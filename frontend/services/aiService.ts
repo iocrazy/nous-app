@@ -7,7 +7,18 @@
  * chat-related API calls use ``services/aiLibraryService.ts`` instead.
  */
 
-import { AISettings, AIProviderConfig, TranscriptData, SummaryData, NousModelPublic, AIGovernanceFlags } from '../types';
+import { AISettings, AIProviderConfig, TranscriptData, SummaryData } from '../types';
+import type {
+  AIGovernanceFlags,
+  AnalyzeTriggerResponse,
+  BackfillResult,
+  CapabilityHealth,
+  LegacySummarizeTriggerResponse,
+  LegacyTranscribeTriggerResponse,
+  NousModelPublic,
+  SummarizeTriggerResponse,
+  TranscribeTriggerResponse,
+} from '../types/api';
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import { apiClient } from './apiClient';
@@ -35,44 +46,12 @@ export async function pollForResult<T>(
   throw new Error('Polling timed out');
 }
 
-/** Real response body of the resource-scoped AI trigger endpoints
- *  (`POST /api/v1/ai/{transcribe,summarize,analyze}/resource/{id}`).
- *
- *  There is NO task id in it — dispatch happens through DBOS and the
- *  router answers with a human-readable message. Callers that need
- *  progress look the task up in the Task Center by
- *  `task_type + resource_id` instead (see VideoDetailPanel). The
- *  optional fields are absent on the in-flight dedup answer
- *  ("… already in progress"), which is a 200, not an error. */
-export interface ResourceAITriggerResponse {
-  message: string;
-  resource_id: string;
-  platform_id?: string;
-  /** Transcription only. */
-  points_charged?: number;
-  /** Transcription only: audio is being extracted first. */
-  extracting_audio?: boolean;
-  /** Transcription only, and NOT a success: an audio extraction that will
-   *  not chain into a transcription holds migration 121's unique slot, so
-   *  nothing was queued and the caller must retry once it finishes. */
-  transcription_pending_audio?: boolean;
-  /** The task to wait on when `transcription_pending_audio` is set. */
-  blocking_task_id?: string | null;
-  /** Transcribe only. The resource ALREADY has a readable transcript, so
-   *  nothing was dispatched and nothing was charged — distinct from the
-   *  in-flight dedup, which means "wait for a run that is happening now".
-   *  Present on every 200 from that endpoint; `?` is for older builds. */
-  already_transcribed?: boolean;
-  /** Summarize only. Same answer for the summary half. */
-  already_summarized?: boolean;
-}
-
 // --- Transcription ---
 
 /** @deprecated Use triggerTranscriptionByResource instead */
 export const triggerTranscription = async (
   platformId: string
-): Promise<{ task_id: string }> => {
+): Promise<LegacyTranscribeTriggerResponse> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/ai/transcribe/${platformId}`, {
@@ -91,7 +70,7 @@ export const triggerTranscription = async (
 export const triggerTranscriptionByResource = async (
   resourceId: string,
   opts?: { followUpSummary?: boolean }
-): Promise<ResourceAITriggerResponse> => {
+): Promise<TranscribeTriggerResponse> => {
   const apiUrl = getApiUrl();
 
   // followUpSummary persists the "summarize once this transcription
@@ -181,7 +160,7 @@ export const getTranscriptByResource = async (
 /** @deprecated Use triggerSummaryByResource instead */
 export const triggerSummary = async (
   platformId: string
-): Promise<{ task_id: string }> => {
+): Promise<LegacySummarizeTriggerResponse> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/ai/summarize/${platformId}`, {
@@ -199,7 +178,7 @@ export const triggerSummary = async (
 
 export const triggerSummaryByResource = async (
   resourceId: string
-): Promise<ResourceAITriggerResponse> => {
+): Promise<SummarizeTriggerResponse> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/ai/summarize/resource/${resourceId}`, {
@@ -277,28 +256,9 @@ export const getSummaryByResource = async (
 
 // --- Visual Analysis ---
 
-/** @deprecated Use triggerVisualAnalysisByResource instead */
-export const triggerVisualAnalysis = async (
-  platformId: string
-): Promise<{ task_id: string }> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/ai/analyze/${platformId}`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
-
 export const triggerVisualAnalysisByResource = async (
   resourceId: string
-): Promise<ResourceAITriggerResponse> => {
+): Promise<AnalyzeTriggerResponse> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/ai/analyze/resource/${resourceId}`, {
@@ -355,38 +315,6 @@ export const getVisualAnalysisByResource = async (
 
 // --- Capability health ---
 
-export interface CapabilityHealth {
-  capability: string;
-  label: string;
-  agent_slug: string;
-  assigned: boolean;
-  model: string;
-  provider: string;
-  needs_vision: boolean;
-  status:
-    | 'ok'
-    | 'no_key'
-    | 'no_model'
-    | 'not_vision'
-    | 'not_configured'
-    | 'probe_failing'
-    | 'key_test_failed'
-    | 'unknown_provider'
-    | 'runtime_failing'
-    | 'error';
-  hint: string;
-  // Which resolution branch produced the config (Phase B): platform catalog,
-  // admin governance lock, or the user's BYOK. Absent/'' on error rows.
-  origin?: 'platform' | 'governance' | 'byok' | 'env' | '';
-  // Runtime layer — present only for capabilities backed by a tracked
-  // workflow (e.g. visual_analysis → ai_extract). Recent terminal-run stats
-  // surface a capability that resolves fine but is failing at call time.
-  task_type?: string;
-  recent_runs?: number;
-  recent_failures?: number;
-  last_error?: string;
-}
-
 export const getAIHealth = async (): Promise<CapabilityHealth[]> => {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/ai/health`, {
@@ -396,8 +324,8 @@ export const getAIHealth = async (): Promise<CapabilityHealth[]> => {
     const err = await response.json().catch(() => ({ detail: 'Request failed' }));
     throw new Error(err.detail || `HTTP ${response.status}`);
   }
-  const data = await response.json();
-  return data.capabilities || [];
+  const data: { capabilities?: CapabilityHealth[] } = await response.json();
+  return data.capabilities ?? [];
 };
 
 // --- Settings ---
@@ -524,8 +452,8 @@ export const getNousModels = async (type?: string): Promise<NousModelPublic[]> =
     headers: await getAuthHeaders(),
   });
   if (!response.ok) return [];
-  const data = await response.json();
-  return data.models || [];
+  const data: { models?: NousModelPublic[] } = await response.json();
+  return data.models ?? [];
 };
 
 export const testAIConnection = async (
@@ -590,6 +518,8 @@ export const GOVERNANCE_ALL_ALLOWED: AIGovernanceFlags = {
   caption: true,
   classification: true,
   summarization: true,
+  topic_scorer: true,
+  embedding: true,
   nous_enabled: false,
   nous_modules: {},
 };
@@ -598,9 +528,8 @@ export const GOVERNANCE_ALL_ALLOWED: AIGovernanceFlags = {
  * Fetch per-module governance flags for the current user.
  *
  * Backend: GET /api/v1/ai/governance
- * Returns { chat: bool, transcription: bool, translation: bool,
- *           visual_analysis: bool, caption: bool, classification: bool }
- * true = user may configure; false = admin-managed (lock the UI row).
+ * Returns one bool per governed module (`AIGovernanceFlags`) plus the Nous
+ * switches. true = user may configure; false = admin-managed (lock the UI row).
  * Throws on network/HTTP error — callers should default to GOVERNANCE_ALL_ALLOWED.
  */
 export const getAIGovernance = async (): Promise<AIGovernanceFlags> => {
@@ -611,39 +540,17 @@ export const getAIGovernance = async (): Promise<AIGovernanceFlags> => {
   if (!response.ok) {
     throw new Error(`GET /ai/governance failed: HTTP ${response.status}`);
   }
-  const data = await response.json();
+  const data: AIGovernanceFlags = await response.json();
   // Merge with all-allowed defaults so any absent key stays true.
   return { ...GOVERNANCE_ALL_ALLOWED, ...data };
 };
 
 // --- Embedding backfill (Settings → AI → Vectors) ---
 
-/** Real body of `POST /api/v1/ai/analyze/backfill-embeddings`. The lists are
- *  orthogonal: `reembedded` landed a vector now, `dispatched` started a run
- *  whose vector has not landed yet, `skipped` carries a stable reason code.
- *  Refusals arrive as the ErrorResponse envelope with the typed code in
- *  `details.code` (`embedder_unconfigured` 409, `vector_store_missing` 503).
- *  Resource ids are strings: Snowflake BIGINTs lose precision as JSON numbers
- *  past 2^53. `total_missing` counts missing + stale vectors; `stale` is how
- *  many rows of this batch were stale rather than missing; `rehashed` counts
- *  legacy hashes relabelled without an embedding call. */
-export interface BackfillResult {
-  success: boolean;
-  dry_run: boolean;
-  space?: unknown;
-  reembedded: string[];
-  dispatched: Array<{ resource_id: string; task_id?: string }>;
-  skipped: Array<{ resource_id: string; reason: string }>;
-  in_flight: number;
-  remaining: number;
-  total_missing: number;
-  stale?: number;
-  /** Rows whose vector was already current under a legacy bare-sha1 hash:
-   *  the hash was relabelled without an embedding call (not in `reembedded`). */
-  rehashed?: number;
-  aborted_reason?: string | null;
-}
-
+/** `POST /api/v1/ai/analyze/backfill-embeddings` (shape: `BackfillResult` in
+ *  types/api). Refusals arrive as the ErrorResponse envelope with the typed
+ *  code in `details.code` (`embedder_unconfigured` 409, `vector_store_missing`
+ *  503). */
 export const backfillEmbeddings = (body: {
   limit: number;
   dry_run: boolean;

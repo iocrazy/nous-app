@@ -206,7 +206,7 @@ async def test_ai_transcription_load_inputs_query_is_load_bearing(
     """app/workflows/ai_transcription.py::load_transcribe_inputs —
     parsed_media JOIN resources."""
     await _assert_select_load_bearing(
-        sqlite_sessionmaker, _transcribe_inputs_select_stmt(1)
+        sqlite_sessionmaker, _transcribe_inputs_select_stmt(1, creator_id=_UID)
     )
 
 

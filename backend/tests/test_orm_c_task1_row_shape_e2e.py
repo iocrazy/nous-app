@@ -146,7 +146,9 @@ async def test_transcribe_inputs_stmt_yields_column_keyed_row_against_real_sqlit
     reads."""
     async with _real_session_with_one_transcribe_row() as session:
         rows = (
-            (await session.execute(_transcribe_inputs_select_stmt(1))).mappings().all()
+            (await session.execute(_transcribe_inputs_select_stmt(1, resource_id=100)))
+            .mappings()
+            .all()
         )
 
     assert len(rows) == 1

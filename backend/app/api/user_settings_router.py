@@ -24,8 +24,25 @@ from app.repositories.user_settings_repository import (  # noqa: F401
     UserSettingsRepository,
     merge_settings_json,
 )
+from app.schemas.user_settings_responses import (
+    SettingsPlatformHeaders,
+    SettingsPlatformWriteResult,
+)
 
 router = APIRouter(prefix="/settings", tags=["用户设置"])
+
+DEFAULT_DOWNLOAD_PATH = "/home/user/downloads/mediahub"
+
+
+def _download_path(settings: Dict[str, Any]) -> str:
+    """The stored path, or the default when absent or NULL.
+
+    The column is nullable; ``settings.get(key, default)`` returned ``None`` for
+    a NULL, which failed ``download_path: str`` validation and made the whole
+    GET/PUT a 500.
+    """
+    value = settings.get("download_path")
+    return DEFAULT_DOWNLOAD_PATH if value is None else value
 
 
 # ============================================
@@ -73,9 +90,7 @@ async def get_user_settings(auth: AuthDep):
             return UserSettingsResponse(
                 id=settings.get("id"),
                 user_id=settings.get("user_id"),
-                download_path=settings.get(
-                    "download_path", "/home/user/downloads/mediahub"
-                ),
+                download_path=_download_path(settings),
                 settings_json=settings.get("settings_json"),
                 created_at=settings.get("created_at"),
                 updated_at=settings.get("updated_at"),
@@ -84,7 +99,7 @@ async def get_user_settings(auth: AuthDep):
         # 返回默认设置
         return UserSettingsResponse(
             user_id=auth.user_id,
-            download_path="/home/user/downloads/mediahub",
+            download_path=DEFAULT_DOWNLOAD_PATH,
             settings_json={},
         )
 
@@ -150,9 +165,7 @@ async def update_user_settings(request: UserSettingsRequest, auth: AuthDep):
             return UserSettingsResponse(
                 id=settings.get("id"),
                 user_id=settings.get("user_id"),
-                download_path=settings.get(
-                    "download_path", "/home/user/downloads/mediahub"
-                ),
+                download_path=_download_path(settings),
                 settings_json=settings.get("settings_json"),
                 created_at=settings.get("created_at"),
                 updated_at=settings.get("updated_at"),
@@ -165,31 +178,6 @@ async def update_user_settings(request: UserSettingsRequest, auth: AuthDep):
     except Exception as e:
         logger.error(f"更新用户设置失败: {e}")
         raise HTTPException(status_code=500, detail="更新用户设置失败")
-
-
-@router.delete("")
-async def delete_user_settings(auth: AuthDep):
-    """
-    删除用户设置
-
-    删除已认证用户的个人设置，重置为默认值。
-
-    需要认证：Bearer Token 或 API Key
-    """
-    try:
-        repo = UserSettingsRepository()
-        success = await repo.delete(auth.user_id)
-
-        if success:
-            return {"success": True, "message": "设置已重置为默认值"}
-
-        raise HTTPException(status_code=500, detail="删除设置失败")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"删除用户设置失败: {e}")
-        raise HTTPException(status_code=500, detail="删除用户设置失败")
 
 
 # ============================================
@@ -242,7 +230,9 @@ async def list_cookies(auth: AuthDep):
         items: List[CookieStatusItem] = []
         for platform in SUPPORTED_PLATFORMS:
             row = row_by_platform.get(platform)
-            if row:
+            # A row can hold custom headers and no cookie (PUT /headers creates
+            # one); that is not a cookie.
+            if row and (row.get("cookie_text") or row.get("cookie_file")):
                 items.append(
                     CookieStatusItem(
                         platform=platform,
@@ -270,7 +260,7 @@ async def list_cookies(auth: AuthDep):
         raise HTTPException(status_code=500, detail="获取 Cookie 列表失败")
 
 
-@router.put("/cookies/{platform}")
+@router.put("/cookies/{platform}", response_model=SettingsPlatformWriteResult)
 async def set_cookie(platform: str, request: CookieUpsertRequest, auth: AuthDep):
     """
     Set or update cookie for a platform
@@ -336,10 +326,12 @@ async def set_cookie(platform: str, request: CookieUpsertRequest, auth: AuthDep)
         raise HTTPException(status_code=500, detail="保存 Cookie 失败")
 
 
-@router.delete("/cookies/{platform}")
+@router.delete("/cookies/{platform}", response_model=SettingsPlatformWriteResult)
 async def delete_cookie(platform: str, auth: AuthDep):
     """
     Delete cookie for a platform
+
+    Custom headers saved for the platform are kept.
 
     Requires authentication: Bearer Token or API Key
     """
@@ -351,7 +343,7 @@ async def delete_cookie(platform: str, auth: AuthDep):
 
     try:
         repo = get_cookies_repository()
-        success = await repo.delete(auth.user_id, platform)
+        success = await repo.clear_cookie(auth.user_id, platform)
 
         if not success:
             raise HTTPException(status_code=500, detail="删除 Cookie 失败")
@@ -375,7 +367,7 @@ class HeadersUpsertRequest(BaseModel):
     headers_text: str
 
 
-@router.get("/headers/{platform}")
+@router.get("/headers/{platform}", response_model=SettingsPlatformHeaders)
 async def get_headers(platform: str, auth: AuthDep):
     """Get custom headers for a platform."""
     if platform not in SUPPORTED_PLATFORMS:
@@ -392,17 +384,23 @@ async def get_headers(platform: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to get headers")
 
 
-@router.put("/headers/{platform}")
+@router.put("/headers/{platform}", response_model=SettingsPlatformWriteResult)
 async def set_headers(platform: str, request: HeadersUpsertRequest, auth: AuthDep):
     """Set custom headers for a platform (stored alongside cookies)."""
     if platform not in SUPPORTED_PLATFORMS:
         raise HTTPException(status_code=400, detail="Unsupported platform")
     try:
         repo = get_cookies_repository()
-        await repo.upsert(
-            auth.user_id, platform, {"custom_headers": request.headers_text}
+        # Not ``upsert``: that also marks the cookie valid and fresh, which a
+        # headers save must not do.
+        saved = await repo.set_custom_headers(
+            auth.user_id, platform, request.headers_text
         )
+        if saved is None:
+            raise HTTPException(status_code=500, detail="Failed to save headers")
         return {"success": True, "platform": platform}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"保存 Headers 失败: {e}")
         raise HTTPException(status_code=500, detail="Failed to save headers")

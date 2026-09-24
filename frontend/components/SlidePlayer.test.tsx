@@ -1,16 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SlidePlayer } from './SlidePlayer';
+import type { MediaSlidesResponse } from '../types/api';
 
 vi.mock('../services/parserService', () => ({
   getAuthHeaders: vi.fn().mockResolvedValue({}),
 }));
 
-const slidesResponse = {
+// Real wire shape of GET /media/{id}/slides (media_type is built from the
+// file suffix, so `.jpg` really is `image/jpg`).
+const slidesResponse: MediaSlidesResponse = {
   slides: [
-    { name: 'a.jpg', type: 'image', media_type: 'image/jpeg', url: '' },
-    { name: 'b.jpg', type: 'image', media_type: 'image/jpeg', url: '' },
+    { name: 'a.jpg', type: 'image', media_type: 'image/jpg', url: '/api/v1/media/7/slides/a.jpg' },
+    { name: 'b.jpg', type: 'image', media_type: 'image/jpg', url: '/api/v1/media/7/slides/b.jpg' },
   ],
+  count: 2,
 };
 
 /**
@@ -72,7 +76,7 @@ describe('SlidePlayer — no slide, no report', () => {
   });
 
   it('reports nothing when the album has no slides', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ slides: [] }) }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ slides: [], count: 0 }) }));
     const onSlideChange = vi.fn();
     render(<SlidePlayer mediaId="m1" downloadStatus="completed" onSlideChange={onSlideChange} />);
     await waitFor(() => expect(screen.getByText(/No slides available/i)).toBeInTheDocument());

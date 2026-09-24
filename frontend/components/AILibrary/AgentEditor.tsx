@@ -28,8 +28,8 @@ import type {
   AgentPermissionAudit,
   AILibraryAgent,
   AILibrarySkill,
-  NousModelPublic,
 } from '../../types';
+import type { NousModelPublic } from '../../types/api';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { getNousModels, getAIGovernance } from '../../services/aiService';
 import { useAuth } from '../../contexts/AuthContext';

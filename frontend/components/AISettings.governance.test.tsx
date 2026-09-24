@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { AISettings } from './AISettings';
 import type { AISettings as AISettingsType } from '../types';
+import { makeGovernance } from '../tests/fixtures/ai';
 
 import en from '../public/locales/en.json';
 
@@ -43,17 +44,14 @@ vi.mock('react-i18next', () => {
 
 // ── shared mocks ──────────────────────────────────────────────────────────────
 
-const ALL_ALLOWED = {
-  chat: true, transcription: true, translation: true,
-  visual_analysis: true, caption: true, classification: true,
-  summarization: true,
-};
+// Real `GET /ai/governance` body: every governed module + the Nous switches.
+const ALL_ALLOWED = makeGovernance();
 
-const ALL_LOCKED = {
+const ALL_LOCKED = makeGovernance({
   chat: false, transcription: false, translation: false,
   visual_analysis: false, caption: false, classification: false,
   summarization: false,
-};
+});
 
 // vi.mock is hoisted — use inline literals, not external variables.
 vi.mock('../services/aiService', () => ({
@@ -64,12 +62,14 @@ vi.mock('../services/aiService', () => ({
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
-    summarization: true,
+    summarization: true, topic_scorer: true, embedding: true,
+    nous_enabled: false, nous_modules: {},
   }),
   GOVERNANCE_ALL_ALLOWED: {
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
-    summarization: true,
+    summarization: true, topic_scorer: true, embedding: true,
+    nous_enabled: false, nous_modules: {},
   },
 }));
 vi.mock('../services/aiLibraryService', () => ({
@@ -107,7 +107,7 @@ function renderSettings(overrides?: Partial<AISettingsType>) {
 /** Re-import getAIGovernance so we can control its return value per test. */
 async function setGovernanceMock(flags: Record<string, boolean>) {
   const mod = await import('../services/aiService');
-  vi.mocked(mod.getAIGovernance).mockResolvedValueOnce(flags as ReturnType<typeof ALL_ALLOWED>);
+  vi.mocked(mod.getAIGovernance).mockResolvedValueOnce(makeGovernance(flags));
 }
 
 const MANAGED_TEXT = 'Managed by your administrator';
@@ -265,15 +265,17 @@ describe('AISettings governance — AI Providers section', () => {
 
   it('shows AI Providers section when only some modules are locked (partial lock)', async () => {
     const { getAIGovernance } = await import('../services/aiService');
-    vi.mocked(getAIGovernance).mockResolvedValueOnce({
-      chat: false,
-      transcription: false,
-      translation: false,
-      visual_analysis: false,
-      caption: true,   // one module still allowed
-      classification: false,
-      summarization: false,
-    });
+    vi.mocked(getAIGovernance).mockResolvedValueOnce(
+      makeGovernance({
+        chat: false,
+        transcription: false,
+        translation: false,
+        visual_analysis: false,
+        caption: true, // one module still allowed
+        classification: false,
+        summarization: false,
+      }),
+    );
 
     renderSettings();
 

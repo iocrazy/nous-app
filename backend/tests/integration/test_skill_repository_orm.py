@@ -129,13 +129,9 @@ async def test_update_fields_and_base_update(patched_engine, cleanup):
     # update_fields path.
     updated = await _repo().update_fields(created["id"], {"description": "desc"})
     assert updated["description"] == "desc"
-    # BaseRepository.update override (used by skills_router + archive).
+    # BaseRepository.update override.
     updated2 = await _repo().update(str(created["id"]), {"icon": "🚀"})
     assert updated2["icon"] == "🚀"
-    # archive() inherited → routes through the overridden update().
-    await _repo().archive(created["id"])
-    archived = await _repo().get_by_id(created["id"])
-    assert archived["status"] == "archived"
 
 
 async def test_list_skills_and_by_ids(patched_engine, cleanup):

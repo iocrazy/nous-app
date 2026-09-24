@@ -16,7 +16,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { AISettings } from './AISettings';
-import type { AISettings as AISettingsType, NousModelPublic } from '../types';
+import type { AISettings as AISettingsType } from '../types';
+import type { NousModelPublic } from '../types/api';
+import { makeNousModel } from '../tests/fixtures/ai';
 
 import en from '../public/locales/en.json';
 
@@ -71,13 +73,13 @@ vi.mock('./MemoryPanel', () => ({ MemoryPanel: () => null }));
 vi.mock('./AgentMemoriesPanel', () => ({ AgentMemoriesPanel: () => null }));
 vi.mock('./AIHealthBoard', () => ({ AIHealthBoard: () => null }));
 
-const MOSS_MODEL: NousModelPublic = {
+const MOSS_MODEL = makeNousModel({
   name: 'mediahub-moss-asr',
   display_name: 'MOSS ASR',
   type: 'asr',
   pricing_type: 'per_hour',
   pricing_value: 10,
-};
+});
 
 // Volcengine enabled → its whisperModels seed the first static option
 // ("Volcengine bigasr") the buggy picker used to flash.

@@ -14,19 +14,21 @@ Sub-routers:
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from loguru import logger
 from pydantic import BaseModel
 
+from app.api.media_access_guard import require_media_access
 from app.api.media_download_router import router as download_router
 
 # Import sub-routers
 from app.api.media_fetch_router import router as fetch_router
 from app.api.media_slides_router import router as slides_router
 from app.api.media_soda_router import router as soda_router
+from app.api.row_guard import NOT_FOUND_OR_OUT_OF_SCOPE
 from app.core.deps import AuthDep
 from app.core.enums import DownloadStatus
 from app.core.scope_dep import ScopedRequestDep
@@ -35,6 +37,14 @@ from app.repositories.media_repository import MediaRepository
 from app.repositories.user_logs_repository import (
     get_user_logs_repository,
     log_user_action,
+)
+from app.schemas.media_responses import (
+    MediaCardListResponse,
+    MediaCleanupStaleResponse,
+    MediaDeleteResponse,
+    MediaDetailResponse,
+    MediaStatisticsResponse,
+    MediaUserLogsResponse,
 )
 from app.services.library.media_storage import resolve_media_source
 from app.services.library.object_gc import delete_object_if_unreferenced
@@ -50,6 +60,9 @@ router.include_router(soda_router)
 TAGS_VIDEOS = ["Video Management"]
 TAGS_STATS = ["Statistics"]
 TAGS_LOGS = ["Logs"]
+
+#: 409 ``detail.code`` when a delete would take the media from other users.
+MEDIA_SHARED = "media_shared"
 
 
 # ============================================
@@ -74,7 +87,11 @@ class MediaSearchRequest(BaseModel):
 # ============================================
 
 
-@router.post("/cleanup-stale-downloads", tags=TAGS_VIDEOS)
+@router.post(
+    "/cleanup-stale-downloads",
+    response_model=MediaCleanupStaleResponse,
+    tags=TAGS_VIDEOS,
+)
 async def cleanup_stale_downloads(
     auth: AuthDep,
     timeout_minutes: int = Query(30, ge=5, le=120),
@@ -105,7 +122,7 @@ async def cleanup_stale_downloads(
         raise HTTPException(status_code=500, detail="Cleanup failed")
 
 
-@router.get("", tags=TAGS_VIDEOS)
+@router.get("", response_model=MediaCardListResponse, tags=TAGS_VIDEOS)
 async def list_videos(
     auth: AuthDep,
     skip: int = Query(0, ge=0),
@@ -133,7 +150,115 @@ async def list_videos(
         raise HTTPException(status_code=500, detail="Failed to get video list")
 
 
-@router.get("/{platform_id}", tags=TAGS_VIDEOS)
+@router.post("/search", response_model=MediaCardListResponse, tags=TAGS_VIDEOS)
+async def search_videos(
+    request: MediaSearchRequest,
+    auth: AuthDep,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """
+    Search videos
+
+    Multi-criteria search of stored videos.
+    """
+    try:
+        repo = MediaRepository()
+
+        status = None
+        if request.status:
+            try:
+                status = DownloadStatus(request.status)
+            except ValueError:
+                pass
+
+        videos = await repo.search(
+            user_id=auth.user_id,
+            keyword=request.keyword,
+            author=request.author,
+            status=status,
+            media_type=request.media_type,
+            category=request.category,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            skip=skip,
+            limit=limit,
+        )
+
+        return {"success": True, "count": len(videos), "videos": videos}
+    except Exception as e:
+        logger.error(f"Failed to search videos: {e}")
+        raise HTTPException(status_code=500, detail="Failed to search videos")
+
+
+@router.get("/statistics", response_model=MediaStatisticsResponse, tags=TAGS_STATS)
+async def get_statistics(auth: AuthDep):
+    """
+    Get statistics
+
+    Returns video count, download status distribution, type distribution, etc.
+    """
+    try:
+        repo = MediaRepository()
+        stats = await repo.get_statistics(user_id=auth.user_id)
+        return {"success": True, "statistics": stats}
+    except Exception as e:
+        logger.error(f"Failed to get statistics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get statistics")
+
+
+@router.get("/logs", response_model=MediaUserLogsResponse, tags=TAGS_LOGS)
+async def get_user_logs(
+    auth: AuthDep,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    level: Optional[str] = Query(None, description="Filter by status level"),
+    date_range: Optional[str] = Query(
+        None, description="Preset date range: 24h, 7days, 30days, 90days"
+    ),
+    start_date: Optional[str] = Query(None, description="Custom start date (ISO)"),
+    end_date: Optional[str] = Query(None, description="Custom end date (ISO)"),
+    search: Optional[str] = Query(None, description="Search in message"),
+):
+    """
+    Get user action logs (paginated)
+    """
+    try:
+        repo = get_user_logs_repository()
+        result = await repo.get_paginated(
+            user_id=auth.user_id,
+            page=page,
+            page_size=page_size,
+            level=level,
+            date_range=date_range,
+            start_date=start_date,
+            end_date=end_date,
+            search=search,
+        )
+        return {"success": True, **result}
+    except Exception as e:
+        logger.error(f"Failed to get user logs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get user logs")
+
+
+# ============================================
+# Route endpoints — single media by platform_id
+#
+# Declared AFTER /search, /statistics and /logs: FastAPI matches in
+# declaration order, and a catch-all ``/{platform_id}`` declared first
+# swallowed ``GET /media/statistics`` and ``GET /media/logs`` (both answered
+# 404 "Video not found"; the dashboard's recent-activity list was always
+# empty because of it).
+# ============================================
+
+
+@router.get(
+    "/{platform_id}",
+    response_model=MediaDetailResponse,
+    # ``resource_id`` is only sent when the caller has a resource on the media.
+    response_model_exclude_unset=True,
+    tags=TAGS_VIDEOS,
+)
 async def get_video(platform_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """
     Get video details
@@ -149,25 +274,24 @@ async def get_video(platform_id: str, auth: AuthDep, _scope: ScopedRequestDep):
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
 
+        # parsed_media is global; the row (download paths included) is only
+        # for callers who may read this media — same rule, and the same 404,
+        # as the download / slides / audio routes.
         media_id = video.get("id")
-        if media_id:
-            from app.repositories.resources_repository import ResourcesRepository
+        await require_media_access(media_id, auth.user_id, detail="Video not found")
 
-            res_repo = ResourcesRepository()
-            user_resource = await res_repo.get_resource_by_media_id_and_creator(
+        from app.repositories.resources_repository import ResourcesRepository
+
+        user_resource = (
+            await ResourcesRepository().get_resource_by_media_id_and_creator(
                 media_id, auth.user_id
             )
-            if user_resource:
-                video["resource_id"] = user_resource["id"]
-                for field in (
-                    "video_download_status",
-                    "music_download_status",
-                    "cover_download_status",
-                    "image_download_status",
-                ):
-                    user_status = user_resource.get(field)
-                    if user_status is not None:
-                        video[field] = user_status
+        )
+        # The download statuses live on parsed_media only (``resources`` has
+        # no ``*_download_status`` columns), so the resource contributes
+        # just its id.
+        if user_resource:
+            video = {**video, "resource_id": user_resource["id"]}
 
         return {"success": True, "video": video}
     except HTTPException:
@@ -177,7 +301,38 @@ async def get_video(platform_id: str, auth: AuthDep, _scope: ScopedRequestDep):
         raise HTTPException(status_code=500, detail="Failed to get video details")
 
 
-@router.delete("/{platform_id}", tags=TAGS_VIDEOS)
+async def _require_sole_owner(
+    repo: MediaRepository, media_id: Any, user_id: str
+) -> None:
+    """Deleting a ``parsed_media`` row deletes it for everyone.
+
+    The row is global (one per piece of platform content) and every
+    ``resources`` row pointing at it loses its ``media_id`` (``ON DELETE SET
+    NULL``). So only a caller who owns a resource on it may delete it, and
+    only while nobody else does. Before this guard any signed-in caller could
+    delete any row by its public platform id and blank out other users'
+    library items.
+    """
+    creators = await repo.get_media_creator_ids(media_id)
+    if user_id not in creators:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": NOT_FOUND_OR_OUT_OF_SCOPE,
+                "message": "Video not found",
+            },
+        )
+    if creators - {user_id}:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": MEDIA_SHARED,
+                "message": "Other users still have this video in their library.",
+            },
+        )
+
+
+@router.delete("/{platform_id}", response_model=MediaDeleteResponse, tags=TAGS_VIDEOS)
 async def delete_video(
     platform_id: str,
     background_tasks: BackgroundTasks,
@@ -199,6 +354,8 @@ async def delete_video(
             video = await repo.get_by_id(platform_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
+
+        await _require_sole_owner(repo, video.get("id"), auth.user_id)
 
         video_title = video.get("title", platform_id)[:30] if video else platform_id
         files_deleted = []
@@ -295,7 +452,9 @@ async def delete_video(
                 if audio_path:
                     await _delete_stored_file(audio_path, label)
 
-        result = await repo.delete(platform_id)
+        # The row may have been found by its Snowflake id; delete by the
+        # platform_id it actually carries.
+        result = await repo.delete(video.get("platform_id") or platform_id)
 
         if not result:
             raise HTTPException(
@@ -326,97 +485,6 @@ async def delete_video(
     except Exception as e:
         logger.error(f"Failed to delete video: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete video")
-
-
-@router.post("/search", tags=TAGS_VIDEOS)
-async def search_videos(
-    request: MediaSearchRequest,
-    auth: AuthDep,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-):
-    """
-    Search videos
-
-    Multi-criteria search of stored videos.
-    """
-    try:
-        repo = MediaRepository()
-
-        status = None
-        if request.status:
-            try:
-                status = DownloadStatus(request.status)
-            except ValueError:
-                pass
-
-        videos = await repo.search(
-            user_id=auth.user_id,
-            keyword=request.keyword,
-            author=request.author,
-            status=status,
-            media_type=request.media_type,
-            category=request.category,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            skip=skip,
-            limit=limit,
-        )
-
-        return {"success": True, "count": len(videos), "videos": videos}
-    except Exception as e:
-        logger.error(f"Failed to search videos: {e}")
-        raise HTTPException(status_code=500, detail="Failed to search videos")
-
-
-@router.get("/statistics", tags=TAGS_STATS)
-async def get_statistics(auth: AuthDep):
-    """
-    Get statistics
-
-    Returns video count, download status distribution, type distribution, etc.
-    """
-    try:
-        repo = MediaRepository()
-        stats = await repo.get_statistics(user_id=auth.user_id)
-        return {"success": True, "statistics": stats}
-    except Exception as e:
-        logger.error(f"Failed to get statistics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get statistics")
-
-
-@router.get("/logs", tags=TAGS_LOGS)
-async def get_user_logs(
-    auth: AuthDep,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
-    level: Optional[str] = Query(None, description="Filter by status level"),
-    date_range: Optional[str] = Query(
-        None, description="Preset date range: 24h, 7days, 30days, 90days"
-    ),
-    start_date: Optional[str] = Query(None, description="Custom start date (ISO)"),
-    end_date: Optional[str] = Query(None, description="Custom end date (ISO)"),
-    search: Optional[str] = Query(None, description="Search in message"),
-):
-    """
-    Get user action logs (paginated)
-    """
-    try:
-        repo = get_user_logs_repository()
-        result = await repo.get_paginated(
-            user_id=auth.user_id,
-            page=page,
-            page_size=page_size,
-            level=level,
-            date_range=date_range,
-            start_date=start_date,
-            end_date=end_date,
-            search=search,
-        )
-        return {"success": True, **result}
-    except Exception as e:
-        logger.error(f"Failed to get user logs: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get user logs")
 
 
 # ============================================

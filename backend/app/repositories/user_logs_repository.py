@@ -219,7 +219,19 @@ class UserLogsRepository:
                     UserLogs.created_at <= _as_utc(datetime.fromisoformat(end_date))
                 )
             if search:
-                base = base.where(UserLogs.message.ilike(f"%{search}%"))
+                # Imported here: app.services.library's package init imports this
+                # repository (circular at module load).
+                from app.services.library.like_escape import (
+                    LIKE_ESCAPE_CHAR,
+                    escape_like,
+                )
+
+                # Escaped so a typed ``%`` / ``_`` matches itself.
+                base = base.where(
+                    UserLogs.message.ilike(
+                        f"%{escape_like(search)}%", escape=LIKE_ESCAPE_CHAR
+                    )
+                )
 
             offset = (page - 1) * page_size
             async with read_scope() as session:

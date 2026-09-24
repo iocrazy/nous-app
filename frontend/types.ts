@@ -543,77 +543,10 @@ export interface ProviderHealthEntry {
   tested_at?: string;  // ISO-8601 UTC
 }
 
-/**
- * Per-module governance flags returned by GET /api/v1/ai/governance.
- * true = user may configure; false = admin-managed (hide the UI row).
- * Absent = true (default-open / fail-open).
- */
-export interface AIGovernanceFlags {
-  chat: boolean;
-  transcription: boolean;
-  translation: boolean;
-  visual_analysis: boolean;
-  caption: boolean;
-  classification: boolean;
-  summarization: boolean;
-  /** Global Nous master switch (default false). */
-  nous_enabled?: boolean;
-  /** Per-module Nous allow flags (default-on once nous_enabled). */
-  nous_modules?: Record<string, boolean>;
-}
-
-// Nous Platform Model (admin-configured, runs on the platform key)
-// Types mirror the DB CHECK constraint (migration 345).
-export type NousModelType = 'llm' | 'embedding' | 'tts' | 'asr' | 'image' | 'video';
-
-// NOTE: no ``description`` field — the public endpoint deliberately omits it
-// (admin-internal ops notes must not surface in the user-facing UI).
-export interface NousModelPublic {
-  name: string;
-  display_name: string;
-  /**
-   * Upstream model id (e.g. `doubao-embedding-vision-251215`) — the label the
-   * admin AI Models card shows. May be empty for local-daemon rows; render
-   * through `utils/platformModel.platformModelLabel`, never directly.
-   */
-  actual_model?: string | null;
-  type: NousModelType;
-  pricing_type: 'per_hour' | 'per_request' | 'per_token';
-  pricing_value: number;
-  /**
-   * Last hourly connectivity probe (backend scheduled_health). `null` /
-   * absent means never probed — which is neither healthy nor broken, so the
-   * UI must say nothing rather than assume. `not_probed` (backend migration
-   * 428) is the same non-claim for a different reason: the probe has no
-   * protocol for that model TYPE and checked nothing. Neither is a failure,
-   * and `buildModelHealth` keeps both out of the map. `idle` (migration 503)
-   * is a local nous-engine model that is authorized but not loaded right now;
-   * it loads on the first request, so it is not a failure either.
-   *
-   * NOTE: the failure REASON TEXT (`last_test_detail`) is deliberately not part
-   * of this public payload — probe errors routinely embed the upstream host and
-   * private base_url. Users get the status plus the classified code below;
-   * admin gets the raw text.
-   */
-  last_test_status?: 'ok' | 'fail' | 'idle' | 'not_probed' | null;
-  last_tested_at?: string | null;
-  /**
-   * Closed-enum classification of the last FAILED probe (migration 427):
-   * `timeout` | `unreachable` | `auth` | `rate_limit` | `model_not_found` |
-   * `upstream_error` | `bad_response` | `other`. Typed as a plain string on
-   * purpose — the backend enum may grow before a frontend deploy catches up,
-   * and `healthReasonKey` already degrades gracefully on a value it doesn't
-   * know. `null` / absent = never probed, or probed before the column existed.
-   */
-  last_test_code?: string | null;
-  /**
-   * 由后端 `list_enabled` 派生(`nous_model_repository`:provider 属于
-   * codex-local / jimeng-local),true = 这一行不在平台上跑,而是在**用户自己
-   * 电脑**的 daemon 上。UI 据此提示本机链路的限制(纯文本、无工具调用)。
-   * 缺省/absent 一律按平台模型处理——没标就不是本机的。
-   */
-  is_local?: boolean;
-}
+// Nous Platform Model (admin-configured, runs on the platform key). The public
+// row is `NousModelPublic` in types/api (generated); its `type` mirrors the DB
+// CHECK constraint through the backend's `NousModelType` literal.
+export type NousModelType = import('./types/api').NousModelPublic['type'];
 
 // Points System Types
 export interface PointPackage {
@@ -893,27 +826,6 @@ export type AdvanceBlockedReason =
   | 'NO_NEXT'
   | 'DEPS_PENDING';
 
-export interface Skill {
-  id: string;
-  team_id?: string;
-  project_id?: string;
-  name: string;
-  description?: string;
-  content_md?: string;
-  category?: string;
-  icon: string;
-  output_format?: string;
-  trigger_keywords: string[];
-  is_public: boolean;
-  status: string;
-  created_by?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-/** @deprecated Use Skill instead */
-export type StyleTemplate = Skill;
-
 export interface StoryboardNode {
   id: string;
   project_id: string;
@@ -992,7 +904,6 @@ export interface ProjectSummary {
 //
 // Naming: prefixed `AILibrary*` to avoid collision with:
 //   - legacy `AIAgent` in `services/aiService.ts` (chat agent — different shape)
-//   - existing top-level `Skill` interface above (style templates — different shape)
 //
 // BIGINT precision note: backend returns `skills.id` as JSON number. For Phase 1
 // these are small serial-like values well below 2^53, so `number` is safe.

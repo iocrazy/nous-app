@@ -11,7 +11,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { AISettings } from './AISettings';
-import type { AISettings as AISettingsType, NousModelPublic } from '../types';
+import type { AISettings as AISettingsType } from '../types';
+import type { NousModelPublic } from '../types/api';
+import { makeNousModel } from '../tests/fixtures/ai';
 
 import en from '../public/locales/en.json';
 
@@ -34,20 +36,20 @@ vi.mock('react-i18next', () => {
   return { useTranslation: () => ({ t }) };
 });
 
-const ASR_MODEL: NousModelPublic = {
+const ASR_MODEL = makeNousModel({
   name: 'moss-asr',
   display_name: 'MOSS ASR',
   type: 'asr',
   pricing_type: 'per_hour',
   pricing_value: 3,
-};
-const LLM_MODEL: NousModelPublic = {
+});
+const LLM_MODEL = makeNousModel({
   name: 'nous-llm',
   display_name: 'Nous LLM',
   type: 'llm',
   pricing_type: 'per_token',
   pricing_value: 2,
-};
+});
 const MODELS: NousModelPublic[] = [ASR_MODEL, LLM_MODEL];
 
 // ASR picker label (transcription <select>) and LLM picker label (agent <select>).

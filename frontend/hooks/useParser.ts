@@ -2,7 +2,12 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Video } from '../types';
 import { isSupabaseConfigured } from '../supabaseClient';
 import { parseShareLink, parseBatchLinks } from '../services/parserService';
-import { fetchVideoByPlatformId, findOwnedVideoByUrl, saveItem } from '../services/dataService';
+import {
+  fetchVideoByMediaId,
+  fetchVideoByPlatformId,
+  findOwnedVideoByUrl,
+  saveItem,
+} from '../services/dataService';
 import { getSystemStatus, SystemStatus } from '../services/systemService';
 import { LogEntry } from '../components/TaskMonitor';
 import { useTaskManager, formatSpeed } from '../contexts/TaskManagerContext';
@@ -283,103 +288,46 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
       // L2 backstop response: backend told us the user already owns it
       // (e.g. URL slipped past L1 due to stale cache or a different
       // canonical form). Treat it like the L1 path.
-      if ((response as any).dedup_action === 'already_owned') {
-        const mediaId = (response as any).media_id;
+      if ('dedup_action' in response && response.dedup_action === 'already_owned') {
         addLog('Already owned (backend dedup hit)', 'success');
         setTaskProgress(100);
         setTaskStatus('Already owned');
         setIsParsing(false);
-        if (mediaId) {
-          fetchVideoByPlatformId(String(mediaId))
-            .then((v) => v && setCurrentResult(v))
-            .catch(() => {});
-        }
+        // `media_id` is the parsed_media id, not a platform id: look the
+        // item up by it. (It used to go to fetchVideoByPlatformId, which
+        // never matched, so the owned item was never shown.)
+        fetchVideoByMediaId(response.media_id)
+          .then((v) => v && setCurrentResult(v))
+          .catch((err) => console.error('Failed to load owned video:', err));
         return;
       }
 
       addLog('Backend received the request', 'success');
-      setTaskProgress(50);
+      addLog('Parse task submitted to background queue', 'info');
+      setTaskStatus('Parsing');
+      setTaskProgress(30);
 
-      if (response.success) {
-        if ((response as any).async) {
-          // Async mode: parse dispatched to background queue
-          addLog('Parse task submitted to background queue', 'info');
-          setTaskStatus('Parsing');
-          setTaskProgress(30);
-
-          const unifiedTaskId = (response as any).task_id || (response as any).unified_task_id;
-          if (unifiedTaskId) {
-            setParseUnifiedTaskId(unifiedTaskId);
-            addLog(`Tracking parse progress: ${unifiedTaskId}`, 'info');
-          } else {
-            // Dedup short-circuit ("subscribed" / "completed") with no task to
-            // track. Before 2026-07-26 this fell through with isParsing still
-            // true: no tracking id, no completion effect, so the UI sat on
-            // "Parsing" forever while nothing appeared in the Task Center —
-            // the user had no way to tell a dedup hit from a hung backend.
-            const action = (response as any).dedup_action;
-            const label =
-              action === 'subscribed'
-                ? 'This link is already being parsed — reusing that task'
-                : 'This link was parsed recently — no new task needed';
-            addLog(label, 'info');
-            setTaskStatus(action === 'subscribed' ? 'Already parsing' : 'Already parsed');
-            setTaskProgress(100);
-            setIsParsing(false);
-          }
-          // Don't set isParsing=false — wait for parse completion via effect
-          return;
-        }
-
-        // Synchronous response (legacy / fallback)
-        addLog(`Video parsed: ${response.title || response.platform_id}`, 'success');
-        if ((response as any).fallback_used) {
-          const reason = (response as any).fallback_reason || 'primary parser failed';
-          addLog(`${reason}, used fallback: ${(response as any).parse_method_name}`, 'warning');
-        } else {
-          addLog(`Parse method: ${(response as any).parse_method_name || 'Unknown'}`, 'info');
-        }
-        addLog(`Author: ${response.author || 'Unknown'}`, 'info');
-
-        const parsedResult: Video = {
-          id: response.id,
-          platform_id: response.platform_id,
-          title: response.title,
-          author: response.author,
-          media_type: response.media_type,
-          original_url: response.original_url || urlInput,
-          video_download_urls: response.video_download_urls || [],
-          cover_urls: response.cover_urls || [],
-          image_download_urls: response.image_download_urls || [],
-          like_count: response.like_count || 0,
-          comment_count: response.comment_count || 0,
-          share_count: response.share_count || 0,
-          favorite_count: response.favorite_count || 0,
-          duration: response.duration || '0',
-          published_at: response.published_at,
-          description: response.description,
-          resolution: response.resolution,
-          video_download_status: (response as any).video_download_status,
-        };
-
-        setCurrentResult(parsedResult);
-
-        const dlTaskId = response.task_id || response.download_task_id;
-        if (dlTaskId) {
-          addLog('Download task submitted to background queue', 'info');
-          addLog(`Tracking download progress: ${dlTaskId}`, 'info');
-          setTaskStatus('Downloading');
-          setTaskProgress(60);
-          setDownloadCeleryId(dlTaskId);
-        } else {
-          setTaskProgress(100);
-          setTaskStatus('Completed');
-          addLog('Task completed successfully!', 'success');
-          await loadLibraryData();
-        }
-      } else {
-        throw new Error(response.message || 'Parse failed');
+      if ('task_id' in response) {
+        setParseUnifiedTaskId(response.task_id);
+        addLog(`Tracking parse progress: ${response.task_id}`, 'info');
+        return;
       }
+
+      // Dedup short-circuit ("subscribed" / "completed") with no task to
+      // track. Before 2026-07-26 this fell through with isParsing still
+      // true: no tracking id, no completion effect, so the UI sat on
+      // "Parsing" forever while nothing appeared in the Task Center —
+      // the user had no way to tell a dedup hit from a hung backend.
+      const subscribed = response.dedup_action === 'subscribed';
+      addLog(
+        subscribed
+          ? 'This link is already being parsed — reusing that task'
+          : 'This link was parsed recently — no new task needed',
+        'info',
+      );
+      setTaskStatus(subscribed ? 'Already parsing' : 'Already parsed');
+      setTaskProgress(100);
+      setIsParsing(false);
     } catch (err: any) {
       setError(err.message || 'Failed to parse link');
       addLog(`Error: ${err.message}`, 'error');

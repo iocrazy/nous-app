@@ -266,7 +266,15 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     setShowDownloadMenu(false);
     setIsFetching(true);
     try {
-      await downloadSodaTracks([{ id: trackId, kind: 'track' }], video.title || undefined);
+      const result = await downloadSodaTracks(
+        [{ id: trackId, kind: 'track' }],
+        video.title || undefined,
+      );
+      // `success: false` = the track was not queued; nothing will update.
+      if (!result.success) {
+        addToast('Audio fetch could not be submitted', 'error');
+        return;
+      }
       addToast('Fetch submitted: Audio. Will update automatically.', 'success');
     } catch (error) {
       console.error('Soda audio fetch error:', error);

@@ -22,6 +22,19 @@ from app.api.ai_library_router import router
 USER_ID = "11111111-1111-1111-1111-111111111111"
 
 
+@pytest.fixture(autouse=True)
+def _caller_in_row_scope(monkeypatch):
+    """The agent/skill row-scope guard has its own tests
+    (``tests/api/test_ai_library_row_scope.py``); here every caller is in scope."""
+    import sys
+
+    monkeypatch.setattr(
+        sys.modules["app.api.ai_library_router"],
+        "_in_row_scope",
+        AsyncMock(return_value=True),
+    )
+
+
 def _app() -> FastAPI:
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")

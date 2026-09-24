@@ -14,7 +14,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { AISettings } from './AISettings';
-import type { AISettings as AISettingsType, NousModelPublic } from '../types';
+import type { AISettings as AISettingsType } from '../types';
+import type { NousModelPublic } from '../types/api';
+import { makeNousModel } from '../tests/fixtures/ai';
 import en from '../public/locales/en.json';
 
 // Resolve against the REAL shipped English copy rather than a hand-written
@@ -36,7 +38,7 @@ vi.mock('react-i18next', () => ({
 
 const twentyMinutesAgo = new Date(Date.now() - 20 * 60_000).toISOString();
 
-const SICK_LLM: NousModelPublic = {
+const SICK_LLM = makeNousModel({
   name: 'mediahub-deepseek-v4-flash',
   display_name: 'DeepSeek V4 Flash',
   type: 'llm',
@@ -44,8 +46,8 @@ const SICK_LLM: NousModelPublic = {
   pricing_value: 2,
   last_test_status: 'fail',
   last_tested_at: twentyMinutesAgo,
-};
-const WELL_LLM: NousModelPublic = {
+});
+const WELL_LLM = makeNousModel({
   name: 'mediahub-deepseek-v4-pro',
   display_name: 'DeepSeek V4 Pro',
   type: 'llm',
@@ -53,16 +55,16 @@ const WELL_LLM: NousModelPublic = {
   pricing_value: 4,
   last_test_status: 'ok',
   last_tested_at: twentyMinutesAgo,
-};
+});
 /** Same red light as SICK_LLM, but the backend classified WHY (mig 427). */
-const RATE_LIMITED_LLM: NousModelPublic = {
+const RATE_LIMITED_LLM = makeNousModel({
   ...SICK_LLM,
   name: 'mediahub-doubao-seed-2-0-pro',
   display_name: 'Doubao Seed 2.0 Pro',
   last_test_code: 'rate_limit',
-};
+});
 /** Recorded as failing by construction — see the no-badge test below. */
-const SICK_IMAGE: NousModelPublic = {
+const SICK_IMAGE = makeNousModel({
   name: 'mediahub-doubao-seedream-t2i',
   display_name: 'Seedream T2I',
   type: 'image',
@@ -70,14 +72,14 @@ const SICK_IMAGE: NousModelPublic = {
   pricing_value: 5,
   last_test_status: 'fail',
   last_tested_at: twentyMinutesAgo,
-};
-const UNPROBED_ASR: NousModelPublic = {
+});
+const UNPROBED_ASR = makeNousModel({
   name: 'moss-asr',
   display_name: 'MOSS ASR',
   type: 'asr',
   pricing_type: 'per_hour',
   pricing_value: 3,
-};
+});
 
 vi.mock('../services/aiService', () => ({
   saveAISettings: vi.fn().mockResolvedValue(undefined),
@@ -209,12 +211,12 @@ describe('AISettings — platform model health', () => {
   });
 
   it('does the same for a saved transcription model', async () => {
-    const sickAsr: NousModelPublic = {
+    const sickAsr = makeNousModel({
       ...UNPROBED_ASR,
       name: 'nous-moss-asr',
       last_test_status: 'fail',
       last_tested_at: twentyMinutesAgo,
-    };
+    });
     await renderWith([sickAsr, WELL_LLM], { transcription: `nous:${sickAsr.name}` });
     const option = document.querySelector(
       `option[value="nous:${sickAsr.name}"]`,

@@ -3,13 +3,13 @@
 """
 Media Batch Router
 
-Endpoints for batch fetching media and debug raw-parse.
+Endpoint for batch fetching media.
 """
 
 import asyncio
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from loguru import logger
 
 from app.api.media_fetch_helpers import (
@@ -19,14 +19,13 @@ from app.api.media_fetch_helpers import (
     resolve_tag_names_to_ids,
     resolve_team_id,
 )
-from app.boundary import validate_url_async
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
 from app.core.utils import Utils
 from app.repositories.tags_repository import get_tags_repository
 from app.repositories.user_logs_repository import log_user_action
+from app.schemas.media_responses import MediaBatchResponse
 from app.services.billing.points_service import PointsService
-from app.services.media.parsers.douyin_parse.failures import DouyinParseError
 from app.services.media.parsers.douyin_parse.parse_chain import fetch_douyin_detail
 from app.services.media.parsers.media_service import MediaService
 from app.services.modules.gate import require_module
@@ -157,7 +156,7 @@ async def attach_after_save(
     return True
 
 
-@router.post("/fetch/batch", tags=TAGS_FETCH)
+@router.post("/fetch/batch", response_model=MediaBatchResponse, tags=TAGS_FETCH)
 async def fetch_videos_batch(
     request: BatchFetchRequest,
     background_tasks: BackgroundTasks,
@@ -372,46 +371,4 @@ async def fetch_videos_batch(
         "failed": len(errors),
         "results": results,
         "errors": errors,
-    }
-
-
-@router.get("/debug/raw-parse", tags=["Debug"])
-async def debug_raw_parse(
-    auth: AuthDep,
-    url: str = Query(..., description="Share URL to parse"),
-):
-    """
-    Debug endpoint: return raw aweme_detail JSON from the unified douyin
-    chain (ABogus → DrissionPage). No DB writes, no downloads — just raw
-    parsed data.
-    """
-    # Boundary: SSRF guard. URLBlockedError -> global handler -> 400.
-    validated = await validate_url_async(url)
-
-    try:
-        chain_result = await fetch_douyin_detail(
-            validated,
-            user_id=auth.user_id,
-            download_video=False,
-            download_music=False,
-            download_cover=False,
-        )
-    except DouyinParseError as e:
-        # The chain now says WHY (captcha / rejected signature / ...). Passing
-        # that through as a typed 422 beats letting a RuntimeError become a
-        # 500, which would tell the operator running this probe that WE broke
-        # rather than that douyin refused.
-        raise HTTPException(
-            status_code=422,
-            detail={"code": e.kind.value, "message": str(e)},
-        ) from e
-    if not chain_result:
-        raise HTTPException(status_code=404, detail="Douyin parse chain returned None")
-
-    aweme_detail, parsed, parse_method = chain_result
-
-    return {
-        "raw_aweme_detail": aweme_detail,
-        "parsed_data": parsed,
-        "parse_method": parse_method,
     }

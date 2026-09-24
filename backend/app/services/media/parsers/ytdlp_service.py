@@ -740,7 +740,9 @@ class YtdlpService:
             platform: Platform identifier (e.g. 'douyin', 'bilibili').
 
         Returns:
-            True if a cookie record exists, False otherwise.
+            True if the user's row for the platform holds cookie content. A row
+            that only carries custom headers (``PUT /settings/headers``) is not
+            a cookie.
         """
         from app.repositories.cookies_repository import (
             get_cookies_repository,
@@ -748,7 +750,7 @@ class YtdlpService:
 
         repo = get_cookies_repository()
         record = await repo.get_by_user_and_platform(user_id, platform)
-        return record is not None
+        return bool(record and (record.get("cookie_text") or record.get("cookie_file")))
 
     @staticmethod
     def _find_downloaded_file(directory: str, prefix: str) -> Optional[str]:

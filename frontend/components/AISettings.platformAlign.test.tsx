@@ -19,7 +19,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { AISettings } from './AISettings';
-import type { AISettings as AISettingsType, NousModelPublic } from '../types';
+import type { AISettings as AISettingsType } from '../types';
+import type { NousModelPublic } from '../types/api';
 
 import en from '../public/locales/en.json';
 
@@ -36,7 +37,8 @@ vi.mock('react-i18next', () => {
 
 const TESTED = '2026-09-24T01:00:00+00:00';
 
-type WireRow = NousModelPublic & { id: number; sort_order: number };
+// The generated row already carries `id` (a JSON number) and `sort_order`.
+type WireRow = NousModelPublic;
 
 let nextId = 7_300_000_000_001;
 function row(

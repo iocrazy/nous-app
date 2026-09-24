@@ -262,6 +262,79 @@ async def _user_can_write_project(user_id: UUID, project_id: int) -> bool:
     return member is not None
 
 
+# ---------------------------------------------------------------------------
+# Row-scope guards for agents / skills (OpenAPI P5 security fix)
+# ---------------------------------------------------------------------------
+#
+# A non-preset agent or skill belongs to one scope: its creator
+# (``user_id`` / ``created_by``), a team (``team_id``) or a project
+# (``project_id``). That scope is exactly the set ``list_accessible`` shows,
+# so it is also who may read the row by slug and who may edit it. Before
+# this, every by-slug route only checked "is it a system preset": anyone
+# logged in could read a private agent's prompts, or PATCH / pause / roll
+# back / rewrite files of someone else's agent or skill by naming its slug.
+# Platform admins pass (moderation), fail closed on a lookup error.
+
+
+async def _in_row_scope(
+    row: Dict[str, Any], user_uuid: UUID, *, owner_key: str
+) -> bool:
+    owner = row.get(owner_key)
+    if owner is not None and str(owner) == str(user_uuid):
+        return True
+    team_id = row.get("team_id")
+    if team_id is not None and await _user_is_team_member(user_uuid, int(team_id)):
+        return True
+    project_id = row.get("project_id")
+    if project_id is not None and await _user_can_write_project(
+        user_uuid, int(project_id)
+    ):
+        return True
+    try:
+        return await _user_is_admin(user_uuid)
+    except Exception as exc:  # noqa: BLE001 — fail closed
+        logger.warning(f"_user_is_admin check failed for user={user_uuid}: {exc}")
+        return False
+
+
+async def _require_agent_write(agent: Dict[str, Any], user_uuid: UUID) -> None:
+    """403 unless the caller is in the (non-preset) agent's scope."""
+    if not await _in_row_scope(agent, user_uuid, owner_key="user_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="not allowed to edit this agent",
+        )
+
+
+async def _require_agent_read(agent: Dict[str, Any], user_uuid: UUID) -> None:
+    """404 (same as a missing slug) unless the agent is a preset or in scope."""
+    if agent.get("is_system_preset"):
+        return
+    if not await _in_row_scope(agent, user_uuid, owner_key="user_id"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
+        )
+
+
+async def _require_skill_write(skill: Dict[str, Any], user_uuid: UUID) -> None:
+    """403 unless the caller is in the (non-preset) skill's scope."""
+    if not await _in_row_scope(skill, user_uuid, owner_key="created_by"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="not allowed to edit this skill",
+        )
+
+
+async def _require_skill_read(skill: Dict[str, Any], user_uuid: UUID) -> None:
+    """404 unless the skill is public or in the caller's scope."""
+    if skill.get("is_public"):
+        return
+    if not await _in_row_scope(skill, user_uuid, owner_key="created_by"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="skill not found"
+        )
+
+
 async def _fetch_user_team_ids(user_id: UUID) -> List[int]:
     """Return BIGINT team ids the user is a member of (empty on miss)."""
     from sqlalchemy import select
@@ -636,13 +709,13 @@ async def get_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
     # Merged view: the editor shows the caller's EFFECTIVE agent (their
     # personal override applied), with override_scope/override_fields set so
     # the UI can show the customized badge + reset affordance.
-    agent = await agent_repo.get_by_slug(
-        slug, override_user_id=_coerce_user_uuid(auth.user_id)
-    )
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    agent = await agent_repo.get_by_slug(slug, override_user_id=user_uuid)
     if not agent:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
         )
+    await _require_agent_read(agent, user_uuid)
     agent_uuid = UUID(str(agent["id"]))
     agent = _with_resolved_permissions(
         {**agent, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
@@ -840,6 +913,8 @@ async def update_agent(
             )
         override_updates = updates
         updates = {}
+    else:
+        await _require_agent_write(agent, user_uuid)
 
     # Role gate for chat-permission edits (CHAT-PERM-19 / review H1). The legacy
     # endpoint had NO role check — any logged-in user could PATCH any agent. We
@@ -1182,6 +1257,7 @@ async def resume_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="system preset agents are read-only in phase 1",
         )
+    await _require_agent_write(agent, _coerce_user_uuid(auth.user_id))
     if agent.get("paused_reason") is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1226,6 +1302,7 @@ async def pause_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="system preset agents are read-only in phase 1",
         )
+    await _require_agent_write(agent, _coerce_user_uuid(auth.user_id))
     if agent.get("paused_reason") is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1354,6 +1431,7 @@ async def get_skill(slug: str, auth: AuthDep) -> Dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="skill not found"
         )
+    await _require_skill_read(skill, _coerce_user_uuid(auth.user_id))
     skill_id = int(skill["id"])
     row = {
         **skill,
@@ -1507,6 +1585,7 @@ async def update_skill(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="system preset skills are read-only in phase 1",
         )
+    await _require_skill_write(skill, _coerce_user_uuid(auth.user_id))
 
     skill_id = int(skill["id"])
     updates = payload.model_dump(exclude_none=True)
@@ -1699,6 +1778,7 @@ async def list_skill_files(slug: str, auth: AuthDep) -> List[Dict[str, Any]]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="skill not found"
         )
+    await _require_skill_read(skill, _coerce_user_uuid(auth.user_id))
     return await skill_repo.list_files(int(skill["id"]))
 
 
@@ -1734,6 +1814,7 @@ async def upsert_skill_file(
     # to keep routing + persistence in lockstep.
     skill_id = int(skill["id"])
     user_uuid = _coerce_user_uuid(auth.user_id)
+    await _require_skill_write(skill, user_uuid)
 
     # Skill scanner: non-blocking warning for now. Findings are logged
     # + surfaced in the response so the UI can show a security badge.
@@ -1788,6 +1869,7 @@ async def delete_skill_file(slug: str, path: str, auth: AuthDep) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="system preset skills are read-only in phase 1",
         )
+    await _require_skill_write(skill, _coerce_user_uuid(auth.user_id))
     await skill_repo.delete_file(int(skill["id"]), path)
 
 
@@ -1902,6 +1984,7 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
 
     user_uuid = _coerce_user_uuid(auth.user_id)
     agent_uuid = UUID(str(agent["id"]))
@@ -2178,6 +2261,7 @@ async def get_agent_usage(slug: str, auth: AuthDep) -> Dict[str, Any]:
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
 
     user_uuid = _coerce_user_uuid(auth.user_id)
     agent_uuid = UUID(str(agent["id"]))
@@ -2272,6 +2356,7 @@ async def list_agent_runs(
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
 
     runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
@@ -2314,6 +2399,7 @@ async def list_agent_run_groups(
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
 
     runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
@@ -4271,6 +4357,7 @@ async def list_agent_versions(
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
 
     from sqlalchemy import select
 
@@ -4319,6 +4406,7 @@ async def get_agent_version(
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -4371,6 +4459,7 @@ async def rollback_agent(
 
     agent_uuid = UUID(str(agent["id"]))
     user_uuid = _coerce_user_uuid(auth.user_id)
+    await _require_agent_write(agent, user_uuid)
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -4437,6 +4526,7 @@ async def list_skill_versions(
     skill = await skill_repo.get_by_slug(slug)
     if not skill:
         raise HTTPException(status_code=404, detail="skill not found")
+    await _require_skill_read(skill, _coerce_user_uuid(auth.user_id))
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -4484,6 +4574,7 @@ async def get_skill_version(
     skill = await skill_repo.get_by_slug(slug)
     if not skill:
         raise HTTPException(status_code=404, detail="skill not found")
+    await _require_skill_read(skill, _coerce_user_uuid(auth.user_id))
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -4524,6 +4615,7 @@ async def list_skill_file_versions(
     skill = await skill_repo.get_by_slug(slug)
     if not skill:
         raise HTTPException(status_code=404, detail="skill not found")
+    await _require_skill_read(skill, _coerce_user_uuid(auth.user_id))
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -4600,6 +4692,7 @@ async def rollback_skill(
 
     skill_id = int(skill["id"])
     user_uuid = _coerce_user_uuid(auth.user_id)
+    await _require_skill_write(skill, user_uuid)
     from sqlalchemy import select
 
     from app.db.session import read_scope

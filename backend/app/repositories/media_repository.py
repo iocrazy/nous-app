@@ -563,16 +563,26 @@ class MediaRepository(AsyncpgRepository):
                 .where(Resources.is_trashed.is_(False))
             )
 
+            # Imported here: app.services.library's package init imports this
+            # repository (circular at module load).
+            from app.services.library.like_escape import LIKE_ESCAPE_CHAR, escape_like
+
+            # Escaped: a typed ``%`` / ``_`` must match itself, not act as a
+            # wildcard (see app/services/library/like_escape.py).
             if keyword:
-                pattern = f"%{keyword}%"
+                pattern = f"%{escape_like(keyword)}%"
                 stmt = stmt.where(
                     or_(
-                        ParsedMedia.title.ilike(pattern),
-                        ParsedMedia.description.ilike(pattern),
+                        ParsedMedia.title.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                        ParsedMedia.description.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
                     )
                 )
             if author:
-                stmt = stmt.where(ParsedMedia.author.ilike(f"%{author}%"))
+                stmt = stmt.where(
+                    ParsedMedia.author.ilike(
+                        f"%{escape_like(author)}%", escape=LIKE_ESCAPE_CHAR
+                    )
+                )
             if status:
                 stmt = stmt.where(ParsedMedia.video_download_status == status.value)
             if media_type:
@@ -805,6 +815,27 @@ class MediaRepository(AsyncpgRepository):
         except Exception as e:
             logger.error(f"get_media_owner_map failed: {e}")
             return {}
+
+    async def get_media_creator_ids(self, media_id: Any) -> set[str]:
+        """Every ``resources.creator_id`` with a resource on ``media_id``,
+        trashed ones included (a trashed resource can still be restored, and
+        deleting the media would null its ``media_id``).
+
+        Deliberately cross-user, like the owner maps above; raises on a DB
+        error so an ownership check can never read a failure as "no owners".
+        A non-numeric id has no resources."""
+        try:
+            mid = int(media_id)
+        except (TypeError, ValueError):
+            return set()
+        async with self._owner_map_scope_cm():
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(Resources.creator_id)
+                    .where(Resources.media_id == mid)
+                    .distinct()
+                )
+                return {str(cid) for (cid,) in result.all() if cid}
 
     async def get_media_resource_owner_map(
         self, media_ids: List[Any]

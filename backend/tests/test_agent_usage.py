@@ -18,7 +18,7 @@ Pinned here:
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -51,6 +51,19 @@ PRODUCTION_TRIGGERS = [
     "chat_summon",
     "asset_classify",
 ]
+
+
+@pytest.fixture(autouse=True)
+def _caller_in_row_scope(monkeypatch):
+    """The agent/skill row-scope guard has its own tests
+    (``tests/api/test_ai_library_row_scope.py``); here every caller is in scope."""
+    import sys
+
+    monkeypatch.setattr(
+        sys.modules["app.api.ai_library_router"],
+        "_in_row_scope",
+        AsyncMock(return_value=True),
+    )
 
 
 async def _fake_auth() -> AuthContext:

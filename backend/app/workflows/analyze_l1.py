@@ -27,21 +27,25 @@ def _dsn() -> str:
     return url + ("&" if "?" in url else "?") + "sslmode=disable"
 
 
-def _analyze_resource_lookup_stmt(media_id: int, user_id: Optional[str]):
-    """resources.id for a parsed_media, preferring the triggering user's own
-    resource (falls back to the media's earliest resource). Column-level
-    select (not entity-level — the B4 row-shape lesson). Factored out so a
-    real-aiosqlite row-shape test can import and exercise the exact
-    production statement."""
+def _analyze_resource_lookup_stmt(media_id: int, user_id: str):
+    """resources.id of the triggering user's OWN resource of a parsed_media
+    (their earliest, if several). Column-level select (not entity-level — the
+    B4 row-shape lesson). Factored out so a real-aiosqlite row-shape test can
+    import and exercise the exact production statement.
+
+    Only the fallback for workflows dispatched without ``resource_id``. It
+    used to fall back further to the media's earliest resource of ANY owner
+    — ``parsed_media`` is shared, so the analysis (and its status flips and
+    vector) landed on another user's row."""
     from app.models import ParsedMedia, Resources
 
-    creator_match = Resources.creator_id == user_id
     return (
         select(Resources.id.label("resource_id"))
         .select_from(ParsedMedia)
         .join(Resources, Resources.media_id == ParsedMedia.id)
         .where(ParsedMedia.id == media_id)
-        .order_by(creator_match.desc().nulls_last(), Resources.created_at.asc())
+        .where(Resources.creator_id == user_id)
+        .order_by(Resources.created_at.asc())
         .limit(1)
     )
 
@@ -114,8 +118,9 @@ async def call_analyze_l1(
     # parsed_media.id — the table moved to resource-keying (mig 076/262) but this
     # workflow kept threading media_id, so every write was cross-domain (the
     # FK to resources.id would reject a parsed_media.id). Resolve media → the
-    # triggering user's resource (falling back to the media's earliest resource),
-    # exactly like the working ai_transcription pipeline does.
+    # triggering user's OWN resource. Never another holder's: parsed_media is
+    # shared, and the old "else the media's earliest resource" fallback wrote
+    # the analysis onto someone else's row.
     #
     # Resources carries UserScoped(creator_id); SCOPE_ENFORCE_RESOURCES
     # defaults false in code but production sets it true via
@@ -131,13 +136,20 @@ async def call_analyze_l1(
         else nullcontext()
     )
     if resource_id is None:
+        if not user_id:
+            raise RuntimeError(
+                f"analyze_l1 for parsed_media id={media_id} has neither a "
+                "resource_id nor an initiating user; refusing to pick a resource"
+            )
         async with scope_cm:
             async with read_scope() as session:
                 resource_id_val = await session.scalar(
                     _analyze_resource_lookup_stmt(media_id, user_id)
                 )
         if resource_id_val is None:
-            raise RuntimeError(f"no resource for parsed_media id={media_id}")
+            raise RuntimeError(
+                f"no resource of user {user_id} for parsed_media id={media_id}"
+            )
         resource_id = int(resource_id_val)
 
     # Make resources.visual_analysis_status authoritative for the whole run:

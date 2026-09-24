@@ -17,7 +17,7 @@ import {
   getTranscript, getTranscriptByResource,
   triggerSummary, triggerSummaryByResource,
   getSummary, getSummaryByResource,
-  triggerVisualAnalysis, triggerVisualAnalysisByResource,
+  triggerVisualAnalysisByResource,
   getVisualAnalysisByResource,
   pollForResult,
 } from '../services/aiService';
@@ -443,14 +443,13 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     try {
       setVisualAnalysisLoading(true);
       setVisualAnalysisError(null);
-      // Prefer the resource-based trigger (dispatches analyze_l1_workflow) —
-      // same migration transcript/summary already got. The platform_id path
-      // (triggerVisualAnalysis) is the legacy 501 "not implemented" stub.
-      if (resourceId) {
-        await triggerVisualAnalysisByResource(resourceId);
-      } else {
-        await triggerVisualAnalysis(video.platform_id);
+      // Visual analysis runs on a library resource (analyze_l1_workflow).
+      // The platform-id endpoint was a stub that answered 501 on every call
+      // and has been removed; without a resource there is nothing to run.
+      if (!resourceId) {
+        throw new Error('Visual analysis is not yet available');
       }
+      await triggerVisualAnalysisByResource(resourceId);
       // Optimistic local phase — the task row arrives via realtime a beat
       // later; until then the spinner (not the trigger button) should show.
       setAnalysisTaskPhase('processing');

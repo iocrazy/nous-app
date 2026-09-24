@@ -32,7 +32,8 @@ import {
   AlertTriangle,
   Terminal,
 } from 'lucide-react';
-import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibraryAgent, AIGovernanceFlags } from '../types';
+import { AISettings as AISettingsType, AIProviderConfig, AILibraryAgent } from '../types';
+import type { AIGovernanceFlags, NousModelPublic } from '../types/api';
 import {
   saveAISettings as saveAISettingsApi,
   testAIConnection as testAIConnectionApi,

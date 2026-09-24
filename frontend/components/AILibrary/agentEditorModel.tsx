@@ -13,8 +13,8 @@ import { isPlatformModelAvailable } from '../../utils/platformModel';
 import type {
   AIProviderConfig,
   AISettings as AISettingsType,
-  NousModelPublic,
 } from '../../types';
+import type { NousModelPublic } from '../../types/api';
 import { UiSelect } from '../ui';
 
 /**

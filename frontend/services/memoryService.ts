@@ -3,6 +3,7 @@
 
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import type { MemoryCardResult, MemoryForgetResult, MemoryPrefsResult } from '../types/api';
 
 export interface MemoryObservation {
   id: string;
@@ -43,25 +44,25 @@ export const getMemoryProfile = async (workspace?: string): Promise<MemoryProfil
 export const setMemoryPrefs = async (prefs: {
   learn_enabled?: boolean;
   inject_enabled?: boolean;
-}): Promise<{ learn_enabled: boolean; inject_enabled: boolean }> => {
+}): Promise<MemoryPrefsResult> => {
   const response = await fetch(`${base()}/prefs`, {
     method: 'PUT',
     headers: await getAuthHeaders(),
     body: JSON.stringify(prefs),
   });
-  return unwrap(response);
+  return unwrap<MemoryPrefsResult>(response);
 };
 
 export const setMemoryCard = async (
   lines: string[],
   workspace?: string,
-): Promise<{ saved: boolean; lines: string[] }> => {
+): Promise<MemoryCardResult> => {
   const response = await fetch(`${base()}/card${wsParam(workspace)}`, {
     method: 'PUT',
     headers: await getAuthHeaders(),
     body: JSON.stringify({ lines }),
   });
-  return unwrap(response);
+  return unwrap<MemoryCardResult>(response);
 };
 
 export const deleteMemoryObservation = async (
@@ -77,10 +78,10 @@ export const deleteMemoryObservation = async (
 
 export const forgetAllMemory = async (
   workspace?: string,
-): Promise<{ deleted: number }> => {
+): Promise<MemoryForgetResult> => {
   const response = await fetch(`${base()}${wsParam(workspace)}`, {
     method: 'DELETE',
     headers: await getAuthHeaders(),
   });
-  return unwrap(response);
+  return unwrap<MemoryForgetResult>(response);
 };
