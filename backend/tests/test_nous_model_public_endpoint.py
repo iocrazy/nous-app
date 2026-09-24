@@ -56,9 +56,22 @@ def test_public_projection_never_exposes_credentials():
         "description",
         "last_test_detail",
         "actual_provider",
-        "actual_model",
     }
     assert col_names & forbidden == set()
+
+
+def test_public_projection_exposes_actual_model_for_admin_name_parity():
+    """2026-09-24: the admin AI Models card names each row by its
+    ``actual_model`` (``doubao-embedding-vision-251215``) while the user side
+    showed ``display_name`` (``Doubao Embedding (Vision)``), so the two surfaces
+    could not be matched by eye. ``actual_model`` is a model id — no host, key
+    or account secret — and is now public so both sides print the same string.
+    ``actual_provider`` (upstream identity) stays out; see the test above."""
+    from app.repositories.nous_model_repository import _PUBLIC_COLS
+
+    col_names = {c.key for c in _PUBLIC_COLS}
+    assert "actual_model" in col_names
+    assert "actual_provider" not in col_names
 
 
 def test_public_projection_exposes_health_status_and_time():

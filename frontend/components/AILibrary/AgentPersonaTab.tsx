@@ -62,6 +62,12 @@ interface AgentPersonaTabProps {
    */
   nonChatModelLabels?: Record<string, string>;
   /**
+   * Localized labels for platform models hidden from the picker because their
+   * last probe failed, keyed by model name. Only consulted when the agent's
+   * saved model is one of them.
+   */
+  unavailableModelLabels?: Record<string, string>;
+  /**
    * Platform model names that run on the USER's own machine (backend
    * `is_local`). Passed in rather than matched by name here — the display
    * name is admin-editable, and a hint keyed on a guessed string would go
@@ -86,6 +92,7 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
   modelHealth,
   unhealthyModelLabels,
   nonChatModelLabels,
+  unavailableModelLabels,
   localModelNames,
   localSkillIds,
   allSkills,
@@ -112,6 +119,9 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
   // say the same sentence for both. Null (pre-427 row, or a code newer than
   // this build) keeps the original wording rather than showing a raw key.
   const selectedReasonKey = healthReasonKey(selectedHealth?.code);
+  // The saved model was hidden from the list (failed probe). Said out loud
+  // rather than silently swapped: the user decides what to pick instead.
+  const selectedUnavailable = Boolean(unavailableModelLabels?.[draft.model ?? '']);
 
   return (
     <div className="space-y-6">
@@ -264,6 +274,7 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
             noModelsLabel: t('aiLibrary.agents.noModelsAvailable'),
             unhealthyLabels: unhealthyModelLabels,
             noteLabels: nonChatModelLabels,
+            orphanLabels: unavailableModelLabels,
           })}
           {/* The local Codex link is plain text — no tool calling — so the
               backend rejects a run whose agent has Skills or tools bound
@@ -295,6 +306,15 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
                       'Last health check failed — chats using this model may fail.',
                     )}
                 {selectedCheckedLabel && ` (${selectedCheckedLabel})`}
+                {selectedUnavailable && (
+                  <span data-testid="model-unavailable-hint">
+                    {' '}
+                    {t(
+                      'aiLibrary.agents.modelUnavailableHint',
+                      'The selected model is unavailable and no longer listed — pick another model.',
+                    )}
+                  </span>
+                )}
               </span>
             </div>
           )}

@@ -134,15 +134,26 @@ it('video kind has a resolution pill and an Adaptive aspect option', () => {
 import { modelLabel } from './GenFooterControls';
 
 describe('modelLabel', () => {
-  it('drops the "(Local)" tag and never appends "· local"', () => {
-    expect(modelLabel({ name: 'jimeng-local-image', display_name: 'Dreamina (Local)', is_local: true })).toBe('Dreamina');
-    expect(modelLabel({ name: 'a-row', display_name: 'Something (本地)', is_local: true })).toBe('Something');
+  // 2026-09-24: primary = the admin AI Models card's label (actual_model,
+  // else the row name — jimeng-local rows carry an empty actual_model in
+  // production), display name as secondary text.
+  it('leads with actual_model, like the admin card', () => {
+    expect(
+      modelLabel({ name: 'openai-image-flare', display_name: 'GPT Image 2.5 Flare (OpenAI API)', actual_model: 'gpt-image-2.5-flare' }),
+    ).toBe('gpt-image-2.5-flare · GPT Image 2.5 Flare (OpenAI API)');
   });
-  it('leaves other names alone and falls back to the row name', () => {
-    expect(modelLabel({ name: 'codex-image', display_name: 'GPT Image (Codex)', is_local: false })).toBe('GPT Image (Codex)');
+  it('drops the "(Local)" tag from the secondary text and never appends "· local"', () => {
+    expect(modelLabel({ name: 'jimeng-local-image', display_name: 'Dreamina (Local)', actual_model: '', is_local: true })).toBe(
+      'jimeng-local-image · Dreamina',
+    );
+    expect(modelLabel({ name: 'a-row', display_name: 'Something (本地)', is_local: true })).toBe('a-row · Something');
+  });
+  it('keeps "local" inside a parenthesis and falls back to the bare row name', () => {
     // The post-465 local row: "local" sits INSIDE the parenthesis beside
     // "Codex", so the tag rule must not bite a piece out of it.
-    expect(modelLabel({ name: 'codex-local-image', display_name: 'GPT Image (Codex, local)', is_local: true })).toBe('GPT Image (Codex, local)');
+    expect(modelLabel({ name: 'codex-local-image', display_name: 'GPT Image (Codex, local)', is_local: true })).toBe(
+      'codex-local-image · GPT Image (Codex, local)',
+    );
     expect(modelLabel({ name: 'x-row' })).toBe('x-row');
   });
 });
@@ -158,7 +169,7 @@ describe('GenFooterControls — model popover rows', () => {
     );
     fireEvent.click(screen.getByTestId('pill-model'));
     const row = screen.getByRole('button', { name: /GPT Image \(Codex, local\)/ });
-    expect(row.textContent).toBe('GPT Image (Codex, local)');
+    expect(row.textContent).toBe('codex-local-image · GPT Image (Codex, local)');
     expect(screen.queryByText(/· local/)).toBeNull();
   });
 });

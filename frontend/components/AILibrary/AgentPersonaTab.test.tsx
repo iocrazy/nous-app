@@ -321,3 +321,33 @@ describe('AgentPersonaTab — selected model health', () => {
     expect(screen.getByTestId('model-health-ok').textContent).toContain('10m ago');
   });
 });
+
+/**
+ * 2026-09-24: failing platform models are no longer listed. An agent that
+ * already uses one keeps its saved value; the picker labels it "unavailable"
+ * and the warning line says to pick another model.
+ */
+describe('AgentPersonaTab — saved model hidden as unavailable', () => {
+  const health = {
+    'nous-broken-llm': { status: 'fail' as const, testedAt: null, code: 'timeout' },
+  };
+
+  it('says to pick another model when the saved one is hidden', () => {
+    renderTab({
+      draft: { model: 'nous-broken-llm' },
+      modelHealth: health,
+      unavailableModelLabels: { 'nous-broken-llm': 'broken-llm-0101 (unavailable)' },
+    });
+    // The option label itself is renderModelSelect's job (mocked here; see
+    // agentEditorModel.test.tsx › orphan labels).
+    expect(screen.getByTestId('model-unavailable-hint').textContent).toContain(
+      'pick another model',
+    );
+  });
+
+  it('says nothing extra for a failing model that is not hidden', () => {
+    renderTab({ draft: { model: 'nous-broken-llm' }, modelHealth: health });
+    expect(screen.getByTestId('model-health-warning')).toBeTruthy();
+    expect(screen.queryByTestId('model-unavailable-hint')).toBeNull();
+  });
+});

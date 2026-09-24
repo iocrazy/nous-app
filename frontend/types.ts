@@ -591,6 +591,12 @@ export type NousModelType = 'llm' | 'embedding' | 'tts' | 'asr' | 'image' | 'vid
 export interface NousModelPublic {
   name: string;
   display_name: string;
+  /**
+   * Upstream model id (e.g. `doubao-embedding-vision-251215`) — the label the
+   * admin AI Models card shows. May be empty for local-daemon rows; render
+   * through `utils/platformModel.platformModelLabel`, never directly.
+   */
+  actual_model?: string | null;
   type: NousModelType;
   pricing_type: 'per_hour' | 'per_request' | 'per_token';
   pricing_value: number;

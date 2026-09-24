@@ -42,7 +42,7 @@ vi.mock('react-i18next', () => ({
 vi.mock('./useAgents', () => ({ useAgents: () => [] }));
 vi.mock('./useTextModels', () => ({
   useTextModels: () => [
-    { name: 'mediahub-doubao-llm', display_name: 'Doubao LLM', type: 'llm', actual_provider: 'doubao' },
+    { name: 'mediahub-doubao-llm', display_name: 'Doubao LLM', actual_model: 'doubao-seed-1-6-250615', type: 'llm', last_test_status: 'ok' },
   ],
 }));
 
@@ -227,7 +227,7 @@ describe('PromptNodeView — edit affordances', () => {
     // UiSelect: open the trigger, then pick the option (its onChange fires from
     // the portal option click, not a native <select> change event).
     fireEvent.click(screen.getByLabelText('Prompt provider'));
-    fireEvent.click(screen.getByRole('option', { name: 'Doubao LLM' }));
+    fireEvent.click(screen.getByRole('option', { name: 'doubao-seed-1-6-250615 · Doubao LLM' }));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
       Record<string, unknown>

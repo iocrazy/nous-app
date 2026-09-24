@@ -218,9 +218,17 @@ async def _read_media_bytes(row: dict):
 _GENERATION_MODEL_PUBLIC_FIELDS = (
     "name",
     "display_name",
+    # The label the admin AI Models card shows; the canvas pickers print the
+    # same string (2026-09-24). A model id, not a credential.
+    "actual_model",
     "type",
     "is_local",
     "sort_order",
+    # Lets the picker drop a failed row with the same predicate as Settings.
+    # generation-models already filters failed rows server-side
+    # (apply_readiness); text-models does not, so the client filter is the one
+    # that holds for both.
+    "last_test_status",
 )
 
 

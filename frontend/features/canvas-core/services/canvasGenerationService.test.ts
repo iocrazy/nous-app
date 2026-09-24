@@ -53,6 +53,49 @@ describe('canvasGenerationService', () => {
     expect(models[0].name).toBe('mediahub-doubao-llm');
   });
 
+  // Real wire rows (2026-09-24): exactly the canvases_router public fields,
+  // with jimeng-local's empty actual_model as production has it.
+  const wireRow = (name: string, type: string, actual_model: string, last_test_status: string) => ({
+    name,
+    display_name: name.toUpperCase(),
+    actual_model,
+    type,
+    is_local: name.includes('-local-'),
+    sort_order: 10,
+    last_test_status,
+  });
+
+  it('drops failed rows from both canvas catalogs, keeps not_probed', async () => {
+    apiFetch.mockResolvedValueOnce(
+      jsonResponse({
+        success: true,
+        data: [
+          wireRow('jimeng-local-image', 'image', '', 'not_probed'),
+          wireRow('openai-image-flare', 'image', 'gpt-image-2.5-flare', 'fail'),
+          wireRow('nous-studio-upscale', 'image', 'studio-upscale', 'ok'),
+        ],
+      }),
+    );
+    expect((await listGenerationModels()).map((m) => m.name)).toEqual([
+      'jimeng-local-image',
+      'nous-studio-upscale',
+    ]);
+
+    apiFetch.mockResolvedValueOnce(
+      jsonResponse({
+        success: true,
+        data: [
+          wireRow('nous-deepseek-v4-pro', 'llm', 'deepseek-v4-pro', 'ok'),
+          wireRow('nous-broken-llm', 'llm', 'broken-llm-0101', 'fail'),
+          wireRow('Codex (Local)', 'llm', '', 'not_probed'),
+        ],
+      }),
+    );
+    const text = await listTextModels();
+    expect(text.map((m) => m.name)).toEqual(['nous-deepseek-v4-pro', 'Codex (Local)']);
+    expect(text[0].actual_model).toBe('deepseek-v4-pro');
+  });
+
   it('cancels a generation task via DELETE', async () => {
     apiFetch.mockResolvedValue(jsonResponse({ success: true }));
     await cancelGeneration('task-9');

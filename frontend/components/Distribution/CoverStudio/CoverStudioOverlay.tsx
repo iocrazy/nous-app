@@ -67,6 +67,7 @@ import { CoverFrameGrabber, type CropFocus, type GrabbedFrame } from './CoverFra
 import { CoverDrafts, type CoverStage } from './CoverDrafts';
 import { HelpTip } from './HelpTip';
 import './cover-studio.css';
+import { platformModelText } from '../../../utils/platformModel';
 
 type Orientation = 'vertical' | 'horizontal';
 
@@ -964,7 +965,7 @@ export function CoverStudioOverlay({
                     <option value="">{t('distribution.coverStudio.modelDefault', 'Catalog default')}</option>
                     {models.map((m) => (
                       <option key={m.name} value={m.name}>
-                        {m.display_name}
+                        {platformModelText(m)}
                       </option>
                     ))}
                   </UiSelect>

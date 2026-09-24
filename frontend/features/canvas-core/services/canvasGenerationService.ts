@@ -10,10 +10,16 @@
  */
 
 import { apiFetch, ApiError } from '../../../services/apiClient';
+import { isPlatformModelAvailable } from '../../../utils/platformModel';
 
 export interface GenerationModel {
   name: string;
   display_name: string;
+  /** Upstream model id — the label the admin AI Models card shows. May be
+   *  empty for local-daemon rows; render via utils/platformModel. */
+  actual_model?: string | null;
+  /** Last probe verdict. `fail` rows are dropped by listGenerationModels. */
+  last_test_status?: 'ok' | 'fail' | 'not_probed' | null;
   type: 'image' | 'video';
   /** True when this row runs on the viewer's own machine via the paired
    *  codex daemon. (The raw provider name is deliberately not exposed —
@@ -71,7 +77,10 @@ export async function listGenerationModels(): Promise<GenerationModel[]> {
   if (!body.success || !Array.isArray(body.data)) {
     throw new ApiError('generation-models response missing data', 500);
   }
-  return body.data;
+  // Same availability rule as Settings (utils/platformModel). The backend
+  // already drops failed rows here; filtering again keeps the two pickers on
+  // one predicate should that server filter ever change.
+  return body.data.filter(isPlatformModelAvailable);
 }
 
 /** What one catalog model can actually honour, as projected by the backend
@@ -122,6 +131,10 @@ export async function listGenerationCapabilities(): Promise<Record<string, Model
 export interface TextModel {
   name: string;
   display_name: string;
+  /** See GenerationModel.actual_model. */
+  actual_model?: string | null;
+  /** `fail` rows are dropped by listTextModels. */
+  last_test_status?: 'ok' | 'fail' | 'not_probed' | null;
   type: 'llm';
   actual_provider: string;
   sort_order?: number;
@@ -137,7 +150,8 @@ export async function listTextModels(): Promise<TextModel[]> {
   if (!body.success || !Array.isArray(body.data)) {
     throw new ApiError('text-models response missing data', 500);
   }
-  return body.data;
+  // text-models does not filter failed rows server-side; this is the filter.
+  return body.data.filter(isPlatformModelAvailable);
 }
 
 export async function dispatchGenerations(
