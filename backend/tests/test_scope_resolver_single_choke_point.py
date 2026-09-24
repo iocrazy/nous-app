@@ -213,9 +213,6 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "workflow's own internal lookups; flagged in the A2 report as a "
         "follow-up for whoever implements A6"
     ),
-    "workflows/script_shot_video.py": (
-        "pre-A2 DBOS workflow triggered from the authenticated REST layer"
-    ),
     "workflows/script_scene_convert.py": (
         "pre-A2 DBOS workflow (chapter-prose -> scenes AI conversion), "
         "triggered from the authenticated REST layer; constructs "

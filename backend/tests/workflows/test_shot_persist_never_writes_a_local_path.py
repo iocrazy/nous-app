@@ -178,25 +178,3 @@ async def test_the_success_path_is_unchanged(monkeypatch):
         "thumbnail_url": "/api/v1/generated-media/55/cover",
     }
     assert reaped == ["/tmp/codeximg_ok/gen.png"]
-
-
-@pytest.mark.asyncio
-async def test_video_persist_has_no_url_fallback_at_all(monkeypatch):
-    """视频侧的产物永远是本地文件，所以它从一开始就没有回退分支。
-    钉住这一点，免得有人「照着出图那条补一个回退」。"""
-    import app.workflows.script_shot_video as wf
-
-    _stub_repos(monkeypatch, wf)
-    _stub_register_boom(monkeypatch, RuntimeError("boom"))
-    reaped = _spy_reaper(monkeypatch, wf)
-
-    with pytest.raises(Exception):
-        await _call_step(
-            wf.persist_video_generation,
-            shot_id="1",
-            local_path="/tmp/jimeng_v/out.mp4",
-            model="m",
-            provider="jimeng-cli",
-            user_id="u",
-        )
-    assert reaped == ["/tmp/jimeng_v/out.mp4"]

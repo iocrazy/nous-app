@@ -330,8 +330,7 @@ async def _writer_for(run_id: Any) -> Optional[_LateRecorder]:
 
     ⚠️ **别读成「父 run 一定已经结束」**（T8c 修复轮 1 更正）。`GenerateShotImage`
     只确认 dispatch 就返回，父 run 继续迭代，所以 DBOS 侧那次
-    `register_generated_media`（`workflows/script_shot_generate.py` /
-    `script_shot_video.py`）完全可能落在父 run 仍然活着时 —— 同一个 run 上两个
+    `register_generated_media`（`workflows/script_shot_generate.py`）完全可能落在父 run 仍然活着时 —— 同一个 run 上两个
     writer。两半都在 `RunEventWriter` 里兜住了：`append` 撞唯一索引会重新播种
     并重试（谁都不吃掉谁的事件），`refold_external_slices` 在镜像前重折两边都能
     碰的切片，而那次撞车本身就是「有第二个 writer」的通知。

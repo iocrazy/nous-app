@@ -7,7 +7,7 @@ workflow. A run is one turn and there is no deferred tool result, so the
 outcome reaches the model the only way anything does after a turn: as a NEW
 item on the ``agent_run_inbox`` of the run's issue or conversation.
 
-Shape (modelled on ``script_shot_video``):
+Shape (modelled on ``script_shot_video``, retired in OpenAPI P7):
 
 1. ``generate_agent_video_step`` — the row the catalog pick lands on decides
    whose machine runs it (``db_registry.resolve_video_route``):

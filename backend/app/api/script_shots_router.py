@@ -5,7 +5,6 @@ Endpoints:
   POST  /scenes/{scene_id}/shots             — verify_scene_access
   PATCH /shots/{shot_id}                     — verify_shot_access
   POST  /scenes/{scene_id}/auto-storyboard   — verify_scene_access
-  POST  /shots/{shot_id}/generate-video      — verify_shot_access
 
 The GET route uses the *_read_access variant (team membership OR an
 explicit project_members row on the parent project — 2026-08-12 fix); the
@@ -21,8 +20,10 @@ agent tools and the project storyboard routes).
 Removed in OpenAPI P6 for having no caller since the editor's storyboard view
 was retired (#1797): ``GET /shots/{id}``, ``DELETE /shots/{id}``,
 ``POST /shots/{id}/move`` and ``POST /shots/{id}/generate``.
-``/generate-video`` stays: it is the only dispatch site of the
-``script_shot_video`` workflow (routed to the local daemon since #2389).
+Retired in OpenAPI P7: ``POST /shots/{id}/generate-video`` together with the
+``script_shot_video`` workflow and the ``FEATURE_SHOT_VIDEO`` flag. The flag
+was never switched on in production, the workflow never ran there, and no
+frontend code called the route.
 """
 
 import uuid as _uuid
@@ -32,7 +33,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
 from app.api.row_guard import require_row
-from app.core.config import settings
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
     verify_scene_access,
@@ -185,57 +185,3 @@ async def auto_storyboard(
         raise HTTPException(
             status_code=500, detail="Failed to dispatch auto-storyboard"
         )
-
-
-@router.post("/shots/{shot_id}/generate-video", response_model=StoryboardTaskDispatch)
-async def generate_shot_video(
-    shot_id: str,
-    auth: AuthDep,
-    _guard: None = Depends(verify_shot_access),
-) -> Dict[str, Any]:
-    """Dispatch async single-shot video generation (flag-gated).
-
-    - flag ``FEATURE_SHOT_VIDEO`` off → 404 (endpoint existence hidden).
-    - This endpoint does NOT flip ``shot.status``: the ``status`` column is the
-      IMAGE lane's state machine and a video run must not clobber it. The video
-      lifecycle lives in ``task_tracking`` (task_type='shot_video') and the
-      workflow writes only ``shot.video_url`` on success (see script_shot_video
-      docstring). With no status flip there is nothing to roll back on dispatch
-      failure — the 500 + the task row are the surface.
-
-    LOW (known, accepted): ``verify_shot_access`` runs BEFORE this body, so a
-    caller without access gets 403/404 regardless of the flag — that leaks
-    nothing about the flag (access-scoped, not existence-scoped)."""
-    if not settings.FEATURE_SHOT_VIDEO:
-        raise HTTPException(status_code=404, detail="Not Found")
-    try:
-        mgr = get_task_manager()
-        wf_id = str(_uuid.uuid4())
-        task_id = await mgr.create(
-            user_id=auth.user_id,
-            task_type="shot_video",  # ≤20 chars: task_tracking.task_type is VARCHAR(20)
-            title="Generate shot video",
-            dbos_workflow_id=wf_id,
-        )
-
-        from app.services.infra.dbos_orchestrator import start_workflow_routed
-        from app.workflows.script_shot_video import script_shot_video_workflow
-
-        await start_workflow_routed(
-            "script_shot_video",
-            dbos_workflow_callable=script_shot_video_workflow,
-            dbos_workflow_kwargs={
-                "shot_id": shot_id,
-                "user_id": auth.user_id,
-                # 3a: no agent run behind a human click. Explicit None so
-                # "this lane has no run" is written down, not forgotten.
-                "run_id": None,
-                "turn": None,
-                "step": None,
-            },
-            workflow_id=wf_id,
-        )
-        return {"success": True, "task_id": task_id}
-    except Exception as exc:
-        logger.error(f"[Shots] generate-video {shot_id} dispatch failed: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to dispatch shot video")
