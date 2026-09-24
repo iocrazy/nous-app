@@ -23,6 +23,8 @@ from app.core.deps import AuthContext, get_auth
 from app.core.scope_guards import verify_project_read_access, verify_script_access
 from app.main import app
 from app.schemas.script import ScriptProjectUpdate
+from tests.api.episode_wire_rows import repo_episode_row, repo_progress_row
+from tests.api.script_wire_rows import script_project_row
 
 pytestmark = pytest.mark.unit
 
@@ -64,7 +66,8 @@ async def test_put_script_project_forwards_episode_id(client, monkeypatch):
     async def fake_update(self, record_id, data):
         captured["record_id"] = record_id
         captured["data"] = data
-        return {"id": record_id, "episode_id": data.get("episode_id")}
+        # Real repository shape: every column, bigint ids as ints.
+        return script_project_row(id=int(record_id), episode_id=int(data["episode_id"]))
 
     # Script + episode both in project 700 so the same-project reassign check
     # passes; then assert the schema forwards episode_id through to the repo.
@@ -90,7 +93,7 @@ async def test_put_script_project_forwards_episode_id(client, monkeypatch):
     assert resp.status_code == 200
     assert captured["record_id"] == "9001"
     assert captured["data"] == {"episode_id": "555"}
-    assert resp.json()["data"]["episode_id"] == "555"
+    assert resp.json()["data"]["episode_id"] == 555
 
 
 @pytest.mark.asyncio
@@ -99,8 +102,8 @@ async def test_list_episodes_returns_script_count(client, monkeypatch):
 
     async def fake_list(self, project_id):
         return [
-            {"id": "10", "title": "Ep 1", "sort_order": 0, "script_count": 2},
-            {"id": "11", "title": "Ep 2", "sort_order": 1, "script_count": 0},
+            repo_episode_row(id=10, title="Ep 1", sort_order=0, script_count=2),
+            repo_episode_row(id=11, title="Ep 2", sort_order=1, script_count=0),
         ]
 
     monkeypatch.setattr(EpisodeRepository, "list_by_project", fake_list)
@@ -123,19 +126,7 @@ async def test_episodes_progress_returns_flat_array(client, monkeypatch):
     from app.repositories.episode_repository import EpisodeRepository
 
     async def fake_progress(self, project_id):
-        return [
-            {
-                "episode_id": "10",
-                "title": "Ep 1",
-                "sort_order": 0,
-                "script_count": 1,
-                "scene_count": 1,
-                "shots_total": 1,
-                "shots_done": 1,
-                "renders_count": 1,
-                "status": "rendered",
-            }
-        ]
+        return [repo_progress_row(episode_id="10", title="Ep 1", sort_order=0)]
 
     monkeypatch.setattr(EpisodeRepository, "progress_by_project", fake_progress)
     app.dependency_overrides[verify_project_read_access] = lambda: None

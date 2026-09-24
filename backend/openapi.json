@@ -7968,6 +7968,97 @@
         "title": "BundleResponse",
         "type": "object"
       },
+      "CanvasAck": {
+        "description": "Delete / restore / purge answer ``{\"success\": true}`` and nothing else.",
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "title": "CanvasAck",
+        "type": "object"
+      },
+      "CanvasAssetRef": {
+        "description": "An asset-library ref held by a canvas (``canvas_asset_refs``).",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "asset_name": {
+            "title": "Asset Name",
+            "type": "string"
+          },
+          "asset_type": {
+            "title": "Asset Type",
+            "type": "string"
+          },
+          "loadout_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loadout Id"
+          },
+          "loadout_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loadout Name"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "node_id",
+          "loadout_id",
+          "asset_name",
+          "asset_type",
+          "loadout_name"
+        ],
+        "title": "CanvasAssetRef",
+        "type": "object"
+      },
+      "CanvasAssetRefsEnvelope": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CanvasAssetRef"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "CanvasAssetRefsEnvelope",
+        "type": "object"
+      },
       "CanvasCreate": {
         "properties": {
           "asset_id": {
@@ -8045,6 +8136,59 @@
           "region"
         ],
         "title": "CanvasCropDeriveRequest",
+        "type": "object"
+      },
+      "CanvasGenerationCapability": {
+        "description": "Which generation knobs one catalog model honours.\n\n``ratios`` keeps the aspect declaration order and ``quality_tiers`` runs\nlow → max; ``video_modes`` is sorted.",
+        "properties": {
+          "max_refs": {
+            "title": "Max Refs",
+            "type": "integer"
+          },
+          "negative": {
+            "title": "Negative",
+            "type": "boolean"
+          },
+          "quality": {
+            "title": "Quality",
+            "type": "boolean"
+          },
+          "quality_tiers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Quality Tiers",
+            "type": "array"
+          },
+          "ratios": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ratios",
+            "type": "array"
+          },
+          "resolution": {
+            "title": "Resolution",
+            "type": "boolean"
+          },
+          "video_modes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Video Modes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ratios",
+          "quality",
+          "quality_tiers",
+          "resolution",
+          "max_refs",
+          "negative",
+          "video_modes"
+        ],
+        "title": "CanvasGenerationCapability",
         "type": "object"
       },
       "CanvasGenerationRequest": {
@@ -8145,6 +8289,63 @@
           "source_url"
         ],
         "title": "CanvasGridDeriveRequest",
+        "type": "object"
+      },
+      "CanvasModelOption": {
+        "description": "A catalog model a canvas picker may offer (public columns only).\n\nThe router projects ``_GENERATION_MODEL_PUBLIC_FIELDS`` off each row;\n``tests/api/test_canvases_wire.py`` pins this field set to that tuple.\nNo credential, host or ``actual_provider`` ever appears here.",
+        "properties": {
+          "actual_model": {
+            "title": "Actual Model",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "is_local": {
+            "title": "Is Local",
+            "type": "boolean"
+          },
+          "last_test_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ok",
+                  "fail",
+                  "idle",
+                  "not_probed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Test Status"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "display_name",
+          "actual_model",
+          "type",
+          "is_local",
+          "sort_order",
+          "last_test_status"
+        ],
+        "title": "CanvasModelOption",
         "type": "object"
       },
       "CanvasOutpaintDeriveRequest": {
@@ -8272,6 +8473,305 @@
           "body"
         ],
         "title": "CanvasPromptRunRequest",
+        "type": "object"
+      },
+      "CanvasReferencedResource": {
+        "description": "A library resource a canvas references (one row per resource).\n\n``role`` / ``node_id`` describe the most recent ref to it.",
+        "properties": {
+          "cover_image_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image Path"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "file_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Type"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mime_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime Type"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "reference",
+              "output"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "thumbnail_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Path"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "file_type",
+          "mime_type",
+          "thumbnail_path",
+          "cover_image_path",
+          "created_at",
+          "role",
+          "node_id"
+        ],
+        "title": "CanvasReferencedResource",
+        "type": "object"
+      },
+      "CanvasRow": {
+        "description": "A full canvas document: every ``canvases`` column, as the router emits it.\n\n``tests/api/test_canvases_wire.py`` pins the field set (minus\n``can_edit``) to the ORM columns.",
+        "properties": {
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Id"
+          },
+          "base_updated_at": {
+            "description": "Optimistic-lock token: echo it back on the next PUT.",
+            "title": "Base Updated At",
+            "type": "string"
+          },
+          "can_edit": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether this caller may write the canvas. Present only on the two load responses (GET /canvases/{id}, GET /canvases/storyboard); absent (not null) on create and save.",
+            "title": "Can Edit"
+          },
+          "connection_ops_json": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Connection Ops Json",
+            "type": "array"
+          },
+          "connections_json": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Connections Json",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "episode_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Episode Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "smart",
+              "lite",
+              "classic",
+              "character",
+              "location",
+              "prop",
+              "costume",
+              "storyboard"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_ops_json": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Node Ops Json",
+            "type": "array"
+          },
+          "nodes_json": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Nodes Json",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "viewport_json": {
+            "additionalProperties": true,
+            "title": "Viewport Json",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "episode_id",
+          "name",
+          "kind",
+          "asset_id",
+          "viewport_json",
+          "nodes_json",
+          "connections_json",
+          "node_ops_json",
+          "connection_ops_json",
+          "base_updated_at",
+          "created_at",
+          "updated_at",
+          "created_by",
+          "deleted_at"
+        ],
+        "title": "CanvasRow",
+        "type": "object"
+      },
+      "CanvasSummary": {
+        "description": "A project canvas list row: summary columns, no node graph.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "smart",
+              "lite",
+              "classic",
+              "character",
+              "location",
+              "prop",
+              "costume",
+              "storyboard"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_count": {
+            "description": "Top-level nodes in the canvas (``jsonb_array_length(nodes_json)``). Added in the P3 typing pass: the workspace card showed a node count read from ``nodes_json``, which this summary never carries.",
+            "title": "Node Count",
+            "type": "integer"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "kind",
+          "created_at",
+          "updated_at",
+          "node_count"
+        ],
+        "title": "CanvasSummary",
         "type": "object"
       },
       "CanvasTimelineRequest": {
@@ -11588,6 +12088,23 @@
         "title": "Envelope[BundleResponse]",
         "type": "object"
       },
+      "Envelope_CanvasRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CanvasRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CanvasRow]",
+        "type": "object"
+      },
       "Envelope_DeletedResponse_": {
         "properties": {
           "data": {
@@ -11620,6 +12137,23 @@
           "data"
         ],
         "title": "Envelope[DetachedResponse]",
+        "type": "object"
+      },
+      "Envelope_EpisodeRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EpisodeRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[EpisodeRow]",
         "type": "object"
       },
       "Envelope_FolderContentCount_": {
@@ -11741,6 +12275,91 @@
         "title": "Envelope[GenerateSlotResponse]",
         "type": "object"
       },
+      "Envelope_GeneratedBatchResult_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedBatchResult"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[GeneratedBatchResult]",
+        "type": "object"
+      },
+      "Envelope_GeneratedCleanupResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedCleanupResponse"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[GeneratedCleanupResponse]",
+        "type": "object"
+      },
+      "Envelope_GeneratedCounts_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedCounts"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[GeneratedCounts]",
+        "type": "object"
+      },
+      "Envelope_GeneratedDeleted_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedDeleted"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[GeneratedDeleted]",
+        "type": "object"
+      },
+      "Envelope_GeneratedItem_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedItem"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[GeneratedItem]",
+        "type": "object"
+      },
       "Envelope_GeneratedMediaPage_": {
         "properties": {
           "data": {
@@ -11756,6 +12375,40 @@
           "data"
         ],
         "title": "Envelope[GeneratedMediaPage]",
+        "type": "object"
+      },
+      "Envelope_GeneratedPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedPage"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[GeneratedPage]",
+        "type": "object"
+      },
+      "Envelope_GeneratedSaveAsAssetResult_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedSaveAsAssetResult"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[GeneratedSaveAsAssetResult]",
         "type": "object"
       },
       "Envelope_ImportFromScriptResponse_": {
@@ -11937,6 +12590,27 @@
           "data"
         ],
         "title": "Envelope[List[ResourceVersionRow]]",
+        "type": "object"
+      },
+      "Envelope_List_ScriptAssetRow__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptAssetRow"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[List[ScriptAssetRow]]",
         "type": "object"
       },
       "Envelope_List_UsedInCanvasRef__": {
@@ -12402,6 +13076,125 @@
         "title": "Envelope[ResourceVersionRow]",
         "type": "object"
       },
+      "Envelope_ScriptAssetRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptAssetRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptAssetRow]",
+        "type": "object"
+      },
+      "Envelope_ScriptCanvasSyncResult_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptCanvasSyncResult"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptCanvasSyncResult]",
+        "type": "object"
+      },
+      "Envelope_ScriptChapterRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptChapterRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptChapterRow]",
+        "type": "object"
+      },
+      "Envelope_ScriptNumberingLock_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptNumberingLock"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptNumberingLock]",
+        "type": "object"
+      },
+      "Envelope_ScriptProjectFull_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptProjectFull"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptProjectFull]",
+        "type": "object"
+      },
+      "Envelope_ScriptProjectPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptProjectPage"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptProjectPage]",
+        "type": "object"
+      },
+      "Envelope_ScriptProjectRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptProjectRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptProjectRow]",
+        "type": "object"
+      },
       "Envelope_StageBoard_": {
         "properties": {
           "data": {
@@ -12588,6 +13381,153 @@
           "data"
         ],
         "title": "Envelope[WorkflowNodeRow]",
+        "type": "object"
+      },
+      "Envelope_dict_str__CanvasGenerationCapability__": {
+        "properties": {
+          "data": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CanvasGenerationCapability"
+            },
+            "title": "Data",
+            "type": "object"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[dict[str, CanvasGenerationCapability]]",
+        "type": "object"
+      },
+      "Envelope_list_CanvasModelOption__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CanvasModelOption"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[CanvasModelOption]]",
+        "type": "object"
+      },
+      "Envelope_list_CanvasReferencedResource__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CanvasReferencedResource"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[CanvasReferencedResource]]",
+        "type": "object"
+      },
+      "Envelope_list_CanvasSummary__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CanvasSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[CanvasSummary]]",
+        "type": "object"
+      },
+      "Envelope_list_EpisodeListRow__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/EpisodeListRow"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[EpisodeListRow]]",
+        "type": "object"
+      },
+      "Envelope_list_EpisodeProgressRow__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/EpisodeProgressRow"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[EpisodeProgressRow]]",
+        "type": "object"
+      },
+      "Envelope_list_ProjectAssetsTreeProject__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectAssetsTreeProject"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[ProjectAssetsTreeProject]]",
         "type": "object"
       },
       "Envelope_list_ProjectCollectionRow__": {
@@ -12800,6 +13740,69 @@
         "title": "Envelope[list[ProjectStageHistoryEntry]]",
         "type": "object"
       },
+      "Envelope_list_ProjectTrashedCanvas__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectTrashedCanvas"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[ProjectTrashedCanvas]]",
+        "type": "object"
+      },
+      "Envelope_list_TeamCanvasProject__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TeamCanvasProject"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[TeamCanvasProject]]",
+        "type": "object"
+      },
+      "Envelope_list_TeamTrashedCanvas__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TeamTrashedCanvas"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[TeamTrashedCanvas]]",
+        "type": "object"
+      },
       "Envelope_list_WorkflowNodeRow__": {
         "properties": {
           "data": {
@@ -12851,6 +13854,249 @@
         "title": "EpisodeCreate",
         "type": "object"
       },
+      "EpisodeDeleted": {
+        "description": "``DELETE /episodes/{id}`` answers ``{\"success\": true}`` and nothing else.",
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "title": "EpisodeDeleted",
+        "type": "object"
+      },
+      "EpisodeListRow": {
+        "description": "A list row: the episode plus its live (non-deleted) script count.\n\nThe UI gates deletion on ``script_count``: the ``script_projects``\nFK is ON DELETE RESTRICT, so a non-empty episode cannot be removed.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_node_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Node Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "integer"
+          },
+          "script_count": {
+            "title": "Script Count",
+            "type": "integer"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "title",
+          "sort_order",
+          "created_at",
+          "updated_at",
+          "current_node_id",
+          "owner_id",
+          "script_count"
+        ],
+        "title": "EpisodeListRow",
+        "type": "object"
+      },
+      "EpisodeProgressRow": {
+        "description": "One row of ``GET /projects/{id}/episodes/progress`` (spec G12).",
+        "properties": {
+          "episode_id": {
+            "title": "Episode Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "renders_count": {
+            "title": "Renders Count",
+            "type": "integer"
+          },
+          "scene_count": {
+            "title": "Scene Count",
+            "type": "integer"
+          },
+          "script_count": {
+            "title": "Script Count",
+            "type": "integer"
+          },
+          "shots_done": {
+            "title": "Shots Done",
+            "type": "integer"
+          },
+          "shots_total": {
+            "title": "Shots Total",
+            "type": "integer"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "planned",
+              "drafting",
+              "boarding",
+              "boarded",
+              "rendered"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "surface_state": {
+            "$ref": "#/components/schemas/EpisodeSurfaceState"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/EpisodeWorkflowRollup"
+          }
+        },
+        "required": [
+          "episode_id",
+          "title",
+          "sort_order",
+          "owner_id",
+          "script_count",
+          "scene_count",
+          "shots_total",
+          "shots_done",
+          "renders_count",
+          "status",
+          "workflow",
+          "surface_state"
+        ],
+        "title": "EpisodeProgressRow",
+        "type": "object"
+      },
+      "EpisodeRow": {
+        "description": "One ``episodes`` row as ``EpisodeRepository._row`` shapes it.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_node_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Node Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "integer"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "title",
+          "sort_order",
+          "created_at",
+          "updated_at",
+          "current_node_id",
+          "owner_id"
+        ],
+        "title": "EpisodeRow",
+        "type": "object"
+      },
+      "EpisodeSurfaceState": {
+        "description": "The completion criteria derived from this episode's content.\n\nThey can legitimately disagree with a node's persisted status (the\nproduced content was deleted after the node auto-completed).",
+        "properties": {
+          "script": {
+            "title": "Script",
+            "type": "boolean"
+          },
+          "storyboard": {
+            "title": "Storyboard",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "script",
+          "storyboard"
+        ],
+        "title": "EpisodeSurfaceState",
+        "type": "object"
+      },
       "EpisodeUpdate": {
         "description": "Request body for updating an episode (title / sort_order / owner_id).\n\n``owner_id`` uses field-set semantics (spec §5 方案 A, workspace IA\nredesign Task 6): omit to leave the episode owner untouched, supply\n(including ``null``) to reassign/clear it. The router reads\n``model_fields_set`` to distinguish \"not sent\" from \"set null\" and gates\nthe write on the project manager role — see ``update_episode``. A\nnon-UUID string 422s here at validation, never reaching the permission\ncheck or the DB.",
         "properties": {
@@ -12891,6 +14137,42 @@
           }
         },
         "title": "EpisodeUpdate",
+        "type": "object"
+      },
+      "EpisodeWorkflowRollup": {
+        "description": "This episode's workflow node counts and cursor.\n\n``current_node_id`` is stringified (bigint), null with no cursor.",
+        "properties": {
+          "current_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Node Id"
+          },
+          "needs_input_count": {
+            "title": "Needs Input Count",
+            "type": "integer"
+          },
+          "nodes_done": {
+            "title": "Nodes Done",
+            "type": "integer"
+          },
+          "nodes_total": {
+            "title": "Nodes Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "nodes_total",
+          "nodes_done",
+          "current_node_id",
+          "needs_input_count"
+        ],
+        "title": "EpisodeWorkflowRollup",
         "type": "object"
       },
       "ErrorEndpointEntry": {
@@ -14323,6 +15605,130 @@
         "title": "GenerateSlotResponse",
         "type": "object"
       },
+      "GeneratedBatchFailure": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "detail"
+        ],
+        "title": "GeneratedBatchFailure",
+        "type": "object"
+      },
+      "GeneratedBatchResult": {
+        "description": "Per-id outcome. Partial failure is reported, not collapsed into a 500 —\n\"12 of 20 saved\" has to survive the response boundary.",
+        "properties": {
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/GeneratedBatchFailure"
+            },
+            "title": "Failed",
+            "type": "array"
+          },
+          "ok": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ok",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "failed"
+        ],
+        "title": "GeneratedBatchResult",
+        "type": "object"
+      },
+      "GeneratedCleanupResponse": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "deleted": {
+            "default": 0,
+            "title": "Deleted",
+            "type": "integer"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "sample": {
+            "items": {
+              "$ref": "#/components/schemas/GeneratedItem"
+            },
+            "title": "Sample",
+            "type": "array"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dry_run",
+          "count",
+          "sample",
+          "deleted",
+          "truncated"
+        ],
+        "title": "GeneratedCleanupResponse",
+        "type": "object"
+      },
+      "GeneratedCounts": {
+        "description": "Tab counters. ``deleted`` is deliberately not on the wire — there is no\ndeleted tab, and shipping a count for a tab that does not exist invites a\nUI that reads it.",
+        "properties": {
+          "in_assets": {
+            "title": "In Assets",
+            "type": "integer"
+          },
+          "saved": {
+            "title": "Saved",
+            "type": "integer"
+          },
+          "unreviewed": {
+            "title": "Unreviewed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unreviewed",
+          "saved",
+          "in_assets"
+        ],
+        "title": "GeneratedCounts",
+        "type": "object"
+      },
+      "GeneratedDeleted": {
+        "description": "``DELETE /generated/{id}``. Always ``true``: a row that is not in the\ncaller's scope is a typed 404 ``generation_not_found``, never\n``deleted: false``.",
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "GeneratedDeleted",
+        "type": "object"
+      },
       "GeneratedItem": {
         "properties": {
           "canvas_id": {
@@ -14456,9 +15862,17 @@
           "id",
           "scope_id",
           "media_kind",
+          "mime",
+          "prompt",
+          "model",
+          "provider",
           "origin_kind",
+          "canvas_id",
+          "node_id",
           "created_at",
+          "promoted_resource_id",
           "review_state",
+          "source_asset_id",
           "source",
           "title"
         ],
@@ -14801,6 +16215,57 @@
         "title": "GeneratedMediaUpscaled",
         "type": "object"
       },
+      "GeneratedPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GeneratedItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "GeneratedPage",
+        "type": "object"
+      },
+      "GeneratedSaveAsAssetResult": {
+        "description": "``POST /generated/{id}/save-as-asset``: the card after the attach, plus\nthe asset it landed in and the promoted resource (both Snowflake strings).\n\n``POST /resources/{id}/save-as-asset`` answers the same three keys plus\n``generated_id`` — see ``ResourceSaveAsAssetResult``.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "generation": {
+            "$ref": "#/components/schemas/GeneratedItem"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "generation",
+          "asset_id",
+          "resource_id"
+        ],
+        "title": "GeneratedSaveAsAssetResult",
+        "type": "object"
+      },
       "GeneratedSource": {
         "description": "Mirror of ``app.services.library.generated_source.describe_source``.\n\n``deep_link`` is ``None`` for kinds that have no route today (shot, chat) —\nnever an invented URL.\n\n``issue_id`` / ``run_id`` / ``step`` are the 3a run provenance, filled only\nfor ``agent_run`` rows that are actually in ``run_deliverables``. They stay\n``None`` for everything else, historical rows included — a card with no\nprovenance is normal history, not a fault. Ids are strings: they are\nSnowflake BIGINTs.",
         "properties": {
@@ -14903,7 +16368,15 @@
         },
         "required": [
           "kind",
-          "label"
+          "label",
+          "canvas_id",
+          "node_id",
+          "shot_id",
+          "conversation_id",
+          "deep_link",
+          "issue_id",
+          "run_id",
+          "step"
         ],
         "title": "GeneratedSource",
         "type": "object"
@@ -23546,6 +25019,71 @@
         "title": "ProfileResponse",
         "type": "object"
       },
+      "ProjectAssetsTreeCanvas": {
+        "properties": {
+          "asset_count": {
+            "title": "Asset Count",
+            "type": "integer"
+          },
+          "canvas_id": {
+            "title": "Canvas Id",
+            "type": "string"
+          },
+          "canvas_name": {
+            "title": "Canvas Name",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "smart",
+              "lite",
+              "classic",
+              "character",
+              "location",
+              "prop",
+              "costume",
+              "storyboard"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canvas_id",
+          "canvas_name",
+          "kind",
+          "asset_count"
+        ],
+        "title": "ProjectAssetsTreeCanvas",
+        "type": "object"
+      },
+      "ProjectAssetsTreeProject": {
+        "description": "A visible project and its non-blank canvases (possibly none).",
+        "properties": {
+          "canvases": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectAssetsTreeCanvas"
+            },
+            "title": "Canvases",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "name",
+          "canvases"
+        ],
+        "title": "ProjectAssetsTreeProject",
+        "type": "object"
+      },
       "ProjectCharacterEntity": {
         "properties": {
           "cue_count": {
@@ -26177,6 +27715,69 @@
         "title": "ProjectSuggestionsResponse",
         "type": "object"
       },
+      "ProjectTrashedCanvas": {
+        "description": "A trashed canvas in a project's trash list.",
+        "properties": {
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "smart",
+              "lite",
+              "classic",
+              "character",
+              "location",
+              "prop",
+              "costume",
+              "storyboard"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "updated_at",
+          "deleted_at",
+          "project_id"
+        ],
+        "title": "ProjectTrashedCanvas",
+        "type": "object"
+      },
       "ProjectUpdate": {
         "description": "Request body for updating an existing project",
         "properties": {
@@ -27974,6 +29575,80 @@
           "has_more"
         ],
         "title": "ResourceBatchTranscodeResult",
+        "type": "object"
+      },
+      "ResourceCanvasRef": {
+        "description": "A live canvas that references a resource, and in which role.",
+        "properties": {
+          "canvas_id": {
+            "title": "Canvas Id",
+            "type": "string"
+          },
+          "canvas_name": {
+            "title": "Canvas Name",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "smart",
+              "lite",
+              "classic",
+              "character",
+              "location",
+              "prop",
+              "costume",
+              "storyboard"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "reference",
+              "output"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canvas_id",
+          "canvas_name",
+          "kind",
+          "project_id",
+          "role"
+        ],
+        "title": "ResourceCanvasRef",
+        "type": "object"
+      },
+      "ResourceCanvasRefsEnvelope": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceCanvasRef"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ResourceCanvasRefsEnvelope",
         "type": "object"
       },
       "ResourceDuplicateCandidate": {
@@ -31961,6 +33636,18 @@
         "title": "ScheduleUpdatePayload",
         "type": "object"
       },
+      "ScriptAck": {
+        "description": "``{\"success\": true}`` with no ``data``: deletes and the viewport save.",
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "title": "ScriptAck",
+        "type": "object"
+      },
       "ScriptAssetCreate": {
         "description": "Request body for creating a script asset.",
         "properties": {
@@ -32008,6 +33695,96 @@
           "name"
         ],
         "title": "ScriptAssetCreate",
+        "type": "object"
+      },
+      "ScriptAssetRow": {
+        "description": "One ``script_assets`` row (``SELECT *`` shape).",
+        "properties": {
+          "asset_type": {
+            "title": "Asset Type",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "data_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Json"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "integer"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "script_id",
+          "asset_type",
+          "name",
+          "content",
+          "data_json",
+          "sort_order",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ScriptAssetRow",
         "type": "object"
       },
       "ScriptAssetUpdate": {
@@ -32092,6 +33869,23 @@
           }
         },
         "title": "ScriptCanvasSyncRequest",
+        "type": "object"
+      },
+      "ScriptCanvasSyncResult": {
+        "description": "``POST /{id}/canvas/sync``: every chapter of the script after the sync.",
+        "properties": {
+          "chapters": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptChapterRow"
+            },
+            "title": "Chapters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "chapters"
+        ],
+        "title": "ScriptCanvasSyncResult",
         "type": "object"
       },
       "ScriptChapterCreate": {
@@ -32223,6 +34017,219 @@
           }
         },
         "title": "ScriptChapterCreate",
+        "type": "object"
+      },
+      "ScriptChapterRow": {
+        "description": "One ``script_chapters`` row (``SELECT *`` shape).",
+        "properties": {
+          "branch_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch Label"
+          },
+          "branch_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch Type"
+          },
+          "chapter_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Number"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "content_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Json"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "data_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Json"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "parent_chapter_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Chapter Id"
+          },
+          "position_x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position X"
+          },
+          "position_y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Y"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "integer"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "script_id",
+          "parent_chapter_id",
+          "chapter_number",
+          "title",
+          "summary",
+          "content",
+          "branch_label",
+          "branch_type",
+          "position_x",
+          "position_y",
+          "width",
+          "height",
+          "data_json",
+          "sort_order",
+          "created_at",
+          "updated_at",
+          "content_json"
+        ],
+        "title": "ScriptChapterRow",
         "type": "object"
       },
       "ScriptChapterUpdate": {
@@ -32469,6 +34476,28 @@
         "title": "ScriptImportRequest",
         "type": "object"
       },
+      "ScriptNumberingLock": {
+        "description": "``POST /{id}/lock-numbering``. ``already_locked`` is true when the call\nwas a no-op; ``scenes`` is then the current (unchanged) scene list.",
+        "properties": {
+          "already_locked": {
+            "title": "Already Locked",
+            "type": "boolean"
+          },
+          "scenes": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptSceneRow"
+            },
+            "title": "Scenes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "already_locked",
+          "scenes"
+        ],
+        "title": "ScriptNumberingLock",
+        "type": "object"
+      },
       "ScriptProjectCreate": {
         "description": "Request body for creating a new script project.",
         "properties": {
@@ -32511,6 +34540,227 @@
           "project_id"
         ],
         "title": "ScriptProjectCreate",
+        "type": "object"
+      },
+      "ScriptProjectFull": {
+        "description": "``GET /scripts/projects/{id}``: the project row plus its chapters in\n``sort_order``.",
+        "properties": {
+          "chapters": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptChapterRow"
+            },
+            "title": "Chapters",
+            "type": "array"
+          },
+          "project": {
+            "$ref": "#/components/schemas/ScriptProjectRow"
+          }
+        },
+        "required": [
+          "project",
+          "chapters"
+        ],
+        "title": "ScriptProjectFull",
+        "type": "object"
+      },
+      "ScriptProjectPage": {
+        "description": "``GET /scripts/projects``: one page of a project's live scripts.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptProjectRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "title": "ScriptProjectPage",
+        "type": "object"
+      },
+      "ScriptProjectRow": {
+        "description": "One ``script_projects`` row (``SELECT *`` shape).",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "display_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Code"
+          },
+          "episode_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Episode Id"
+          },
+          "genre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Genre"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "numbering_locked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numbering Locked At"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "integer"
+          },
+          "settings_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Json"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "target_duration_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Duration Sec"
+          },
+          "team_id": {
+            "title": "Team Id",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "viewport_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewport Json"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "team_id",
+          "name",
+          "created_by",
+          "display_code",
+          "description",
+          "settings_json",
+          "viewport_json",
+          "status",
+          "created_at",
+          "updated_at",
+          "genre",
+          "episode_id",
+          "target_duration_sec",
+          "numbering_locked_at"
+        ],
+        "title": "ScriptProjectRow",
         "type": "object"
       },
       "ScriptProjectUpdate": {
@@ -32591,6 +34841,198 @@
           }
         },
         "title": "ScriptProjectUpdate",
+        "type": "object"
+      },
+      "ScriptSceneRow": {
+        "description": "One ``script_scenes`` row plus the derived ``scene_no_in_episode``.\n\n``content_json`` is the scene's element list (JSONB, default ``[]``), so it\nis typed as any JSON value rather than an object.",
+        "properties": {
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "content_json": {
+            "title": "Content Json"
+          },
+          "content_version": {
+            "title": "Content Version",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "heading_int_ext": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading Int Ext"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          },
+          "location_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Text"
+          },
+          "omitted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Omitted At"
+          },
+          "position_x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position X"
+          },
+          "position_y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Y"
+          },
+          "scene_no_in_episode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene No In Episode"
+          },
+          "scene_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Number"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "integer"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "time_of_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Of Day"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "script_id",
+          "chapter_id",
+          "heading_int_ext",
+          "location_text",
+          "location_id",
+          "time_of_day",
+          "content_json",
+          "content",
+          "content_version",
+          "position_x",
+          "position_y",
+          "width",
+          "height",
+          "sort_order",
+          "created_at",
+          "updated_at",
+          "scene_number",
+          "omitted_at",
+          "scene_no_in_episode"
+        ],
+        "title": "ScriptSceneRow",
         "type": "object"
       },
       "SearchGroups": {
@@ -37194,6 +39636,71 @@
         "title": "TeamAiBudgetUpdate",
         "type": "object"
       },
+      "TeamCanvasProject": {
+        "description": "A team project with its live canvases (empty list when it has none).",
+        "properties": {
+          "canvases": {
+            "items": {
+              "$ref": "#/components/schemas/TeamCanvasSummary"
+            },
+            "title": "Canvases",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "project_name": {
+            "title": "Project Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "project_name",
+          "canvases"
+        ],
+        "title": "TeamCanvasProject",
+        "type": "object"
+      },
+      "TeamCanvasSummary": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "smart",
+              "lite",
+              "classic",
+              "character",
+              "location",
+              "prop",
+              "costume",
+              "storyboard"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "updated_at"
+        ],
+        "title": "TeamCanvasSummary",
+        "type": "object"
+      },
       "TeamCreate": {
         "description": "Request to create a team.",
         "properties": {
@@ -37394,6 +39901,74 @@
           "is_assignable"
         ],
         "title": "TeamRoleResponse",
+        "type": "object"
+      },
+      "TeamTrashedCanvas": {
+        "description": "A trashed canvas in a team's trash list, named with its project.",
+        "properties": {
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "smart",
+              "lite",
+              "classic",
+              "character",
+              "location",
+              "prop",
+              "costume",
+              "storyboard"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "project_name": {
+            "title": "Project Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "updated_at",
+          "deleted_at",
+          "project_id",
+          "project_name"
+        ],
+        "title": "TeamTrashedCanvas",
         "type": "object"
       },
       "TeamUpdate": {
@@ -67159,9 +69734,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Generation Capabilities Api V1 Canvases Generation Capabilities Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_dict_str__CanvasGenerationCapability__"
                 }
               }
             },
@@ -67227,9 +69800,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Generation Models Api V1 Canvases Generation Models Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_list_CanvasModelOption__"
                 }
               }
             },
@@ -67534,9 +70105,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Or Create Storyboard Canvas Api V1 Canvases Storyboard Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_CanvasRow_"
                 }
               }
             },
@@ -67611,9 +70180,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Team Canvases Api V1 Canvases Team  Team Id  Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_list_TeamCanvasProject__"
                 }
               }
             },
@@ -67688,9 +70255,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Team Canvas Trash Api V1 Canvases Team  Team Id  Trash Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_list_TeamTrashedCanvas__"
                 }
               }
             },
@@ -67756,9 +70321,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Text Models Api V1 Canvases Text Models Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_list_CanvasModelOption__"
                 }
               }
             },
@@ -67835,9 +70398,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Canvas Api V1 Canvases  Canvas Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/CanvasAck"
                 }
               }
             },
@@ -67912,9 +70473,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Canvas Api V1 Canvases  Canvas Id  Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_CanvasRow_"
                 }
               }
             },
@@ -67998,9 +70557,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Canvas Api V1 Canvases  Canvas Id  Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_CanvasRow_"
                 }
               }
             },
@@ -68077,9 +70634,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Canvas Asset Refs Api V1 Canvases  Canvas Id  Asset Refs Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/CanvasAssetRefsEnvelope"
                 }
               }
             },
@@ -68152,7 +70707,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_list_CanvasReferencedResource__"
+                }
               }
             },
             "description": "Successful Response"
@@ -68578,9 +71135,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Purge Canvas Api V1 Canvases  Canvas Id  Purge Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/CanvasAck"
                 }
               }
             },
@@ -68656,9 +71211,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Restore Canvas Api V1 Canvases  Canvas Id  Restore Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/CanvasAck"
                 }
               }
             },
@@ -74044,9 +76597,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Episode Api V1 Episodes  Episode Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/EpisodeDeleted"
                 }
               }
             },
@@ -74129,9 +76680,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Episode Api V1 Episodes  Episode Id  Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_EpisodeRow_"
                 }
               }
             },
@@ -74853,20 +77402,52 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GeneratedPage_"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "summary": "List Generated",
@@ -75745,20 +78326,52 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GeneratedBatchResult_"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "summary": "Batch",
@@ -75829,20 +78442,52 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GeneratedCleanupResponse_"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "summary": "Cleanup",
@@ -75903,20 +78548,52 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GeneratedCounts_"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "summary": "Counts",
@@ -75988,20 +78665,52 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GeneratedDeleted_"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "summary": "Delete",
@@ -76072,20 +78781,52 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GeneratedItem_"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "summary": "Get Generated",
@@ -76157,20 +78898,52 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GeneratedItem_"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "summary": "Save",
@@ -76252,20 +79025,52 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GeneratedSaveAsAssetResult_"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
           }
         },
         "summary": "Save As Asset",
@@ -86441,9 +89246,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Project Canvases Api V1 Projects  Project Id  Canvases Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_list_CanvasSummary__"
                 }
               }
             },
@@ -86527,9 +89330,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Project Canvas Api V1 Projects  Project Id  Canvases Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_CanvasRow_"
                 }
               }
             },
@@ -86606,9 +89407,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Project Canvas Trash Api V1 Projects  Project Id  Canvases Trash Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_list_ProjectTrashedCanvas__"
                 }
               }
             },
@@ -87000,9 +89799,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Episodes Api V1 Projects  Project Id  Episodes Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_list_EpisodeListRow__"
                 }
               }
             },
@@ -87085,9 +89882,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Episode Api V1 Projects  Project Id  Episodes Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_EpisodeRow_"
                 }
               }
             },
@@ -87162,9 +89957,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Episodes Progress Api V1 Projects  Project Id  Episodes Progress Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_list_EpisodeProgressRow__"
                 }
               }
             },
@@ -93255,7 +96048,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_list_ProjectAssetsTreeProject__"
+                }
               }
             },
             "description": "Successful Response"
@@ -94618,7 +97413,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceCanvasRefsEnvelope"
+                }
               }
             },
             "description": "Successful Response"
@@ -99636,9 +102433,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Script Projects Api V1 Scripts Projects Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptProjectPage_"
                 }
               }
             },
@@ -99711,9 +102506,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Script Project Api V1 Scripts Projects Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptProjectRow_"
                 }
               }
             },
@@ -99788,9 +102581,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Asset Api V1 Scripts Projects Assets  Asset Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScriptAck"
                 }
               }
             },
@@ -99873,9 +102664,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Asset Api V1 Scripts Projects Assets  Asset Id  Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptAssetRow_"
                 }
               }
             },
@@ -99949,9 +102738,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Chapter Api V1 Scripts Projects Chapters  Chapter Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScriptAck"
                 }
               }
             },
@@ -100033,9 +102820,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Chapter Api V1 Scripts Projects Chapters  Chapter Id  Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptChapterRow_"
                 }
               }
             },
@@ -100109,9 +102894,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Script Project Api V1 Scripts Projects  Script Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScriptAck"
                 }
               }
             },
@@ -100183,9 +102966,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Script Project Api V1 Scripts Projects  Script Id  Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptProjectFull_"
                 }
               }
             },
@@ -100267,9 +103048,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Script Project Api V1 Scripts Projects  Script Id  Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptProjectRow_"
                 }
               }
             },
@@ -100360,9 +103139,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Assets Api V1 Scripts Projects  Script Id  Assets Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_List_ScriptAssetRow__"
                 }
               }
             },
@@ -100445,9 +103222,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Asset Api V1 Scripts Projects  Script Id  Assets Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptAssetRow_"
                 }
               }
             },
@@ -100531,9 +103306,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Sync Canvas Api V1 Scripts Projects  Script Id  Canvas Sync Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptCanvasSyncResult_"
                 }
               }
             },
@@ -100617,9 +103390,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Chapter Api V1 Scripts Projects  Script Id  Chapters Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptChapterRow_"
                 }
               }
             },
@@ -100694,9 +103465,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Lock Numbering Api V1 Scripts Projects  Script Id  Lock Numbering Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptNumberingLock_"
                 }
               }
             },
@@ -100780,9 +103549,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Viewport Api V1 Scripts Projects  Script Id  Viewport Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScriptAck"
                 }
               }
             },

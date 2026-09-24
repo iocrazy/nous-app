@@ -133,3 +133,60 @@ export type ProjectWorkflow = Omit<ProjectWorkflowOut, 'nodes'> & { nodes: Proje
 /** `fetchStageBoard` result — the node normalized like every other node payload. */
 export type StageBoardData = Omit<StageBoard, 'node'> & { node: ProjectStageNode };
 export type ResourceLyricsUpload = Schemas['ResourceLyricsUpload'];
+
+// --- P3: generated inbox (/api/v1/generated) ---
+// Snowflake ids are strings on this surface (the repository `_normalize`s
+// them); `created_at` is Pydantic's rendering (`…Z`), not `isoformat()`.
+export type GeneratedItem = Schemas['GeneratedItem'];
+export type GeneratedSource = Schemas['GeneratedSource'];
+export type GeneratedPage = Schemas['GeneratedPage'];
+export type GeneratedCounts = Schemas['GeneratedCounts'];
+export type GeneratedReviewState = GeneratedItem['review_state'];
+export type GeneratedBatchAction = Schemas['BatchRequest']['action'];
+export type GeneratedNewAssetSpec = Schemas['NewAssetSpec'];
+export type GeneratedBatchFailure = Schemas['GeneratedBatchFailure'];
+export type GeneratedBatchResult = Schemas['GeneratedBatchResult'];
+export type GeneratedCleanupResult = Schemas['GeneratedCleanupResponse'];
+export type GeneratedSaveAsAssetResult = Schemas['GeneratedSaveAsAssetResult'];
+/** `POST /resources/{id}/save-as-asset`: the generation route's keys + `generated_id`. */
+export type ResourceSaveAsAssetResult = Schemas['ResourceSaveAsAssetResult'];
+// --- end generated inbox ---
+
+// --- P3: script projects (/api/v1/scripts/projects) ---
+/** One `script_projects` row. Ids are JSON numbers on this surface (plain
+ * `fetch`, no bigIntSafeFetch); `String()` them at URL / key / compare sites. */
+export type ScriptProject = Schemas['ScriptProjectRow'];
+/** `GET /scripts/projects?project_id=` payload: full rows, not summaries. */
+export type ScriptProjectPage = Schemas['ScriptProjectPage'];
+/** Raw `GET /scripts/projects/{id}` payload: `{ project, chapters }`. */
+export type ScriptProjectDetail = Schemas['ScriptProjectFull'];
+export type ScriptProjectUpdate = Schemas['ScriptProjectUpdate'];
+export type ScriptChapter = Schemas['ScriptChapterRow'];
+export type ScriptAsset = Schemas['ScriptAssetRow'];
+// --- end script projects ---
+
+// --- P3: canvases, episodes, project assets ---
+/** A full canvas document as the canvas routes send it (ids are strings). */
+export type CanvasRow = Schemas['CanvasRow'];
+/** `GET /projects/{id}/canvases` row: summary columns + `node_count`, no graph. */
+export type CanvasSummary = Schemas['CanvasSummary'];
+export type TeamCanvasSummary = Schemas['TeamCanvasSummary'];
+export type TeamCanvasProject = Schemas['TeamCanvasProject'];
+export type ProjectTrashedCanvas = Schemas['ProjectTrashedCanvas'];
+export type TeamTrashedCanvas = Schemas['TeamTrashedCanvas'];
+export type CanvasAssetRef = Schemas['CanvasAssetRef'];
+export type CanvasReferencedResource = Schemas['CanvasReferencedResource'];
+export type ProjectAssetsTreeProject = Schemas['ProjectAssetsTreeProject'];
+/** A live canvas that references a resource (`GET /resources/{id}/canvas-refs`). */
+export type ResourceCanvasRef = Schemas['ResourceCanvasRef'];
+/** A catalog model a canvas picker may offer (generation-models / text-models). */
+export type CanvasModelOption = Schemas['CanvasModelOption'];
+export type CanvasGenerationCapability = Schemas['CanvasGenerationCapability'];
+/** `episodes` row — bigint ids are JSON numbers on this surface. */
+export type EpisodeRow = Schemas['EpisodeRow'];
+export type EpisodeListRow = Schemas['EpisodeListRow'];
+export type EpisodeProgress = Schemas['EpisodeProgressRow'];
+export type EpisodeStatus = EpisodeProgress['status'];
+export type EpisodeWorkflowRollup = Schemas['EpisodeWorkflowRollup'];
+export type EpisodeSurfaceState = Schemas['EpisodeSurfaceState'];
+// --- end canvases ---

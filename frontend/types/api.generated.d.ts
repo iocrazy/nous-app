@@ -20126,6 +20126,47 @@ export interface components {
              */
             reference_resource_ids: string[];
         };
+        /**
+         * CanvasAck
+         * @description Delete / restore / purge answer ``{"success": true}`` and nothing else.
+         */
+        CanvasAck: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * CanvasAssetRef
+         * @description An asset-library ref held by a canvas (``canvas_asset_refs``).
+         */
+        CanvasAssetRef: {
+            /** Asset Id */
+            asset_id: string;
+            /** Asset Name */
+            asset_name: string;
+            /** Asset Type */
+            asset_type: string;
+            /** Loadout Id */
+            loadout_id: string | null;
+            /** Loadout Name */
+            loadout_name: string | null;
+            /** Node Id */
+            node_id: string;
+        };
+        /** CanvasAssetRefsEnvelope */
+        CanvasAssetRefsEnvelope: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["CanvasAssetRef"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** CanvasCreate */
         CanvasCreate: {
             /** Asset Id */
@@ -20153,6 +20194,29 @@ export interface components {
             region: components["schemas"]["CropRegionModel"];
             /** Source Url */
             source_url: string;
+        };
+        /**
+         * CanvasGenerationCapability
+         * @description Which generation knobs one catalog model honours.
+         *
+         *     ``ratios`` keeps the aspect declaration order and ``quality_tiers`` runs
+         *     low → max; ``video_modes`` is sorted.
+         */
+        CanvasGenerationCapability: {
+            /** Max Refs */
+            max_refs: number;
+            /** Negative */
+            negative: boolean;
+            /** Quality */
+            quality: boolean;
+            /** Quality Tiers */
+            quality_tiers: string[];
+            /** Ratios */
+            ratios: string[];
+            /** Resolution */
+            resolution: boolean;
+            /** Video Modes */
+            video_modes: string[];
         };
         /**
          * CanvasGenerationRequest
@@ -20197,6 +20261,30 @@ export interface components {
             xs?: number[];
             /** Ys */
             ys?: number[];
+        };
+        /**
+         * CanvasModelOption
+         * @description A catalog model a canvas picker may offer (public columns only).
+         *
+         *     The router projects ``_GENERATION_MODEL_PUBLIC_FIELDS`` off each row;
+         *     ``tests/api/test_canvases_wire.py`` pins this field set to that tuple.
+         *     No credential, host or ``actual_provider`` ever appears here.
+         */
+        CanvasModelOption: {
+            /** Actual Model */
+            actual_model: string;
+            /** Display Name */
+            display_name: string;
+            /** Is Local */
+            is_local: boolean;
+            /** Last Test Status */
+            last_test_status: ("ok" | "fail" | "idle" | "not_probed") | null;
+            /** Name */
+            name: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Type */
+            type: string;
         };
         /** CanvasOutpaintDeriveRequest */
         CanvasOutpaintDeriveRequest: {
@@ -20260,6 +20348,126 @@ export interface components {
              * @description Provider override; null means service picks the default.
              */
             provider_slug?: string | null;
+        };
+        /**
+         * CanvasReferencedResource
+         * @description A library resource a canvas references (one row per resource).
+         *
+         *     ``role`` / ``node_id`` describe the most recent ref to it.
+         */
+        CanvasReferencedResource: {
+            /** Cover Image Path */
+            cover_image_path: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** File Type */
+            file_type: string | null;
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: string;
+            /** Mime Type */
+            mime_type: string | null;
+            /** Node Id */
+            node_id: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "reference" | "output";
+            /** Thumbnail Path */
+            thumbnail_path: string | null;
+        };
+        /**
+         * CanvasRow
+         * @description A full canvas document: every ``canvases`` column, as the router emits it.
+         *
+         *     ``tests/api/test_canvases_wire.py`` pins the field set (minus
+         *     ``can_edit``) to the ORM columns.
+         */
+        CanvasRow: {
+            /** Asset Id */
+            asset_id: string | null;
+            /**
+             * Base Updated At
+             * @description Optimistic-lock token: echo it back on the next PUT.
+             */
+            base_updated_at: string;
+            /**
+             * Can Edit
+             * @description Whether this caller may write the canvas. Present only on the two load responses (GET /canvases/{id}, GET /canvases/storyboard); absent (not null) on create and save.
+             */
+            can_edit?: boolean | null;
+            /** Connection Ops Json */
+            connection_ops_json: {
+                [key: string]: unknown;
+            }[];
+            /** Connections Json */
+            connections_json: {
+                [key: string]: unknown;
+            }[];
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Deleted At */
+            deleted_at: string | null;
+            /** Episode Id */
+            episode_id: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "smart" | "lite" | "classic" | "character" | "location" | "prop" | "costume" | "storyboard";
+            /** Name */
+            name: string;
+            /** Node Ops Json */
+            node_ops_json: {
+                [key: string]: unknown;
+            }[];
+            /** Nodes Json */
+            nodes_json: {
+                [key: string]: unknown;
+            }[];
+            /** Project Id */
+            project_id: string;
+            /** Updated At */
+            updated_at: string;
+            /** Viewport Json */
+            viewport_json: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * CanvasSummary
+         * @description A project canvas list row: summary columns, no node graph.
+         */
+        CanvasSummary: {
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "smart" | "lite" | "classic" | "character" | "location" | "prop" | "costume" | "storyboard";
+            /** Name */
+            name: string;
+            /**
+             * Node Count
+             * @description Top-level nodes in the canvas (``jsonb_array_length(nodes_json)``). Added in the P3 typing pass: the workspace card showed a node count read from ``nodes_json``, which this summary never carries.
+             */
+            node_count: number;
+            /** Project Id */
+            project_id: string;
+            /** Updated At */
+            updated_at: string;
         };
         /**
          * CanvasTimelineRequest
@@ -21883,6 +22091,15 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[CanvasRow] */
+        Envelope_CanvasRow_: {
+            data: components["schemas"]["CanvasRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[DeletedResponse] */
         Envelope_DeletedResponse_: {
             data: components["schemas"]["DeletedResponse"];
@@ -21895,6 +22112,15 @@ export interface components {
         /** Envelope[DetachedResponse] */
         Envelope_DetachedResponse_: {
             data: components["schemas"]["DetachedResponse"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[EpisodeRow] */
+        Envelope_EpisodeRow_: {
+            data: components["schemas"]["EpisodeRow"];
             /**
              * Success
              * @default true
@@ -21964,9 +22190,72 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[GeneratedBatchResult] */
+        Envelope_GeneratedBatchResult_: {
+            data: components["schemas"]["GeneratedBatchResult"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[GeneratedCleanupResponse] */
+        Envelope_GeneratedCleanupResponse_: {
+            data: components["schemas"]["GeneratedCleanupResponse"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[GeneratedCounts] */
+        Envelope_GeneratedCounts_: {
+            data: components["schemas"]["GeneratedCounts"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[GeneratedDeleted] */
+        Envelope_GeneratedDeleted_: {
+            data: components["schemas"]["GeneratedDeleted"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[GeneratedItem] */
+        Envelope_GeneratedItem_: {
+            data: components["schemas"]["GeneratedItem"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[GeneratedMediaPage] */
         Envelope_GeneratedMediaPage_: {
             data: components["schemas"]["GeneratedMediaPage"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[GeneratedPage] */
+        Envelope_GeneratedPage_: {
+            data: components["schemas"]["GeneratedPage"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[GeneratedSaveAsAssetResult] */
+        Envelope_GeneratedSaveAsAssetResult_: {
+            data: components["schemas"]["GeneratedSaveAsAssetResult"];
             /**
              * Success
              * @default true
@@ -22055,6 +22344,16 @@ export interface components {
         Envelope_List_ResourceVersionRow__: {
             /** Data */
             data: components["schemas"]["ResourceVersionRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[List[ScriptAssetRow]] */
+        Envelope_List_ScriptAssetRow__: {
+            /** Data */
+            data: components["schemas"]["ScriptAssetRow"][];
             /**
              * Success
              * @default true
@@ -22305,6 +22604,69 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[ScriptAssetRow] */
+        Envelope_ScriptAssetRow_: {
+            data: components["schemas"]["ScriptAssetRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptCanvasSyncResult] */
+        Envelope_ScriptCanvasSyncResult_: {
+            data: components["schemas"]["ScriptCanvasSyncResult"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptChapterRow] */
+        Envelope_ScriptChapterRow_: {
+            data: components["schemas"]["ScriptChapterRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptNumberingLock] */
+        Envelope_ScriptNumberingLock_: {
+            data: components["schemas"]["ScriptNumberingLock"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptProjectFull] */
+        Envelope_ScriptProjectFull_: {
+            data: components["schemas"]["ScriptProjectFull"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptProjectPage] */
+        Envelope_ScriptProjectPage_: {
+            data: components["schemas"]["ScriptProjectPage"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptProjectRow] */
+        Envelope_ScriptProjectRow_: {
+            data: components["schemas"]["ScriptProjectRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[StageBoard] */
         Envelope_StageBoard_: {
             data: components["schemas"]["StageBoard"];
@@ -22385,6 +22747,78 @@ export interface components {
         /** Envelope[WorkflowNodeRow] */
         Envelope_WorkflowNodeRow_: {
             data: components["schemas"]["WorkflowNodeRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[dict[str, CanvasGenerationCapability]] */
+        Envelope_dict_str__CanvasGenerationCapability__: {
+            /** Data */
+            data: {
+                [key: string]: components["schemas"]["CanvasGenerationCapability"];
+            };
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[CanvasModelOption]] */
+        Envelope_list_CanvasModelOption__: {
+            /** Data */
+            data: components["schemas"]["CanvasModelOption"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[CanvasReferencedResource]] */
+        Envelope_list_CanvasReferencedResource__: {
+            /** Data */
+            data: components["schemas"]["CanvasReferencedResource"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[CanvasSummary]] */
+        Envelope_list_CanvasSummary__: {
+            /** Data */
+            data: components["schemas"]["CanvasSummary"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[EpisodeListRow]] */
+        Envelope_list_EpisodeListRow__: {
+            /** Data */
+            data: components["schemas"]["EpisodeListRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[EpisodeProgressRow]] */
+        Envelope_list_EpisodeProgressRow__: {
+            /** Data */
+            data: components["schemas"]["EpisodeProgressRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ProjectAssetsTreeProject]] */
+        Envelope_list_ProjectAssetsTreeProject__: {
+            /** Data */
+            data: components["schemas"]["ProjectAssetsTreeProject"][];
             /**
              * Success
              * @default true
@@ -22491,6 +22925,36 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[list[ProjectTrashedCanvas]] */
+        Envelope_list_ProjectTrashedCanvas__: {
+            /** Data */
+            data: components["schemas"]["ProjectTrashedCanvas"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[TeamCanvasProject]] */
+        Envelope_list_TeamCanvasProject__: {
+            /** Data */
+            data: components["schemas"]["TeamCanvasProject"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[TeamTrashedCanvas]] */
+        Envelope_list_TeamTrashedCanvas__: {
+            /** Data */
+            data: components["schemas"]["TeamTrashedCanvas"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[list[WorkflowNodeRow]] */
         Envelope_list_WorkflowNodeRow__: {
             /** Data */
@@ -22512,6 +22976,110 @@ export interface components {
             title?: string | null;
         };
         /**
+         * EpisodeDeleted
+         * @description ``DELETE /episodes/{id}`` answers ``{"success": true}`` and nothing else.
+         */
+        EpisodeDeleted: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * EpisodeListRow
+         * @description A list row: the episode plus its live (non-deleted) script count.
+         *
+         *     The UI gates deletion on ``script_count``: the ``script_projects``
+         *     FK is ON DELETE RESTRICT, so a non-empty episode cannot be removed.
+         */
+        EpisodeListRow: {
+            /** Created At */
+            created_at: string;
+            /** Current Node Id */
+            current_node_id: number | null;
+            /** Id */
+            id: number;
+            /** Owner Id */
+            owner_id: string | null;
+            /** Project Id */
+            project_id: number;
+            /** Script Count */
+            script_count: number;
+            /** Sort Order */
+            sort_order: number;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * EpisodeProgressRow
+         * @description One row of ``GET /projects/{id}/episodes/progress`` (spec G12).
+         */
+        EpisodeProgressRow: {
+            /** Episode Id */
+            episode_id: string;
+            /** Owner Id */
+            owner_id: string | null;
+            /** Renders Count */
+            renders_count: number;
+            /** Scene Count */
+            scene_count: number;
+            /** Script Count */
+            script_count: number;
+            /** Shots Done */
+            shots_done: number;
+            /** Shots Total */
+            shots_total: number;
+            /** Sort Order */
+            sort_order: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "planned" | "drafting" | "boarding" | "boarded" | "rendered";
+            surface_state: components["schemas"]["EpisodeSurfaceState"];
+            /** Title */
+            title: string;
+            workflow: components["schemas"]["EpisodeWorkflowRollup"];
+        };
+        /**
+         * EpisodeRow
+         * @description One ``episodes`` row as ``EpisodeRepository._row`` shapes it.
+         */
+        EpisodeRow: {
+            /** Created At */
+            created_at: string;
+            /** Current Node Id */
+            current_node_id: number | null;
+            /** Id */
+            id: number;
+            /** Owner Id */
+            owner_id: string | null;
+            /** Project Id */
+            project_id: number;
+            /** Sort Order */
+            sort_order: number;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * EpisodeSurfaceState
+         * @description The completion criteria derived from this episode's content.
+         *
+         *     They can legitimately disagree with a node's persisted status (the
+         *     produced content was deleted after the node auto-completed).
+         */
+        EpisodeSurfaceState: {
+            /** Script */
+            script: boolean;
+            /** Storyboard */
+            storyboard: boolean;
+        };
+        /**
          * EpisodeUpdate
          * @description Request body for updating an episode (title / sort_order / owner_id).
          *
@@ -22530,6 +23098,22 @@ export interface components {
             sort_order?: number | null;
             /** Title */
             title?: string | null;
+        };
+        /**
+         * EpisodeWorkflowRollup
+         * @description This episode's workflow node counts and cursor.
+         *
+         *     ``current_node_id`` is stringified (bigint), null with no cursor.
+         */
+        EpisodeWorkflowRollup: {
+            /** Current Node Id */
+            current_node_id: string | null;
+            /** Needs Input Count */
+            needs_input_count: number;
+            /** Nodes Done */
+            nodes_done: number;
+            /** Nodes Total */
+            nodes_total: number;
         };
         /** ErrorEndpointEntry */
         ErrorEndpointEntry: {
@@ -23115,10 +23699,73 @@ export interface components {
             /** Skipped References */
             skipped_references?: components["schemas"]["SkippedReference"][];
         };
+        /** GeneratedBatchFailure */
+        GeneratedBatchFailure: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Id */
+            id: string;
+        };
+        /**
+         * GeneratedBatchResult
+         * @description Per-id outcome. Partial failure is reported, not collapsed into a 500 —
+         *     "12 of 20 saved" has to survive the response boundary.
+         */
+        GeneratedBatchResult: {
+            /** Failed */
+            failed: components["schemas"]["GeneratedBatchFailure"][];
+            /** Ok */
+            ok: string[];
+        };
+        /** GeneratedCleanupResponse */
+        GeneratedCleanupResponse: {
+            /** Count */
+            count: number;
+            /**
+             * Deleted
+             * @default 0
+             */
+            deleted: number;
+            /** Dry Run */
+            dry_run: boolean;
+            /** Sample */
+            sample: components["schemas"]["GeneratedItem"][];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
+         * GeneratedCounts
+         * @description Tab counters. ``deleted`` is deliberately not on the wire — there is no
+         *     deleted tab, and shipping a count for a tab that does not exist invites a
+         *     UI that reads it.
+         */
+        GeneratedCounts: {
+            /** In Assets */
+            in_assets: number;
+            /** Saved */
+            saved: number;
+            /** Unreviewed */
+            unreviewed: number;
+        };
+        /**
+         * GeneratedDeleted
+         * @description ``DELETE /generated/{id}``. Always ``true``: a row that is not in the
+         *     caller's scope is a typed 404 ``generation_not_found``, never
+         *     ``deleted: false``.
+         */
+        GeneratedDeleted: {
+            /** Deleted */
+            deleted: boolean;
+        };
         /** GeneratedItem */
         GeneratedItem: {
             /** Canvas Id */
-            canvas_id?: string | null;
+            canvas_id: string | null;
             /**
              * Created At
              * Format: date-time
@@ -23129,19 +23776,19 @@ export interface components {
             /** Media Kind */
             media_kind: string;
             /** Mime */
-            mime?: string | null;
+            mime: string | null;
             /** Model */
-            model?: string | null;
+            model: string | null;
             /** Node Id */
-            node_id?: string | null;
+            node_id: string | null;
             /** Origin Kind */
             origin_kind: string;
             /** Promoted Resource Id */
-            promoted_resource_id?: string | null;
+            promoted_resource_id: string | null;
             /** Prompt */
-            prompt?: string | null;
+            prompt: string | null;
             /** Provider */
-            provider?: string | null;
+            provider: string | null;
             /**
              * Review State
              * @enum {string}
@@ -23151,7 +23798,7 @@ export interface components {
             scope_id: string;
             source: components["schemas"]["GeneratedSource"];
             /** Source Asset Id */
-            source_asset_id?: string | null;
+            source_asset_id: string | null;
             /** Title */
             title: string;
         };
@@ -23268,6 +23915,28 @@ export interface components {
             /** Url */
             url: string;
         };
+        /** GeneratedPage */
+        GeneratedPage: {
+            /** Items */
+            items: components["schemas"]["GeneratedItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /**
+         * GeneratedSaveAsAssetResult
+         * @description ``POST /generated/{id}/save-as-asset``: the card after the attach, plus
+         *     the asset it landed in and the promoted resource (both Snowflake strings).
+         *
+         *     ``POST /resources/{id}/save-as-asset`` answers the same three keys plus
+         *     ``generated_id`` — see ``ResourceSaveAsAssetResult``.
+         */
+        GeneratedSaveAsAssetResult: {
+            /** Asset Id */
+            asset_id: string;
+            generation: components["schemas"]["GeneratedItem"];
+            /** Resource Id */
+            resource_id: string;
+        };
         /**
          * GeneratedSource
          * @description Mirror of ``app.services.library.generated_source.describe_source``.
@@ -23283,25 +23952,25 @@ export interface components {
          */
         GeneratedSource: {
             /** Canvas Id */
-            canvas_id?: string | null;
+            canvas_id: string | null;
             /** Conversation Id */
-            conversation_id?: string | null;
+            conversation_id: string | null;
             /** Deep Link */
-            deep_link?: string | null;
+            deep_link: string | null;
             /** Issue Id */
-            issue_id?: string | null;
+            issue_id: string | null;
             /** Kind */
             kind: string;
             /** Label */
             label: string;
             /** Node Id */
-            node_id?: string | null;
+            node_id: string | null;
             /** Run Id */
-            run_id?: string | null;
+            run_id: string | null;
             /** Shot Id */
-            shot_id?: string | null;
+            shot_id: string | null;
             /** Step */
-            step?: number | null;
+            step: number | null;
         };
         /**
          * GraphMemorySettingsResponse
@@ -26605,6 +27274,32 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** ProjectAssetsTreeCanvas */
+        ProjectAssetsTreeCanvas: {
+            /** Asset Count */
+            asset_count: number;
+            /** Canvas Id */
+            canvas_id: string;
+            /** Canvas Name */
+            canvas_name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "smart" | "lite" | "classic" | "character" | "location" | "prop" | "costume" | "storyboard";
+        };
+        /**
+         * ProjectAssetsTreeProject
+         * @description A visible project and its non-blank canvases (possibly none).
+         */
+        ProjectAssetsTreeProject: {
+            /** Canvases */
+            canvases: components["schemas"]["ProjectAssetsTreeCanvas"][];
+            /** Name */
+            name: string;
+            /** Project Id */
+            project_id: string;
+        };
         /** ProjectCharacterEntity */
         ProjectCharacterEntity: {
             /** Cue Count */
@@ -27310,6 +28005,27 @@ export interface components {
         ProjectSuggestionsResponse: {
             /** Items */
             items: components["schemas"]["ProjectSuggestionItem"][];
+        };
+        /**
+         * ProjectTrashedCanvas
+         * @description A trashed canvas in a project's trash list.
+         */
+        ProjectTrashedCanvas: {
+            /** Deleted At */
+            deleted_at: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "smart" | "lite" | "classic" | "character" | "location" | "prop" | "costume" | "storyboard";
+            /** Name */
+            name: string;
+            /** Project Id */
+            project_id: string;
+            /** Updated At */
+            updated_at: string | null;
         };
         /**
          * ProjectUpdate
@@ -28082,6 +28798,40 @@ export interface components {
             success: boolean;
             /** Total Found */
             total_found: number;
+        };
+        /**
+         * ResourceCanvasRef
+         * @description A live canvas that references a resource, and in which role.
+         */
+        ResourceCanvasRef: {
+            /** Canvas Id */
+            canvas_id: string;
+            /** Canvas Name */
+            canvas_name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "smart" | "lite" | "classic" | "character" | "location" | "prop" | "costume" | "storyboard";
+            /** Project Id */
+            project_id: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "reference" | "output";
+        };
+        /** ResourceCanvasRefsEnvelope */
+        ResourceCanvasRefsEnvelope: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["ResourceCanvasRef"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
         };
         /**
          * ResourceDuplicateCandidate
@@ -29356,6 +30106,17 @@ export interface components {
             timezone?: string | null;
         };
         /**
+         * ScriptAck
+         * @description ``{"success": true}`` with no ``data``: deletes and the viewport save.
+         */
+        ScriptAck: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
          * ScriptAssetCreate
          * @description Request body for creating a script asset.
          */
@@ -29377,6 +30138,32 @@ export interface components {
              * @default 0
              */
             sort_order: number;
+        };
+        /**
+         * ScriptAssetRow
+         * @description One ``script_assets`` row (``SELECT *`` shape).
+         */
+        ScriptAssetRow: {
+            /** Asset Type */
+            asset_type: string;
+            /** Content */
+            content: string | null;
+            /** Created At */
+            created_at: string | null;
+            /** Data Json */
+            data_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Script Id */
+            script_id: number;
+            /** Sort Order */
+            sort_order: number | null;
+            /** Updated At */
+            updated_at: string | null;
         };
         /**
          * ScriptAssetUpdate
@@ -29407,6 +30194,14 @@ export interface components {
             updated_chapters?: {
                 [key: string]: unknown;
             }[];
+        };
+        /**
+         * ScriptCanvasSyncResult
+         * @description ``POST /{id}/canvas/sync``: every chapter of the script after the sync.
+         */
+        ScriptCanvasSyncResult: {
+            /** Chapters */
+            chapters: components["schemas"]["ScriptChapterRow"][];
         };
         /**
          * ScriptChapterCreate
@@ -29450,6 +30245,52 @@ export interface components {
             title?: string | null;
             /** Width */
             width?: number | null;
+        };
+        /**
+         * ScriptChapterRow
+         * @description One ``script_chapters`` row (``SELECT *`` shape).
+         */
+        ScriptChapterRow: {
+            /** Branch Label */
+            branch_label: string | null;
+            /** Branch Type */
+            branch_type: string | null;
+            /** Chapter Number */
+            chapter_number: number | null;
+            /** Content */
+            content: string | null;
+            /** Content Json */
+            content_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Created At */
+            created_at: string | null;
+            /** Data Json */
+            data_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Height */
+            height: number | null;
+            /** Id */
+            id: number;
+            /** Parent Chapter Id */
+            parent_chapter_id: number | null;
+            /** Position X */
+            position_x: number | null;
+            /** Position Y */
+            position_y: number | null;
+            /** Script Id */
+            script_id: number;
+            /** Sort Order */
+            sort_order: number | null;
+            /** Summary */
+            summary: string | null;
+            /** Title */
+            title: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Width */
+            width: number | null;
         };
         /**
          * ScriptChapterUpdate
@@ -29529,6 +30370,17 @@ export interface components {
             project_id: number;
         };
         /**
+         * ScriptNumberingLock
+         * @description ``POST /{id}/lock-numbering``. ``already_locked`` is true when the call
+         *     was a no-op; ``scenes`` is then the current (unchanged) scene list.
+         */
+        ScriptNumberingLock: {
+            /** Already Locked */
+            already_locked: boolean;
+            /** Scenes */
+            scenes: components["schemas"]["ScriptSceneRow"][];
+        };
+        /**
          * ScriptProjectCreate
          * @description Request body for creating a new script project.
          */
@@ -29541,6 +30393,72 @@ export interface components {
             name: string;
             /** Project Id */
             project_id: number;
+        };
+        /**
+         * ScriptProjectFull
+         * @description ``GET /scripts/projects/{id}``: the project row plus its chapters in
+         *     ``sort_order``.
+         */
+        ScriptProjectFull: {
+            /** Chapters */
+            chapters: components["schemas"]["ScriptChapterRow"][];
+            project: components["schemas"]["ScriptProjectRow"];
+        };
+        /**
+         * ScriptProjectPage
+         * @description ``GET /scripts/projects``: one page of a project's live scripts.
+         */
+        ScriptProjectPage: {
+            /** Items */
+            items: components["schemas"]["ScriptProjectRow"][];
+            /** Limit */
+            limit: number;
+            /** Page */
+            page: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * ScriptProjectRow
+         * @description One ``script_projects`` row (``SELECT *`` shape).
+         */
+        ScriptProjectRow: {
+            /** Created At */
+            created_at: string | null;
+            /** Created By */
+            created_by: string;
+            /** Description */
+            description: string | null;
+            /** Display Code */
+            display_code: string | null;
+            /** Episode Id */
+            episode_id: number | null;
+            /** Genre */
+            genre: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Numbering Locked At */
+            numbering_locked_at: string | null;
+            /** Project Id */
+            project_id: number;
+            /** Settings Json */
+            settings_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Status */
+            status: string | null;
+            /** Target Duration Sec */
+            target_duration_sec: number | null;
+            /** Team Id */
+            team_id: number;
+            /** Updated At */
+            updated_at: string | null;
+            /** Viewport Json */
+            viewport_json: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * ScriptProjectUpdate
@@ -29561,6 +30479,55 @@ export interface components {
             status?: string | null;
             /** Target Duration Sec */
             target_duration_sec?: number | null;
+        };
+        /**
+         * ScriptSceneRow
+         * @description One ``script_scenes`` row plus the derived ``scene_no_in_episode``.
+         *
+         *     ``content_json`` is the scene's element list (JSONB, default ``[]``), so it
+         *     is typed as any JSON value rather than an object.
+         */
+        ScriptSceneRow: {
+            /** Chapter Id */
+            chapter_id: number | null;
+            /** Content */
+            content: string;
+            /** Content Json */
+            content_json: unknown;
+            /** Content Version */
+            content_version: number;
+            /** Created At */
+            created_at: string;
+            /** Heading Int Ext */
+            heading_int_ext: string | null;
+            /** Height */
+            height: number | null;
+            /** Id */
+            id: number;
+            /** Location Id */
+            location_id: number | null;
+            /** Location Text */
+            location_text: string | null;
+            /** Omitted At */
+            omitted_at: string | null;
+            /** Position X */
+            position_x: number | null;
+            /** Position Y */
+            position_y: number | null;
+            /** Scene No In Episode */
+            scene_no_in_episode: string | null;
+            /** Scene Number */
+            scene_number: string | null;
+            /** Script Id */
+            script_id: number;
+            /** Sort Order */
+            sort_order: number;
+            /** Time Of Day */
+            time_of_day: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Width */
+            width: number | null;
         };
         /**
          * SearchGroups
@@ -31432,6 +32399,32 @@ export interface components {
             monthly_budget_cents?: number | null;
         };
         /**
+         * TeamCanvasProject
+         * @description A team project with its live canvases (empty list when it has none).
+         */
+        TeamCanvasProject: {
+            /** Canvases */
+            canvases: components["schemas"]["TeamCanvasSummary"][];
+            /** Project Id */
+            project_id: string;
+            /** Project Name */
+            project_name: string;
+        };
+        /** TeamCanvasSummary */
+        TeamCanvasSummary: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "smart" | "lite" | "classic" | "character" | "location" | "prop" | "costume" | "storyboard";
+            /** Name */
+            name: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
          * TeamCreate
          * @description Request to create a team.
          */
@@ -31525,6 +32518,29 @@ export interface components {
             permissions: string[];
             /** Role */
             role: string;
+        };
+        /**
+         * TeamTrashedCanvas
+         * @description A trashed canvas in a team's trash list, named with its project.
+         */
+        TeamTrashedCanvas: {
+            /** Deleted At */
+            deleted_at: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "smart" | "lite" | "classic" | "character" | "location" | "prop" | "costume" | "storyboard";
+            /** Name */
+            name: string;
+            /** Project Id */
+            project_id: string;
+            /** Project Name */
+            project_name: string;
+            /** Updated At */
+            updated_at: string | null;
         };
         /**
          * TeamUpdate
@@ -44648,9 +45664,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_dict_str__CanvasGenerationCapability__"];
                 };
             };
             /** @description Validation Error */
@@ -44682,9 +45696,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_list_CanvasModelOption__"];
                 };
             };
             /** @description Validation Error */
@@ -44828,9 +45840,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_CanvasRow_"];
                 };
             };
             /** @description Validation Error */
@@ -44864,9 +45874,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_list_TeamCanvasProject__"];
                 };
             };
             /** @description Validation Error */
@@ -44900,9 +45908,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_list_TeamTrashedCanvas__"];
                 };
             };
             /** @description Validation Error */
@@ -44934,9 +45940,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_list_CanvasModelOption__"];
                 };
             };
             /** @description Validation Error */
@@ -44971,9 +45975,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_CanvasRow_"];
                 };
             };
             /** @description Validation Error */
@@ -45012,9 +46014,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_CanvasRow_"];
                 };
             };
             /** @description Validation Error */
@@ -45049,9 +46049,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CanvasAck"];
                 };
             };
             /** @description Validation Error */
@@ -45086,9 +46084,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CanvasAssetRefsEnvelope"];
                 };
             };
             /** @description Validation Error */
@@ -45122,7 +46118,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_CanvasReferencedResource__"];
                 };
             };
             /** @description Validation Error */
@@ -45318,9 +46314,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CanvasAck"];
                 };
             };
             /** @description Validation Error */
@@ -45355,9 +46349,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CanvasAck"];
                 };
             };
             /** @description Validation Error */
@@ -48148,9 +49140,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["EpisodeDeleted"];
                 };
             };
             /** @description Validation Error */
@@ -48188,9 +49178,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_EpisodeRow_"];
                 };
             };
             /** @description Validation Error */
@@ -48447,16 +49435,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_GeneratedPage_"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -48835,16 +49850,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_GeneratedBatchResult_"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -48873,16 +49915,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_GeneratedCleanupResponse_"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -48907,16 +49976,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_GeneratedCounts_"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -48943,16 +50039,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_GeneratedItem_"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -48979,16 +50102,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_GeneratedDeleted_"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -49015,16 +50165,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_GeneratedItem_"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -49055,16 +50232,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_GeneratedSaveAsAssetResult_"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Content */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -53607,9 +54811,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_list_CanvasSummary__"];
                 };
             };
             /** @description Validation Error */
@@ -53648,9 +54850,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_CanvasRow_"];
                 };
             };
             /** @description Validation Error */
@@ -53685,9 +54885,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_list_ProjectTrashedCanvas__"];
                 };
             };
             /** @description Validation Error */
@@ -53862,9 +55060,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_list_EpisodeListRow__"];
                 };
             };
             /** @description Validation Error */
@@ -53902,9 +55098,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_EpisodeRow_"];
                 };
             };
             /** @description Validation Error */
@@ -53938,9 +55132,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_list_EpisodeProgressRow__"];
                 };
             };
             /** @description Validation Error */
@@ -56330,7 +57522,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ProjectAssetsTreeProject__"];
                 };
             };
             /** @description Validation Error */
@@ -56906,7 +58098,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourceCanvasRefsEnvelope"];
                 };
             };
             /** @description Validation Error */
@@ -59146,9 +60338,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptProjectPage_"];
                 };
             };
             /** @description Validation Error */
@@ -59184,9 +60374,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptProjectRow_"];
                 };
             };
             /** @description Validation Error */
@@ -59224,9 +60412,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptAssetRow_"];
                 };
             };
             /** @description Validation Error */
@@ -59260,9 +60446,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScriptAck"];
                 };
             };
             /** @description Validation Error */
@@ -59300,9 +60484,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptChapterRow_"];
                 };
             };
             /** @description Validation Error */
@@ -59336,9 +60518,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScriptAck"];
                 };
             };
             /** @description Validation Error */
@@ -59372,9 +60552,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptProjectFull_"];
                 };
             };
             /** @description Validation Error */
@@ -59412,9 +60590,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptProjectRow_"];
                 };
             };
             /** @description Validation Error */
@@ -59448,9 +60624,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScriptAck"];
                 };
             };
             /** @description Validation Error */
@@ -59486,9 +60660,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_List_ScriptAssetRow__"];
                 };
             };
             /** @description Validation Error */
@@ -59526,9 +60698,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptAssetRow_"];
                 };
             };
             /** @description Validation Error */
@@ -59566,9 +60736,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptCanvasSyncResult_"];
                 };
             };
             /** @description Validation Error */
@@ -59606,9 +60774,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptChapterRow_"];
                 };
             };
             /** @description Validation Error */
@@ -59642,9 +60808,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptNumberingLock_"];
                 };
             };
             /** @description Validation Error */
@@ -59682,9 +60846,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScriptAck"];
                 };
             };
             /** @description Validation Error */

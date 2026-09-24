@@ -769,58 +769,6 @@ export interface StoryboardProject {
   updated_at: string;
 }
 
-export interface ScriptProject {
-  id: string;
-  project_id: string;
-  team_id: string;
-  created_by: string;
-  name: string;
-  description?: string;
-  display_code?: string;
-  episode_id?: string | null;
-  settings_json?: Record<string, unknown>;
-  viewport_json?: { x: number; y: number; zoom: number };
-  status: 'active' | 'archived' | 'deleted';
-  /** Beats timeline target total runtime in seconds (M3); null/absent = unset. */
-  target_duration_sec?: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ScriptChapter {
-  id: string;
-  script_id: string;
-  parent_chapter_id?: string;
-  chapter_number?: number;
-  title?: string;
-  summary?: string;
-  content?: string;
-  branch_label?: string;
-  branch_type?: 'condition' | 'choice';
-  position_x: number;
-  position_y: number;
-  width?: number;
-  height?: number;
-  data_json: Record<string, unknown>;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ScriptProjectSummary {
-  id: string;
-  name: string;
-  display_code?: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
-  chapter_count?: number;
-  // Present at runtime (episodes_router / script_projects.episode_id) but
-  // was missing from this summary type — PR-10b workspace shell resolves
-  // "this episode's script" by filtering on it (see ProjectWorkspace).
-  episode_id?: string | null;
-}
-
 export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'shares' | 'trash';
 
 // ============================================
@@ -978,65 +926,6 @@ export type AdvanceBlockedReason =
   | 'FORM_INCOMPLETE'
   | 'NO_NEXT'
   | 'DEPS_PENDING';
-
-/**
- * Per-episode progress row from `GET /api/v1/projects/{id}/episodes/progress`
- * (PR-10b workspace shell, spec G12) — script/scene/shot counts plus a
- * server-derived pipeline status. `status` is one of
- * planned/drafting/boarding/boarded/rendered (see episode_repository.py
- * `_derive_episode_status`); kept as `string` here so the frontend degrades
- * gracefully instead of throwing on a future status value.
- */
-export interface EpisodeProgress {
-  episode_id: string;
-  title: string;
-  sort_order: number;
-  /** 集负责人 (Task 6, mig — Episodes.owner_id). null = unassigned. Drives
-   * Task 9's `canEditConfig` (project owner OR this episode's owner may
-   * edit that episode's node config in place). */
-  owner_id?: string | null;
-  script_count: number;
-  scene_count: number;
-  shots_total: number;
-  shots_done: number;
-  renders_count: number;
-  status: string;
-  /** B4 真数据(2026-08-08):每集工作流节点计数与 agent 提问数。optional —
-   * fetchEpisodesProgress 原样透传,旧后端/测试桩缺省时消费方回退旧近似
-   * (进度条回落 status 五段阶梯、"等你回答"回落 planned 计数)。 */
-  workflow?: EpisodeWorkflowRollup;
-  /** B4 判据当前值(派生,可与节点 status 合法不一致=产物被删的信号)。 */
-  surface_state?: EpisodeSurfaceState;
-}
-
-/** 每集工作流汇总(episode_repository.progress_by_project 的 workflow 键)。 */
-export interface EpisodeWorkflowRollup {
-  nodes_total: number;
-  nodes_done: number;
-  /** BIGINT 走字符串防精度丢失;无游标时为 null。 */
-  current_node_id: string | null;
-  needs_input_count: number;
-}
-
-/** surface 完成判据的当前派生值(script/storyboard 两档, spec §5)。 */
-export interface EpisodeSurfaceState {
-  script: boolean;
-  storyboard: boolean;
-}
-
-export type ScriptAssetType = 'worldview' | 'character' | 'location' | 'prop' | 'plot_point';
-
-export interface ScriptAsset {
-  id: string;
-  script_id: string;
-  asset_type: ScriptAssetType;
-  name: string;
-  content?: string;
-  data_json: Record<string, unknown>;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
 
 export interface Skill {
   id: string;

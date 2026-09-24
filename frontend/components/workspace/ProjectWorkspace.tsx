@@ -47,7 +47,7 @@ import { ApiError } from '../../services/apiClient';
 import type { AgentOption, PersonOption } from '../workflow/OwnerPicker';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
 import type { FilesChip } from './WorkspaceFiles';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
 import type { AdvancePreview, Project, ProjectStageNode } from '../../types/api';
 
 // Code-split the heavier / non-default modules out of the ProjectsPage chunk
@@ -622,7 +622,7 @@ export function ProjectWorkspace({
       candidates.sort(
         (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
       );
-      return candidates[0].id;
+      return String(candidates[0].id);
     },
     [projectId],
   );
@@ -649,7 +649,7 @@ export function ProjectWorkspace({
           name: episode.title,
           episode_id: episode.episode_id,
         });
-        return created.id;
+        return String(created.id);
       })();
       provisionInFlightRef.current.set(key, run);
       // Housekeeping branch: clear the in-flight entry once settled. The
