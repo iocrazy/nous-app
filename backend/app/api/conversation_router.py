@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+from uuid import UUID
 
 from fastapi import (
     APIRouter,
@@ -56,6 +57,22 @@ router = APIRouter(
     tags=["Conversations"],
     dependencies=[Depends(require_module("ai-library"))],
 )
+
+
+def _require_uuid(value: str, detail: str) -> None:
+    """400 unless ``value`` is a UUID.
+
+    User and agent ids are UUID columns; a malformed id bound into those
+    queries raised a driver DataError, i.e. a 500. No member can have such an
+    id, so answer the way the service does for a non-member target.
+    """
+    try:
+        UUID(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+_NOT_A_MEMBER = "target user is not a member of this conversation"
 
 
 class MessageEdit(BaseModel):
@@ -115,6 +132,8 @@ async def create_conversation(payload: ConversationCreate, auth: AuthDep):
     "/{conversation_id}/members", response_model=ConversationMembersAddedResponse
 )
 async def add_members(conversation_id: int, payload: MemberAdd, auth: AuthDep):
+    for target in payload.user_ids:
+        _require_uuid(target, "target user not in this team")
     svc = get_conversation_service()
     try:
         added = await svc.add_members(
@@ -148,6 +167,7 @@ async def list_members(conversation_id: int, auth: AuthDep):
 )
 async def remove_member(conversation_id: int, member_user_id: str, auth: AuthDep):
     """Remove a member (admin/owner) or leave the group (self-target)."""
+    _require_uuid(member_user_id, _NOT_A_MEMBER)
     svc = get_conversation_service()
     try:
         return await svc.remove_member(
@@ -168,6 +188,7 @@ async def remove_member(conversation_id: int, member_user_id: str, auth: AuthDep
 async def set_member_role(
     conversation_id: int, member_user_id: str, payload: MemberRoleSet, auth: AuthDep
 ):
+    _require_uuid(member_user_id, _NOT_A_MEMBER)
     svc = get_conversation_service()
     try:
         return await svc.set_member_role(
@@ -187,6 +208,7 @@ async def set_member_role(
     response_model=ConversationOwnerTransferResponse,
 )
 async def transfer_owner(conversation_id: int, payload: OwnerTransfer, auth: AuthDep):
+    _require_uuid(payload.to_user_id, _NOT_A_MEMBER)
     svc = get_conversation_service()
     try:
         return await svc.transfer_ownership(
@@ -205,6 +227,7 @@ async def transfer_owner(conversation_id: int, payload: OwnerTransfer, auth: Aut
     response_model=ConversationAgentRemovedResponse,
 )
 async def remove_agent(conversation_id: int, agent_id: str, auth: AuthDep):
+    _require_uuid(agent_id, "invalid agent id")
     svc = get_conversation_service()
     try:
         return await svc.remove_agent(

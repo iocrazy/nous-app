@@ -230,3 +230,50 @@ async def test_promote_attachment_wire(client, monkeypatch) -> None:
     )
     assert_wire_unchanged(resp, raw)
     assert resp.json() == {"promoted_resource_id": str(resource["id"])}
+
+
+# --------------------------------------------------------------------------- #
+# Malformed ids: 400, never a driver DataError (500)
+# --------------------------------------------------------------------------- #
+
+
+def _uuid_strict_repo() -> AsyncMock:
+    """A repository that fails like asyncpg does on a non-UUID bind."""
+    repo = _repo()
+    original = repo.get_member_role.side_effect
+
+    async def get_member_role(*, conversation_id: int, user_id: str):
+        try:
+            uuid.UUID(user_id)
+        except ValueError:
+            # asyncpg's DataError is not a ValueError: nothing maps it to 400.
+            raise RuntimeError("invalid input for query argument") from None
+        return await original(conversation_id=conversation_id, user_id=user_id)
+
+    repo.get_member_role.side_effect = get_member_role
+    return repo
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method,path,body",
+    [
+        ("DELETE", f"{BASE}/members/not-a-uuid", None),
+        ("PATCH", f"{BASE}/members/not-a-uuid/role", {"role": "admin"}),
+        ("POST", f"{BASE}/transfer-owner", {"to_user_id": "not-a-uuid"}),
+        ("DELETE", f"{BASE}/agents/not-a-uuid", None),
+        ("POST", f"{BASE}/members", {"user_ids": [MEMBER, "not-a-uuid"]}),
+    ],
+)
+async def test_malformed_ids_are_400(client, monkeypatch, method, path, body) -> None:
+    repo = _uuid_strict_repo()
+    monkeypatch.setattr(
+        r, "get_conversation_service", lambda: ConversationService(repo=repo)
+    )
+    resp = await client.request(method, path, json=body)
+    assert resp.status_code == 400, resp.text
+    repo.remove_user_member.assert_not_awaited()
+    repo.set_member_role.assert_not_awaited()
+    repo.transfer_owner.assert_not_awaited()
+    repo.remove_agent_member.assert_not_awaited()
+    repo.add_members.assert_not_awaited()
