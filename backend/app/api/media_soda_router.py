@@ -30,6 +30,7 @@ from app.api.media_fetch_helpers import resolve_team_id
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
 from app.repositories.resources_repository import get_resources_repository
+from app.schemas.media_responses import MediaSodaDownloadResponse
 from app.services.billing.points_service import PointsService
 from app.services.infra.unified_task_manager import get_task_manager
 from app.services.media.parsers.soda_music.cookie_source import get_soda_cookie
@@ -289,6 +290,7 @@ async def resolve_soda_playlist(
 # while the media-parser module is off, so the gate cannot sit at router level.
 @router.post(
     "/soda/playlist/download",
+    response_model=MediaSodaDownloadResponse,
     tags=TAGS_SODA,
     dependencies=[Depends(require_module("media-parser"))],
 )

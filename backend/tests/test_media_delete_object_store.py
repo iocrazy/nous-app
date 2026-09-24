@@ -97,6 +97,9 @@ def _patch_repo(video, *, delete_result=True):
     repo = MagicMock()
     repo.get_by_platform_id = AsyncMock(return_value=video)
     repo.get_by_id = AsyncMock(return_value=video)
+    # The caller ("u1") is the media's only owner, so the delete may proceed
+    # (ownership rules: tests/api/test_media_crud_wire.py).
+    repo.get_media_creator_ids = AsyncMock(return_value={"u1"})
     delete = AsyncMock(return_value=delete_result)
     repo.delete = delete
     return patch("app.api.media_router.MediaRepository", return_value=repo), repo

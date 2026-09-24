@@ -3,15 +3,11 @@ import { ChevronLeft, ChevronRight, Volume2, VolumeX, Loader2, ImageOff } from '
 import Loading from './common/Loading';
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from '../services/parserService';
+import type { MediaSlide, MediaSlidesResponse } from '../types/api';
 
-interface Slide {
-  name: string;
-  // Short classifier: 'image' | 'video' — use this for rendering branches.
-  type: 'image' | 'video';
-  // MIME string from backend, e.g. 'image/jpeg' / 'video/mp4'.
-  media_type: string;
-  url: string;
-}
+// `type` ('image' | 'video') drives the rendering branches; `media_type` is
+// the MIME string.
+type Slide = MediaSlide;
 
 interface SlidePlayerProps {
   mediaId: string;
@@ -73,8 +69,8 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
         if (!resp.ok) {
           throw new Error(`Failed to load slides (${resp.status})`);
         }
-        const json = await resp.json();
-        const data: Slide[] = Array.isArray(json) ? json : (json.slides || []);
+        const json: MediaSlidesResponse = await resp.json();
+        const data = json.slides;
         if (!cancelled) {
           setSlides(data);
           setCurrentIndex(0);

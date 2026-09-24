@@ -550,61 +550,15 @@ try:
     ) -> None:
         """Check resource-level permissions. Raises 403 if denied.
 
-        Uses cached ownership data from _resolve_file_path when possible,
-        falls back to check_media_access for share_token and team membership.
+        The rule lives in ``media_access_guard.require_media_file_access`` (one
+        rule for every holder of a shared media row); this wrapper passes the
+        ownership ``_resolve_file_path`` cached.
         """
-        from app.api.media_permissions import (
-            _get_resource_id_for_media,
-            _validate_share_token,
+        from app.api.media_access_guard import require_media_file_access
+
+        await require_media_file_access(
+            media_id, user_id, share_token, creator_id, team_ids
         )
-
-        # Fast path: share_token validation (never cached)
-        if share_token:
-            resource_id = await _get_resource_id_for_media(media_id)
-            if resource_id and await _validate_share_token(share_token, resource_id):
-                return
-            # Invalid share token — fall through to user-based checks
-
-        if not user_id:
-            if share_token:
-                raise HTTPException(
-                    status_code=403, detail="Invalid or expired share link"
-                )
-            raise HTTPException(status_code=403, detail="Access denied")
-
-        # Fast path: creator check using cached data
-        if creator_id and str(creator_id) == str(user_id):
-            return
-
-        # No ownership info (legacy parsed_media) — allow
-        if creator_id is None:
-            return
-
-        # Team membership check
-        if team_ids:
-            try:
-                from sqlalchemy import select
-
-                from app.db.session import read_scope
-                from app.models import TeamMembers
-
-                async with read_scope() as session:
-                    member = (
-                        await session.execute(
-                            select(TeamMembers.team_id)
-                            .where(TeamMembers.user_id == user_id)
-                            .where(
-                                TeamMembers.team_id.in_([int(str(t)) for t in team_ids])
-                            )
-                            .limit(1)
-                        )
-                    ).first()
-                if member is not None:
-                    return
-            except Exception as e:
-                logger.error(f"Team membership check failed: {e}")
-
-        raise HTTPException(status_code=403, detail="Access denied")
 
     @app.get("/media/{media_id}", include_in_schema=False)
     async def serve_media_by_id(

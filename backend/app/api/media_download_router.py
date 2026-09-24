@@ -10,15 +10,22 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from loguru import logger
 from pydantic import BaseModel
 
+from app.api.media_access_guard import require_media_access
 from app.core.deps import AuthDep
 from app.core.enums import DownloadStatus
 from app.core.scope_dep import ScopedRequestDep
 from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
 from app.repositories.user_logs_repository import log_user_action
+from app.schemas.media_download_responses import (
+    PendingDownloadsResponse,
+    RetryDownloadResponse,
+)
+from app.schemas.wire import binary_response
 from app.services.modules.gate import require_module
 
 router = APIRouter()
@@ -72,7 +79,7 @@ class RetryDownloadRequest(BaseModel):
     cover_bool: bool = False
 
 
-@router.get("/pending", tags=TAGS_DOWNLOAD)
+@router.get("/pending", tags=TAGS_DOWNLOAD, response_model=PendingDownloadsResponse)
 async def get_pending_downloads(auth: AuthDep, limit: int = Query(100, ge=1, le=500)):
     """
     Get pending downloads list
@@ -99,6 +106,7 @@ async def get_pending_downloads(auth: AuthDep, limit: int = Query(100, ge=1, le=
     "/retry/{platform_id}",
     tags=TAGS_DOWNLOAD,
     dependencies=[Depends(require_module("media-parser"))],
+    response_model=RetryDownloadResponse,
 )
 async def retry_download(
     platform_id: str,
@@ -120,6 +128,9 @@ async def retry_download(
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
+        # A retry resets the SHARED parsed_media row's statuses and dispatches
+        # a download, so it is gated like the file routes below.
+        await require_media_access(video.get("id"), auth.user_id, "Video not found")
 
         video_title = video.get("title", platform_id)[:30]
         media_type = video.get("media_type", 0)
@@ -176,7 +187,6 @@ async def retry_download(
             download_cover=request.cover_bool,
             background_tasks=background_tasks,
         )
-        download_task_id = dispatch_result["task_id"]
 
         background_tasks.add_task(
             log_user_action,
@@ -187,14 +197,13 @@ async def retry_download(
             aweme_id=platform_id,
         )
 
+        # ``dedup_and_dispatch`` returns the task_tracking id under
+        # ``task_id``; this used to read a ``unified_task_id`` key that dict
+        # never had, so every retry answered ``task_id: null``.
         return {
             "success": True,
             "message": "Download task resubmitted",
-            "task_id": (
-                dispatch_result.get("unified_task_id")
-                if isinstance(dispatch_result, dict)
-                else download_task_id
-            ),
+            "task_id": dispatch_result["task_id"],
         }
     except HTTPException:
         raise
@@ -203,7 +212,14 @@ async def retry_download(
         raise HTTPException(status_code=500, detail="Failed to retry download")
 
 
-@router.get("/download/{platform_id}", tags=TAGS_DOWNLOAD)
+@router.get(
+    "/download/{platform_id}",
+    tags=TAGS_DOWNLOAD,
+    response_class=Response,
+    responses=binary_response(
+        "The downloaded video as an attachment (Range supported)", "video/mp4"
+    ),
+)
 async def download_video_file(platform_id: str, request: Request, auth: AuthDep):
     """
     Download video file
@@ -222,6 +238,7 @@ async def download_video_file(platform_id: str, request: Request, auth: AuthDep)
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
+        await require_media_access(video.get("id"), auth.user_id, "Video not found")
 
         download_path = video.get("download_path")
         if not download_path:
@@ -251,7 +268,12 @@ async def download_video_file(platform_id: str, request: Request, auth: AuthDep)
         raise HTTPException(status_code=500, detail="Failed to download video file")
 
 
-@router.get("/download/{platform_id}/cover", tags=TAGS_DOWNLOAD)
+@router.get(
+    "/download/{platform_id}/cover",
+    tags=TAGS_DOWNLOAD,
+    response_class=Response,
+    responses=binary_response("The cover image as an attachment", "image/jpeg"),
+)
 async def download_cover_file(platform_id: str, request: Request, auth: AuthDep):
     """
     Download cover file
@@ -270,6 +292,7 @@ async def download_cover_file(platform_id: str, request: Request, auth: AuthDep)
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
+        await require_media_access(video.get("id"), auth.user_id, "Video not found")
 
         cover_path = video.get("cover_download_path")
         if not cover_path:
@@ -301,7 +324,14 @@ async def download_cover_file(platform_id: str, request: Request, auth: AuthDep)
         raise HTTPException(status_code=500, detail="Failed to download cover file")
 
 
-@router.get("/download/{platform_id}/music", tags=TAGS_DOWNLOAD)
+@router.get(
+    "/download/{platform_id}/music",
+    tags=TAGS_DOWNLOAD,
+    response_class=Response,
+    responses=binary_response(
+        "The extracted or downloaded audio as an attachment", "audio/*"
+    ),
+)
 async def download_music_file(platform_id: str, request: Request, auth: AuthDep):
     """
     Download music/audio file
@@ -322,6 +352,7 @@ async def download_music_file(platform_id: str, request: Request, auth: AuthDep)
 
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
+        await require_media_access(video.get("id"), auth.user_id, "Video not found")
 
         try:
             base_path = Utils.get_download_base_path()
@@ -392,7 +423,14 @@ async def download_music_file(platform_id: str, request: Request, auth: AuthDep)
         raise HTTPException(status_code=500, detail="Failed to download music file")
 
 
-@router.get("/download/{platform_id}/gallery", tags=TAGS_DOWNLOAD)
+@router.get(
+    "/download/{platform_id}/gallery",
+    tags=TAGS_DOWNLOAD,
+    response_class=Response,
+    responses=binary_response(
+        "Every slide of the post in one zip attachment", "application/zip"
+    ),
+)
 async def download_gallery_zip(platform_id: str, auth: AuthDep):
     """Stream a zip containing every slide file for a gallery / image-text
     post. Works whether the slides folder contains images, videos (动图),
@@ -427,6 +465,7 @@ async def download_gallery_zip(platform_id: str, auth: AuthDep):
         video = await repo.get_by_platform_id(platform_id)
         if not video:
             raise HTTPException(status_code=404, detail="Media not found")
+        await require_media_access(video.get("id"), auth.user_id)
 
         video_title = video.get("title", platform_id) or platform_id
         safe_title = (

@@ -104,7 +104,7 @@ const endpoints: EndpointDef[] = [
   {
     method: 'POST',
     path: '/api/v1/media/fetch',
-    description: 'Parse and fetch a single video by share link. Returns parsed metadata and starts downloading media files.',
+    description: 'Parse and fetch a single video by share link. Queues a parse task that then downloads the media files; track it in the Task Center. If the link is already in your library, or is already being parsed, no new task is created (the response says which, via dedup_action).',
     params: [
       { name: 'url', type: 'string', required: true, description: 'Share link or video URL' },
       { name: 'video_bool', type: 'boolean', required: false, default: 'true', description: 'Download video file' },
@@ -128,13 +128,9 @@ const endpoints: EndpointDef[] = [
   }'`,
     response: `{
   "success": true,
-  "message": "Video fetched successfully",
-  "platform_id": "7312345678901234567",
-  "title": "Video Title",
-  "author": "Author Name",
-  "media_type": 0,
-  "like_count": 12345,
-  "video_download_status": "completed"
+  "async": true,
+  "message": "Parse task submitted",
+  "task_id": "parse-1a2b3c4d-9f8e7d6c5b4a-59123456"
 }`,
   },
   {
@@ -166,9 +162,15 @@ const endpoints: EndpointDef[] = [
   }'`,
     response: `{
   "success": true,
-  "count": 2,
-  "videos": [ ... ],
-  "errors": []
+  "total": 2,
+  "submitted": 1,
+  "failed": 1,
+  "results": [
+    { "url": "https://v.douyin.com/aaaaaa/", "platform_id": "7312345678901234567", "status": "submitted", "data": { ... } }
+  ],
+  "errors": [
+    { "url": "https://v.douyin.com/bbbbbb/", "error": "Cannot fetch video info" }
+  ]
 }`,
   },
   {
@@ -191,8 +193,9 @@ const endpoints: EndpointDef[] = [
       "platform_id": "7312345678901234567",
       "title": "Video Title",
       "author": "Author Name",
-      "media_type": 0,
-      "created_at": "2025-01-15T10:30:00Z"
+      "media_type": "0",
+      "resource_id": 7312345678901234999,
+      "created_at": "2025-01-15T10:30:00+00:00"
     }
   ]
 }`,
@@ -221,12 +224,13 @@ const endpoints: EndpointDef[] = [
   {
     method: 'DELETE',
     path: '/api/v1/media/{platform_id}',
-    description: 'Delete a video record and its associated media files.',
+    description: 'Delete a video record (and, with delete_files=true, its media files). Only for a video that is in your library and nobody else\'s: 404 otherwise, 409 while other users still have it.',
     curl: `curl -X DELETE "${BASE_URL}/api/v1/media/7312345678901234567" \\
   -H "X-API-Key: your_api_key_here"`,
     response: `{
   "success": true,
-  "message": "Video deleted successfully"
+  "message": "Video deleted",
+  "files_deleted": []
 }`,
   },
   {
@@ -249,9 +253,13 @@ const endpoints: EndpointDef[] = [
     response: `{
   "success": true,
   "statistics": {
-    "total_count": 150,
-    "status_distribution": { "completed": 140, "failed": 5, "pending": 5 },
-    "type_distribution": { "video": 120, "image": 30 }
+    "total": 150,
+    "pending": 5,
+    "completed": 140,
+    "failed": 5,
+    "skipped": 0,
+    "total_storage_bytes": 52428800000,
+    "unique_authors": 42
   }
 }`,
   },

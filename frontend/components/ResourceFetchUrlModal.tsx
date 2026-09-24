@@ -61,11 +61,9 @@ export const ResourceFetchUrlModal: React.FC<ResourceFetchUrlModalProps> = ({
     setError(null);
     try {
       const result = await parseShareLink(trimmed);
-      // parseShareLink returns FetchResponse — success indicates the
-      // parse task was queued (or the resource was already owned and
-      // returned via dedup). Either way the user sees the right thing
-      // in their library / task center, no need to branch on async vs
-      // already-owned here.
+      // Every MediaFetchResult shape carries a user-facing `message`
+      // (queued / already owned / already parsing); the user sees the
+      // outcome in their library or Task Center, so no branching here.
       const successMsg = result.message
         || t('resources.fetchUrl.successFallback')
         || 'Parse task submitted';

@@ -25,6 +25,19 @@ from app.core.deps import AuthContext
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def _caller_owns_media():
+    """These tests are about path resolution and serving, not access: the
+    caller is treated as owning the media (``media_access_guard`` has its own
+    tests in ``tests/api/test_media_download_wire.py``)."""
+    with patch(
+        "app.api.media_access_guard.caller_can_read_media",
+        new=AsyncMock(return_value=True),
+    ):
+        yield
+
+
 SB_AUDIO_PATH = "sb://library/331438215859255/ab/cd/abcdef1234567890.m4a"
 PLATFORM_ID = "7123456789"
 

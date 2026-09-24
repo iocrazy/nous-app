@@ -9,7 +9,8 @@ import {
 } from '../services/parserService';
 
 interface SodaPlaylistPanelProps {
-  onSubmitted?: (flowId: string, submitted: number) => void;
+  /** `flowId` is null when the backend could not create the task flow row. */
+  onSubmitted?: (flowId: string | null, submitted: number) => void;
 }
 
 /** Format milliseconds into m:ss; null → empty string. */
