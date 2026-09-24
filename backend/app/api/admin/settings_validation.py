@@ -158,6 +158,44 @@ def _object_of(fields: dict[str, Callable[[Any], Any]]) -> Callable[[Any], dict]
     return check
 
 
+#: Admin AI Models page: custom names for provider cards. A card is every
+#: ``nous_models`` row sharing ``actual_provider`` + ``base_url``, keyed
+#: ``"<actual_provider>|<base_url>"`` (blank base URL → ``"nous|"``).
+AI_PROVIDER_CARD_LABELS_KEY = "ai_provider_card_labels"
+CARD_LABEL_MAX_LEN = 64
+CARD_LABEL_KEY_MAX_LEN = 512
+CARD_LABELS_MAX_ENTRIES = 500
+
+
+def _card_labels(raw: Any) -> dict[str, str]:
+    """``{"<provider>|<base_url>": name}``; a blank name drops the override.
+
+    Returns a new dict — the input is never mutated."""
+    if not isinstance(raw, dict):
+        raise _Invalid("expected an object mapping '<provider>|<base_url>' to a name")
+    out: dict[str, str] = {}
+    for card_key, label in raw.items():
+        if not isinstance(card_key, str) or "|" not in card_key:
+            raise _Invalid(
+                f"card key must look like '<provider>|<base_url>', got {card_key!r}"
+            )
+        provider = card_key.split("|", 1)[0]
+        if not provider.strip() or len(card_key) > CARD_LABEL_KEY_MAX_LEN:
+            raise _Invalid(f"invalid card key {card_key!r}")
+        if not isinstance(label, str):
+            raise _Invalid(f"name for {card_key!r} must be a string, got {label!r}")
+        name = label.strip()
+        if len(name) > CARD_LABEL_MAX_LEN:
+            raise _Invalid(
+                f"name for {card_key!r} exceeds {CARD_LABEL_MAX_LEN} characters"
+            )
+        if name:
+            out[card_key] = name
+    if len(out) > CARD_LABELS_MAX_ENTRIES:
+        raise _Invalid(f"at most {CARD_LABELS_MAX_ENTRIES} card names")
+    return out
+
+
 _MODULE_BOOL_WHY = "ai_governance reads it with isinstance(bool); strings are ignored"
 
 SETTING_VALIDATORS: dict[str, SettingRule] = {
@@ -210,6 +248,10 @@ SETTING_VALIDATORS: dict[str, SettingRule] = {
     "workflow_autopilot": SettingRule(
         _object_of({"daily_auto_runs": _non_negative_int}),
         "autopilot reads {daily_auto_runs: int} and ignores non-dict values",
+    ),
+    AI_PROVIDER_CARD_LABELS_KEY: SettingRule(
+        _card_labels,
+        "admin AI Models page reads {card_key: name}; blank names are dropped",
     ),
     **{
         f"ai_module.{module}.{flag}": SettingRule(_json_bool, _MODULE_BOOL_WHY)

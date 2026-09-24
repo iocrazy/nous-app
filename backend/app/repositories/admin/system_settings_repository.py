@@ -92,6 +92,16 @@ class SystemSettingsRepository:
             rows = [_row(r) for r in result.scalars().all()]
         return [row for row in rows if not row["key"].startswith("transcode_")]
 
+    async def get_value(self, key: str) -> Any:
+        """Stored ``value`` for ``key``, or ``None`` when the row is absent.
+
+        Returned as stored — secret keys stay concealed; callers that need
+        the plaintext use ``app.core.secure_settings``."""
+        async with read_scope() as session:
+            return await session.scalar(
+                select(SystemSettings.value).where(SystemSettings.key == key).limit(1)
+            )
+
     async def exists(self, key: str) -> bool:
         """True iff a setting with ``key`` exists. Swallows any error to False —
         parity with the legacy maybe_single try/except."""

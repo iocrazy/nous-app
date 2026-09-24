@@ -2,7 +2,7 @@
 
 """Pydantic schemas for Nous models API."""
 
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -162,3 +162,19 @@ class ProviderProtocolItem(BaseModel):
 
 class ProviderProtocolListResponse(BaseModel):
     protocols: List[ProviderProtocolItem]
+
+
+class CardLabelsResponse(BaseModel):
+    """Admin-chosen provider card names, keyed ``"<provider>|<base_url>"``."""
+
+    labels: dict[str, str]
+
+
+class CardLabelsUpdate(BaseModel):
+    """Partial update: listed cards are renamed, a blank name removes one.
+
+    ``Any`` values on purpose — the shape check lives in
+    ``settings_validation`` so the generic settings PATCH and this endpoint
+    reject the same things with the same message."""
+
+    labels: dict[str, Any] = Field(default_factory=dict)

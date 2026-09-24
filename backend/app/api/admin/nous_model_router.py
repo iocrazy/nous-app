@@ -10,13 +10,23 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from app.agent_framework.catalog_windows import refresh_catalog_windows
+from app.api.admin.settings_validation import (
+    AI_PROVIDER_CARD_LABELS_KEY,
+    SettingValidationError,
+    validate_setting_value,
+)
 from app.core.admin_deps import AdminAuthDep
+from app.repositories.admin.system_settings_repository import (
+    get_system_settings_repository,
+)
 from app.repositories.nous_model_repository import (
     NousModelRepository,
     get_nous_model_repository,
 )
 from app.schemas.ai import TestConnectionResponse
 from app.schemas.nous_model import (
+    CardLabelsResponse,
+    CardLabelsUpdate,
     NousModelCreate,
     NousModelProbeRequest,
     NousModelResponse,
@@ -37,6 +47,7 @@ from app.services.ai.nous_model_health import (
     probe_result_status as _probe_result_status,
 )
 from app.services.ai.providers.ai_provider import AIProviderFactory
+from app.utils.admin_helpers import create_audit_log
 
 router = APIRouter()
 
@@ -114,6 +125,57 @@ async def list_provider_protocols(auth: AdminAuthDep):
             for p in all_protocols()
         ]
     )
+
+
+async def _read_card_labels() -> dict[str, str]:
+    """Stored card names; a row that fails validation reads as no names.
+
+    The page falls back to the protocol label, so garbage here costs a
+    custom name, never the page."""
+    raw = await get_system_settings_repository().get_value(AI_PROVIDER_CARD_LABELS_KEY)
+    if raw is None:
+        return {}
+    try:
+        return validate_setting_value(AI_PROVIDER_CARD_LABELS_KEY, raw)
+    except SettingValidationError as exc:
+        logger.error(f"[Admin] stored {AI_PROVIDER_CARD_LABELS_KEY} is invalid: {exc}")
+        return {}
+
+
+@router.get("/card-labels", response_model=CardLabelsResponse)
+async def get_card_labels(auth: AdminAuthDep):
+    """Admin-chosen provider card names, keyed ``"<provider>|<base_url>"``."""
+    return CardLabelsResponse(labels=await _read_card_labels())
+
+
+@router.put("/card-labels", response_model=CardLabelsResponse)
+async def update_card_labels(body: CardLabelsUpdate, auth: AdminAuthDep):
+    """Merge ``body.labels`` into the stored names; a blank name removes one.
+
+    A patch rather than a full replace, so two admins renaming different
+    cards do not overwrite each other."""
+    # Blank names in the patch survive the merge and are then dropped by the
+    # validator, which is what makes "" mean "remove this override".
+    merged_raw = {**await _read_card_labels(), **body.labels}
+    try:
+        merged = validate_setting_value(AI_PROVIDER_CARD_LABELS_KEY, merged_raw)
+    except SettingValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "setting_invalid", "key": exc.key, "reason": exc.reason},
+        ) from exc
+    await get_system_settings_repository().upsert_setting(
+        AI_PROVIDER_CARD_LABELS_KEY, merged, auth.user_id
+    )
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="update_setting",
+        target_type="system_setting",
+        target_id=AI_PROVIDER_CARD_LABELS_KEY,
+        details={"patch": body.labels},
+    )
+    logger.info(f"[Admin] card labels updated by {auth.user_id}: {sorted(body.labels)}")
+    return CardLabelsResponse(labels=merged)
 
 
 @router.post("/probe-models", response_model=TestConnectionResponse)
