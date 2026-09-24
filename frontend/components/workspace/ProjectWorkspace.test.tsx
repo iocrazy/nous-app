@@ -17,7 +17,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { ApiError } from '../../services/apiClient';
 import { requestShotFocus } from '../agentActivity/shotFocusBus';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
+import { makeEpisodeProgress } from '../../tests/fixtures/episodes';
 import type { Project, ProjectStageNode, ProjectWorkflow } from '../../types/api';
 import { makeProject } from '../../tests/fixtures/projects';
 import { makeStageNode } from '../../tests/fixtures/projects';
@@ -262,7 +263,7 @@ const PROJECT: Project = makeProject({
 // Deliberately unsorted (Ep 2 first) to pin the "default = lowest
 // sort_order" selection logic rather than trivially picking array[0].
 const EPISODES: EpisodeProgress[] = [
-  {
+  makeEpisodeProgress({
     episode_id: '2',
     title: 'Ep 2 — Cutdown',
     sort_order: 20,
@@ -272,8 +273,8 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 0,
     renders_count: 0,
     status: 'drafting',
-  },
-  {
+  }),
+  makeEpisodeProgress({
     episode_id: '1',
     title: 'Ep 1 — Pilot',
     sort_order: 10,
@@ -283,7 +284,7 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 9,
     renders_count: 1,
     status: 'boarding',
-  },
+  }),
 ];
 
 beforeEach(() => {

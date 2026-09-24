@@ -20,7 +20,7 @@ import {
 } from '../../services/projectsService';
 import { ApiError } from '../../services/apiClient';
 import { useToast } from '../Toast';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
 
 interface WorkspaceEpisodesProps {
   projectId: string;

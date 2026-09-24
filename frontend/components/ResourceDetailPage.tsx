@@ -42,7 +42,7 @@ import { ResourceInspectorTabs, visibleInspectorTabs, type InspectorTab } from '
 import { AiSubTabs, AI_SUB_TABS, busiestStatus, type AiSubTab } from './detail/AiSubTabs';
 import { ShotsTabPlaceholder } from './VideoDetailPanel/ShotsTabPlaceholder';
 import { ResourceItem } from '../types';
-import type { ResourceRow, ResourceVersion, Tag } from '../types/api';
+import type { ResourceCanvasRef, ResourceRow, ResourceVersion, Tag } from '../types/api';
 import type { ResourceLyrics } from '../utils/resourceLyrics';
 import {
   fetchResourceById,
@@ -67,7 +67,6 @@ import {
   translateGenPrompt,
   classifyResource,
   fetchResourceCanvasRefs,
-  type CanvasBackRef,
 } from '../services/resourceService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { isGalleryMime } from '../utils/galleryMime';
@@ -351,7 +350,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [commentMarkers, setCommentMarkers] = useState<Array<{ time: number }>>([]);
 
   // Canvas back-references — "appears in N canvases" block
-  const [canvasRefs, setCanvasRefs] = useState<CanvasBackRef[]>([]);
+  const [canvasRefs, setCanvasRefs] = useState<ResourceCanvasRef[]>([]);
   useEffect(() => {
     if (!resourceId) return;
     let cancelled = false;

@@ -13,7 +13,7 @@ import {
   listTeamCanvasTrash,
   purgeCanvas,
   restoreCanvas,
-  type TrashedCanvas,
+  type TeamTrashedCanvas,
 } from '../services/canvasService';
 
 const FOCUS_RING =
@@ -29,7 +29,7 @@ export function CanvasTrashSection({
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<TrashedCanvas[] | null>(null);
+  const [rows, setRows] = useState<TeamTrashedCanvas[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [armedId, setArmedId] = useState<string | null>(null);
 

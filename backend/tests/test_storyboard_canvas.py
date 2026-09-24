@@ -31,6 +31,7 @@ from httpx import ASGITransport, AsyncClient
 from app.core.deps import AuthContext, get_auth
 from app.core.scope_guards import ProjectAccess
 from app.main import app
+from tests.api.canvas_wire_rows import repo_canvas_row
 
 # ``app.api.__init__`` rebinds ``canvases_router`` to the APIRouter instance,
 # so grab the real module from sys.modules (same trick as
@@ -186,6 +187,7 @@ class _FakeCanvasService:
             return existing
         _FakeCanvasService._next_id += 1
         row = {
+            **repo_canvas_row(),
             "id": str(_FakeCanvasService._next_id),
             "project_id": str(project_id),
             "episode_id": str(episode_id),
@@ -322,6 +324,7 @@ async def test_existing_storyboard_uses_read_gate_not_write_gate(client, monkeyp
     _allow_read_gate(monkeypatch)
 
     existing = {
+        **repo_canvas_row(),
         "id": "42",
         "project_id": PROJECT_ID,
         "episode_id": EPISODE_ID,

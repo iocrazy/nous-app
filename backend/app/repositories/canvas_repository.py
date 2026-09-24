@@ -35,8 +35,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
+from sqlalchemy import case
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import insert, null, select
+from sqlalchemy import func, insert, null, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 
@@ -60,6 +61,16 @@ _JSONB_COLS = (
 )
 
 _TS_COLS = ("created_at", "updated_at", "base_updated_at", "deleted_at")
+
+# Card-list node count. ``jsonb_array_length`` raises on a non-array, and no
+# CHECK keeps ``nodes_json`` an array, so one odd row must not 500 the list.
+_NODE_COUNT = case(
+    (
+        func.jsonb_typeof(Canvases.nodes_json) == "array",
+        func.jsonb_array_length(Canvases.nodes_json),
+    ),
+    else_=0,
+).label("node_count")
 
 
 def _serialize(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -195,7 +206,13 @@ class CanvasRepository:
 
         SUMMARY columns only — every consumer renders cards, and dragging
         nodes_json/ops back for a list was exactly the payload problem the
-        team-tree endpoint was built to kill (G4 review follow-up)."""
+        team-tree endpoint was built to kill (G4 review follow-up).
+
+        ``node_count`` is the one thing a card needs from the graph (it
+        showed "0 nodes" for every canvas while it read ``nodes_json`` off
+        this summary). ``nodes_json`` has no CHECK that it is an array, and
+        ``jsonb_array_length`` raises on anything else, so a non-array row
+        counts as 0 instead of failing the whole list."""
         try:
             async with read_scope() as session:
                 result = await session.execute(
@@ -206,6 +223,7 @@ class CanvasRepository:
                         Canvases.kind,
                         Canvases.created_at,
                         Canvases.updated_at,
+                        _NODE_COUNT,
                     )
                     .where(Canvases.project_id == _bigint(project_id))
                     .where(Canvases.deleted_at.is_(None))

@@ -91,6 +91,8 @@ def _canvas_row() -> Dict[str, Any]:
         "created_at": "2026-08-01T09:00:00+00:00",
         "updated_at": "2026-08-13T09:00:00+00:00",
         "created_by": None,
+        "asset_id": None,
+        "deleted_at": None,
     }
 
 

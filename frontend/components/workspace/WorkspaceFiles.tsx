@@ -30,7 +30,7 @@ import { getApiUrl } from '../../utils/apiConfig';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { FileInfoPanel } from '../FileInfoPanel';
 import { useToast } from '../Toast';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
 import type { GeneratedMediaRow, ProjectFile, ProjectFolder } from '../../types/api';
 
 export type FilesChip = 'all' | 'media' | 'renders' | 'docs';

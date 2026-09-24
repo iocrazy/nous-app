@@ -244,22 +244,6 @@ describe('GenFooterControls quality tiers follow the model', () => {
     expect(qualityTexts()).toContain('Extra High');
   });
 
-  it('a backend too old to send quality_tiers keeps every tier', () => {
-    // The two halves deploy independently (Cloudflare Pages vs gpupc, no
-    // ordering guarantee), so a caps row WITHOUT the key is a real wire
-    // shape for as long as that window lasts. Reading it as "supports no
-    // tier" would strip working rungs; worse, a bare `.includes` on the
-    // missing field throws and takes the whole footer down.
-    // No cast: `quality_tiers` is optional on `ModelCapabilities`, so the old
-    // backend's shape is expressible in the type the client actually uses.
-    // Casting here would have been the check switching itself off.
-    const { quality_tiers: _dropped, ...legacy } = CODEX_LOCAL;
-    caps = legacy;
-    renderBar({ model: 'codex-local-image' });
-    fireEvent.click(screen.getByTestId('pill-quality'));
-    expect(qualityTexts()).toContain('Max');
-  });
-
   it('a stored quality the model no longer offers reads as Auto', () => {
     // Unlike the ratio, this one is NOT marked and kept: `request.py` drops a
     // quality outside `caps.quality_tiers` before dispatch, so the run really

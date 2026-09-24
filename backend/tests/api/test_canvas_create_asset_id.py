@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.core.deps import get_auth
+from tests.api.canvas_wire_rows import repo_canvas_row
 
 # ``app.api`` re-exports the canvases APIRouter under this very name, so
 # ``from app.api import canvases_router`` hands back the router object, not the
@@ -64,6 +65,7 @@ class _FakeCanvasService:
             "created_by": created_by,
         }
         return {
+            **repo_canvas_row(),
             "id": 10001,
             "project_id": int(project_id),
             "name": data.name,

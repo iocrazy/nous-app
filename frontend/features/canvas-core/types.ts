@@ -6,6 +6,8 @@
  * `number`.
  */
 
+import type { CanvasRow } from '../../types/api';
+
 // 'character' (mig 357) reuses the smart pipeline with the CharacterNode +
 // preset agent workflow on top (character canvas epic).
 // 'classic' (canvas 1.0 engine) is RETIRED: no new classic canvases can be
@@ -82,46 +84,29 @@ export type CanvasConnection = Record<string, unknown>;
 export type CanvasNodeOp = Record<string, unknown>;
 export type CanvasConnectionOp = Record<string, unknown>;
 
-export interface Canvas {
-  id: string;
-  project_id: string;
-  /**
-   * The asset this canvas belongs to (`canvases.asset_id`, mig 446), set by
-   * the asset sheet's "Open In Canvas". `CanvasResponse` has declared it since
-   * asset-library P2 Task 1; it was missing here, so the seeding rule that
-   * depends on it (P4 Task 6 — an EMPTY asset-bound canvas gets one card for
-   * that asset) had no typed field to read.
-   */
-  asset_id?: string | null;
-  /** Owning episode for a `kind==='storyboard'` row (Task 1, mig 421);
-   *  absent/null for every other kind. Snowflake bigint as string. */
-  episode_id?: string | null;
-  name: string;
-  kind: CanvasKind;
+/**
+ * A full canvas document — the wire `CanvasRow` (generated from the backend
+ * schema, see `types/api.ts`) with `viewport_json` narrowed from an opaque
+ * object to the viewport the React Flow layer reads and writes.
+ *
+ * - `asset_id` (mig 446) is set by the asset sheet's "Open In Canvas";
+ *   `episode_id` only on a `kind==='storyboard'` row (mig 421). Both are
+ *   null otherwise — the backend always sends the key.
+ * - `can_edit`: may THIS caller write the canvas? The same verdict the PUT's
+ *   write guard reaches, shipped with the read so the surface can render
+ *   read-only up front (see `canvasCoreStore.applyServerRow`). Only the two
+ *   LOAD endpoints (`GET /canvases/{id}`, `GET /canvases/storyboard`) send
+ *   it; create and save omit the key, and a Supabase Realtime row
+ *   (`applyRemoteUpdate`) has no notion of a caller. `undefined` therefore
+ *   means "this payload carries no permission statement", NOT "false".
+ */
+export type Canvas = Omit<CanvasRow, 'viewport_json'> & {
   viewport_json: CanvasViewport;
-  nodes_json: CanvasNode[];
-  connections_json: CanvasConnection[];
-  node_ops_json: CanvasNodeOp[];
-  connection_ops_json: CanvasConnectionOp[];
-  base_updated_at: string;
-  created_at: string;
-  updated_at: string;
-  created_by: string | null;
-  /**
-   * May THIS caller write the canvas? The same verdict the PUT's write
-   * guard reaches (`scope_guards.resolve_project_read_access`), shipped with the read
-   * so the surface can render read-only up front instead of discovering it
-   * from a 403 (see `canvasCoreStore.applyServerRow`).
-   *
-   * Optional on purpose — only the two LOAD endpoints supply it (`GET
-   * /canvases/{id}`, `GET /canvases/storyboard`). A Supabase Realtime row
-   * (`applyRemoteUpdate`) is a raw `canvases` table row with no notion of a
-   * caller, and the 409 conflict body is only reachable after the write
-   * guard already passed. `undefined` therefore means "this payload carries
-   * no permission statement", NOT "false".
-   */
-  can_edit?: boolean;
-}
+};
+
+/** `GET /projects/{id}/canvases` row: summary columns and `node_count` — the
+ *  list never carries the node graph. */
+export type { CanvasSummary } from '../../types/api';
 
 export interface CanvasCreatePayload {
   name?: string;

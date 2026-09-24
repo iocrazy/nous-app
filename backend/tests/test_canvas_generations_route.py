@@ -21,6 +21,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.deps import AuthContext, get_auth
 from app.main import app
+from tests.api.catalog_wire_rows import list_enabled_row
 
 canvases_router = sys.modules["app.api.canvases_router"]
 
@@ -195,7 +196,11 @@ class TestGenerationModels:
                 "sort_order": 1,
             },
         ]
-        repo = SimpleNamespace(list_enabled=AsyncMock(return_value=rows))
+        repo = SimpleNamespace(
+            list_enabled=AsyncMock(
+                return_value=[list_enabled_row(**row) for row in rows]
+            )
+        )
         import app.repositories.nous_model_repository as repo_mod
 
         monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
@@ -227,7 +232,9 @@ class TestTextModels:
                 "base_url": "https://ark.example.com/v1",
             },
         ]
-        list_enabled = AsyncMock(return_value=llm_rows)
+        list_enabled = AsyncMock(
+            return_value=[list_enabled_row(**row) for row in llm_rows]
+        )
         repo = SimpleNamespace(list_enabled=list_enabled)
         import app.repositories.nous_model_repository as repo_mod
 
@@ -265,7 +272,11 @@ class TestTextModels:
                 "is_local": False,
             },
         ]
-        repo = SimpleNamespace(list_enabled=AsyncMock(return_value=rows))
+        repo = SimpleNamespace(
+            list_enabled=AsyncMock(
+                return_value=[list_enabled_row(**row) for row in rows]
+            )
+        )
         import app.repositories.nous_model_repository as repo_mod
 
         monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
@@ -395,7 +406,11 @@ class TestGenerationModelsFollowSettings:
             {"name": "codex-image", "display_name": "GPT Image", "type": "image"},
             {"name": "jimeng-cli-image", "display_name": "Dreamina", "type": "image"},
         ]
-        repo = SimpleNamespace(list_enabled=AsyncMock(return_value=rows))
+        repo = SimpleNamespace(
+            list_enabled=AsyncMock(
+                return_value=[list_enabled_row(**row) for row in rows]
+            )
+        )
         monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
 
         async def _gate(user_id):

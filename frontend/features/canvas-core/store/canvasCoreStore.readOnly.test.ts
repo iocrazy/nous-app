@@ -36,6 +36,9 @@ const baseCanvas: Canvas = {
   created_at: '2026-08-01T09:00:00+00:00',
   updated_at: '2026-08-12T09:00:00+00:00',
   created_by: null,
+  episode_id: '337610660408999',
+  asset_id: null,
+  deleted_at: null,
 };
 
 /** Server stub whose PUT is refused exactly the way `saveCanvas` refuses it:

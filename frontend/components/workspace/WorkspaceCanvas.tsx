@@ -8,9 +8,11 @@
  * route/chrome (`/team/:teamId/canvas/:canvasId`), and embedding React
  * Flow inside the workspace shell would fight its keyboard/pan gestures.
  *
- * Each card's top half is a live minimap of the canvas's real node layout
- * (CanvasCardPreview) — the list endpoint returns full documents, so the
- * geometry is already on hand.
+ * Each card's top half is CanvasCardPreview. The list endpoint returns
+ * SUMMARY rows (`CanvasSummary`: no node graph, just `node_count`), so the
+ * preview has no geometry to draw and shows its empty glyph; the node count
+ * comes from `node_count`. It used to be read off `nodes_json`, which the
+ * summary never carried, so every card said "0 nodes".
  */
 
 import { useEffect, useState } from 'react';
@@ -23,7 +25,7 @@ import {
   createCanvas,
   listCanvases,
 } from '../../features/canvas-core/services/canvasService';
-import type { Canvas, CreatableCanvasKind } from '../../features/canvas-core/types';
+import type { CanvasSummary, CreatableCanvasKind } from '../../features/canvas-core/types';
 import { NewCanvasDialog } from '../../features/canvas-core/ui/NewCanvasDialog';
 import { CanvasCardMenu } from '../../features/canvas-core/ui/CanvasCardMenu';
 import { deleteCanvas } from '../../features/canvas-core/services/canvasService';
@@ -44,7 +46,7 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { addToast } = useToast();
-  const [canvases, setCanvases] = useState<Canvas[] | null>(null);
+  const [canvases, setCanvases] = useState<CanvasSummary[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [creating, setCreating] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -164,10 +166,7 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
             onClick={() => navigate(editorPath(String(canvas.id)))}
             className={`flex w-full flex-col overflow-hidden rounded-xl border border-ink-800 bg-ink-900 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--accent-border)] hover:shadow-lg hover:shadow-indigo-500/10 ${FOCUS_RING}`}
           >
-            <CanvasCardPreview
-              nodes={canvas.nodes_json}
-              connections={canvas.connections_json}
-            />
+            <CanvasCardPreview />
             <div className="flex w-full flex-1 flex-col gap-1.5 p-3.5">
               <span className="truncate text-sm font-medium text-ink-100">
                 {canvas.name || t('canvasList.untitled', 'Untitled Canvas')}
@@ -185,7 +184,7 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
                 )}
                 <span>
                   {t('canvasList.nodeCount', '{{count}} nodes', {
-                    count: canvas.nodes_json?.length ?? 0,
+                    count: canvas.node_count,
                   })}
                 </span>
                 {canvas.updated_at && (

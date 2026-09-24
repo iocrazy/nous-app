@@ -63,6 +63,9 @@ function canvasRow(over: Partial<Canvas> = {}): Canvas {
     created_at: '2026-09-01T00:00:00+00:00',
     updated_at: '2026-09-02T10:00:00+00:00',
     created_by: null,
+    episode_id: null,
+    asset_id: null,
+    deleted_at: null,
     can_edit: true,
     ...over,
   };

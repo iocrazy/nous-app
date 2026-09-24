@@ -23,7 +23,7 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown } from 'lucide-react';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
 
 /** The server-derived pipeline stages, in order (episode_repository.py
  * `_derive_episode_status`). Index+1 = how many segments are lit. */
