@@ -5,6 +5,13 @@ import { getAuthHeaders } from '../services/parserService';
 import { retryTaskInPlace } from '../services/taskRetry';
 import { cancelWorkflow } from '../services/dbosWorkflowService';
 import { listNeedsInput, type NeedsInputItem } from '../services/issuesService';
+import type {
+  TaskActiveCountsResponse,
+  TaskClearCompletedResult,
+  TaskIdList,
+  TaskListPage,
+  TaskTrackingRow,
+} from '../types/api';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -217,8 +224,11 @@ const STRUCTURAL_ACTIONS = new Set<Action['type']>([
  * anymore (PK = dbos_workflow_id, see migration 180), so adapt by
  * aliasing PK as `id` for downstream consumers (TopBar, TasksPanel, etc)
  * that still spell it `task.id`. */
-function rowToTask(row: Record<string, unknown>): UnifiedTask {
-  const pk = (row.dbos_workflow_id || row.id || '') as string;
+/** One task row → the UI model. Rows arrive from two boundaries: the REST
+ * list (`TaskTrackingRow`, typed from OpenAPI) and Supabase Realtime
+ * (`task_tracking` as PostgREST encodes it, untyped). */
+function rowToTask(row: TaskTrackingRow | Record<string, unknown>): UnifiedTask {
+  const pk = (row.dbos_workflow_id || (row as Record<string, unknown>).id || '') as string;
   return {
     ...(row as unknown as UnifiedTask),
     id: pk,
@@ -400,8 +410,8 @@ async function fetchRecentTasks(): Promise<UnifiedTask[]> {
     console.error(`[TaskManager] fetchRecentTasks failed: ${resp.status}`);
     return [];
   }
-  const json = await resp.json();
-  return ((json.data as Record<string, unknown>[]) || []).map(rowToTask);
+  const json: TaskListPage = await resp.json();
+  return json.data.map(rowToTask);
 }
 
 // ─── Settings → Tasks: server-side page-number pagination ──────────────
@@ -445,12 +455,12 @@ export async function fetchTasksPage(
     { headers: await getAuthHeaders() },
   );
   if (!resp.ok) throw new Error(`tasks ${resp.status}: ${resp.statusText}`);
-  const json = await resp.json();
+  const json: TaskListPage = await resp.json();
   return {
-    tasks: ((json.data as Record<string, unknown>[]) || []).map(rowToTask),
-    total: (json.total as number) ?? 0,
-    page: (json.page as number) ?? page,
-    pageSize: (json.page_size as number) ?? pageSize,
+    tasks: json.data.map(rowToTask),
+    total: json.total,
+    page: json.page,
+    pageSize: json.page_size,
   };
 }
 
@@ -470,12 +480,8 @@ export async function fetchMatchingTaskIds(params: {
     { headers: await getAuthHeaders() },
   );
   if (!resp.ok) throw new Error(`task ids ${resp.status}`);
-  const json = await resp.json();
-  return {
-    ids: (json.ids as string[]) ?? [],
-    total: (json.total as number) ?? 0,
-    capped: !!json.capped,
-  };
+  const json: TaskIdList = await resp.json();
+  return { ids: json.ids, total: json.total, capped: json.capped };
 }
 
 export interface ActiveCounts {
@@ -491,9 +497,8 @@ export async function fetchActiveCounts(): Promise<ActiveCounts> {
     { headers: await getAuthHeaders() },
   );
   if (!resp.ok) throw new Error(`active-counts ${resp.status}`);
-  const json = await resp.json();
-  const d = (json.data as { total?: number; by_type?: Record<string, number> }) ?? {};
-  return { total: d.total ?? 0, byType: d.by_type ?? {} };
+  const json: TaskActiveCountsResponse = await resp.json();
+  return { total: json.data.total, byType: json.data.by_type };
 }
 
 async function apiCancelTask(taskId: string): Promise<void> {
@@ -513,18 +518,30 @@ async function apiCancelTask(taskId: string): Promise<void> {
   }
 }
 
-async function apiDeleteTask(taskId: string): Promise<void> {
-  await fetch(`${API_BASE}/api/v1/task-manager/tasks/${taskId}`, {
+/** Delete one task row. Throws on failure so callers (the batch runner
+ * counts throws as failures) never report a delete that did not happen.
+ * 404 means the row is already gone for this caller — that is the outcome
+ * the user asked for, so it resolves. */
+export async function apiDeleteTask(taskId: string): Promise<void> {
+  const resp = await fetch(`${API_BASE}/api/v1/task-manager/tasks/${taskId}`, {
     method: 'DELETE',
     headers: await getAuthHeaders(),
   });
+  if (resp.ok || resp.status === 404) return;
+  throw new Error(`delete task ${resp.status}`);
 }
 
-async function apiClearCompleted(): Promise<void> {
-  await fetch(`${API_BASE}/api/v1/task-manager/tasks/clear-completed`, {
+/** Delete old terminal tasks. The backend KEEPS the 50 most recent terminal
+ * rows, so the caller must re-read the list rather than drop every terminal
+ * row locally. Resolves to the number of rows actually deleted. */
+export async function apiClearCompleted(): Promise<number> {
+  const resp = await fetch(`${API_BASE}/api/v1/task-manager/tasks/clear-completed`, {
     method: 'POST',
     headers: await getAuthHeaders(),
   });
+  if (!resp.ok) throw new Error(`clear-completed ${resp.status}`);
+  const json: TaskClearCompletedResult = await resp.json();
+  return json.cleared;
 }
 
 // ─── Context ────────────────────────────────────────────
@@ -920,20 +937,24 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   const deleteTask = useCallback(async (taskId: string) => {
-    dispatch({ type: 'DELETE', id: taskId });
+    // Remove locally only once the server agreed: an optimistic removal left
+    // a row that failed to delete hidden until the next reload.
     await apiDeleteTask(taskId);
+    dispatch({ type: 'DELETE', id: taskId });
   }, []);
 
   const clearCompleted = useCallback(async () => {
-    // Optimistic: remove completed/failed/cancelled from local state
-    const completedIds = state.tasks
-      .filter(t => ['completed', 'failed', 'cancelled', 'lost'].includes(t.status))
-      .map(t => t.id);
-    for (const id of completedIds) {
-      dispatch({ type: 'DELETE', id });
+    // Not optimistic: the server keeps the 50 most recent terminal rows, so
+    // dropping every terminal row locally hid rows that still exist (they
+    // came back on reload). Re-read what is actually left instead.
+    try {
+      await apiClearCompleted();
+    } catch (e) {
+      console.error('[TaskManager] clear-completed failed:', e);
+      return;
     }
-    await apiClearCompleted();
-  }, [state.tasks]);
+    await refreshTasks();
+  }, [refreshTasks]);
 
   return (
     <TaskManagerContext.Provider value={{
