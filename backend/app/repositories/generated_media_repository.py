@@ -542,8 +542,7 @@ class GeneratedMediaRepository:
         Read as the SYSTEM rather than the caller: ``Resources`` is UserScoped,
         so under an ambient user Scope the join would silently drop another
         contributor's archived output. Canvas membership plus the scope join
-        above is the authorization boundary here, not ``creator_id`` — same
-        rationale as ``canvas_refs_repository.list_assets_for_canvas``.
+        above is the authorization boundary here, not ``creator_id``.
 
         Out-of-scope generations are EXCLUDED from the result and ``warning``
         -logged (count + ids + scope) rather than dropped in silence: some of
@@ -653,7 +652,6 @@ class GeneratedMediaRepository:
         # The refcount must see EVERY owner, not just the caller's own rows:
         # ``Resources`` is UserScoped, so under an ambient user Scope the
         # count would silently drop another user's live row and read 0.
-        # Same rationale as ``canvas_refs_repository.list_assets_for_canvas``.
         scope_cm = (
             system_request_scope(
                 reason="generated-media object refcount: ownership of the "
