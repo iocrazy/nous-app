@@ -1314,7 +1314,7 @@ export function AIModelsPage() {
                 <FormItem
                   label="Context Window (tokens)"
                   field="context_window_choice"
-                  extra="Leave empty to fall back to the builtin table / global default. Takes effect on workers within 5 minutes. Match the provider's declared window; nous-engine rows should equal the engine's max_model_len."
+                  extra="Pick Unset to fall back to the builtin table / global default. Takes effect on workers within 5 minutes. Match the provider's declared window; nous-engine rows should equal the engine's max_model_len."
                 >
                   <Select
                     placeholder="Unset (fallback)"
