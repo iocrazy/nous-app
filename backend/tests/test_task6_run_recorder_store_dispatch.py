@@ -159,6 +159,12 @@ async def _run_chat_turn(session_row: Dict[str, Any]) -> Dict[str, Any]:
 
     fake_agent_repo_instance = MagicMock()
     fake_agent_repo_instance.get_by_slug = AsyncMock(return_value=fake_agent_record)
+    # The session rows below are bound to agent 2222…, while the slug resolves
+    # to ``agent_id``. Since mig 501 that mismatch makes the turn check whether
+    # the BOUND agent was soft-deleted; here it is live.
+    fake_agent_repo_instance.get_by_id = AsyncMock(
+        return_value={"id": "22222222-2222-2222-2222-222222222222", "deleted_at": None}
+    )
 
     with (
         patch(

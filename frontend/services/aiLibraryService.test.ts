@@ -6,7 +6,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { aiLibraryService } from './aiLibraryService';
+import { AiLibraryRequestError, aiLibraryService } from './aiLibraryService';
 
 vi.mock('./parserService', () => ({
   getAuthHeaders: vi.fn().mockResolvedValue({}),
@@ -72,6 +72,50 @@ describe('aiLibraryService.getAgentDashboard', () => {
   });
 });
 
+
+describe('aiLibraryService.deleteAgent (mig 501 soft delete)', () => {
+  it('surfaces agent_in_use from the production envelope as a typed error', async () => {
+    // Verbatim ErrorResponse shape from backend/app/core/exceptions.py: a
+    // dict detail moves to `details`, `error` is the generic sentence.
+    stubFetch(
+      {
+        success: false,
+        error: 'Request failed',
+        code: 'http_409',
+        request_id: 'req-1',
+        details: {
+          code: 'agent_in_use',
+          message: 'This agent still has work routed to it.',
+          counts: {
+            issues: 2,
+            pipeline_steps: 0,
+            stage_nodes: 0,
+            template_nodes: 0,
+            running_runs: 1,
+          },
+        },
+      },
+      409,
+    );
+    const err = await aiLibraryService.deleteAgent('writer').catch((e) => e);
+    expect(err).toBeInstanceOf(AiLibraryRequestError);
+    expect(err.code).toBe('agent_in_use');
+    expect(err.status).toBe(409);
+    expect(err.message).toBe('This agent still has work routed to it.');
+  });
+
+  it('resolves on 204 without reading a body', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+      headers: new Headers(),
+      json: async () => {
+        throw new Error('no body');
+      },
+    } as unknown as Response);
+    await expect(aiLibraryService.deleteAgent('writer')).resolves.toBeUndefined();
+  });
+});
 
 // ─── Phase O (O1): streamChatMessage SSE parsing ─────────────────────
 

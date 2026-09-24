@@ -51,7 +51,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import delete, false, insert, or_, select, update
+from sqlalchemy import delete, false, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
@@ -150,19 +150,29 @@ class AgentRepository:
         *,
         override_user_id: Optional[UUID] = None,
         override_team_id: Optional[int] = None,
+        include_deleted: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Fetch a single agent by slug; returns None if not found.
+
+        A slug names an agent someone is about to USE (new chat, Delegate
+        target, management API), so soft-deleted rows (mig 501) are invisible
+        by default. ``include_deleted=True`` is for callers that must tell
+        "deleted" from "never existed" (turn-time refusal); a live row with
+        the same slug still wins over a tombstone.
 
         When ``override_user_id`` / ``override_team_id`` are provided and the
         agent is a SYSTEM PRESET, the caller's customization layer is merged
         in (user override ?? team override ?? system row — whole-field, see
         migration 341). Callers that omit them (background pipelines, admin
         paths, seed loader) always get the pristine system row."""
+        stmt = select(AiAgents).where(AiAgents.slug == slug)
+        if include_deleted:
+            stmt = stmt.order_by(AiAgents.deleted_at.desc().nulls_first())
+        else:
+            stmt = stmt.where(AiAgents.deleted_at.is_(None))
         try:
             async with read_scope() as session:
-                result = await session.execute(
-                    select(AiAgents).where(AiAgents.slug == slug).limit(1)
-                )
+                result = await session.execute(stmt.limit(1))
                 row = result.scalars().first()
                 agent = _agent_to_dict(row) if row else None
             if agent is not None:
@@ -182,7 +192,12 @@ class AgentRepository:
         override_team_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """Fetch an agent by UUID; returns None if not found. Override merge
-        semantics identical to :meth:`get_by_slug`."""
+        semantics identical to :meth:`get_by_slug`.
+
+        Deliberately NOT filtered on ``deleted_at``: an id is how history
+        (runs, usage, transcripts) names the agent that did the work, and a
+        soft-deleted agent must keep resolving there. Callers deciding
+        whether an agent may be used check ``deleted_at`` themselves."""
         try:
             async with read_scope() as session:
                 result = await session.execute(
@@ -347,15 +362,24 @@ class AgentRepository:
             return False
 
     async def delete_agent(self, agent_id: UUID) -> bool:
-        """Hard-delete one NON-PRESET agent. Returns True iff a row was
-        deleted. The preset guard is enforced here as well as at the router
-        so a future caller can't nuke a system agent by accident — every FK
-        referencing ai_agents declares CASCADE or SET NULL (verified against
-        prod information_schema, 2026-07-07), so the row delete is safe."""
+        """Soft-delete one live NON-PRESET agent (mig 501). Returns True iff a
+        row changed; an already-deleted agent returns False.
+
+        Why not a row delete: eleven FKs to ai_agents CASCADE, among them
+        agent_runs — and agent_runs.parent_run_id CASCADEs again, so a hard
+        delete also removed OTHER agents' Delegate child runs, the agent's
+        transcripts and cost history, and pipeline steps. The preset guard is
+        enforced here as well as at the router. The live-reference refusal
+        (409 agent_in_use) is the router's job — see agent_references."""
         try:
-            stmt = delete(AiAgents).where(
-                AiAgents.id == agent_id,
-                AiAgents.is_system_preset.is_(False),
+            stmt = (
+                update(AiAgents)
+                .where(
+                    AiAgents.id == agent_id,
+                    AiAgents.is_system_preset.is_(False),
+                    AiAgents.deleted_at.is_(None),
+                )
+                .values(deleted_at=func.now(), enabled=False)
             )
             async with write_scope() as session:
                 result = await session.execute(stmt)
@@ -374,7 +398,9 @@ class AgentRepository:
         try:
             async with read_scope() as session:
                 result = await session.execute(
-                    select(AiAgents.slug).where(AiAgents.slug.is_not(None))
+                    select(AiAgents.slug).where(
+                        AiAgents.slug.is_not(None), AiAgents.deleted_at.is_(None)
+                    )
                 )
                 return [s for (s,) in result.all() if s]
         except Exception as e:
@@ -387,7 +413,10 @@ class AgentRepository:
             async with read_scope() as session:
                 result = await session.execute(
                     select(AiAgents)
-                    .where(AiAgents.is_system_preset.is_(True))
+                    .where(
+                        AiAgents.is_system_preset.is_(True),
+                        AiAgents.deleted_at.is_(None),
+                    )
                     .order_by(AiAgents.name)
                 )
                 return [_agent_to_dict(r) for r in result.scalars().all()]
@@ -452,7 +481,7 @@ class AgentRepository:
             async with read_scope() as session:
                 result = await session.execute(
                     select(*cols)
-                    .where(AiAgents.persistent.is_(True))
+                    .where(AiAgents.persistent.is_(True), AiAgents.deleted_at.is_(None))
                     .order_by(AiAgents.slug)
                 )
                 out: List[Dict[str, Any]] = []
@@ -498,7 +527,7 @@ class AgentRepository:
             async with read_scope() as session:
                 result = await session.execute(
                     select(AiAgents)
-                    .where(or_(*predicates))
+                    .where(or_(*predicates), AiAgents.deleted_at.is_(None))
                     .order_by(AiAgents.sort_order, AiAgents.name)
                 )
                 return [_agent_to_dict(r) for r in result.scalars().all()]

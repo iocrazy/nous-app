@@ -1,9 +1,13 @@
 """Tests for DELETE /api/v1/ai-library/agents/{slug} (2026-07-07).
 
-User-owned agents can be hard-deleted by their creator; system presets
-and other users' agents are refused. Before this endpoint existed there
-was NO way to delete an agent at all (create/edit/reset only) — test
-agents were immortal.
+User-owned agents can be deleted by their creator; system presets and other
+users' agents are refused. Before this endpoint existed there was NO way to
+delete an agent at all (create/edit/reset only) — test agents were immortal.
+
+Since mig 501 the delete is SOFT (``ai_agents.deleted_at``) and is refused
+with 409 ``agent_in_use`` while live routing still points at the agent —
+the hard delete cascaded away the agent's runs AND other agents' Delegate
+child runs, and silently reshaped pipelines.
 """
 
 from __future__ import annotations
@@ -69,11 +73,25 @@ def _repo(agent: Dict[str, Any] | None, deleted: bool = True) -> AsyncMock:
     return repo
 
 
+def _refs(**counts: int):
+    from app.repositories.agent_references import AgentLiveReferences
+
+    return AgentLiveReferences(**counts)
+
+
 def _do_delete(
-    client: TestClient, fake_auth, repo: AsyncMock, slug: str = "test-analyze"
+    client: TestClient,
+    fake_auth,
+    repo: AsyncMock,
+    slug: str = "test-analyze",
+    refs=None,
 ):
     _install_auth_override(client.app, fake_auth)
-    with patch("app.api.ai_library_router._repos", return_value=(repo, AsyncMock())):
+    counter = AsyncMock(return_value=refs if refs is not None else _refs())
+    with (
+        patch("app.api.ai_library_router._repos", return_value=(repo, AsyncMock())),
+        patch("app.api.ai_library_router.count_live_agent_references", counter),
+    ):
         return client.delete(f"/api/v1/ai-library/agents/{slug}")
 
 
@@ -107,3 +125,62 @@ def test_repo_failure_500(client: TestClient, fake_auth) -> None:
     repo = _repo(_agent(), deleted=False)
     resp = _do_delete(client, fake_auth, repo)
     assert resp.status_code == 500
+
+
+# ── mig 501: refuse while live routing points at the agent ─────────────
+
+
+def test_live_references_refuse_with_typed_409_and_counts(
+    client: TestClient, fake_auth
+) -> None:
+    repo = _repo(_agent())
+    resp = _do_delete(client, fake_auth, repo, refs=_refs(issues=2, running_runs=1))
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["code"] == "agent_in_use"
+    assert detail["counts"] == {
+        "issues": 2,
+        "pipeline_steps": 0,
+        "stage_nodes": 0,
+        "template_nodes": 0,
+        "running_runs": 1,
+    }
+    assert detail["message"]
+    repo.delete_agent.assert_not_awaited()
+
+
+def test_every_reference_kind_alone_refuses(client: TestClient, fake_auth) -> None:
+    for kind in (
+        "issues",
+        "pipeline_steps",
+        "stage_nodes",
+        "template_nodes",
+        "running_runs",
+    ):
+        repo = _repo(_agent())
+        resp = _do_delete(client, fake_auth, repo, refs=_refs(**{kind: 1}))
+        assert resp.status_code == 409, kind
+        repo.delete_agent.assert_not_awaited()
+
+
+def test_production_envelope_carries_the_code_under_details(fake_auth) -> None:
+    """Production wraps HTTPException in ErrorResponse; the frontend reads
+    ``details.code``. Assert on that shape, not the bare FastAPI one."""
+    from app.core.exceptions import register_exception_handlers
+
+    app = _app_with_router()
+    register_exception_handlers(app)
+    resp = _do_delete(
+        TestClient(app), fake_auth, _repo(_agent()), refs=_refs(pipeline_steps=3)
+    )
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["success"] is False
+    assert body["details"]["code"] == "agent_in_use"
+    assert body["details"]["counts"]["pipeline_steps"] == 3
+
+
+def test_preset_refused_before_reference_count(client: TestClient, fake_auth) -> None:
+    repo = _repo(_agent(is_system_preset=True))
+    resp = _do_delete(client, fake_auth, repo, refs=_refs(issues=5))
+    assert resp.status_code == 403
