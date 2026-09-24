@@ -7,7 +7,7 @@ from app.services.ai.provider_protocols.base import ProviderProtocol
 
 class DoubaoProtocol(ProviderProtocol):
     key = "doubao"
-    label = "Doubao (chat)"
+    label = "Doubao"
     description = "Volcengine Doubao chat-completions (doubao-*/ep-*)."
     model_types = ("llm", "embedding", "asr")
     credential_kind = "api_key"
