@@ -36,16 +36,20 @@ async def save_chat_image(
 
     conv_repo = conv_repo or get_conversation_repository()
 
-    conv = await conv_repo.get_conversation(conversation_id=conversation_id)
-    if conv is None:
-        raise ValueError(f"conversation {conversation_id} not found")
-    scope_id: int = int(conv["scope_id"])
-
+    # Membership FIRST: looking the conversation up before it turned the
+    # 400 "not found" / 403 "not a member" pair into an existence oracle for
+    # arbitrary conversation ids. A non-member gets the same 403 either way
+    # (same rule as ConversationService._require_group_role).
     is_member = await conv_repo.is_member(
         conversation_id=conversation_id, user_id=user_id
     )
     if not is_member:
         raise PermissionError("not a member of this conversation")
+
+    conv = await conv_repo.get_conversation(conversation_id=conversation_id)
+    if conv is None:
+        raise ValueError(f"conversation {conversation_id} not found")
+    scope_id: int = int(conv["scope_id"])
 
     row = await register_uploaded_media(
         user_id=user_id,
