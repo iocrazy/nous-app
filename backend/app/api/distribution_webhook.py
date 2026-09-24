@@ -24,7 +24,10 @@ from app.repositories.publish_tasks_repository import (
     PublishTasksRepository,
     aggregate_task_status,
 )
-from app.services.distribution.credentials import get_douyin_credentials
+from app.services.distribution.credentials import (
+    CredentialsNotConfigured,
+    get_douyin_credentials,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +37,14 @@ publish_repo = PublishTasksRepository()
 
 def verify_douyin_signature(client_secret: str, body: str, provided: str) -> bool:
     """SHA1(client_secret + raw_body) — the media-router prototype's scheme.
-    Constant-time compare to avoid a timing oracle."""
+    Constant-time compare to avoid a timing oracle.
+
+    An empty secret never verifies: SHA1("" + body) is computable by anyone,
+    so a blank ``client_secret`` in ``system_settings`` would otherwise turn
+    this into an open door for flipping publish records to ``success``.
+    """
+    if not client_secret or not provided:
+        return False
     expected = hashlib.sha1((client_secret + body).encode()).hexdigest()
     return hmac.compare_digest(expected, provided or "")
 
@@ -59,8 +69,17 @@ async def _reaggregate_task_tracking(task_id: str) -> None:
 @router.post("/webhook/douyin")
 async def douyin_webhook(request: Request):
     body_bytes = await request.body()
-    body_str = body_bytes.decode("utf-8")
-    creds = await get_douyin_credentials()
+    try:
+        creds = await get_douyin_credentials()
+    except CredentialsNotConfigured:
+        # Fail closed (was an unhandled 500): with no secret there is nothing
+        # to verify the caller against.
+        logger.warning("distribution webhook: douyin credentials not configured")
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    try:
+        body_str = body_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=403, detail="Invalid signature")
     provided = request.headers.get("x-douyin-signature", "")
     if not verify_douyin_signature(creds.client_secret, body_str, provided):
         logger.warning("distribution webhook: signature mismatch")
