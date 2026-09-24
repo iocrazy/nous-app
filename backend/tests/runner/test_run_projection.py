@@ -120,7 +120,60 @@ def test_compaction_bracket_moves_phase_and_context():
 
 def test_local_context_measurement_updates_gauge_without_an_event_type_in_the_whitelist():
     v = rp.apply(rp.empty_views(), "context_measured", {"used": 620, "window": 1000})
-    assert v["view"]["context"] == {"used_pct": 62, "window": 1000}
+    # A payload from before window_source existed folds with an explicit None,
+    # so the view shape is the same for every run.
+    assert v["view"]["context"] == {
+        "used_pct": 62,
+        "window": 1000,
+        "window_source": None,
+    }
+
+
+@pytest.mark.parametrize("source", ["catalog", "builtin", "fallback"])
+def test_context_measurement_carries_the_window_source(source):
+    v = rp.apply(
+        rp.empty_views(),
+        "context_measured",
+        {"used": 620, "window": 1000, "window_source": source},
+    )
+    assert v["view"]["context"] == {
+        "used_pct": 62,
+        "window": 1000,
+        "window_source": source,
+    }
+
+
+def test_an_unrecognised_window_source_folds_to_none_not_through():
+    v = rp.apply(
+        rp.empty_views(),
+        "context_measured",
+        {"used": 620, "window": 1000, "window_source": "guess"},
+    )
+    assert v["view"]["context"]["window_source"] is None
+
+
+def test_compaction_bracket_carries_the_window_source_through_end():
+    v = rp.apply(
+        rp.empty_views(),
+        "compaction_start",
+        {
+            "tier": "orange",
+            "tokens_before": 850,
+            "window": 1000,
+            "window_source": "fallback",
+        },
+    )
+    assert v["view"]["context"] == {
+        "used_pct": 85,
+        "window": 1000,
+        "window_source": "fallback",
+    }
+    v = rp.apply(v, "compaction_end", {"tokens_after": 400})
+    assert v["view"]["context"] == {
+        "used_pct": 40,
+        "window": 1000,
+        "window_source": "fallback",
+    }
 
 
 def test_turn_end_sets_ended_and_phase():

@@ -60,7 +60,7 @@ def _orange(msgs, *, summary_tokens, summarize=None, warm=None):
     return (
         patch(
             "app.agent_framework.context_compactor.resolve_model_window",
-            return_value=(1000, True),
+            return_value=(1000, "builtin"),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
@@ -105,6 +105,7 @@ async def test_success_path_lands_all_three_events_in_order():
     assert rec.types() == ["compaction_start", "compaction_summary", "compaction_end"]
     start = rec.payload("compaction_start")
     assert start["tier"] == "orange" and start["window"] == 1000
+    assert start["window_source"] == "builtin"
     assert start["tokens_before"] == 850
     summary = rec.payload("compaction_summary")
     assert summary["path"] == "legacy"
@@ -233,7 +234,7 @@ async def test_green_and_yellow_tiers_never_bracket():
     with (
         patch(
             "app.agent_framework.context_compactor.resolve_model_window",
-            return_value=(1000, True),
+            return_value=(1000, "builtin"),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(

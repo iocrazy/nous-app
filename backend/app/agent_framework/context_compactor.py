@@ -246,7 +246,8 @@ class ContextCompactor:
                 notes=("AGENT_AUTO_COMPACT=false",),
             )
 
-        window, window_known = resolve_model_window(model)
+        window, window_source = resolve_model_window(model)
+        window_known = window_source != "fallback"
         # Every tier below divides by `window`. When neither the catalog nor
         # the table knew the model, that denominator is a default, and a wrong denominator makes
         # a confidently-wrong tier — so it rides every return path, including
@@ -327,7 +328,14 @@ class ContextCompactor:
         await _emit(
             recorder,
             "compaction_start",
-            {"tier": tier.value, "tokens_before": total, "window": window},
+            {
+                "tier": tier.value,
+                "tokens_before": total,
+                "window": window,
+                # Same source the step-end gauge reports for this model, so the
+                # gauge keeps one meaning whichever writer moved it last.
+                "window_source": window_source,
+            },
         )
         end_payload: dict[str, Any] = {}
         try:

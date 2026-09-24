@@ -5737,6 +5737,7 @@
     "now": "正在",
     "steps": "步骤",
     "context": "上下文",
+    "windowFallbackHint": "此模型未配置上下文窗口，仪表按默认值（{{window}} tokens）计算。请到 Admin → AI Models 设置。",
     "cancelling": "取消中…",
     "retryWaiting": "重试 {{attempt}}/{{max}} · 等待 {{s}}s",
     "retried": "已重试 {{attempt}}/{{max}}",

@@ -30,7 +30,7 @@ async def _run(tier_counts):
         st.enter_context(
             patch(
                 "app.agent_framework.context_compactor.resolve_model_window",
-                return_value=(1000, True),
+                return_value=(1000, "builtin"),
             )
         )
         st.enter_context(

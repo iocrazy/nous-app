@@ -133,3 +133,16 @@ describe('the citation + provenance copy exists in both locales (harness 3a Task
       .not.toBe((en.refError as unknown as Record<string, string>).unresolvable);
   });
 });
+
+
+describe('issueDetail.windowFallbackHint (FH2 T6)', () => {
+  it.each(['en', 'zh'])('%s interpolates the default window', (lang) => {
+    expect(load(lang).issueDetail.windowFallbackHint).toContain('{{window}}');
+  });
+  it('en is the agreed copy and zh is translated', () => {
+    expect(load('en').issueDetail.windowFallbackHint).toBe(
+      'No window configured for this model — gauge uses the default ({{window}} tokens). Set it in Admin → AI Models.',
+    );
+    expect(load('zh').issueDetail.windowFallbackHint).not.toBe(load('en').issueDetail.windowFallbackHint);
+  });
+});

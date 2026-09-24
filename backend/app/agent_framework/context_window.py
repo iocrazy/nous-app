@@ -37,7 +37,7 @@ Usage from agent_runner:
 from __future__ import annotations
 
 import warnings
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 from app.agent_framework.catalog_windows import catalog_window
 from app.agent_framework.tokenizer import count_messages_tokens, count_tokens
@@ -147,8 +147,20 @@ def model_window_size(model: str) -> int:
     return window
 
 
-def resolve_model_window(model: str) -> tuple[int, bool]:
-    """``(window, is_known)`` — the size, plus whether we actually knew it.
+WindowSource = Literal["catalog", "builtin", "fallback"]
+"""Where a context window came from.
+
+``catalog``: the admin-owned ``nous_models.context_window_tokens``.
+``builtin``: the hardcoded ``_MODEL_WINDOWS`` table (including the base-name
+strip). ``fallback``: neither knew the model, so the number is
+``settings.LLM_MAX_CONTEXT_TOKENS`` — a default, not a fact about the model.
+Callers that only need the old ``is_known`` bool use ``source != "fallback"``.
+The value rides ``view.context.window_source`` so the UI can say which one.
+"""
+
+
+def resolve_model_window(model: str | None) -> tuple[int, WindowSource]:
+    """``(window, source)`` — the size, plus which layer answered.
 
     ``model_window_size()`` answers every model, which makes the generic
     fallback indistinguishable from a real lookup at the call site. Callers
@@ -162,22 +174,23 @@ def resolve_model_window(model: str) -> tuple[int, bool]:
     tier decisions have all been made against ``LLM_MAX_CONTEXT_TOKENS``.
 
     Lookup order: provider catalog (``nous_models.context_window_tokens``, by
-    actual model id or catalog name) → ``_MODEL_WINDOWS`` → the fallback.
-    Catalog and table hits are both "known"; only the fallback is not.
+    actual model id or catalog name) → ``_MODEL_WINDOWS`` → the fallback,
+    reported as ``"catalog"`` / ``"builtin"`` / ``"fallback"`` (see
+    :data:`WindowSource`). Only the fallback is a guess.
     """
     if not model:
-        return settings.LLM_MAX_CONTEXT_TOKENS, False
+        return settings.LLM_MAX_CONTEXT_TOKENS, "fallback"
     from_catalog = catalog_window(model)
     if from_catalog is not None:
-        return from_catalog, True
+        return from_catalog, "catalog"
     key = model.strip().lower()
     if key in _MODEL_WINDOWS:
-        return _MODEL_WINDOWS[key], True
+        return _MODEL_WINDOWS[key], "builtin"
     # Try base model name (drop -date / -instruct / -chat suffix)
     base = key.split(":")[0].split("-instruct")[0].split("-chat")[0]
     if base in _MODEL_WINDOWS:
-        return _MODEL_WINDOWS[base], True
-    return settings.LLM_MAX_CONTEXT_TOKENS, False
+        return _MODEL_WINDOWS[base], "builtin"
+    return settings.LLM_MAX_CONTEXT_TOKENS, "fallback"
 
 
 def check_context_budget(

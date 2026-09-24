@@ -38,7 +38,7 @@ async def test_blank_summary_is_rejected_and_falls_back_to_emergency_cap(monkeyp
         {"role": "user", "content": f"turn {i} " + "x" * 400} for i in range(12)
     ]
     # Force the orange tier regardless of the model table.
-    monkeypatch.setattr(cc, "resolve_model_window", lambda model: (1000, True))
+    monkeypatch.setattr(cc, "resolve_model_window", lambda model: (1000, "builtin"))
     monkeypatch.setattr(cc, "count_messages_tokens", lambda msgs, model: 70 * len(msgs))
     out, stats = await compactor.maybe_compact(
         system_message="sys", user_messages=messages, model="m", recorder=_Rec()

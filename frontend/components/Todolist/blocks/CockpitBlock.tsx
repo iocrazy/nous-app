@@ -17,6 +17,7 @@ import {
   childrenState,
   contextGauge,
   currentStep,
+  fallbackWindowLabel,
   outputsState,
   retryState,
   selectRunView,
@@ -120,6 +121,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const replayingOther = !!replay && replay.seq != null && !frozen;
   const step = stepProgress(view);
   const gauge = contextGauge(view);
+  const guessedWindow = fallbackWindowLabel(gauge);
   const cur = currentStep(view);
   const retry = retryState(view, Date.now());
   const runBudget = budgetState(view);
@@ -312,9 +314,19 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
             <span className="text-ink-600 text-[12px]">—</span>
           )}
         </Cell>
-        <Cell label={t('issueDetail.context', 'Context')} testId="cockpit-context" bar={gauge ? { pct: gauge.used_pct, tone: gauge.used_pct >= 85 ? 'bg-warn' : 'bg-info' } : undefined}>
+        <Cell
+          label={t('issueDetail.context', 'Context')}
+          testId="cockpit-context"
+          title={
+            guessedWindow != null
+              ? t('issueDetail.windowFallbackHint', 'No window configured for this model — gauge uses the default ({{window}} tokens). Set it in Admin → AI Models.', { window: guessedWindow })
+              : undefined
+          }
+          bar={gauge ? { pct: gauge.used_pct, tone: gauge.used_pct >= 85 ? 'bg-warn' : 'bg-info' } : undefined}
+        >
           {gauge ? (
             <>
+              {guessedWindow != null && <span className="text-ink-500">~</span>}
               {Math.round(gauge.used_pct)}
               <span className="text-ink-500 text-[12px]">%</span>
             </>

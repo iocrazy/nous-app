@@ -25,7 +25,7 @@ describe('runView selectors', () => {
     expect(currentStep(v)).toEqual({ turn: 1, step: 4, model: 'm' });
     expect(retryState(v, Date.parse('2026-09-05T00:00:01Z'))).toEqual({ attempt: 2, max: 4, waitingSeconds: 2 });
     expect(retryState(v, Date.parse('2026-09-05T00:01:00Z'))?.waitingSeconds).toBe(0);
-    expect(contextGauge(v)).toEqual({ used_pct: 62, window: 128000 });
+    expect(contextGauge(v)).toEqual({ used_pct: 62, window: 128000, window_source: null });
     expect(budgetState(v)).toEqual({ pct: 82, state: 'warn', spent_cents: 82 });
     expect(endedReason(v)).toBeNull();
     expect(selectRunCost(meta)?.spent_cents).toBe(0.9);
@@ -139,5 +139,17 @@ describe('outputsState (harness 3a §5)', () => {
   it('does not leak the bookkeeping `seen` list to components', () => {
     const state = outputsState({ outputs: { total: 1, revised: 0, last, seen: ['generated_media:77:1'] } } as never);
     expect(state && 'seen' in state).toBe(false);
+  });
+});
+
+
+describe('contextGauge window_source (FH2 T6)', () => {
+  const at = (context: unknown) => ({ context } as never);
+  it.each(['catalog', 'builtin', 'fallback'] as const)('passes %s through', (source) => {
+    expect(contextGauge(at({ used_pct: 40, window: 28000, window_source: source }))?.window_source).toBe(source);
+  });
+  it('is null for a gauge written before the field existed, or with an unknown value', () => {
+    expect(contextGauge(at({ used_pct: 40, window: 28000 }))?.window_source).toBeNull();
+    expect(contextGauge(at({ used_pct: 40, window: 28000, window_source: 'guess' }))?.window_source).toBeNull();
   });
 });
