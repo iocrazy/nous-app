@@ -11,7 +11,7 @@
  * materialise (see EditorShell).
  */
 import { useTranslation } from 'react-i18next';
-import type { ScriptChapter } from '../../types';
+import type { ScriptChapter } from '../../types/api';
 
 export interface ChapterFallbackProps {
   chapter: ScriptChapter;
@@ -44,7 +44,11 @@ export function ChapterFallback({
           className="mh-chapter-convert-btn"
           disabled={converting}
           aria-busy={converting}
-          onClick={() => (isEmpty ? onStartWriting(chapter.id) : onConvert(chapter.id))}
+          // Chapter ids are JSON numbers; the handlers (and the convert poll's
+          // match against string scene.chapter_id) take the string form.
+          onClick={() =>
+            isEmpty ? onStartWriting(String(chapter.id)) : onConvert(String(chapter.id))
+          }
         >
           {converting
             ? t('editor.converting')

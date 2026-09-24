@@ -29,7 +29,7 @@ vi.mock('../sceneService', () => sceneSvc);
 
 import { ChapterActionsNode, ChapterActionContext } from '../nodes/ChapterActionsNode';
 import type { ChapterActionContextValue } from '../nodes/ChapterActionsNode';
-import type { ScriptChapter } from '../../types';
+import type { ScriptChapter } from '../../types/api';
 
 type NodeCompProps = ComponentProps<typeof ChapterActionsNode>;
 

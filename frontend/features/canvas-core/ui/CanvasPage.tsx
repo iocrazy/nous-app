@@ -304,7 +304,8 @@ export function CanvasView({
           ?.id;
         if (!scriptId || cancelled || !sameCanvas()) return;
 
-        const sceneDocs = await listScenes(scriptId);
+        // Script ids are JSON numbers on /scripts/projects.
+        const sceneDocs = await listScenes(String(scriptId));
         if (cancelled || !sameCanvas()) return;
         promoteScenesRef.current = sceneDocs;
         setPromoteScenes(sceneDocs);

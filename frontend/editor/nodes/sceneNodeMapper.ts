@@ -14,7 +14,7 @@
  */
 
 import type { SceneDoc } from '../types';
-import type { ScriptChapter } from '../../types';
+import type { ScriptChapter } from '../../types/api';
 
 /** Longest summary line rendered on a scene node before truncation. */
 const SUMMARY_MAX = 60;
@@ -88,6 +88,12 @@ export function sceneSummary(scene: SceneDoc): string {
   return text.length > SUMMARY_MAX ? text.slice(0, SUMMARY_MAX) + '…' : text;
 }
 
+/** `branch_type` is a plain string on the wire; the create/update schemas only
+ * ever accept these two values. */
+function branchTypeOf(value: string | null | undefined): ChapterNodeData['branchType'] {
+  return value === 'condition' || value === 'choice' ? value : undefined;
+}
+
 function chapterNodeData(ch: ScriptChapter): ChapterNodeData {
   return {
     title: ch.title ?? '',
@@ -95,7 +101,7 @@ function chapterNodeData(ch: ScriptChapter): ChapterNodeData {
     content: ch.content ?? '',
     chapterNumber: ch.chapter_number ?? 0,
     branchLabel: ch.branch_label,
-    branchType: ch.branch_type,
+    branchType: branchTypeOf(ch.branch_type),
     contentJson: null,
   };
 }

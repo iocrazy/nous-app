@@ -20,6 +20,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.deps import AuthContext, get_auth
 from app.main import app
+from tests.api.script_wire_rows import script_project_row
 
 pytestmark = pytest.mark.unit
 
@@ -71,7 +72,10 @@ async def test_update_forwards_target_duration_sec(
 
     async def fake_update(self, record_id, data):
         captured.update(data)
-        return {"id": record_id, "target_duration_sec": data.get("target_duration_sec")}
+        # Real repository shape: every column, bigint ids as ints.
+        return script_project_row(
+            id=int(record_id), target_duration_sec=data.get("target_duration_sec")
+        )
 
     monkeypatch.setattr(ScriptProjectRepository, "update", fake_update)
 

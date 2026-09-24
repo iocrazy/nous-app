@@ -13,7 +13,7 @@
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SceneDoc } from '../types';
-import type { ScriptChapter } from '../../types';
+import type { ScriptChapter } from '../../types/api';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
@@ -217,7 +217,9 @@ describe('OutlineView drag reorder', () => {
     fireEvent.dragOver(headerEl, { dataTransfer: dt() });
     fireEvent.drop(headerEl, { dataTransfer: dt() });
 
-    expect(svc.moveScene).toHaveBeenCalledWith('200', { chapter_id: 100 });
+    // The chapter id arrives as a JSON number, but `SceneMoveRequest.chapter_id`
+    // is `str` and Pydantic does not coerce int → str: a numeric id was a 422.
+    expect(svc.moveScene).toHaveBeenCalledWith('200', { chapter_id: '100' });
     await vi.waitFor(() => expect(onReload).toHaveBeenCalled());
   });
 });

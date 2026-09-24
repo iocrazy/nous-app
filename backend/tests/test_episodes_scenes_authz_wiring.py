@@ -31,6 +31,7 @@ from app.core.scope_guards import (
     verify_script_read_access,
 )
 from app.main import app
+from tests.api.script_wire_rows import script_chapter_row
 
 pytestmark = pytest.mark.unit
 
@@ -177,7 +178,8 @@ async def test_canvas_update_chapter_persists_position(client, monkeypatch):
     async def fake_update(self, chapter_id, data):
         captured["chapter_id"] = chapter_id
         captured["data"] = data
-        return {"id": chapter_id, **data}
+        # Real repository shape: every column, bigint ids as ints.
+        return script_chapter_row(id=int(chapter_id), **data)
 
     monkeypatch.setattr(ScriptChapterRepository, "get_by_id", fake_chapter_get)
     monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
