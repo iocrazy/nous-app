@@ -215,8 +215,8 @@ class AnalysisRepository:
         The vector is passed as a formatted string with an explicit CAST.
 
         ``user_id`` scopes the scan to rows the caller owns and is REQUIRED.
-        It is the only cross-user control on ``/search/similar`` and
-        ``/search/quick``, neither of which post-filters the RPC output, so a
+        It is the only cross-user control on ``/search/similar``, which
+        does not post-filter the RPC output, so a
         default would let one forgotten keyword silently restore the global
         scan. Before migration 463 the RPC ranked every user's analysis rows
         and spent the whole ``limit`` budget before any ownership filter ran.

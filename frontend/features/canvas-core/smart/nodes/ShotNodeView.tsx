@@ -26,8 +26,8 @@
  * Generate: dispatches through the SAME canvas generations lane the Prompt
  * node's Run uses (`dispatchGenerations`/`pollGeneration`,
  * canvasGenerationService.ts) with `node_id` = this shot node's own id —
- * NOT the shots router's `/shots/{id}/generate` (that's the editor
- * storyboard rail's own dispatch lane). `canvas_generation_workflow`
+ * NOT the shots router's old `/shots/{id}/generate` (the retired editor
+ * storyboard rail's lane, removed in OpenAPI P6). `canvas_generation_workflow`
  * backfills `script_shots.image_url`/`status` server-side when the target
  * node is a bound shot (canvas subsystem facts §7 lane (c)); this view
  * still has to patch its OWN node mirror on completion — the backfill step

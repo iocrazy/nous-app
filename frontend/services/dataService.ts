@@ -63,6 +63,13 @@ export const saveFrontendConfig = async (config: {
 }): Promise<FrontendConfig | null> =>
   apiClient.put<FrontendConfig>('/api/v1/config', config);
 
+/*
+ * The four `/media/download/{platform_id}*` URLs below require the caller's
+ * Bearer header (the routes are `AuthDep`, and check that the caller holds the
+ * media). Fetch them with `downloadWithAuth` (utils/download) — a plain
+ * `<a href>`, `<img src>` or `downloadFile` sends no credential and gets a 401.
+ */
+
 /**
  * Get video download URL via backend API
  */

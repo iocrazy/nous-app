@@ -16,11 +16,12 @@ scene ids) hanging off a script. Pure synchronous CRUD — no AI, no workflow, n
 task_type. Scene links are stored as an ordered JSONB string array on the beat.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
     verify_beat_access,
@@ -28,12 +29,15 @@ from app.core.scope_guards import (
     verify_script_read_access,
 )
 from app.repositories.script_beat_repository import get_script_beat_repository
+from app.schemas.envelope import Envelope
 from app.schemas.script import BeatCreate, BeatMoveRequest, BeatUpdate
+from app.schemas.script_beat_responses import ScriptBeatRow
+from app.schemas.script_project_responses import ScriptAck
 
 router = APIRouter()
 
 
-@router.get("/scripts/{script_id}/beats")
+@router.get("/scripts/{script_id}/beats", response_model=Envelope[List[ScriptBeatRow]])
 async def list_beats(
     script_id: str,
     auth: AuthDep,
@@ -48,7 +52,7 @@ async def list_beats(
         raise HTTPException(status_code=500, detail="Failed to list beats")
 
 
-@router.post("/scripts/{script_id}/beats")
+@router.post("/scripts/{script_id}/beats", response_model=Envelope[ScriptBeatRow])
 async def create_beat(
     script_id: str,
     auth: AuthDep,
@@ -60,14 +64,16 @@ async def create_beat(
     try:
         data = body.model_dump(exclude_none=True)
         data["script_id"] = script_id
-        beat = await get_script_beat_repository().create(data)
+        beat = require_row(await get_script_beat_repository().create(data))
         return {"success": True, "data": beat}
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"[Beats] create for script {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create beat")
 
 
-@router.patch("/beats/{beat_id}")
+@router.patch("/beats/{beat_id}", response_model=Envelope[ScriptBeatRow])
 async def update_beat(
     beat_id: str,
     auth: AuthDep,
@@ -86,9 +92,8 @@ async def update_beat(
         for immutable_via_null in ("title", "scene_ids"):
             if data.get(immutable_via_null) is None:
                 data.pop(immutable_via_null, None)
-        beat = await get_script_beat_repository().update(beat_id, data)
-        if beat is None:
-            raise HTTPException(status_code=404, detail="Beat not found")
+        # None: the beat was deleted between the guard and the write.
+        beat = require_row(await get_script_beat_repository().update(beat_id, data))
         return {"success": True, "data": beat}
     except HTTPException:
         raise
@@ -97,7 +102,7 @@ async def update_beat(
         raise HTTPException(status_code=500, detail="Failed to update beat")
 
 
-@router.delete("/beats/{beat_id}")
+@router.delete("/beats/{beat_id}", response_model=ScriptAck)
 async def delete_beat(
     beat_id: str,
     auth: AuthDep,
@@ -112,7 +117,7 @@ async def delete_beat(
         raise HTTPException(status_code=500, detail="Failed to delete beat")
 
 
-@router.post("/beats/{beat_id}/move")
+@router.post("/beats/{beat_id}/move", response_model=Envelope[ScriptBeatRow])
 async def move_beat(
     beat_id: str,
     auth: AuthDep,
@@ -124,7 +129,9 @@ async def move_beat(
         beat = await get_script_beat_repository().move(
             beat_id, after_beat_id=body.after_beat_id
         )
-        return {"success": True, "data": beat}
+        return {"success": True, "data": require_row(beat)}
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"[Beats] move {beat_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to move beat")

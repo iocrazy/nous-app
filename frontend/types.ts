@@ -624,29 +624,11 @@ export interface Stroke {
   text?: string;  // For text tool
 }
 
-// Share types
+// The share types a user can pick when creating one (`ShareCreate.share_type`).
+// Share rows themselves are API shapes: `Share` etc. in `types/api.ts`.
 export type ShareType = 'link' | 'review' | 'presentation' | 'delivery';
-export type ShareStatus = 'active' | 'expired' | 'cancelled';
-
-export interface Share {
-  id: string;
-  resource_id: string | null;
-  project_file_id: string | null;
-  folder_id: string | null;
-  version_id: string | null;
-  share_type: ShareType;
-  shared_by: string;
-  share_name: string;
-  share_code: string;
-  password: string | null;
-  allow_download: boolean;
-  expires_at: string | null;
-  max_views: number | null;
-  view_count: number;
-  watermark: boolean;
-  status: ShareStatus;
-  created_at: string;
-}
+// The `status` filter of `GET /shares` (its query pattern).
+export type ShareStatus = 'active' | 'inactive' | 'expired' | 'cancelled';
 
 // ============================================
 // Storyboard Types

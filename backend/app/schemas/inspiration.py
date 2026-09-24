@@ -75,3 +75,18 @@ class ApiTokenCreated(ApiTokenOut):
     """Create response — the plaintext `token` is returned exactly once."""
 
     token: str
+
+
+class InspirationNoteActivityDay(BaseModel):
+    """A row of ``inspiration_activity()``: ``day`` is the repository's
+    ``date.isoformat()`` (``YYYY-MM-DD``), ``cnt`` a COUNT(*)."""
+
+    day: str
+    cnt: int
+
+
+class InspirationNoteTagCount(BaseModel):
+    """A row of ``inspiration_tag_counts()``."""
+
+    tag: str
+    cnt: int

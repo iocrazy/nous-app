@@ -9660,6 +9660,67 @@
         "title": "BeatCreate",
         "type": "object"
       },
+      "BeatMemoImageUpload": {
+        "description": "``POST /scripts/{id}/memos/upload``: the object-store path the caller\nthen persists into the memo's ``images`` array.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "BeatMemoImageUpload",
+        "type": "object"
+      },
+      "BeatMemoOut": {
+        "description": "One ``beat_memos`` row as the API returns it. Bigint ``id`` /\n``script_id`` serialize to strings (``coerce_numbers_to_str``) so JS never\nloses Snowflake precision; ``anchor_sec`` is a real INTEGER and stays an\nint. The handlers build their payload through this model, and it is also\nthe declared response model.",
+        "properties": {
+          "anchor_sec": {
+            "title": "Anchor Sec",
+            "type": "integer"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "script_id",
+          "anchor_sec",
+          "content",
+          "images",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BeatMemoOut",
+        "type": "object"
+      },
       "BeatMoveRequest": {
         "description": "Request body for `POST /beats/{beat_id}/move`.\n\n``after_beat_id`` names the beat this one lands just after; ``null`` moves it\nto the front. Beats are reordered within their script only.",
         "properties": {
@@ -9913,25 +9974,6 @@
           "file"
         ],
         "title": "Body_import_generation_api_v1_generated_media_import_post",
-        "type": "object"
-      },
-      "Body_import_script_api_v1_scripts_import_post": {
-        "properties": {
-          "file": {
-            "format": "binary",
-            "title": "File",
-            "type": "string"
-          },
-          "script_id": {
-            "title": "Script Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "file",
-          "script_id"
-        ],
-        "title": "Body_import_script_api_v1_scripts_import_post",
         "type": "object"
       },
       "Body_overwrite_version_content_api_v1_resources__resource_id__versions__version_id__content_put": {
@@ -13292,36 +13334,6 @@
         "title": "ConversationUpdate",
         "type": "object"
       },
-      "ConvertToStoryboardRequest": {
-        "description": "Request body for converting a chapter to storyboard scenes.",
-        "properties": {
-          "chapter_id": {
-            "title": "Chapter Id",
-            "type": "string"
-          },
-          "script_id": {
-            "title": "Script Id",
-            "type": "string"
-          },
-          "storyboard_project_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Storyboard Project Id"
-          }
-        },
-        "required": [
-          "script_id",
-          "chapter_id"
-        ],
-        "title": "ConvertToStoryboardRequest",
-        "type": "object"
-      },
       "CookieListResponse": {
         "description": "Response for GET /settings/cookies",
         "properties": {
@@ -14672,6 +14684,40 @@
         "title": "Envelope[AssetResponse]",
         "type": "object"
       },
+      "Envelope_BeatMemoImageUpload_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BeatMemoImageUpload"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[BeatMemoImageUpload]",
+        "type": "object"
+      },
+      "Envelope_BeatMemoOut_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BeatMemoOut"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[BeatMemoOut]",
+        "type": "object"
+      },
       "Envelope_BundleResponse_": {
         "properties": {
           "data": {
@@ -15135,6 +15181,27 @@
         "title": "Envelope[List[AssetResponse]]",
         "type": "object"
       },
+      "Envelope_List_BeatMemoOut__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BeatMemoOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[List[BeatMemoOut]]",
+        "type": "object"
+      },
       "Envelope_List_FolderRow__": {
         "properties": {
           "data": {
@@ -15280,6 +15347,90 @@
           "data"
         ],
         "title": "Envelope[List[ScriptAssetRow]]",
+        "type": "object"
+      },
+      "Envelope_List_ScriptBeatRow__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptBeatRow"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[List[ScriptBeatRow]]",
+        "type": "object"
+      },
+      "Envelope_List_ScriptCommitListItem__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptCommitListItem"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[List[ScriptCommitListItem]]",
+        "type": "object"
+      },
+      "Envelope_List_ScriptSceneNumbered__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptSceneNumbered"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[List[ScriptSceneNumbered]]",
+        "type": "object"
+      },
+      "Envelope_List_StoryboardShotResponse__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/StoryboardShotResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[List[StoryboardShotResponse]]",
         "type": "object"
       },
       "Envelope_List_TaskTrackingRow__": {
@@ -15834,6 +15985,23 @@
         "title": "Envelope[ScriptAssetRow]",
         "type": "object"
       },
+      "Envelope_ScriptBeatRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptBeatRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptBeatRow]",
+        "type": "object"
+      },
       "Envelope_ScriptCanvasSyncResult_": {
         "properties": {
           "data": {
@@ -15866,6 +16034,57 @@
           "data"
         ],
         "title": "Envelope[ScriptChapterRow]",
+        "type": "object"
+      },
+      "Envelope_ScriptCommitDiff_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptCommitDiff"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptCommitDiff]",
+        "type": "object"
+      },
+      "Envelope_ScriptCommitRollback_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptCommitRollback"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptCommitRollback]",
+        "type": "object"
+      },
+      "Envelope_ScriptCommitRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptCommitRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptCommitRow]",
         "type": "object"
       },
       "Envelope_ScriptNumberingLock_": {
@@ -15936,6 +16155,159 @@
         "title": "Envelope[ScriptProjectRow]",
         "type": "object"
       },
+      "Envelope_ScriptSceneCopilotOps_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptSceneCopilotOps"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptSceneCopilotOps]",
+        "type": "object"
+      },
+      "Envelope_ScriptSceneDeleteResult_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptSceneDeleteResult"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptSceneDeleteResult]",
+        "type": "object"
+      },
+      "Envelope_ScriptSceneNumbered_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptSceneNumbered"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptSceneNumbered]",
+        "type": "object"
+      },
+      "Envelope_ScriptSceneOpsResult_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptSceneOpsResult"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptSceneOpsResult]",
+        "type": "object"
+      },
+      "Envelope_ScriptScenePatched_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptScenePatched"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptScenePatched]",
+        "type": "object"
+      },
+      "Envelope_ScriptSceneResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScriptSceneResponse"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ScriptSceneResponse]",
+        "type": "object"
+      },
+      "Envelope_ShareCommentRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ShareCommentRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ShareCommentRow]",
+        "type": "object"
+      },
+      "Envelope_ShareRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ShareRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ShareRow]",
+        "type": "object"
+      },
+      "Envelope_ShareVisitorView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ShareVisitorView"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ShareVisitorView]",
+        "type": "object"
+      },
       "Envelope_StageBoard_": {
         "properties": {
           "data": {
@@ -15951,6 +16323,23 @@
           "data"
         ],
         "title": "Envelope[StageBoard]",
+        "type": "object"
+      },
+      "Envelope_StoryboardShotResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StoryboardShotResponse"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[StoryboardShotResponse]",
         "type": "object"
       },
       "Envelope_SurfaceCompletionSyncResult_": {
@@ -16509,6 +16898,27 @@
           "data"
         ],
         "title": "Envelope[list[ProjectTrashedCanvas]]",
+        "type": "object"
+      },
+      "Envelope_list_ShareComment__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ShareComment"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[ShareComment]]",
         "type": "object"
       },
       "Envelope_list_TeamCanvasProject__": {
@@ -18161,46 +18571,6 @@
           "task_ids"
         ],
         "title": "GenerateMissingResponse",
-        "type": "object"
-      },
-      "GenerateOutlineRequest": {
-        "description": "Request body for AI-generated story outline.",
-        "properties": {
-          "chapter_count": {
-            "default": 5,
-            "maximum": 20.0,
-            "minimum": 2.0,
-            "title": "Chapter Count",
-            "type": "integer"
-          },
-          "premise": {
-            "maxLength": 10000,
-            "minLength": 1,
-            "title": "Premise",
-            "type": "string"
-          },
-          "script_id": {
-            "title": "Script Id",
-            "type": "string"
-          },
-          "style_guide": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Style Guide"
-          }
-        },
-        "required": [
-          "script_id",
-          "premise"
-        ],
-        "title": "GenerateOutlineRequest",
         "type": "object"
       },
       "GenerateSlotFailure": {
@@ -20388,6 +20758,44 @@
           "target_id"
         ],
         "title": "InboxPost",
+        "type": "object"
+      },
+      "InspirationNoteActivityDay": {
+        "description": "A row of ``inspiration_activity()``: ``day`` is the repository's\n``date.isoformat()`` (``YYYY-MM-DD``), ``cnt`` a COUNT(*).",
+        "properties": {
+          "cnt": {
+            "title": "Cnt",
+            "type": "integer"
+          },
+          "day": {
+            "title": "Day",
+            "type": "string"
+          }
+        },
+        "required": [
+          "day",
+          "cnt"
+        ],
+        "title": "InspirationNoteActivityDay",
+        "type": "object"
+      },
+      "InspirationNoteTagCount": {
+        "description": "A row of ``inspiration_tag_counts()``.",
+        "properties": {
+          "cnt": {
+            "title": "Cnt",
+            "type": "integer"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag",
+          "cnt"
+        ],
+        "title": "InspirationNoteTagCount",
         "type": "object"
       },
       "InterestRequest": {
@@ -39286,147 +39694,6 @@
         "title": "SceneCreate",
         "type": "object"
       },
-      "SceneCreateAfterLock": {
-        "description": "Request body for `POST /scripts/{script_id}/scenes/after-lock` — a\nscene create for an ALREADY-LOCKED script (agent-layer spec §4.2 \"锁定后\n插入\"). Adds the same before/after sparse-insertion anchors ``move_scene``\nuses; omitting both is a tail append (continues the plain integer\nsequence — nothing to protect there, so no letter suffix).",
-        "properties": {
-          "after_scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "After Scene Id"
-          },
-          "before_scene_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Before Scene Id"
-          },
-          "chapter_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Chapter Id"
-          },
-          "heading_int_ext": {
-            "anyOf": [
-              {
-                "maxLength": 10,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heading Int Ext"
-          },
-          "height": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Height"
-          },
-          "location_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Location Id"
-          },
-          "location_text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Location Text"
-          },
-          "position_x": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Position X"
-          },
-          "position_y": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Position Y"
-          },
-          "sort_order": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sort Order"
-          },
-          "time_of_day": {
-            "anyOf": [
-              {
-                "maxLength": 20,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Time Of Day"
-          },
-          "width": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Width"
-          }
-        },
-        "title": "SceneCreateAfterLock",
-        "type": "object"
-      },
       "SceneMetaUpdate": {
         "description": "Request body for updating scene header fields / canvas coords. NEVER\ntouches content_version/content — those move through the ops endpoint.",
         "properties": {
@@ -39896,6 +40163,25 @@
         "title": "ScriptAck",
         "type": "object"
       },
+      "ScriptAiTaskDispatch": {
+        "description": "``{\"success\": true, \"task_id\": ...}``: the workflow is queued, poll the\n``task_tracking`` row.",
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "ScriptAiTaskDispatch",
+        "type": "object"
+      },
       "ScriptAssetCreate": {
         "description": "Request body for creating a script asset.",
         "properties": {
@@ -40088,6 +40374,113 @@
           }
         },
         "title": "ScriptAssetUpdate",
+        "type": "object"
+      },
+      "ScriptBeatRow": {
+        "description": "One ``script_beats`` row (``SELECT *`` shape).",
+        "properties": {
+          "beat_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beat Role"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Sec"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "scene_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scene Ids",
+            "type": "array"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "integer"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "start_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Sec"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "script_id",
+          "title",
+          "summary",
+          "scene_ids",
+          "sort_order",
+          "start_sec",
+          "duration_sec",
+          "beat_role",
+          "color",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ScriptBeatRow",
         "type": "object"
       },
       "ScriptCanvasSyncRequest": {
@@ -40636,6 +41029,461 @@
         "title": "ScriptChapterUpdate",
         "type": "object"
       },
+      "ScriptCommitDiff": {
+        "description": "``GET .../commits/{id}/diff``. ``authors`` maps actor uuids to display\nnames (``copilot`` and unresolved ids are absent).",
+        "properties": {
+          "authors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Authors",
+            "type": "object"
+          },
+          "scenes": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptCommitSceneDiff"
+            },
+            "title": "Scenes",
+            "type": "array"
+          },
+          "scenes_added": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptCommitSceneChange"
+            },
+            "title": "Scenes Added",
+            "type": "array"
+          },
+          "scenes_removed": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptCommitSceneChange"
+            },
+            "title": "Scenes Removed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scenes",
+          "scenes_added",
+          "scenes_removed",
+          "authors"
+        ],
+        "title": "ScriptCommitDiff",
+        "type": "object"
+      },
+      "ScriptCommitElementChange": {
+        "description": "One element-level change inside a scene diff, aligned by element id.\n``before`` / ``after`` are the raw element dicts (``None`` on the side the\nelement is missing from).",
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "after": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "added",
+              "removed",
+              "changed",
+              "moved"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "before",
+          "after",
+          "actor"
+        ],
+        "title": "ScriptCommitElementChange",
+        "type": "object"
+      },
+      "ScriptCommitListItem": {
+        "description": "``GET .../commits``: the row plus the author's display name (``None``\nwhen ``created_by`` has no profile / a blank username).",
+        "properties": {
+          "author_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Name"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "scene_ids": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptCommitSceneSnapshot"
+            },
+            "title": "Scene Ids",
+            "type": "array"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "integer"
+          },
+          "watermarks": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Watermarks",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "script_id",
+          "message",
+          "watermarks",
+          "scene_ids",
+          "created_by",
+          "created_at",
+          "author_name"
+        ],
+        "title": "ScriptCommitListItem",
+        "type": "object"
+      },
+      "ScriptCommitRollback": {
+        "description": "``POST .../commits/{id}/rollback``. A partial failure is still a 200:\nthe envelope's ``success`` is false and ``results`` lists every scene.",
+        "properties": {
+          "commit_id": {
+            "title": "Commit Id",
+            "type": "string"
+          },
+          "not_deleted": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Not Deleted",
+            "type": "array"
+          },
+          "not_resurrected": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Not Resurrected",
+            "type": "array"
+          },
+          "partial_failure": {
+            "title": "Partial Failure",
+            "type": "boolean"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptCommitRollbackSceneResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "commit_id",
+          "results",
+          "not_deleted",
+          "not_resurrected",
+          "partial_failure"
+        ],
+        "title": "ScriptCommitRollback",
+        "type": "object"
+      },
+      "ScriptCommitRollbackSceneResult": {
+        "description": "One scene's rollback outcome. ``error_code`` / ``error`` are only sent\non ``failed``.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "conflict",
+                  "error"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "scene_id": {
+            "title": "Scene Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "unchanged",
+              "rolled_back",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scene_id",
+          "status"
+        ],
+        "title": "ScriptCommitRollbackSceneResult",
+        "type": "object"
+      },
+      "ScriptCommitRow": {
+        "description": "One ``script_commits`` row (``SELECT *`` shape): ``POST .../commits``.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "scene_ids": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptCommitSceneSnapshot"
+            },
+            "title": "Scene Ids",
+            "type": "array"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "integer"
+          },
+          "watermarks": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Watermarks",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "script_id",
+          "message",
+          "watermarks",
+          "scene_ids",
+          "created_by",
+          "created_at"
+        ],
+        "title": "ScriptCommitRow",
+        "type": "object"
+      },
+      "ScriptCommitSceneChange": {
+        "description": "A scene added or removed between the two diff sides, with the actor who\nlast worked on it up to that side's watermark.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "heading_int_ext": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading Int Ext"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "location_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Text"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          }
+        },
+        "required": [
+          "id",
+          "sort_order",
+          "heading_int_ext",
+          "location_text",
+          "author"
+        ],
+        "title": "ScriptCommitSceneChange",
+        "type": "object"
+      },
+      "ScriptCommitSceneDiff": {
+        "description": "The element changes of one scene present on both diff sides.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "elements": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptCommitElementChange"
+            },
+            "title": "Elements",
+            "type": "array"
+          },
+          "scene_id": {
+            "title": "Scene Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scene_id",
+          "elements",
+          "author"
+        ],
+        "title": "ScriptCommitSceneDiff",
+        "type": "object"
+      },
+      "ScriptCommitSceneSnapshot": {
+        "description": "One entry of a commit's ``scene_ids`` snapshot\n(``version_service._scene_snapshot``).",
+        "properties": {
+          "heading_int_ext": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading Int Ext"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "location_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Text"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          }
+        },
+        "required": [
+          "id",
+          "sort_order",
+          "heading_int_ext",
+          "location_text"
+        ],
+        "title": "ScriptCommitSceneSnapshot",
+        "type": "object"
+      },
       "ScriptContextRequest": {
         "description": "§5.3：随消息携带的剧本选区 handle。文本折叠仍在 content 里（展示/\n持久化不变）；这里只携带 id，让 agent 能用 ReadScene/ProposeEdit 精确\n定位，而不是拿文本再搜一遍。id 全部字符串（BIGINT snowflake 精度）。",
         "properties": {
@@ -40722,6 +41570,30 @@
           "content"
         ],
         "title": "ScriptImportRequest",
+        "type": "object"
+      },
+      "ScriptImportScreenplayDispatch": {
+        "description": "``POST /scripts/import-screenplay``: the new script's id (a string on\nthis route — the handler ``str()``-s it) plus the import task to poll.",
+        "properties": {
+          "script_id": {
+            "title": "Script Id",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "script_id",
+          "task_id"
+        ],
+        "title": "ScriptImportScreenplayDispatch",
         "type": "object"
       },
       "ScriptNumberingLock": {
@@ -41091,6 +41963,658 @@
         "title": "ScriptProjectUpdate",
         "type": "object"
       },
+      "ScriptSceneCopilotOps": {
+        "description": "``POST /scenes/{id}/copilot-ops``: dry-run-validated ops (never\nwritten). ``proposal`` is only sent (as true) when the scene moved past\nthe caller's ``read_version``; the route uses\n``response_model_exclude_unset``.",
+        "properties": {
+          "base_version": {
+            "title": "Base Version",
+            "type": "integer"
+          },
+          "ops": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Ops",
+            "type": "array"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ops",
+          "base_version",
+          "summary"
+        ],
+        "title": "ScriptSceneCopilotOps",
+        "type": "object"
+      },
+      "ScriptSceneDeleteResult": {
+        "description": "``DELETE /scenes/{id}``: hard delete pre-lock (``deleted``), or the\nOMITTED row once numbering is locked (``omitted`` + ``scene``). A missing\nscene is a quiet no-op (both false, ``scene`` null).",
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "omitted": {
+            "title": "Omitted",
+            "type": "boolean"
+          },
+          "scene": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScriptSceneResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "deleted",
+          "omitted",
+          "scene"
+        ],
+        "title": "ScriptSceneDeleteResult",
+        "type": "object"
+      },
+      "ScriptSceneNumbered": {
+        "description": "A scene row plus the derived ``scene_no_in_episode`` (list / get): the\nlocked ``scene_number``, else the number derived from canonical order,\nelse null.",
+        "properties": {
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "content_json": {
+            "title": "Content Json"
+          },
+          "content_version": {
+            "title": "Content Version",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "heading_int_ext": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading Int Ext"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          },
+          "location_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Text"
+          },
+          "omitted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Omitted At"
+          },
+          "position_x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position X"
+          },
+          "position_y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Y"
+          },
+          "scene_no_in_episode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene No In Episode"
+          },
+          "scene_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Number"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "time_of_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Of Day"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "script_id",
+          "chapter_id",
+          "heading_int_ext",
+          "location_text",
+          "location_id",
+          "time_of_day",
+          "content_json",
+          "content",
+          "content_version",
+          "position_x",
+          "position_y",
+          "width",
+          "height",
+          "sort_order",
+          "created_at",
+          "updated_at",
+          "scene_number",
+          "omitted_at",
+          "scene_no_in_episode"
+        ],
+        "title": "ScriptSceneNumbered",
+        "type": "object"
+      },
+      "ScriptSceneOpsResult": {
+        "description": "``POST /scenes/{id}/elements/ops`` success: the new version and the\nelement list after the batch.",
+        "properties": {
+          "content_version": {
+            "title": "Content Version",
+            "type": "integer"
+          },
+          "elements": {
+            "items": {},
+            "title": "Elements",
+            "type": "array"
+          }
+        },
+        "required": [
+          "content_version",
+          "elements"
+        ],
+        "title": "ScriptSceneOpsResult",
+        "type": "object"
+      },
+      "ScriptScenePatched": {
+        "description": "``PATCH /scenes/{id}``. An update that writes a field returns the bare\nrow; an update with nothing to write re-reads the scene through\n``get_by_id``, which also carries ``scene_no_in_episode``. The route uses\n``response_model_exclude_unset`` so the key is only sent when present.",
+        "properties": {
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "content_json": {
+            "title": "Content Json"
+          },
+          "content_version": {
+            "title": "Content Version",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "heading_int_ext": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading Int Ext"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          },
+          "location_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Text"
+          },
+          "omitted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Omitted At"
+          },
+          "position_x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position X"
+          },
+          "position_y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Y"
+          },
+          "scene_no_in_episode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene No In Episode"
+          },
+          "scene_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Number"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "time_of_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Of Day"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "script_id",
+          "chapter_id",
+          "heading_int_ext",
+          "location_text",
+          "location_id",
+          "time_of_day",
+          "content_json",
+          "content",
+          "content_version",
+          "position_x",
+          "position_y",
+          "width",
+          "height",
+          "sort_order",
+          "created_at",
+          "updated_at",
+          "scene_number",
+          "omitted_at"
+        ],
+        "title": "ScriptScenePatched",
+        "type": "object"
+      },
+      "ScriptSceneResponse": {
+        "description": "One ``script_scenes`` row with its bigint ids as strings.",
+        "properties": {
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "content_json": {
+            "title": "Content Json"
+          },
+          "content_version": {
+            "title": "Content Version",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "heading_int_ext": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading Int Ext"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          },
+          "location_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Text"
+          },
+          "omitted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Omitted At"
+          },
+          "position_x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position X"
+          },
+          "position_y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Y"
+          },
+          "scene_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Number"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "time_of_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Of Day"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "script_id",
+          "chapter_id",
+          "heading_int_ext",
+          "location_text",
+          "location_id",
+          "time_of_day",
+          "content_json",
+          "content",
+          "content_version",
+          "position_x",
+          "position_y",
+          "width",
+          "height",
+          "sort_order",
+          "created_at",
+          "updated_at",
+          "scene_number",
+          "omitted_at"
+        ],
+        "title": "ScriptSceneResponse",
+        "type": "object"
+      },
       "ScriptSceneRow": {
         "description": "One ``script_scenes`` row plus the derived ``scene_no_in_episode``.\n\n``content_json`` is the scene's element list (JSONB, default ``[]``), so it\nis typed as any JSON value rather than an object.",
         "properties": {
@@ -41281,6 +42805,36 @@
           "scene_no_in_episode"
         ],
         "title": "ScriptSceneRow",
+        "type": "object"
+      },
+      "ScriptSceneVersionConflict": {
+        "description": "409 body of ``/elements/ops``: the editor rebases onto these.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "current_version": {
+            "title": "Current Version",
+            "type": "integer"
+          },
+          "elements": {
+            "items": {},
+            "title": "Elements",
+            "type": "array"
+          },
+          "success": {
+            "default": false,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "current_version",
+          "elements"
+        ],
+        "title": "ScriptSceneVersionConflict",
         "type": "object"
       },
       "SearchGroups": {
@@ -42438,6 +43992,76 @@
         "title": "ShareAccessRequest",
         "type": "object"
       },
+      "ShareComment": {
+        "description": "A review comment as a share visitor sees it.",
+        "properties": {
+          "author_id": {
+            "title": "Author Id",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "frame_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "timecode": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timecode"
+          }
+        },
+        "required": [
+          "id",
+          "content",
+          "timecode",
+          "frame_number",
+          "status",
+          "author_id",
+          "parent_id",
+          "created_at"
+        ],
+        "title": "ShareComment",
+        "type": "object"
+      },
       "ShareCommentCreate": {
         "description": "Request body for creating a comment on a shared resource.",
         "properties": {
@@ -42465,6 +44089,98 @@
           "content"
         ],
         "title": "ShareCommentCreate",
+        "type": "object"
+      },
+      "ShareCommentRow": {
+        "description": "The full ``review_comments`` row returned to the author who posted it.",
+        "properties": {
+          "author_id": {
+            "title": "Author Id",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "frame_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "timecode": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timecode"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "id",
+          "resource_id",
+          "author_id",
+          "content",
+          "status",
+          "created_at",
+          "updated_at",
+          "timecode",
+          "frame_number",
+          "parent_id",
+          "version_id"
+        ],
+        "title": "ShareCommentRow",
         "type": "object"
       },
       "ShareCreate": {
@@ -42602,6 +44318,215 @@
         "title": "ShareCreate",
         "type": "object"
       },
+      "ShareListResponse": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ShareRow"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ShareListResponse",
+        "type": "object"
+      },
+      "ShareMessageResponse": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "ShareMessageResponse",
+        "type": "object"
+      },
+      "ShareRow": {
+        "description": "One ``shares`` row as its owner sees it (``_enrich_share``).",
+        "properties": {
+          "allow_download": {
+            "title": "Allow Download",
+            "type": "boolean"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "has_password": {
+            "title": "Has Password",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "library_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Library Id"
+          },
+          "max_views": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Views"
+          },
+          "project_file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project File Id"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "share_code": {
+            "title": "Share Code",
+            "type": "string"
+          },
+          "share_name": {
+            "title": "Share Name",
+            "type": "string"
+          },
+          "share_type": {
+            "title": "Share Type",
+            "type": "string"
+          },
+          "share_url": {
+            "title": "Share Url",
+            "type": "string"
+          },
+          "shared_by": {
+            "title": "Shared By",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
+          "view_count": {
+            "title": "View Count",
+            "type": "integer"
+          },
+          "watermark": {
+            "title": "Watermark",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "share_type",
+          "shared_by",
+          "share_name",
+          "share_code",
+          "allow_download",
+          "view_count",
+          "watermark",
+          "status",
+          "created_at",
+          "expires_at",
+          "max_views",
+          "project_file_id",
+          "version_id",
+          "resource_id",
+          "folder_id",
+          "library_id",
+          "team_id",
+          "share_url",
+          "has_password"
+        ],
+        "title": "ShareRow",
+        "type": "object"
+      },
       "ShareSchemaResponse": {
         "properties": {
           "schema_url": {
@@ -42620,88 +44545,196 @@
         "title": "ShareSchemaResponse",
         "type": "object"
       },
-      "ShareUpdate": {
-        "description": "Request body for updating share settings.",
+      "ShareStatusToggleResponse": {
+        "description": "``DELETE /shares/{id}`` flips active ↔ inactive; no ``data`` key.",
         "properties": {
-          "allow_download": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Whether viewers can download",
-            "title": "Allow Download"
+          "message": {
+            "title": "Message",
+            "type": "string"
           },
-          "expires_at": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message",
+          "status"
+        ],
+        "title": "ShareStatusToggleResponse",
+        "type": "object"
+      },
+      "ShareVisitorView": {
+        "description": "What a visitor gets from ``POST /shares/code/{code}``.\n\nThe six resource keys (``mime_type`` … ``media_id``) are only present\nwhen the share points at a resource that still exists; the route is\ndeclared ``response_model_exclude_unset`` so an absent key stays absent.\n\n``access_token`` is the share grant (``app/api/share_access.py``): pass\nit as ``share_token`` to the media file routes and the comment routes.\nFor a password-protected share it is the only thing they accept.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "allow_download": {
+            "title": "Allow Download",
+            "type": "boolean"
+          },
+          "cover_image_path": {
             "anyOf": [
               {
-                "format": "date-time",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Expiration timestamp (UTC)",
-            "title": "Expires At"
+            "title": "Cover Image Path"
           },
-          "max_views": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "file_type": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Type"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
                 "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Maximum views allowed",
-            "title": "Max Views"
+            "title": "Folder Id"
           },
-          "password": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "media_id": {
             "anyOf": [
               {
-                "maxLength": 100,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Access password (empty string to remove)",
-            "title": "Password"
+            "title": "Media Id"
+          },
+          "mime_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime Type"
+          },
+          "project_file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project File Id"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "share_code": {
+            "title": "Share Code",
+            "type": "string"
           },
           "share_name": {
+            "title": "Share Name",
+            "type": "string"
+          },
+          "share_type": {
+            "title": "Share Type",
+            "type": "string"
+          },
+          "thumbnail_path": {
             "anyOf": [
               {
-                "maxLength": 200,
-                "minLength": 1,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Display name",
-            "title": "Share Name"
+            "title": "Thumbnail Path"
           },
-          "watermark": {
+          "version_id": {
             "anyOf": [
               {
-                "type": "boolean"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Whether to apply watermark",
-            "title": "Watermark"
+            "title": "Version Id"
+          },
+          "view_count": {
+            "title": "View Count",
+            "type": "integer"
+          },
+          "watermark": {
+            "title": "Watermark",
+            "type": "boolean"
           }
         },
-        "title": "ShareUpdate",
+        "required": [
+          "id",
+          "share_type",
+          "share_name",
+          "share_code",
+          "allow_download",
+          "watermark",
+          "view_count",
+          "resource_id",
+          "project_file_id",
+          "folder_id",
+          "version_id",
+          "created_at",
+          "access_token"
+        ],
+        "title": "ShareVisitorView",
         "type": "object"
       },
       "ShotCreate": {
@@ -42801,35 +44834,6 @@
           }
         },
         "title": "ShotCreate",
-        "type": "object"
-      },
-      "ShotMoveRequest": {
-        "description": "Request body for `POST /shots/{shot_id}/move`.\n\nShots are reordered WITHIN their scene only (no cross-scene move in P3), so\nthere is no reparent field — just the sparse-insertion anchors.",
-        "properties": {
-          "after_shot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "After Shot Id"
-          },
-          "before_shot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Before Shot Id"
-          }
-        },
-        "title": "ShotMoveRequest",
         "type": "object"
       },
       "ShotUpdate": {
@@ -44656,6 +46660,196 @@
         "title": "StoryboardProgress",
         "type": "object"
       },
+      "StoryboardShotResponse": {
+        "description": "One ``script_shots`` row with its bigint ids as strings.",
+        "properties": {
+          "camera_angle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Camera Angle"
+          },
+          "camera_movement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Camera Movement"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by_agent_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Agent Run Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "focal_length": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Focal Length"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "lighting": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lighting"
+          },
+          "scene_id": {
+            "title": "Scene Id",
+            "type": "string"
+          },
+          "shot_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shot Number"
+          },
+          "shot_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shot Type"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Url"
+          }
+        },
+        "required": [
+          "id",
+          "scene_id",
+          "shot_number",
+          "shot_type",
+          "camera_angle",
+          "camera_movement",
+          "focal_length",
+          "lighting",
+          "description",
+          "image_url",
+          "thumbnail_url",
+          "video_url",
+          "status",
+          "sort_order",
+          "created_at",
+          "updated_at",
+          "created_by_agent_run_id"
+        ],
+        "title": "StoryboardShotResponse",
+        "type": "object"
+      },
+      "StoryboardTaskDispatch": {
+        "description": "The flat ``{\"success\", \"task_id\"}`` body of an async dispatch.",
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "StoryboardTaskDispatch",
+        "type": "object"
+      },
       "StyleProfileUpdate": {
         "description": "Request body for PUT /projects/{id}/style-profile.\n\nAll fields optional — absent fields keep their stored value (merge\nsemantics, never clobber).",
         "properties": {
@@ -45196,6 +47390,20 @@
           "sort_order"
         ],
         "title": "TagGroupItem",
+        "type": "object"
+      },
+      "TagGroupMutationResult": {
+        "description": "``PUT /tags/groups/reorder`` and ``DELETE /tags/groups/{id}``: the\nbody is only the success flag; the caller refetches the groups.",
+        "properties": {
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "TagGroupMutationResult",
         "type": "object"
       },
       "TagGroupReorder": {
@@ -47821,6 +50029,47 @@
           "featured_min_score"
         ],
         "title": "TopicScoringConfigResponse",
+        "type": "object"
+      },
+      "TopicScriptChapter": {
+        "description": "One chapter of the script_ai outline (``ScriptAIService.generate_outline``\nalways emits both keys, truncated strings).",
+        "properties": {
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "summary"
+        ],
+        "title": "TopicScriptChapter",
+        "type": "object"
+      },
+      "TopicScriptResponse": {
+        "description": "``POST /topics/{hotspot_id}/generate-script``: no ``data`` key — the\noutline travels as ``script`` next to ``success``.",
+        "properties": {
+          "script": {
+            "items": {
+              "$ref": "#/components/schemas/TopicScriptChapter"
+            },
+            "title": "Script",
+            "type": "array"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "script"
+        ],
+        "title": "TopicScriptResponse",
         "type": "object"
       },
       "TopicSuggestResponse": {
@@ -76418,9 +78667,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Beat Api V1 Beats  Beat Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScriptAck"
                 }
               }
             },
@@ -76503,9 +78750,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Beat Api V1 Beats  Beat Id  Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptBeatRow_"
                 }
               }
             },
@@ -76590,9 +78835,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Move Beat Api V1 Beats  Beat Id  Move Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptBeatRow_"
                 }
               }
             },
@@ -79901,9 +82144,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Commit Api V1 Commits  Commit Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScriptAck"
                 }
               }
             },
@@ -86843,11 +89084,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "*/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "The attachment's bytes, served with its stored mime (Range-aware)"
           },
           "422": {
             "content": {
@@ -87121,7 +89365,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InspirationNoteActivityDay"
+                  },
+                  "title": "Response Notes Activity Api V1 Inspiration Notes Activity Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -87162,7 +89412,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InspirationNoteTagCount"
+                  },
+                  "title": "Response Notes Tags Api V1 Inspiration Notes Tags Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -91676,7 +93932,7 @@
     },
     "/api/v1/media/{media_id}/audio": {
       "get": {
-        "description": "Serve standalone background audio for carousel content.\n\n- **media_id**: parsed_media Snowflake ID\n\nAuthentication: Bearer Token, API Key, or ?token= query param",
+        "description": "Serve standalone background audio for carousel content.\n\n- **media_id**: parsed_media Snowflake ID\n\nAuthentication: Bearer Token, API Key, ?token= or ?share_token=",
         "operationId": "serve_audio_file_api_v1_media__media_id__audio_get",
         "parameters": [
           {
@@ -91695,6 +93951,22 @@
             "schema": {
               "title": "Token",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "share_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Share Token"
             }
           },
           {
@@ -91914,7 +94186,7 @@
     },
     "/api/v1/media/{media_id}/slides": {
       "get": {
-        "description": "List slide files for a carousel/image-text media item.\n\n- **media_id**: parsed_media Snowflake ID",
+        "description": "List slide files for a carousel/image-text media item.\n\n- **media_id**: parsed_media Snowflake ID\n\nAuthentication: Bearer Token, API Key, or ?share_token= (share page)",
         "operationId": "list_slides_api_v1_media__media_id__slides_get",
         "parameters": [
           {
@@ -91924,6 +94196,22 @@
             "schema": {
               "title": "Media Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "share_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Share Token"
             }
           },
           {
@@ -91990,7 +94278,7 @@
     },
     "/api/v1/media/{media_id}/slides/{filename}": {
       "get": {
-        "description": "Serve a single slide file.\n\n- **media_id**: parsed_media Snowflake ID\n- **filename**: Slide filename (e.g. 001.jpg, 002.mp4)\n\nAuthentication: Bearer Token, API Key, or ?token= query param",
+        "description": "Serve a single slide file.\n\n- **media_id**: parsed_media Snowflake ID\n- **filename**: Slide filename (e.g. 001.jpg, 002.mp4)\n\nAuthentication: Bearer Token, API Key, ?token= or ?share_token=",
         "operationId": "serve_slide_file_api_v1_media__media_id__slides__filename__get",
         "parameters": [
           {
@@ -92018,6 +94306,22 @@
             "schema": {
               "title": "Token",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "share_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Share Token"
             }
           },
           {
@@ -92471,9 +94775,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Memo Api V1 Memos  Memo Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScriptAck"
                 }
               }
             },
@@ -92556,9 +94858,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Memo Api V1 Memos  Memo Id  Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_BeatMemoOut_"
                 }
               }
             },
@@ -99506,7 +101806,7 @@
     },
     "/api/v1/projects/{project_id}/storyboard/generate-missing": {
       "post": {
-        "description": "Batch-generate every empty storyboard shot in the project (flag-gated).\n\nFlag ``FEATURE_SHOT_GENERATE`` off → 404 (existence hidden), mirroring\n``script_shots_router.py::generate_shot``.",
+        "description": "Batch-generate every empty storyboard shot in the project (flag-gated).\n\nFlag ``FEATURE_SHOT_GENERATE`` off → 404 (existence hidden), mirroring\nthe agent ``generate_shot_image`` tool.",
         "operationId": "generate_missing_frames_api_v1_projects__project_id__storyboard_generate_missing_post",
         "parameters": [
           {
@@ -107504,9 +109804,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Scene Api V1 Scenes  Scene Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptSceneDeleteResult_"
                 }
               }
             },
@@ -107579,9 +109877,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Scene Api V1 Scenes  Scene Id  Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptSceneNumbered_"
                 }
               }
             },
@@ -107664,9 +109960,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Scene Api V1 Scenes  Scene Id  Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptScenePatched_"
                 }
               }
             },
@@ -107741,9 +110035,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Auto Storyboard Api V1 Scenes  Scene Id  Auto Storyboard Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/StoryboardTaskDispatch"
                 }
               }
             },
@@ -107827,7 +110119,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ScriptSceneCopilotOps_"
+                }
               }
             },
             "description": "Successful Response"
@@ -107926,10 +110220,22 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ScriptSceneOpsResult_"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptSceneVersionConflict"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -107950,7 +110256,7 @@
     },
     "/api/v1/scenes/{scene_id}/move": {
       "post": {
-        "description": "Reorder (and optionally reparent) a scene. ``chapter_id`` omitted keeps\nthe current chapter; supplied (incl. null) reparents.",
+        "description": "Reorder (and optionally reparent) a scene. ``chapter_id`` omitted keeps\nthe current chapter; supplied (incl. null) reparents — a non-null one must\nbe a chapter of the scene's own script (404 otherwise).",
         "operationId": "move_scene_api_v1_scenes__scene_id__move_post",
         "parameters": [
           {
@@ -108010,9 +110316,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Move Scene Api V1 Scenes  Scene Id  Move Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptSceneResponse_"
                 }
               }
             },
@@ -108087,9 +110391,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Shots Api V1 Scenes  Scene Id  Shots Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_List_StoryboardShotResponse__"
                 }
               }
             },
@@ -108172,9 +110474,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Shot Api V1 Scenes  Scene Id  Shots Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_StoryboardShotResponse_"
                 }
               }
             },
@@ -108730,84 +111030,6 @@
         ]
       }
     },
-    "/api/v1/scripts/convert-to-storyboard": {
-      "post": {
-        "description": "Retired (Phase B P4 cutover): 410 Gone.\n\nThis was the bridge that converted a chapter into legacy-workbench storyboard\nnodes (``script_to_storyboard_workflow`` → storyboard_nodes /\nscript_storyboard_links). The workbench is retired and its ``/storyboard/*``\nroutes are 410-tombstoned; storyboarding now lives in the script editor as\nper-scene shots. The endpoint stays mounted (bookmarks / stale clients) but\nanswers 410 rather than writing to the deprecated tables. The workflow it\nused to dispatch (``script_to_storyboard_workflow``) and the storyboard\ntables it wrote were both removed once these 410s were confirmed stable.",
-        "operationId": "convert_to_storyboard_api_v1_scripts_convert_to_storyboard_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConvertToStoryboardRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Convert To Storyboard Api V1 Scripts Convert To Storyboard Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Convert To Storyboard",
-        "tags": [
-          "Script AI"
-        ]
-      }
-    },
     "/api/v1/scripts/create-branches": {
       "post": {
         "description": "Dispatch async story branching. Returns task_id immediately.",
@@ -108861,9 +111083,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Branches Api V1 Scripts Create Branches Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScriptAiTaskDispatch"
                 }
               }
             },
@@ -108939,9 +111159,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Expand Chapter Api V1 Scripts Expand Chapter Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScriptAiTaskDispatch"
                 }
               }
             },
@@ -108964,166 +111182,9 @@
         ]
       }
     },
-    "/api/v1/scripts/generate-outline": {
-      "post": {
-        "description": "Dispatch async outline generation. Returns task_id immediately.",
-        "operationId": "generate_outline_api_v1_scripts_generate_outline_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GenerateOutlineRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Generate Outline Api V1 Scripts Generate Outline Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Generate Outline",
-        "tags": [
-          "Script AI"
-        ]
-      }
-    },
-    "/api/v1/scripts/import": {
-      "post": {
-        "description": "Parse an uploaded file and return structured chapter content.\n\nAccepts TXT, PDF, and DOCX files (max 10 MB).\nReturns a list of chapters extracted from the document.",
-        "operationId": "import_script_api_v1_scripts_import_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_import_script_api_v1_scripts_import_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Import Script Api V1 Scripts Import Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Import Script",
-        "tags": [
-          "Script Import",
-          "Script Import"
-        ]
-      }
-    },
     "/api/v1/scripts/import-screenplay": {
       "post": {
-        "description": "Create a script from imported text and dispatch the import workflow.\n\nGuard口径 mirrors ``create_script_project``: ``require_team_id`` scopes the\nnew script to the caller's team. Returns ``{success, script_id, task_id}``\nimmediately; the client polls ``task_id`` and opens the editor on the new\n``script_id`` once the workflow completes.",
+        "description": "Create a script from imported text and dispatch the import workflow.\n\nGuard口径 mirrors ``create_script_project``: the caller must be able to\nwrite the target project (it is in the body, so the guard runs\nimperatively — before this, any signed-in user could create a script in\nany project id), and ``require_team_id`` scopes the new script to the\ncaller's team. Returns ``{success, script_id, task_id}``\nimmediately; the client polls ``task_id`` and opens the editor on the new\n``script_id`` once the workflow completes.",
         "operationId": "import_screenplay_api_v1_scripts_import_screenplay_post",
         "parameters": [
           {
@@ -109174,9 +111235,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Import Screenplay Api V1 Scripts Import Screenplay Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScriptImportScreenplayDispatch"
                 }
               }
             },
@@ -110482,9 +112541,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Beats Api V1 Scripts  Script Id  Beats Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_List_ScriptBeatRow__"
                 }
               }
             },
@@ -110567,9 +112624,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Beat Api V1 Scripts  Script Id  Beats Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptBeatRow_"
                 }
               }
             },
@@ -110653,9 +112708,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Convert To Scenes Api V1 Scripts  Script Id  Chapters  Chapter Id  Convert To Scenes Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScriptAiTaskDispatch"
                 }
               }
             },
@@ -110730,9 +112783,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Commits Api V1 Scripts  Script Id  Commits Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_List_ScriptCommitListItem__"
                 }
               }
             },
@@ -110815,9 +112866,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Commit Api V1 Scripts  Script Id  Commits Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptCommitRow_"
                 }
               }
             },
@@ -110919,9 +112968,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Diff Commit Api V1 Scripts  Script Id  Commits  Commit Id  Diff Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptCommitDiff_"
                 }
               }
             },
@@ -111005,9 +113052,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Rollback Commit Api V1 Scripts  Script Id  Commits  Commit Id  Rollback Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptCommitRollback_"
                 }
               }
             },
@@ -111027,109 +113072,6 @@
         "summary": "Rollback Commit",
         "tags": [
           "Script Versions"
-        ]
-      }
-    },
-    "/api/v1/scripts/{script_id}/export": {
-      "get": {
-        "description": "Export a script project in the requested format.\n\nSupported formats: txt, md, json, docx.",
-        "operationId": "export_script_api_v1_scripts__script_id__export_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "script_id",
-            "required": true,
-            "schema": {
-              "title": "Script Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Export format: txt | md | json | docx",
-            "in": "query",
-            "name": "format",
-            "required": true,
-            "schema": {
-              "description": "Export format: txt | md | json | docx",
-              "title": "Format",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Branch ID (reserved)",
-            "in": "query",
-            "name": "branch_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Branch ID (reserved)",
-              "title": "Branch Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Export Script",
-        "tags": [
-          "Script Export",
-          "Script Export"
         ]
       }
     },
@@ -111185,9 +113127,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Memos Api V1 Scripts  Script Id  Memos Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_List_BeatMemoOut__"
                 }
               }
             },
@@ -111270,9 +113210,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Memo Api V1 Scripts  Script Id  Memos Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_BeatMemoOut_"
                 }
               }
             },
@@ -111357,9 +113295,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Upload Memo Image Api V1 Scripts  Script Id  Memos Upload Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_BeatMemoImageUpload_"
                 }
               }
             },
@@ -111450,11 +113386,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "image/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "The memo image bytes."
           },
           "422": {
             "content": {
@@ -111525,9 +113464,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Scenes Api V1 Scripts  Script Id  Scenes Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_List_ScriptSceneNumbered__"
                 }
               }
             },
@@ -111550,7 +113487,7 @@
         ]
       },
       "post": {
-        "description": "Create a scene under a script. sort_order auto-assigns to MAX+STEP\nwithin the (script_id, chapter_id) group when omitted.",
+        "description": "Create a scene under a script. sort_order auto-assigns to MAX+STEP\nwithin the (script_id, chapter_id) group when omitted. A ``chapter_id``\nmust be a chapter of this script (404 otherwise).",
         "operationId": "create_scene_api_v1_scripts__script_id__scenes_post",
         "parameters": [
           {
@@ -111610,9 +113547,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Scene Api V1 Scripts  Script Id  Scenes Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_ScriptSceneResponse_"
                 }
               }
             },
@@ -111630,93 +113565,6 @@
           }
         },
         "summary": "Create Scene",
-        "tags": [
-          "Script Scenes"
-        ]
-      }
-    },
-    "/api/v1/scripts/{script_id}/scenes/after-lock": {
-      "post": {
-        "description": "Create a scene in an ALREADY-LOCKED script (agent-layer spec §4.2\n\"锁定后插入\"): positions it (bisecting between ``before_scene_id`` /\n``after_scene_id``, or appended at the tail when neither is given) and\nassigns its ``scene_number`` — a letter suffix for a genuine insert\nbetween two locked scenes, or the next plain integer for a tail append.\n404 if the script's numbering isn't locked yet (use the plain create\nendpoint pre-lock).",
-        "operationId": "create_scene_after_lock_api_v1_scripts__script_id__scenes_after_lock_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "script_id",
-            "required": true,
-            "schema": {
-              "title": "Script Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SceneCreateAfterLock"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Scene After Lock Api V1 Scripts  Script Id  Scenes After Lock Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Scene After Lock",
         "tags": [
           "Script Scenes"
         ]
@@ -111946,96 +113794,6 @@
           }
         },
         "summary": "Hybrid Search",
-        "tags": [
-          "Search",
-          "Search"
-        ]
-      }
-    },
-    "/api/v1/search/quick": {
-      "get": {
-        "description": "Quick search endpoint for search bar.\n\nSimplified semantic search with fewer options.",
-        "operationId": "quick_search_api_v1_search_quick_get",
-        "parameters": [
-          {
-            "description": "Search query",
-            "in": "query",
-            "name": "q",
-            "required": true,
-            "schema": {
-              "description": "Search query",
-              "maxLength": 200,
-              "minLength": 1,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 10,
-              "maximum": 50,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Quick Search",
         "tags": [
           "Search",
           "Search"
@@ -113021,7 +114779,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ShareListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -113043,7 +114803,7 @@
         ]
       },
       "post": {
-        "description": "Create a new share.\n\nAt least one of resource_id, project_file_id, or folder_id must be\nprovided.  A unique 8-character share code is generated automatically.\n\nAuthentication: Bearer Token or API Key",
+        "description": "Create a new share.\n\nAt least one of resource_id, project_file_id, or folder_id must be\nprovided, and the caller must be able to read it.  A unique 8-character\nshare code is generated automatically.\n\nAuthentication: Bearer Token or API Key",
         "operationId": "create_share_api_v1_shares_post",
         "parameters": [
           {
@@ -113093,7 +114853,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ShareRow_"
+                }
               }
             },
             "description": "Successful Response"
@@ -113117,7 +114879,7 @@
     },
     "/api/v1/shares/code/{share_code}": {
       "post": {
-        "description": "Public: access shared content by share code.\n\nValidates password (if set), checks expiration and max view limits,\nincrements view_count, and records a view in share_views.\n\nAuthentication: Optional (viewer identity is recorded if authenticated)",
+        "description": "Public: access shared content by share code.\n\nValidates password (if set), checks expiration and max view limits,\nincrements view_count, and records a view in share_views. Returns an\n``access_token`` (share grant) for the media and comment routes.\n\nAuthentication: Optional (viewer identity is recorded if authenticated)",
         "operationId": "access_share_by_code_api_v1_shares_code__share_code__post",
         "parameters": [
           {
@@ -113176,7 +114938,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ShareVisitorView_"
+                }
               }
             },
             "description": "Successful Response"
@@ -113200,7 +114964,7 @@
     },
     "/api/v1/shares/code/{share_code}/comments": {
       "get": {
-        "description": "Get comments for a shared resource (public endpoint).\n\nReturns review_comments for the share's resource, ordered by created_at.",
+        "description": "Get comments for a shared resource (public endpoint).\n\nReturns review_comments for the share's resource, ordered by created_at.\nA password-protected share needs ``share_token`` (the access_token).",
         "operationId": "get_share_comments_api_v1_shares_code__share_code__comments_get",
         "parameters": [
           {
@@ -113210,6 +114974,24 @@
             "schema": {
               "title": "Share Code",
               "type": "string"
+            }
+          },
+          {
+            "description": "The access_token from POST /shares/code/{code}. Required when the share has a password.",
+            "in": "query",
+            "name": "share_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The access_token from POST /shares/code/{code}. Required when the share has a password.",
+              "title": "Share Token"
             }
           },
           {
@@ -113249,7 +115031,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_list_ShareComment__"
+                }
               }
             },
             "description": "Successful Response"
@@ -113271,7 +115055,7 @@
         ]
       },
       "post": {
-        "description": "Create a comment on a shared resource.\n\nAuthenticated review-share members only (review_comments.author_id is\nNOT NULL — anonymous posts are rejected with 401).\nOnly available for review-type shares.",
+        "description": "Create a comment on a shared resource.\n\nAuthenticated review-share members only (review_comments.author_id is\nNOT NULL — anonymous posts are rejected with 401).\nOnly available for review-type shares; a password-protected share needs\n``share_token`` (the access_token).",
         "operationId": "create_share_comment_api_v1_shares_code__share_code__comments_post",
         "parameters": [
           {
@@ -113281,6 +115065,24 @@
             "schema": {
               "title": "Share Code",
               "type": "string"
+            }
+          },
+          {
+            "description": "The access_token from POST /shares/code/{code}. Required when the share has a password.",
+            "in": "query",
+            "name": "share_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The access_token from POST /shares/code/{code}. Required when the share has a password.",
+              "title": "Share Token"
             }
           },
           {
@@ -113330,7 +115132,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ShareCommentRow_"
+                }
               }
             },
             "description": "Successful Response"
@@ -113403,7 +115207,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ShareStatusToggleResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -113420,158 +115226,6 @@
           }
         },
         "summary": "Toggle Share Status",
-        "tags": [
-          "Shares"
-        ]
-      },
-      "get": {
-        "description": "Get detailed information about a share (owner only).\n\nReturns full share details including view statistics.\n\nAuthentication: Bearer Token or API Key",
-        "operationId": "get_share_api_v1_shares__share_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "share_id",
-            "required": true,
-            "schema": {
-              "title": "Share Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Share",
-        "tags": [
-          "Shares"
-        ]
-      },
-      "put": {
-        "description": "Update share settings (owner only).\n\nAllows modifying password, expiration, download permission, and watermark.\n\nAuthentication: Bearer Token or API Key",
-        "operationId": "update_share_api_v1_shares__share_id__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "share_id",
-            "required": true,
-            "schema": {
-              "title": "Share Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ShareUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Share",
         "tags": [
           "Shares"
         ]
@@ -113628,7 +115282,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ShareMessageResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -113651,156 +115307,6 @@
       }
     },
     "/api/v1/shots/{shot_id}": {
-      "delete": {
-        "description": "Delete a shot.",
-        "operationId": "delete_shot_api_v1_shots__shot_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "shot_id",
-            "required": true,
-            "schema": {
-              "title": "Shot Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Shot Api V1 Shots  Shot Id  Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Shot",
-        "tags": [
-          "Script Shots"
-        ]
-      },
-      "get": {
-        "description": "Get a single shot by id.",
-        "operationId": "get_shot_api_v1_shots__shot_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "shot_id",
-            "required": true,
-            "schema": {
-              "title": "Shot Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Shot Api V1 Shots  Shot Id  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Shot",
-        "tags": [
-          "Script Shots"
-        ]
-      },
       "patch": {
         "description": "Update shot parameter tags / description. NEVER touches status or URLs.",
         "operationId": "update_shot_api_v1_shots__shot_id__patch",
@@ -113862,9 +115368,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Shot Api V1 Shots  Shot Id  Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_StoryboardShotResponse_"
                 }
               }
             },
@@ -113887,86 +115391,9 @@
         ]
       }
     },
-    "/api/v1/shots/{shot_id}/generate": {
-      "post": {
-        "description": "Dispatch async single-shot image generation (flag-gated).\n\n- flag ``FEATURE_SHOT_GENERATE`` off → 404 (endpoint existence hidden).\n- sets ``status='generating'`` before dispatch; the workflow flips it to\n  'done' + image_url on success, or 'failed' on error.\n\nLOW (known, accepted): ``verify_shot_access`` is a Depends and runs BEFORE\nthis body, so a caller WITHOUT shot access gets the guard's 403/404 whether\nor not the flag is on — that leaks nothing about the flag (403/404 is\naccess-scoped, not existence-scoped) and the 404-hides-existence guarantee\nstill holds for callers WITH access.",
-        "operationId": "generate_shot_api_v1_shots__shot_id__generate_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "shot_id",
-            "required": true,
-            "schema": {
-              "title": "Shot Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Generate Shot Api V1 Shots  Shot Id  Generate Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Generate Shot",
-        "tags": [
-          "Script Shots"
-        ]
-      }
-    },
     "/api/v1/shots/{shot_id}/generate-video": {
       "post": {
-        "description": "Dispatch async single-shot video generation (flag-gated).\n\n- flag ``FEATURE_SHOT_VIDEO`` off → 404 (endpoint existence hidden).\n- Unlike ``/generate`` this endpoint does NOT flip ``shot.status``: the\n  ``status`` column is the IMAGE lane's state machine and a video run must\n  not clobber it. The video lifecycle lives in ``task_tracking``\n  (task_type='shot_video') and the workflow writes only ``shot.video_url`` on\n  success (see script_shot_video docstring). With no status flip there is\n  nothing to roll back on dispatch failure — the 500 + the task row are the\n  surface.\n\nLOW (known, accepted): ``verify_shot_access`` runs BEFORE this body, so a\ncaller without access gets 403/404 regardless of the flag — that leaks\nnothing about the flag (access-scoped, not existence-scoped).",
+        "description": "Dispatch async single-shot video generation (flag-gated).\n\n- flag ``FEATURE_SHOT_VIDEO`` off → 404 (endpoint existence hidden).\n- This endpoint does NOT flip ``shot.status``: the ``status`` column is the\n  IMAGE lane's state machine and a video run must not clobber it. The video\n  lifecycle lives in ``task_tracking`` (task_type='shot_video') and the\n  workflow writes only ``shot.video_url`` on success (see script_shot_video\n  docstring). With no status flip there is nothing to roll back on dispatch\n  failure — the 500 + the task row are the surface.\n\nLOW (known, accepted): ``verify_shot_access`` runs BEFORE this body, so a\ncaller without access gets 403/404 regardless of the flag — that leaks\nnothing about the flag (access-scoped, not existence-scoped).",
         "operationId": "generate_shot_video_api_v1_shots__shot_id__generate_video_post",
         "parameters": [
           {
@@ -114016,9 +115443,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Generate Shot Video Api V1 Shots  Shot Id  Generate Video Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/StoryboardTaskDispatch"
                 }
               }
             },
@@ -114036,93 +115461,6 @@
           }
         },
         "summary": "Generate Shot Video",
-        "tags": [
-          "Script Shots"
-        ]
-      }
-    },
-    "/api/v1/shots/{shot_id}/move": {
-      "post": {
-        "description": "Reorder a shot within its scene (sparse insertion between anchors).",
-        "operationId": "move_shot_api_v1_shots__shot_id__move_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "shot_id",
-            "required": true,
-            "schema": {
-              "title": "Shot Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ShotMoveRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Move Shot Api V1 Shots  Shot Id  Move Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Move Shot",
         "tags": [
           "Script Shots"
         ]
@@ -114659,7 +115997,7 @@
     },
     "/api/v1/tags/groups/reorder": {
       "put": {
-        "description": "Update sort_order for all groups based on the provided order.",
+        "description": "Update sort_order for all groups based on the provided order.\n\nAdmin only: ``tag_groups`` is one platform-wide table (no owner column),\nso the order is everyone's order.",
         "operationId": "reorder_tag_groups_api_v1_tags_groups_reorder_put",
         "parameters": [
           {
@@ -114709,7 +116047,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TagGroupMutationResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -114734,7 +116074,7 @@
     },
     "/api/v1/tags/groups/{group_id}": {
       "delete": {
-        "description": "Delete a tag group. Tags in this group become uncategorized.",
+        "description": "Delete a tag group. Tags in this group become uncategorized.\n\nAdmin only: the group is platform-wide and the un-grouping touches every\nuser's tags that sit in it.",
         "operationId": "delete_tag_group_api_v1_tags_groups__group_id__delete",
         "parameters": [
           {
@@ -114783,7 +116123,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TagGroupMutationResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -118547,7 +119889,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TopicScriptResponse"
+                }
               }
             },
             "description": "Successful Response"

@@ -10058,7 +10058,7 @@ export interface paths {
          *
          *     - **media_id**: parsed_media Snowflake ID
          *
-         *     Authentication: Bearer Token, API Key, or ?token= query param
+         *     Authentication: Bearer Token, API Key, ?token= or ?share_token=
          */
         get: operations["serve_audio_file_api_v1_media__media_id__audio_get"];
         put?: never;
@@ -10133,6 +10133,8 @@ export interface paths {
          * @description List slide files for a carousel/image-text media item.
          *
          *     - **media_id**: parsed_media Snowflake ID
+         *
+         *     Authentication: Bearer Token, API Key, or ?share_token= (share page)
          */
         get: operations["list_slides_api_v1_media__media_id__slides_get"];
         put?: never;
@@ -10157,7 +10159,7 @@ export interface paths {
          *     - **media_id**: parsed_media Snowflake ID
          *     - **filename**: Slide filename (e.g. 001.jpg, 002.mp4)
          *
-         *     Authentication: Bearer Token, API Key, or ?token= query param
+         *     Authentication: Bearer Token, API Key, ?token= or ?share_token=
          */
         get: operations["serve_slide_file_api_v1_media__media_id__slides__filename__get"];
         put?: never;
@@ -11824,7 +11826,7 @@ export interface paths {
          * @description Batch-generate every empty storyboard shot in the project (flag-gated).
          *
          *     Flag ``FEATURE_SHOT_GENERATE`` off → 404 (existence hidden), mirroring
-         *     ``script_shots_router.py::generate_shot``.
+         *     the agent ``generate_shot_image`` tool.
          */
         post: operations["generate_missing_frames_api_v1_projects__project_id__storyboard_generate_missing_post"];
         delete?: never;
@@ -13745,7 +13747,8 @@ export interface paths {
         /**
          * Move Scene
          * @description Reorder (and optionally reparent) a scene. ``chapter_id`` omitted keeps
-         *     the current chapter; supplied (incl. null) reparents.
+         *     the current chapter; supplied (incl. null) reparents — a non-null one must
+         *     be a chapter of the scene's own script (404 otherwise).
          */
         post: operations["move_scene_api_v1_scenes__scene_id__move_post"];
         delete?: never;
@@ -13867,35 +13870,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/scripts/convert-to-storyboard": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Convert To Storyboard
-         * @description Retired (Phase B P4 cutover): 410 Gone.
-         *
-         *     This was the bridge that converted a chapter into legacy-workbench storyboard
-         *     nodes (``script_to_storyboard_workflow`` → storyboard_nodes /
-         *     script_storyboard_links). The workbench is retired and its ``/storyboard/*``
-         *     routes are 410-tombstoned; storyboarding now lives in the script editor as
-         *     per-scene shots. The endpoint stays mounted (bookmarks / stale clients) but
-         *     answers 410 rather than writing to the deprecated tables. The workflow it
-         *     used to dispatch (``script_to_storyboard_workflow``) and the storyboard
-         *     tables it wrote were both removed once these 410s were confirmed stable.
-         */
-        post: operations["convert_to_storyboard_api_v1_scripts_convert_to_storyboard_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/scripts/create-branches": {
         parameters: {
             query?: never;
@@ -13936,49 +13910,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/scripts/generate-outline": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate Outline
-         * @description Dispatch async outline generation. Returns task_id immediately.
-         */
-        post: operations["generate_outline_api_v1_scripts_generate_outline_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/scripts/import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Import Script
-         * @description Parse an uploaded file and return structured chapter content.
-         *
-         *     Accepts TXT, PDF, and DOCX files (max 10 MB).
-         *     Returns a list of chapters extracted from the document.
-         */
-        post: operations["import_script_api_v1_scripts_import_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/scripts/import-screenplay": {
         parameters: {
             query?: never;
@@ -13992,8 +13923,11 @@ export interface paths {
          * Import Screenplay
          * @description Create a script from imported text and dispatch the import workflow.
          *
-         *     Guard口径 mirrors ``create_script_project``: ``require_team_id`` scopes the
-         *     new script to the caller's team. Returns ``{success, script_id, task_id}``
+         *     Guard口径 mirrors ``create_script_project``: the caller must be able to
+         *     write the target project (it is in the body, so the guard runs
+         *     imperatively — before this, any signed-in user could create a script in
+         *     any project id), and ``require_team_id`` scopes the new script to the
+         *     caller's team. Returns ``{success, script_id, task_id}``
          *     immediately; the client polls ``task_id`` and opens the editor on the new
          *     ``script_id`` once the workflow completes.
          */
@@ -14303,28 +14237,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/scripts/{script_id}/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Export Script
-         * @description Export a script project in the requested format.
-         *
-         *     Supported formats: txt, md, json, docx.
-         */
-        get: operations["export_script_api_v1_scripts__script_id__export_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/scripts/{script_id}/memos": {
         parameters: {
             query?: never;
@@ -14413,35 +14325,10 @@ export interface paths {
         /**
          * Create Scene
          * @description Create a scene under a script. sort_order auto-assigns to MAX+STEP
-         *     within the (script_id, chapter_id) group when omitted.
+         *     within the (script_id, chapter_id) group when omitted. A ``chapter_id``
+         *     must be a chapter of this script (404 otherwise).
          */
         post: operations["create_scene_api_v1_scripts__script_id__scenes_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/scripts/{script_id}/scenes/after-lock": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create Scene After Lock
-         * @description Create a scene in an ALREADY-LOCKED script (agent-layer spec §4.2
-         *     "锁定后插入"): positions it (bisecting between ``before_scene_id`` /
-         *     ``after_scene_id``, or appended at the tail when neither is given) and
-         *     assigns its ``scene_number`` — a letter suffix for a genuine insert
-         *     between two locked scenes, or the next plain integer for a tail append.
-         *     404 if the script's numbering isn't locked yet (use the plain create
-         *     endpoint pre-lock).
-         */
-        post: operations["create_scene_after_lock_api_v1_scripts__script_id__scenes_after_lock_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -14492,28 +14379,6 @@ export interface paths {
          *     Results are ranked by semantic similarity when a query is provided.
          */
         post: operations["hybrid_search_api_v1_search_hybrid_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/search/quick": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Quick Search
-         * @description Quick search endpoint for search bar.
-         *
-         *     Simplified semantic search with fewer options.
-         */
-        get: operations["quick_search_api_v1_search_quick_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -14762,7 +14627,8 @@ export interface paths {
          * @description Create a new share.
          *
          *     At least one of resource_id, project_file_id, or folder_id must be
-         *     provided.  A unique 8-character share code is generated automatically.
+         *     provided, and the caller must be able to read it.  A unique 8-character
+         *     share code is generated automatically.
          *
          *     Authentication: Bearer Token or API Key
          */
@@ -14787,7 +14653,8 @@ export interface paths {
          * @description Public: access shared content by share code.
          *
          *     Validates password (if set), checks expiration and max view limits,
-         *     increments view_count, and records a view in share_views.
+         *     increments view_count, and records a view in share_views. Returns an
+         *     ``access_token`` (share grant) for the media and comment routes.
          *
          *     Authentication: Optional (viewer identity is recorded if authenticated)
          */
@@ -14810,6 +14677,7 @@ export interface paths {
          * @description Get comments for a shared resource (public endpoint).
          *
          *     Returns review_comments for the share's resource, ordered by created_at.
+         *     A password-protected share needs ``share_token`` (the access_token).
          */
         get: operations["get_share_comments_api_v1_shares_code__share_code__comments_get"];
         put?: never;
@@ -14819,7 +14687,8 @@ export interface paths {
          *
          *     Authenticated review-share members only (review_comments.author_id is
          *     NOT NULL — anonymous posts are rejected with 401).
-         *     Only available for review-type shares.
+         *     Only available for review-type shares; a password-protected share needs
+         *     ``share_token`` (the access_token).
          */
         post: operations["create_share_comment_api_v1_shares_code__share_code__comments_post"];
         delete?: never;
@@ -14835,24 +14704,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Share
-         * @description Get detailed information about a share (owner only).
-         *
-         *     Returns full share details including view statistics.
-         *
-         *     Authentication: Bearer Token or API Key
-         */
-        get: operations["get_share_api_v1_shares__share_id__get"];
-        /**
-         * Update Share
-         * @description Update share settings (owner only).
-         *
-         *     Allows modifying password, expiration, download permission, and watermark.
-         *
-         *     Authentication: Bearer Token or API Key
-         */
-        put: operations["update_share_api_v1_shares__share_id__put"];
+        get?: never;
+        put?: never;
         post?: never;
         /**
          * Toggle Share Status
@@ -14895,18 +14748,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Shot
-         * @description Get a single shot by id.
-         */
-        get: operations["get_shot_api_v1_shots__shot_id__get"];
+        get?: never;
         put?: never;
         post?: never;
-        /**
-         * Delete Shot
-         * @description Delete a shot.
-         */
-        delete: operations["delete_shot_api_v1_shots__shot_id__delete"];
+        delete?: never;
         options?: never;
         head?: never;
         /**
@@ -14914,36 +14759,6 @@ export interface paths {
          * @description Update shot parameter tags / description. NEVER touches status or URLs.
          */
         patch: operations["update_shot_api_v1_shots__shot_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/shots/{shot_id}/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate Shot
-         * @description Dispatch async single-shot image generation (flag-gated).
-         *
-         *     - flag ``FEATURE_SHOT_GENERATE`` off → 404 (endpoint existence hidden).
-         *     - sets ``status='generating'`` before dispatch; the workflow flips it to
-         *       'done' + image_url on success, or 'failed' on error.
-         *
-         *     LOW (known, accepted): ``verify_shot_access`` is a Depends and runs BEFORE
-         *     this body, so a caller WITHOUT shot access gets the guard's 403/404 whether
-         *     or not the flag is on — that leaks nothing about the flag (403/404 is
-         *     access-scoped, not existence-scoped) and the 404-hides-existence guarantee
-         *     still holds for callers WITH access.
-         */
-        post: operations["generate_shot_api_v1_shots__shot_id__generate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/shots/{shot_id}/generate-video": {
@@ -14960,39 +14775,18 @@ export interface paths {
          * @description Dispatch async single-shot video generation (flag-gated).
          *
          *     - flag ``FEATURE_SHOT_VIDEO`` off → 404 (endpoint existence hidden).
-         *     - Unlike ``/generate`` this endpoint does NOT flip ``shot.status``: the
-         *       ``status`` column is the IMAGE lane's state machine and a video run must
-         *       not clobber it. The video lifecycle lives in ``task_tracking``
-         *       (task_type='shot_video') and the workflow writes only ``shot.video_url`` on
-         *       success (see script_shot_video docstring). With no status flip there is
-         *       nothing to roll back on dispatch failure — the 500 + the task row are the
-         *       surface.
+         *     - This endpoint does NOT flip ``shot.status``: the ``status`` column is the
+         *       IMAGE lane's state machine and a video run must not clobber it. The video
+         *       lifecycle lives in ``task_tracking`` (task_type='shot_video') and the
+         *       workflow writes only ``shot.video_url`` on success (see script_shot_video
+         *       docstring). With no status flip there is nothing to roll back on dispatch
+         *       failure — the 500 + the task row are the surface.
          *
          *     LOW (known, accepted): ``verify_shot_access`` runs BEFORE this body, so a
          *     caller without access gets 403/404 regardless of the flag — that leaks
          *     nothing about the flag (access-scoped, not existence-scoped).
          */
         post: operations["generate_shot_video_api_v1_shots__shot_id__generate_video_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/shots/{shot_id}/move": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Move Shot
-         * @description Reorder a shot within its scene (sparse insertion between anchors).
-         */
-        post: operations["move_shot_api_v1_shots__shot_id__move_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -15138,6 +14932,9 @@ export interface paths {
         /**
          * Reorder Tag Groups
          * @description Update sort_order for all groups based on the provided order.
+         *
+         *     Admin only: ``tag_groups`` is one platform-wide table (no owner column),
+         *     so the order is everyone's order.
          */
         put: operations["reorder_tag_groups_api_v1_tags_groups_reorder_put"];
         post?: never;
@@ -15164,6 +14961,9 @@ export interface paths {
         /**
          * Delete Tag Group
          * @description Delete a tag group. Tags in this group become uncategorized.
+         *
+         *     Admin only: the group is platform-wide and the un-grouping touches every
+         *     user's tags that sit in it.
          */
         delete: operations["delete_tag_group_api_v1_tags_groups__group_id__delete"];
         options?: never;
@@ -20441,6 +20241,39 @@ export interface components {
             title: string;
         };
         /**
+         * BeatMemoImageUpload
+         * @description ``POST /scripts/{id}/memos/upload``: the object-store path the caller
+         *     then persists into the memo's ``images`` array.
+         */
+        BeatMemoImageUpload: {
+            /** Path */
+            path: string;
+        };
+        /**
+         * BeatMemoOut
+         * @description One ``beat_memos`` row as the API returns it. Bigint ``id`` /
+         *     ``script_id`` serialize to strings (``coerce_numbers_to_str``) so JS never
+         *     loses Snowflake precision; ``anchor_sec`` is a real INTEGER and stays an
+         *     int. The handlers build their payload through this model, and it is also
+         *     the declared response model.
+         */
+        BeatMemoOut: {
+            /** Anchor Sec */
+            anchor_sec: number;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Images */
+            images: string[];
+            /** Script Id */
+            script_id: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
          * BeatMoveRequest
          * @description Request body for `POST /beats/{beat_id}/move`.
          *
@@ -20529,16 +20362,6 @@ export interface components {
             node_id?: string | null;
             /** Role */
             role?: string | null;
-        };
-        /** Body_import_script_api_v1_scripts_import_post */
-        Body_import_script_api_v1_scripts_import_post: {
-            /**
-             * File
-             * Format: binary
-             */
-            file: string;
-            /** Script Id */
-            script_id: string;
         };
         /** Body_overwrite_version_content_api_v1_resources__resource_id__versions__version_id__content_put */
         Body_overwrite_version_content_api_v1_resources__resource_id__versions__version_id__content_put: {
@@ -22160,18 +21983,6 @@ export interface components {
             type?: ("group" | "public") | null;
         };
         /**
-         * ConvertToStoryboardRequest
-         * @description Request body for converting a chapter to storyboard scenes.
-         */
-        ConvertToStoryboardRequest: {
-            /** Chapter Id */
-            chapter_id: string;
-            /** Script Id */
-            script_id: string;
-            /** Storyboard Project Id */
-            storyboard_project_id?: string | null;
-        };
-        /**
          * CookieListResponse
          * @description Response for GET /settings/cookies
          */
@@ -22824,6 +22635,24 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[BeatMemoImageUpload] */
+        Envelope_BeatMemoImageUpload_: {
+            data: components["schemas"]["BeatMemoImageUpload"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[BeatMemoOut] */
+        Envelope_BeatMemoOut_: {
+            data: components["schemas"]["BeatMemoOut"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[BundleResponse] */
         Envelope_BundleResponse_: {
             data: components["schemas"]["BundleResponse"];
@@ -23068,6 +22897,16 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[List[BeatMemoOut]] */
+        Envelope_List_BeatMemoOut__: {
+            /** Data */
+            data: components["schemas"]["BeatMemoOut"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[List[FolderRow]] */
         Envelope_List_FolderRow__: {
             /** Data */
@@ -23132,6 +22971,46 @@ export interface components {
         Envelope_List_ScriptAssetRow__: {
             /** Data */
             data: components["schemas"]["ScriptAssetRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[List[ScriptBeatRow]] */
+        Envelope_List_ScriptBeatRow__: {
+            /** Data */
+            data: components["schemas"]["ScriptBeatRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[List[ScriptCommitListItem]] */
+        Envelope_List_ScriptCommitListItem__: {
+            /** Data */
+            data: components["schemas"]["ScriptCommitListItem"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[List[ScriptSceneNumbered]] */
+        Envelope_List_ScriptSceneNumbered__: {
+            /** Data */
+            data: components["schemas"]["ScriptSceneNumbered"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[List[StoryboardShotResponse]] */
+        Envelope_List_StoryboardShotResponse__: {
+            /** Data */
+            data: components["schemas"]["StoryboardShotResponse"][];
             /**
              * Success
              * @default true
@@ -23428,6 +23307,15 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[ScriptBeatRow] */
+        Envelope_ScriptBeatRow_: {
+            data: components["schemas"]["ScriptBeatRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[ScriptCanvasSyncResult] */
         Envelope_ScriptCanvasSyncResult_: {
             data: components["schemas"]["ScriptCanvasSyncResult"];
@@ -23440,6 +23328,33 @@ export interface components {
         /** Envelope[ScriptChapterRow] */
         Envelope_ScriptChapterRow_: {
             data: components["schemas"]["ScriptChapterRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptCommitDiff] */
+        Envelope_ScriptCommitDiff_: {
+            data: components["schemas"]["ScriptCommitDiff"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptCommitRollback] */
+        Envelope_ScriptCommitRollback_: {
+            data: components["schemas"]["ScriptCommitRollback"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptCommitRow] */
+        Envelope_ScriptCommitRow_: {
+            data: components["schemas"]["ScriptCommitRow"];
             /**
              * Success
              * @default true
@@ -23482,9 +23397,99 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[ScriptSceneCopilotOps] */
+        Envelope_ScriptSceneCopilotOps_: {
+            data: components["schemas"]["ScriptSceneCopilotOps"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptSceneDeleteResult] */
+        Envelope_ScriptSceneDeleteResult_: {
+            data: components["schemas"]["ScriptSceneDeleteResult"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptSceneNumbered] */
+        Envelope_ScriptSceneNumbered_: {
+            data: components["schemas"]["ScriptSceneNumbered"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptSceneOpsResult] */
+        Envelope_ScriptSceneOpsResult_: {
+            data: components["schemas"]["ScriptSceneOpsResult"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptScenePatched] */
+        Envelope_ScriptScenePatched_: {
+            data: components["schemas"]["ScriptScenePatched"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ScriptSceneResponse] */
+        Envelope_ScriptSceneResponse_: {
+            data: components["schemas"]["ScriptSceneResponse"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ShareCommentRow] */
+        Envelope_ShareCommentRow_: {
+            data: components["schemas"]["ShareCommentRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ShareRow] */
+        Envelope_ShareRow_: {
+            data: components["schemas"]["ShareRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ShareVisitorView] */
+        Envelope_ShareVisitorView_: {
+            data: components["schemas"]["ShareVisitorView"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[StageBoard] */
         Envelope_StageBoard_: {
             data: components["schemas"]["StageBoard"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[StoryboardShotResponse] */
+        Envelope_StoryboardShotResponse_: {
+            data: components["schemas"]["StoryboardShotResponse"];
             /**
              * Success
              * @default true
@@ -23751,6 +23756,16 @@ export interface components {
         Envelope_list_ProjectTrashedCanvas__: {
             /** Data */
             data: components["schemas"]["ProjectTrashedCanvas"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ShareComment]] */
+        Envelope_list_ShareComment__: {
+            /** Data */
+            data: components["schemas"]["ShareComment"][];
             /**
              * Success
              * @default true
@@ -24407,23 +24422,6 @@ export interface components {
             dispatched_count: number;
             /** Task Ids */
             task_ids: string[];
-        };
-        /**
-         * GenerateOutlineRequest
-         * @description Request body for AI-generated story outline.
-         */
-        GenerateOutlineRequest: {
-            /**
-             * Chapter Count
-             * @default 5
-             */
-            chapter_count: number;
-            /** Premise */
-            premise: string;
-            /** Script Id */
-            script_id: string;
-            /** Style Guide */
-            style_guide?: string | null;
         };
         /**
          * GenerateSlotFailure
@@ -25320,6 +25318,27 @@ export interface components {
              * @enum {string}
              */
             target_kind: "conversation" | "issue";
+        };
+        /**
+         * InspirationNoteActivityDay
+         * @description A row of ``inspiration_activity()``: ``day`` is the repository's
+         *     ``date.isoformat()`` (``YYYY-MM-DD``), ``cnt`` a COUNT(*).
+         */
+        InspirationNoteActivityDay: {
+            /** Cnt */
+            cnt: number;
+            /** Day */
+            day: string;
+        };
+        /**
+         * InspirationNoteTagCount
+         * @description A row of ``inspiration_tag_counts()``.
+         */
+        InspirationNoteTagCount: {
+            /** Cnt */
+            cnt: number;
+            /** Tag */
+            tag: string;
         };
         /** InterestRequest */
         InterestRequest: {
@@ -31826,40 +31845,6 @@ export interface components {
             width?: number | null;
         };
         /**
-         * SceneCreateAfterLock
-         * @description Request body for `POST /scripts/{script_id}/scenes/after-lock` — a
-         *     scene create for an ALREADY-LOCKED script (agent-layer spec §4.2 "锁定后
-         *     插入"). Adds the same before/after sparse-insertion anchors ``move_scene``
-         *     uses; omitting both is a tail append (continues the plain integer
-         *     sequence — nothing to protect there, so no letter suffix).
-         */
-        SceneCreateAfterLock: {
-            /** After Scene Id */
-            after_scene_id?: string | null;
-            /** Before Scene Id */
-            before_scene_id?: string | null;
-            /** Chapter Id */
-            chapter_id?: string | null;
-            /** Heading Int Ext */
-            heading_int_ext?: string | null;
-            /** Height */
-            height?: number | null;
-            /** Location Id */
-            location_id?: string | null;
-            /** Location Text */
-            location_text?: string | null;
-            /** Position X */
-            position_x?: number | null;
-            /** Position Y */
-            position_y?: number | null;
-            /** Sort Order */
-            sort_order?: number | null;
-            /** Time Of Day */
-            time_of_day?: string | null;
-            /** Width */
-            width?: number | null;
-        };
-        /**
          * SceneMetaUpdate
          * @description Request body for updating scene header fields / canvas coords. NEVER
          *     touches content_version/content — those move through the ops endpoint.
@@ -32019,6 +32004,20 @@ export interface components {
             success: boolean;
         };
         /**
+         * ScriptAiTaskDispatch
+         * @description ``{"success": true, "task_id": ...}``: the workflow is queued, poll the
+         *     ``task_tracking`` row.
+         */
+        ScriptAiTaskDispatch: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Task Id */
+            task_id: string;
+        };
+        /**
          * ScriptAssetCreate
          * @description Request body for creating a script asset.
          */
@@ -32082,6 +32081,36 @@ export interface components {
             name?: string | null;
             /** Sort Order */
             sort_order?: number | null;
+        };
+        /**
+         * ScriptBeatRow
+         * @description One ``script_beats`` row (``SELECT *`` shape).
+         */
+        ScriptBeatRow: {
+            /** Beat Role */
+            beat_role: string | null;
+            /** Color */
+            color: string | null;
+            /** Created At */
+            created_at: string;
+            /** Duration Sec */
+            duration_sec: number | null;
+            /** Id */
+            id: number;
+            /** Scene Ids */
+            scene_ids: string[];
+            /** Script Id */
+            script_id: number;
+            /** Sort Order */
+            sort_order: number;
+            /** Start Sec */
+            start_sec: number | null;
+            /** Summary */
+            summary: string | null;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at: string;
         };
         /**
          * ScriptCanvasSyncRequest
@@ -32229,6 +32258,174 @@ export interface components {
             width?: number | null;
         };
         /**
+         * ScriptCommitDiff
+         * @description ``GET .../commits/{id}/diff``. ``authors`` maps actor uuids to display
+         *     names (``copilot`` and unresolved ids are absent).
+         */
+        ScriptCommitDiff: {
+            /** Authors */
+            authors: {
+                [key: string]: string;
+            };
+            /** Scenes */
+            scenes: components["schemas"]["ScriptCommitSceneDiff"][];
+            /** Scenes Added */
+            scenes_added: components["schemas"]["ScriptCommitSceneChange"][];
+            /** Scenes Removed */
+            scenes_removed: components["schemas"]["ScriptCommitSceneChange"][];
+        };
+        /**
+         * ScriptCommitElementChange
+         * @description One element-level change inside a scene diff, aligned by element id.
+         *     ``before`` / ``after`` are the raw element dicts (``None`` on the side the
+         *     element is missing from).
+         */
+        ScriptCommitElementChange: {
+            /** Actor */
+            actor: string | null;
+            /** After */
+            after: {
+                [key: string]: unknown;
+            } | null;
+            /** Before */
+            before: {
+                [key: string]: unknown;
+            } | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "added" | "removed" | "changed" | "moved";
+        };
+        /**
+         * ScriptCommitListItem
+         * @description ``GET .../commits``: the row plus the author's display name (``None``
+         *     when ``created_by`` has no profile / a blank username).
+         */
+        ScriptCommitListItem: {
+            /** Author Name */
+            author_name: string | null;
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Id */
+            id: number;
+            /** Message */
+            message: string;
+            /** Scene Ids */
+            scene_ids: components["schemas"]["ScriptCommitSceneSnapshot"][];
+            /** Script Id */
+            script_id: number;
+            /** Watermarks */
+            watermarks: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * ScriptCommitRollback
+         * @description ``POST .../commits/{id}/rollback``. A partial failure is still a 200:
+         *     the envelope's ``success`` is false and ``results`` lists every scene.
+         */
+        ScriptCommitRollback: {
+            /** Commit Id */
+            commit_id: string;
+            /** Not Deleted */
+            not_deleted: string[];
+            /** Not Resurrected */
+            not_resurrected: string[];
+            /** Partial Failure */
+            partial_failure: boolean;
+            /** Results */
+            results: components["schemas"]["ScriptCommitRollbackSceneResult"][];
+        };
+        /**
+         * ScriptCommitRollbackSceneResult
+         * @description One scene's rollback outcome. ``error_code`` / ``error`` are only sent
+         *     on ``failed``.
+         */
+        ScriptCommitRollbackSceneResult: {
+            /** Error */
+            error?: string | null;
+            /** Error Code */
+            error_code?: ("conflict" | "error") | null;
+            /** Scene Id */
+            scene_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unchanged" | "rolled_back" | "failed";
+        };
+        /**
+         * ScriptCommitRow
+         * @description One ``script_commits`` row (``SELECT *`` shape): ``POST .../commits``.
+         */
+        ScriptCommitRow: {
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Id */
+            id: number;
+            /** Message */
+            message: string;
+            /** Scene Ids */
+            scene_ids: components["schemas"]["ScriptCommitSceneSnapshot"][];
+            /** Script Id */
+            script_id: number;
+            /** Watermarks */
+            watermarks: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * ScriptCommitSceneChange
+         * @description A scene added or removed between the two diff sides, with the actor who
+         *     last worked on it up to that side's watermark.
+         */
+        ScriptCommitSceneChange: {
+            /** Author */
+            author: string | null;
+            /** Heading Int Ext */
+            heading_int_ext: string | null;
+            /** Id */
+            id: string;
+            /** Location Text */
+            location_text: string | null;
+            /** Sort Order */
+            sort_order: number | null;
+        };
+        /**
+         * ScriptCommitSceneDiff
+         * @description The element changes of one scene present on both diff sides.
+         */
+        ScriptCommitSceneDiff: {
+            /** Author */
+            author: string | null;
+            /** Elements */
+            elements: components["schemas"]["ScriptCommitElementChange"][];
+            /** Scene Id */
+            scene_id: string;
+        };
+        /**
+         * ScriptCommitSceneSnapshot
+         * @description One entry of a commit's ``scene_ids`` snapshot
+         *     (``version_service._scene_snapshot``).
+         */
+        ScriptCommitSceneSnapshot: {
+            /** Heading Int Ext */
+            heading_int_ext: string | null;
+            /** Id */
+            id: string;
+            /** Location Text */
+            location_text: string | null;
+            /** Sort Order */
+            sort_order: number | null;
+        };
+        /**
          * ScriptContextRequest
          * @description §5.3：随消息携带的剧本选区 handle。文本折叠仍在 content 里（展示/
          *     持久化不变）；这里只携带 id，让 agent 能用 ReadScene/ProposeEdit 精确
@@ -32270,6 +32467,22 @@ export interface components {
             name: string;
             /** Project Id */
             project_id: number;
+        };
+        /**
+         * ScriptImportScreenplayDispatch
+         * @description ``POST /scripts/import-screenplay``: the new script's id (a string on
+         *     this route — the handler ``str()``-s it) plus the import task to poll.
+         */
+        ScriptImportScreenplayDispatch: {
+            /** Script Id */
+            script_id: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Task Id */
+            task_id: string;
         };
         /**
          * ScriptNumberingLock
@@ -32383,6 +32596,190 @@ export interface components {
             target_duration_sec?: number | null;
         };
         /**
+         * ScriptSceneCopilotOps
+         * @description ``POST /scenes/{id}/copilot-ops``: dry-run-validated ops (never
+         *     written). ``proposal`` is only sent (as true) when the scene moved past
+         *     the caller's ``read_version``; the route uses
+         *     ``response_model_exclude_unset``.
+         */
+        ScriptSceneCopilotOps: {
+            /** Base Version */
+            base_version: number;
+            /** Ops */
+            ops: {
+                [key: string]: unknown;
+            }[];
+            /** Proposal */
+            proposal?: boolean | null;
+            /** Summary */
+            summary: string;
+        };
+        /**
+         * ScriptSceneDeleteResult
+         * @description ``DELETE /scenes/{id}``: hard delete pre-lock (``deleted``), or the
+         *     OMITTED row once numbering is locked (``omitted`` + ``scene``). A missing
+         *     scene is a quiet no-op (both false, ``scene`` null).
+         */
+        ScriptSceneDeleteResult: {
+            /** Deleted */
+            deleted: boolean;
+            /** Omitted */
+            omitted: boolean;
+            scene: components["schemas"]["ScriptSceneResponse"] | null;
+        };
+        /**
+         * ScriptSceneNumbered
+         * @description A scene row plus the derived ``scene_no_in_episode`` (list / get): the
+         *     locked ``scene_number``, else the number derived from canonical order,
+         *     else null.
+         */
+        ScriptSceneNumbered: {
+            /** Chapter Id */
+            chapter_id: string | null;
+            /** Content */
+            content: string;
+            /** Content Json */
+            content_json: unknown;
+            /** Content Version */
+            content_version: number;
+            /** Created At */
+            created_at: string;
+            /** Heading Int Ext */
+            heading_int_ext: string | null;
+            /** Height */
+            height: number | null;
+            /** Id */
+            id: string;
+            /** Location Id */
+            location_id: string | null;
+            /** Location Text */
+            location_text: string | null;
+            /** Omitted At */
+            omitted_at: string | null;
+            /** Position X */
+            position_x: number | null;
+            /** Position Y */
+            position_y: number | null;
+            /** Scene No In Episode */
+            scene_no_in_episode: string | null;
+            /** Scene Number */
+            scene_number: string | null;
+            /** Script Id */
+            script_id: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Time Of Day */
+            time_of_day: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Width */
+            width: number | null;
+        };
+        /**
+         * ScriptSceneOpsResult
+         * @description ``POST /scenes/{id}/elements/ops`` success: the new version and the
+         *     element list after the batch.
+         */
+        ScriptSceneOpsResult: {
+            /** Content Version */
+            content_version: number;
+            /** Elements */
+            elements: unknown[];
+        };
+        /**
+         * ScriptScenePatched
+         * @description ``PATCH /scenes/{id}``. An update that writes a field returns the bare
+         *     row; an update with nothing to write re-reads the scene through
+         *     ``get_by_id``, which also carries ``scene_no_in_episode``. The route uses
+         *     ``response_model_exclude_unset`` so the key is only sent when present.
+         */
+        ScriptScenePatched: {
+            /** Chapter Id */
+            chapter_id: string | null;
+            /** Content */
+            content: string;
+            /** Content Json */
+            content_json: unknown;
+            /** Content Version */
+            content_version: number;
+            /** Created At */
+            created_at: string;
+            /** Heading Int Ext */
+            heading_int_ext: string | null;
+            /** Height */
+            height: number | null;
+            /** Id */
+            id: string;
+            /** Location Id */
+            location_id: string | null;
+            /** Location Text */
+            location_text: string | null;
+            /** Omitted At */
+            omitted_at: string | null;
+            /** Position X */
+            position_x: number | null;
+            /** Position Y */
+            position_y: number | null;
+            /** Scene No In Episode */
+            scene_no_in_episode?: string | null;
+            /** Scene Number */
+            scene_number: string | null;
+            /** Script Id */
+            script_id: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Time Of Day */
+            time_of_day: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Width */
+            width: number | null;
+        };
+        /**
+         * ScriptSceneResponse
+         * @description One ``script_scenes`` row with its bigint ids as strings.
+         */
+        ScriptSceneResponse: {
+            /** Chapter Id */
+            chapter_id: string | null;
+            /** Content */
+            content: string;
+            /** Content Json */
+            content_json: unknown;
+            /** Content Version */
+            content_version: number;
+            /** Created At */
+            created_at: string;
+            /** Heading Int Ext */
+            heading_int_ext: string | null;
+            /** Height */
+            height: number | null;
+            /** Id */
+            id: string;
+            /** Location Id */
+            location_id: string | null;
+            /** Location Text */
+            location_text: string | null;
+            /** Omitted At */
+            omitted_at: string | null;
+            /** Position X */
+            position_x: number | null;
+            /** Position Y */
+            position_y: number | null;
+            /** Scene Number */
+            scene_number: string | null;
+            /** Script Id */
+            script_id: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Time Of Day */
+            time_of_day: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Width */
+            width: number | null;
+        };
+        /**
          * ScriptSceneRow
          * @description One ``script_scenes`` row plus the derived ``scene_no_in_episode``.
          *
@@ -32430,6 +32827,23 @@ export interface components {
             updated_at: string;
             /** Width */
             width: number | null;
+        };
+        /**
+         * ScriptSceneVersionConflict
+         * @description 409 body of ``/elements/ops``: the editor rebases onto these.
+         */
+        ScriptSceneVersionConflict: {
+            /** Code */
+            code: string;
+            /** Current Version */
+            current_version: number;
+            /** Elements */
+            elements: unknown[];
+            /**
+             * Success
+             * @default false
+             */
+            success: boolean;
         };
         /**
          * SearchGroups
@@ -32934,6 +33348,28 @@ export interface components {
             password?: string | null;
         };
         /**
+         * ShareComment
+         * @description A review comment as a share visitor sees it.
+         */
+        ShareComment: {
+            /** Author Id */
+            author_id: string;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: string;
+            /** Frame Number */
+            frame_number: number | null;
+            /** Id */
+            id: number;
+            /** Parent Id */
+            parent_id: number | null;
+            /** Status */
+            status: string;
+            /** Timecode */
+            timecode: number | null;
+        };
+        /**
          * ShareCommentCreate
          * @description Request body for creating a comment on a shared resource.
          */
@@ -32945,6 +33381,34 @@ export interface components {
              * @description Timestamp in seconds
              */
             timecode?: number | null;
+        };
+        /**
+         * ShareCommentRow
+         * @description The full ``review_comments`` row returned to the author who posted it.
+         */
+        ShareCommentRow: {
+            /** Author Id */
+            author_id: string;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: string;
+            /** Frame Number */
+            frame_number: number | null;
+            /** Id */
+            id: number;
+            /** Parent Id */
+            parent_id: number | null;
+            /** Resource Id */
+            resource_id: number;
+            /** Status */
+            status: string;
+            /** Timecode */
+            timecode: number | null;
+            /** Updated At */
+            updated_at: string;
+            /** Version Id */
+            version_id: number | null;
         };
         /**
          * ShareCreate
@@ -33014,6 +33478,74 @@ export interface components {
              */
             watermark: boolean;
         };
+        /** ShareListResponse */
+        ShareListResponse: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["ShareRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** ShareMessageResponse */
+        ShareMessageResponse: {
+            /** Message */
+            message: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * ShareRow
+         * @description One ``shares`` row as its owner sees it (``_enrich_share``).
+         */
+        ShareRow: {
+            /** Allow Download */
+            allow_download: boolean;
+            /** Created At */
+            created_at: string;
+            /** Expires At */
+            expires_at: string | null;
+            /** Folder Id */
+            folder_id: number | null;
+            /** Has Password */
+            has_password: boolean;
+            /** Id */
+            id: number;
+            /** Library Id */
+            library_id: number | null;
+            /** Max Views */
+            max_views: number | null;
+            /** Project File Id */
+            project_file_id: number | null;
+            /** Resource Id */
+            resource_id: number | null;
+            /** Share Code */
+            share_code: string;
+            /** Share Name */
+            share_name: string;
+            /** Share Type */
+            share_type: string;
+            /** Share Url */
+            share_url: string;
+            /** Shared By */
+            shared_by: string;
+            /** Status */
+            status: string;
+            /** Team Id */
+            team_id: number | null;
+            /** Version Id */
+            version_id: number | null;
+            /** View Count */
+            view_count: number;
+            /** Watermark */
+            watermark: boolean;
+        };
         /** ShareSchemaResponse */
         ShareSchemaResponse: {
             /** Schema Url */
@@ -33022,40 +33554,71 @@ export interface components {
             share_id: string;
         };
         /**
-         * ShareUpdate
-         * @description Request body for updating share settings.
+         * ShareStatusToggleResponse
+         * @description ``DELETE /shares/{id}`` flips active ↔ inactive; no ``data`` key.
          */
-        ShareUpdate: {
+        ShareStatusToggleResponse: {
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
             /**
-             * Allow Download
-             * @description Whether viewers can download
+             * Success
+             * @default true
              */
-            allow_download?: boolean | null;
-            /**
-             * Expires At
-             * @description Expiration timestamp (UTC)
-             */
-            expires_at?: string | null;
-            /**
-             * Max Views
-             * @description Maximum views allowed
-             */
-            max_views?: number | null;
-            /**
-             * Password
-             * @description Access password (empty string to remove)
-             */
-            password?: string | null;
-            /**
-             * Share Name
-             * @description Display name
-             */
-            share_name?: string | null;
-            /**
-             * Watermark
-             * @description Whether to apply watermark
-             */
-            watermark?: boolean | null;
+            success: boolean;
+        };
+        /**
+         * ShareVisitorView
+         * @description What a visitor gets from ``POST /shares/code/{code}``.
+         *
+         *     The six resource keys (``mime_type`` … ``media_id``) are only present
+         *     when the share points at a resource that still exists; the route is
+         *     declared ``response_model_exclude_unset`` so an absent key stays absent.
+         *
+         *     ``access_token`` is the share grant (``app/api/share_access.py``): pass
+         *     it as ``share_token`` to the media file routes and the comment routes.
+         *     For a password-protected share it is the only thing they accept.
+         */
+        ShareVisitorView: {
+            /** Access Token */
+            access_token: string;
+            /** Allow Download */
+            allow_download: boolean;
+            /** Cover Image Path */
+            cover_image_path?: string | null;
+            /** Created At */
+            created_at: string;
+            /** File Type */
+            file_type?: string | null;
+            /** Filename */
+            filename?: string | null;
+            /** Folder Id */
+            folder_id: number | null;
+            /** Id */
+            id: number;
+            /** Media Id */
+            media_id?: string | null;
+            /** Mime Type */
+            mime_type?: string | null;
+            /** Project File Id */
+            project_file_id: number | null;
+            /** Resource Id */
+            resource_id: number | null;
+            /** Share Code */
+            share_code: string;
+            /** Share Name */
+            share_name: string;
+            /** Share Type */
+            share_type: string;
+            /** Thumbnail Path */
+            thumbnail_path?: string | null;
+            /** Version Id */
+            version_id: number | null;
+            /** View Count */
+            view_count: number;
+            /** Watermark */
+            watermark: boolean;
         };
         /**
          * ShotCreate
@@ -33080,19 +33643,6 @@ export interface components {
             shot_type?: string | null;
             /** Sort Order */
             sort_order?: number | null;
-        };
-        /**
-         * ShotMoveRequest
-         * @description Request body for `POST /shots/{shot_id}/move`.
-         *
-         *     Shots are reordered WITHIN their scene only (no cross-scene move in P3), so
-         *     there is no reparent field — just the sparse-insertion anchors.
-         */
-        ShotMoveRequest: {
-            /** After Shot Id */
-            after_shot_id?: string | null;
-            /** Before Shot Id */
-            before_shot_id?: string | null;
         };
         /**
          * ShotUpdate
@@ -33808,6 +34358,59 @@ export interface components {
             total: number;
         };
         /**
+         * StoryboardShotResponse
+         * @description One ``script_shots`` row with its bigint ids as strings.
+         */
+        StoryboardShotResponse: {
+            /** Camera Angle */
+            camera_angle: string | null;
+            /** Camera Movement */
+            camera_movement: string | null;
+            /** Created At */
+            created_at: string;
+            /** Created By Agent Run Id */
+            created_by_agent_run_id: string | null;
+            /** Description */
+            description: string | null;
+            /** Focal Length */
+            focal_length: string | null;
+            /** Id */
+            id: string;
+            /** Image Url */
+            image_url: string | null;
+            /** Lighting */
+            lighting: string | null;
+            /** Scene Id */
+            scene_id: string;
+            /** Shot Number */
+            shot_number: number | null;
+            /** Shot Type */
+            shot_type: string | null;
+            /** Sort Order */
+            sort_order: number;
+            /** Status */
+            status: string;
+            /** Thumbnail Url */
+            thumbnail_url: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Video Url */
+            video_url: string | null;
+        };
+        /**
+         * StoryboardTaskDispatch
+         * @description The flat ``{"success", "task_id"}`` body of an async dispatch.
+         */
+        StoryboardTaskDispatch: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Task Id */
+            task_id: string;
+        };
+        /**
          * StyleProfileUpdate
          * @description Request body for PUT /projects/{id}/style-profile.
          *
@@ -34022,6 +34625,15 @@ export interface components {
             name: string;
             /** Sort Order */
             sort_order: number;
+        };
+        /**
+         * TagGroupMutationResult
+         * @description ``PUT /tags/groups/reorder`` and ``DELETE /tags/groups/{id}``: the
+         *     body is only the success flag; the caller refetches the groups.
+         */
+        TagGroupMutationResult: {
+            /** Success */
+            success: boolean;
         };
         /** TagGroupReorder */
         TagGroupReorder: {
@@ -35115,6 +35727,28 @@ export interface components {
             tier_weights: {
                 [key: string]: number;
             };
+        };
+        /**
+         * TopicScriptChapter
+         * @description One chapter of the script_ai outline (``ScriptAIService.generate_outline``
+         *     always emits both keys, truncated strings).
+         */
+        TopicScriptChapter: {
+            /** Summary */
+            summary: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * TopicScriptResponse
+         * @description ``POST /topics/{hotspot_id}/generate-script``: no ``data`` key — the
+         *     outline travels as ``script`` next to ``success``.
+         */
+        TopicScriptResponse: {
+            /** Script */
+            script: components["schemas"]["TopicScriptChapter"][];
+            /** Success */
+            success: boolean;
         };
         /** TopicSuggestResponse */
         TopicSuggestResponse: {
@@ -47621,9 +48255,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScriptAck"];
                 };
             };
             /** @description Validation Error */
@@ -47661,9 +48293,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptBeatRow_"];
                 };
             };
             /** @description Validation Error */
@@ -47701,9 +48331,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptBeatRow_"];
                 };
             };
             /** @description Validation Error */
@@ -49264,9 +49892,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScriptAck"];
                 };
             };
             /** @description Validation Error */
@@ -52710,13 +53336,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The attachment's bytes, served with its stored mime (Range-aware) */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "*/*": string;
                 };
             };
             /** @description Validation Error */
@@ -52856,7 +53482,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["InspirationNoteActivityDay"][];
                 };
             };
             /** @description Validation Error */
@@ -52887,7 +53513,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["InspirationNoteTagCount"][];
                 };
             };
             /** @description Validation Error */
@@ -54855,6 +55481,7 @@ export interface operations {
         parameters: {
             query?: {
                 token?: string;
+                share_token?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -54957,7 +55584,9 @@ export interface operations {
     };
     list_slides_api_v1_media__media_id__slides_get: {
         parameters: {
-            query?: never;
+            query?: {
+                share_token?: string | null;
+            };
             header?: {
                 authorization?: string | null;
                 "X-API-Key"?: string | null;
@@ -54993,6 +55622,7 @@ export interface operations {
         parameters: {
             query?: {
                 token?: string;
+                share_token?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -55191,9 +55821,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScriptAck"];
                 };
             };
             /** @description Validation Error */
@@ -55231,9 +55859,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_BeatMemoOut_"];
                 };
             };
             /** @description Validation Error */
@@ -61510,9 +62136,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptSceneNumbered_"];
                 };
             };
             /** @description Validation Error */
@@ -61546,9 +62170,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptSceneDeleteResult_"];
                 };
             };
             /** @description Validation Error */
@@ -61586,9 +62208,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptScenePatched_"];
                 };
             };
             /** @description Validation Error */
@@ -61622,9 +62242,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["StoryboardTaskDispatch"];
                 };
             };
             /** @description Validation Error */
@@ -61662,7 +62280,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ScriptSceneCopilotOps_"];
                 };
             };
             /** @description Validation Error */
@@ -61701,7 +62319,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ScriptSceneOpsResult_"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScriptSceneVersionConflict"];
                 };
             };
             /** @description Validation Error */
@@ -61739,9 +62366,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptSceneResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -61775,9 +62400,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_List_StoryboardShotResponse__"];
                 };
             };
             /** @description Validation Error */
@@ -61815,9 +62438,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_StoryboardShotResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -62077,44 +62698,6 @@ export interface operations {
             };
         };
     };
-    convert_to_storyboard_api_v1_scripts_convert_to_storyboard_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConvertToStoryboardRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     create_branches_api_v1_scripts_create_branches_post: {
         parameters: {
             query?: never;
@@ -62137,9 +62720,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScriptAiTaskDispatch"];
                 };
             };
             /** @description Validation Error */
@@ -62175,85 +62756,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generate_outline_api_v1_scripts_generate_outline_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GenerateOutlineRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    import_script_api_v1_scripts_import_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_import_script_api_v1_scripts_import_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScriptAiTaskDispatch"];
                 };
             };
             /** @description Validation Error */
@@ -62289,9 +62792,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScriptImportScreenplayDispatch"];
                 };
             };
             /** @description Validation Error */
@@ -62870,9 +63371,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_List_ScriptBeatRow__"];
                 };
             };
             /** @description Validation Error */
@@ -62910,9 +63409,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptBeatRow_"];
                 };
             };
             /** @description Validation Error */
@@ -62947,9 +63444,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScriptAiTaskDispatch"];
                 };
             };
             /** @description Validation Error */
@@ -62983,9 +63478,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_List_ScriptCommitListItem__"];
                 };
             };
             /** @description Validation Error */
@@ -63023,9 +63516,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptCommitRow_"];
                 };
             };
             /** @description Validation Error */
@@ -63063,9 +63554,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptCommitDiff_"];
                 };
             };
             /** @description Validation Error */
@@ -63100,48 +63589,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    export_script_api_v1_scripts__script_id__export_get: {
-        parameters: {
-            query: {
-                /** @description Export format: txt | md | json | docx */
-                format: string;
-                /** @description Branch ID (reserved) */
-                branch_id?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                script_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ScriptCommitRollback_"];
                 };
             };
             /** @description Validation Error */
@@ -63175,9 +63623,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_List_BeatMemoOut__"];
                 };
             };
             /** @description Validation Error */
@@ -63215,9 +63661,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_BeatMemoOut_"];
                 };
             };
             /** @description Validation Error */
@@ -63255,9 +63699,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_BeatMemoImageUpload_"];
                 };
             };
             /** @description Validation Error */
@@ -63288,13 +63730,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The memo image bytes. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "image/*": string;
                 };
             };
             /** @description Validation Error */
@@ -63328,9 +63770,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_List_ScriptSceneNumbered__"];
                 };
             };
             /** @description Validation Error */
@@ -63368,49 +63808,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_scene_after_lock_api_v1_scripts__script_id__scenes_after_lock_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                script_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SceneCreateAfterLock"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_ScriptSceneResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -63486,42 +63884,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    quick_search_api_v1_search_quick_get: {
-        parameters: {
-            query: {
-                /** @description Search query */
-                q: string;
-                limit?: number;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -63951,7 +64313,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ShareListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -63987,7 +64349,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ShareRow_"];
                 };
             };
             /** @description Validation Error */
@@ -64025,7 +64387,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ShareVisitorView_"];
                 };
             };
             /** @description Validation Error */
@@ -64041,7 +64403,10 @@ export interface operations {
     };
     get_share_comments_api_v1_shares_code__share_code__comments_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The access_token from POST /shares/code/{code}. Required when the share has a password. */
+                share_token?: string | null;
+            };
             header?: {
                 authorization?: string | null;
                 "X-API-Key"?: string | null;
@@ -64059,7 +64424,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ShareComment__"];
                 };
             };
             /** @description Validation Error */
@@ -64075,7 +64440,10 @@ export interface operations {
     };
     create_share_comment_api_v1_shares_code__share_code__comments_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The access_token from POST /shares/code/{code}. Required when the share has a password. */
+                share_token?: string | null;
+            };
             header?: {
                 authorization?: string | null;
                 "X-API-Key"?: string | null;
@@ -64097,79 +64465,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_share_api_v1_shares__share_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                share_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_share_api_v1_shares__share_id__put: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                share_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ShareUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ShareCommentRow_"];
                 };
             };
             /** @description Validation Error */
@@ -64203,7 +64499,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ShareStatusToggleResponse"];
                 };
             };
             /** @description Validation Error */
@@ -64237,79 +64533,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_shot_api_v1_shots__shot_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                shot_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_shot_api_v1_shots__shot_id__delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                shot_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ShareMessageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -64347,45 +64571,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generate_shot_api_v1_shots__shot_id__generate_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                shot_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_StoryboardShotResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -64419,49 +64605,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    move_shot_api_v1_shots__shot_id__move_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                shot_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ShotMoveRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["StoryboardTaskDispatch"];
                 };
             };
             /** @description Validation Error */
@@ -64736,7 +64880,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TagGroupMutationResult"];
                 };
             };
             /** @description Validation Error */
@@ -64808,7 +64952,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TagGroupMutationResult"];
                 };
             };
             /** @description Validation Error */
@@ -66403,7 +66547,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TopicScriptResponse"];
                 };
             };
             /** @description Validation Error */

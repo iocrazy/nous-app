@@ -12,6 +12,14 @@ type Slide = MediaSlide;
 interface SlidePlayerProps {
   mediaId: string;
   mediaToken?: string;
+  /**
+   * The share grant (`access_token` from `POST /shares/code/{code}`) when the
+   * player runs on the public share page. The visitor has no session: the
+   * slide list, each slide and the audio all take it as `?share_token=`.
+   * (SharePage used to pass the share code as `mediaToken`, which only takes a
+   * signed media token, so a shared album never loaded.)
+   */
+  shareToken?: string;
   downloadStatus?: string; // 'pending' | 'downloading' | 'completed' | 'failed'
   /**
    * Is a download actually running for this media? Derived from task_tracking
@@ -31,7 +39,7 @@ interface SlidePlayerProps {
   onSlideChange?: (slideName: string, index: number, total: number) => void;
 }
 
-export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, downloadStatus, isDownloading, onSlideChange }) => {
+export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, shareToken, downloadStatus, isDownloading, onSlideChange }) => {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,13 +53,19 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
 
   const baseUrl = getApiUrl();
 
-  // Build authenticated URL with token query param
-  const buildSlideUrl = useCallback((filename: string) => {
-    const url = `${baseUrl}/api/v1/media/${mediaId}/slides/${filename}`;
-    return mediaToken ? `${url}?token=${encodeURIComponent(mediaToken)}` : url;
-  }, [baseUrl, mediaId, mediaToken]);
+  // <img>/<video>/<audio> cannot send a header: the credential rides the URL.
+  const credentialQuery = shareToken
+    ? `?share_token=${encodeURIComponent(shareToken)}`
+    : mediaToken
+      ? `?token=${encodeURIComponent(mediaToken)}`
+      : '';
 
-  const audioUrl = `${baseUrl}/api/v1/media/${mediaId}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`;
+  const buildSlideUrl = useCallback(
+    (filename: string) => `${baseUrl}/api/v1/media/${mediaId}/slides/${filename}${credentialQuery}`,
+    [baseUrl, mediaId, credentialQuery],
+  );
+
+  const audioUrl = `${baseUrl}/api/v1/media/${mediaId}/audio${credentialQuery}`;
 
   // Fetch slide list on mount
   useEffect(() => {
@@ -62,8 +76,9 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
       setLoadError(null);
       try {
         const headers = await getAuthHeaders();
+        const shareQuery = shareToken ? `?share_token=${encodeURIComponent(shareToken)}` : '';
         const resp = await fetch(
-          `${baseUrl}/api/v1/media/${mediaId}/slides`,
+          `${baseUrl}/api/v1/media/${mediaId}/slides${shareQuery}`,
           { headers },
         );
         if (!resp.ok) {
@@ -88,7 +103,7 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
 
     fetchSlides();
     return () => { cancelled = true; };
-  }, [baseUrl, mediaId]);
+  }, [baseUrl, mediaId, shareToken]);
 
   // Navigate slides
   const goTo = useCallback((index: number) => {

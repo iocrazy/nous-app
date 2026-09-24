@@ -183,3 +183,10 @@ class TagStatisticsResponse(BaseModel):
     success: bool = True
     top_tags: List[TagCountItem]
     total_tagged_videos: int = 0
+
+
+class TagGroupMutationResult(BaseModel):
+    """``PUT /tags/groups/reorder`` and ``DELETE /tags/groups/{id}``: the
+    body is only the success flag; the caller refetches the groups."""
+
+    success: bool

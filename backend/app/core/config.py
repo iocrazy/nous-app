@@ -165,10 +165,11 @@ class Settings(BaseSettings):
     )
     FEATURE_SHOT_GENERATE: bool = Field(
         default=False,
-        description="Enable single-shot image generation (POST "
-        "/shots/{id}/generate): dispatches a DBOS workflow that runs the "
+        description="Enable storyboard shot image generation (the agent "
+        "GenerateShotImage tool and POST /projects/{id}/storyboard/generate-"
+        "missing): dispatches a DBOS workflow that runs the "
         "storyboard image-provider chain and writes the produced URL onto the "
-        "shot row. Off (default) = the endpoint 404s (existence hidden) — this "
+        "shot row. Off (default) = those 404 (existence hidden) — this "
         "is an independent switch for the image-generation cost surface. Flip "
         "true once the generate chain is validated on the target stack.",
     )

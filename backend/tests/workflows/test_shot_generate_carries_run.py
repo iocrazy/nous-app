@@ -376,7 +376,11 @@ def _scan_enqueue_sites() -> list[_EnqueueSite]:
 
 
 def test_every_shot_enqueue_site_passes_the_three_keys():
-    """四个站点全覆盖——而且是**扫出来的**，不是手数的。
+    """三个站点全覆盖——而且是**扫出来的**，不是手数的。
+
+    OpenAPI P6 删掉了人手点的 ``/shots/{id}/generate``（#1797 之后没有调用方），
+    站点从四个降到三个：出图是 agent 的 ``GenerateShotImage`` 与项目的
+    ``generate-missing``，出视频是 ``/shots/{id}/generate-video``。
 
     加宽站点这件事的失败模式就是漏掉一个，而漏掉的那个通常没有测试。
     新加第五个站点忘了带坐标，这条转红——无论那个站点的参数怎么排、
@@ -384,10 +388,9 @@ def test_every_shot_enqueue_site_passes_the_three_keys():
     """
     sites = _scan_enqueue_sites()
 
-    assert len(sites) == 4, f"expected 4 enqueue sites, found {len(sites)}: {sites}"
-    # 出图三个、出视频一个——数量对了但类型错了，说明扫到了别的 workflow。
+    assert len(sites) == 3, f"expected 3 enqueue sites, found {len(sites)}: {sites}"
+    # 出图两个、出视频一个——数量对了但类型错了，说明扫到了别的 workflow。
     assert sorted(s.which for s in sites) == [
-        "script_shot_generate_workflow",
         "script_shot_generate_workflow",
         "script_shot_generate_workflow",
         "script_shot_video_workflow",

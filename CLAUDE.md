@@ -127,7 +127,7 @@ bash scripts/branch-health.sh           # 列出所有 worktree 落后 master �
 
 ### 边界 mock 必须用真实 JSON 形状（2026-08-12 血泪）
 
-任何模拟后端 HTTP 响应体的 mock（`page.route` fulfill、桩 `fetch` 等）必须照抄后端真实返回的 JSON 形状——字段类型（number vs string）也算，不能按前端书写习惯"美化"。典型陷阱：Snowflake BIGINT 主键/外键，`scenes`/`shots` 两个 router 原样返回 ORM dict 是 JSON **number**，`canvases` router 显式 `str(out["id"])` 是 JSON **string**——同一类 id 在不同资源上形状不同，是真实的、故意的，不是可以"统一"的漂移。
+任何模拟后端 HTTP 响应体的 mock（`page.route` fulfill、桩 `fetch` 等）必须照抄后端真实返回的 JSON 形状——字段类型（number vs string）也算，不能按前端书写习惯"美化"。典型陷阱：Snowflake BIGINT 主键/外键，`script_beats` / `script_versions`（beats、commits）两个 router 原样返回 ORM dict 是 JSON **number**，`scenes`/`shots` 两个 router 自 #1809 起在 `_to_response` 边界转成 JSON **string**，`canvases` router 显式 `str(out["id"])` 也是 JSON **string**——同一类 id 在不同资源上形状不同，是真实的、故意的，不是可以"统一"的漂移（以 `backend/openapi.json` 与各域 wire 测试为准）。
 
 2026-08-12 分镜画布 P0 事故的根因之一就是这条纪律缺失：全仓库手写 fixture 一律用理想化字符串 id（`'shot1'`、`'200'`），从未有测试真正跑过数字 id 分支，导致"对账索引按字符串建、真实响应给数字"的类型不匹配在生产环境才第一次触发（102 个重复节点、画布空白）。区分口径见 `frontend/e2e/helpers/realShapes.ts` 顶部注释：模拟"HTTP 响应体"要用真实 wire 形状；模拟"已归一化的前端 service 函数"（如 `vi.mock('editor/sceneService')`）用该函数自己文档化的返回类型（通常是 string）才是对的——判断标准是你在模拟哪一层边界，不是"哪个更像 TypeScript"。
 

@@ -166,6 +166,17 @@ async def test_commit_delete_404_missing(client, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
+# The real shape ``VersionService.compute_diff`` builds (the route declares a
+# response model now, so a partial dict would be a 500).
+_ADDED = {
+    "id": "333",
+    "sort_order": 3000,
+    "heading_int_ext": "INT",
+    "location_text": "Kitchen",
+    "author": None,
+}
+
+
 @pytest.mark.asyncio
 async def test_diff_shape(client, monkeypatch, _same_team, _commit_belongs):
     from app.services.script.version_service import VersionService
@@ -173,10 +184,23 @@ async def test_diff_shape(client, monkeypatch, _same_team, _commit_belongs):
     async def fake_compute_diff(self, script_id, commit_a, commit_b):
         return {
             "scenes": [
-                {"scene_id": "111", "elements": [{"kind": "changed", "id": "el_1"}]}
+                {
+                    "scene_id": "111",
+                    "elements": [
+                        {
+                            "kind": "changed",
+                            "id": "el_1",
+                            "before": {"id": "el_1", "text": "a"},
+                            "after": {"id": "el_1", "text": "b"},
+                            "actor": None,
+                        }
+                    ],
+                    "author": None,
+                }
             ],
-            "scenes_added": [{"id": "333"}],
+            "scenes_added": [_ADDED],
             "scenes_removed": [],
+            "authors": {},
         }
 
     monkeypatch.setattr(VersionService, "compute_diff", fake_compute_diff)
@@ -186,7 +210,7 @@ async def test_diff_shape(client, monkeypatch, _same_team, _commit_belongs):
     body = resp.json()
     assert body["success"] is True
     assert body["data"]["scenes"][0]["scene_id"] == "111"
-    assert body["data"]["scenes_added"] == [{"id": "333"}]
+    assert body["data"]["scenes_added"] == [_ADDED]
 
 
 @pytest.mark.asyncio

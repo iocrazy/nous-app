@@ -414,3 +414,86 @@ export type MediaExtractAudioResult = Schemas['MediaExtractAudioResponse'];
 /** `success` is false when no track could be dispatched; `flow_id` may be null. */
 export type MediaSodaDownloadResult = Schemas['MediaSodaDownloadResponse'];
 // —— end P5 media (A) ——
+
+// ── P6 scenes/shots ──
+// `/api/v1/scripts/{id}/scenes`, `/api/v1/scenes/*` and `/api/v1/scenes/{id}/shots`,
+// `/api/v1/shots/{id}`. Unlike `/scripts/projects`, these routers stringify
+// every bigint id (#1809), so ids are `string` here. `editor/sceneService`
+// normalizes the rows further (SceneDoc, Shot) — callers use those.
+/** A `script_scenes` row. List / get add `scene_no_in_episode`, and PATCH adds
+ * it when nothing was written; `toSceneDoc` passes it through untyped. */
+export type ScriptSceneWire = Schemas['ScriptSceneResponse'];
+/** `POST /scenes/{id}/elements/ops` success payload. */
+export type ScriptSceneOpsResult = Schemas['ScriptSceneOpsResult'];
+/** 409 body of `/elements/ops` (the editor rebases onto it). */
+export type ScriptSceneVersionConflict = Schemas['ScriptSceneVersionConflict'];
+/** `POST /scenes/{id}/copilot-ops`: `proposal` is only present (true) for a stale read. */
+export type ScriptSceneCopilotOps = Schemas['ScriptSceneCopilotOps'];
+/** A `script_shots` row (status is a plain string on the wire). */
+export type StoryboardShotWire = Schemas['StoryboardShotResponse'];
+/** The flat `{ success, task_id }` body of `POST /scenes/{id}/auto-storyboard`. */
+export type StoryboardTaskDispatch = Schemas['StoryboardTaskDispatch'];
+// —— end P6 scenes/shots ——
+
+// ── P6 tags/search/topics/inspiration ──
+// Tag group writes (`/api/v1/tags/groups*`) are platform-admin only since P6;
+// `GET /tags/groups` stays open. `GET /search/quick` was removed (no caller).
+/** A `tag_groups` row as `/tags/groups` renders it: the id is stringified and
+ * there is no `created_at` (the old hand-written copy claimed one). */
+export type TagGroup = Schemas['TagGroupItem'];
+/** `PUT /tags/groups/reorder` and `DELETE /tags/groups/{id}`. */
+export type TagGroupMutationResult = Schemas['TagGroupMutationResult'];
+/** `POST /topics/{hotspot_id}/generate-script`: the script_ai outline. */
+export type TopicScriptResponse = Schemas['TopicScriptResponse'];
+export type TopicScriptChapter = Schemas['TopicScriptChapter'];
+/** A row of `GET /inspiration/notes/activity`; `day` is `YYYY-MM-DD`. */
+export type InspirationNoteActivityDay = Schemas['InspirationNoteActivityDay'];
+/** A row of `GET /inspiration/notes/tags`. */
+export type InspirationNoteTagCount = Schemas['InspirationNoteTagCount'];
+// —— end P6 tags/search/topics/inspiration ——
+
+// ── P6 scripts (beats / memos / versions / editor dispatch) ──
+// Beats and commits carry Snowflake ids as JSON numbers on the wire; the editor
+// services (`editor/sceneService.ts`) stringify them at the boundary and export
+// the normalized `Beat` / `ScriptCommit`. Memo ids are already strings.
+/** A `script_beats` row as `/scripts/{id}/beats` and `/beats/{id}` send it. */
+export type ScriptBeatWire = Schemas['ScriptBeatRow'];
+/** A `beat_memos` row (ids stringified server-side). */
+export type BeatMemo = Schemas['BeatMemoOut'];
+/** `POST /scripts/{id}/memos/upload` payload. */
+export type BeatMemoImageUpload = Schemas['BeatMemoImageUpload'];
+/** `GET /scripts/{id}/commits` row (`POST` returns the same row without `author_name`). */
+export type ScriptCommitWire = Schemas['ScriptCommitListItem'];
+export type ScriptCommitSceneSnapshot = Schemas['ScriptCommitSceneSnapshot'];
+/** A scene added / removed in a diff, with its last author. */
+export type ScriptCommitSceneChange = Schemas['ScriptCommitSceneChange'];
+export type ScriptCommitElementChangeWire = Schemas['ScriptCommitElementChange'];
+export type ScriptCommitSceneDiffWire = Schemas['ScriptCommitSceneDiff'];
+export type ScriptCommitDiffWire = Schemas['ScriptCommitDiff'];
+/** `POST .../commits/{id}/rollback`: a partial failure is still a 200. */
+export type ScriptCommitRollback = Schemas['ScriptCommitRollback'];
+export type ScriptCommitRollbackSceneResult = Schemas['ScriptCommitRollbackSceneResult'];
+/** Flat `{ success, task_id }` of expand-chapter / create-branches / convert-to-scenes. */
+export type ScriptAiTaskDispatch = Schemas['ScriptAiTaskDispatch'];
+/** `POST /scripts/import-screenplay`: the new script id is a string here. */
+export type ScriptImportScreenplayDispatch = Schemas['ScriptImportScreenplayDispatch'];
+// —— end P6 scripts ——
+
+// ── P6 shares ──
+// `/api/v1/shares`. Share and comment ids are Snowflake BIGINTs sent as JSON
+// numbers. No share shape carries the plaintext password.
+/** An owner's `shares` row (`POST /shares`, `GET /shares` items). */
+export type Share = Schemas['ShareRow'];
+/** `DELETE /shares/{id}` toggles active ↔ inactive; no `data` key. */
+export type ShareStatusToggle = Schemas['ShareStatusToggleResponse'];
+/**
+ * `POST /shares/code/{code}`: what a visitor sees. Pass `access_token` as
+ * `share_token` to the media and comment routes — a password-protected share
+ * accepts nothing else. The resource keys are absent when the share has none.
+ */
+export type ShareVisitorView = Schemas['ShareVisitorView'];
+/** A review comment as `GET /shares/code/{code}/comments` lists it. */
+export type ShareComment = Schemas['ShareComment'];
+/** The full row `POST /shares/code/{code}/comments` returns to its author. */
+export type ShareCommentRow = Schemas['ShareCommentRow'];
+// —— end P6 shares ——

@@ -32,12 +32,12 @@ import {
 } from 'lucide-react';
 import Loading from '../components/common/Loading';
 import { accessShare } from '../services/sharesService';
-import { Share } from '../types';
+import type { ShareComment, ShareVisitorView } from '../types/api';
 import {
   fetchShareComments,
   createShareComment,
-  ReviewComment,
 } from '../services/reviewCommentsService';
+import { buildShareMediaUrls } from '../utils/shareMediaUrls';
 
 type Phase = 'initial' | 'password' | 'loading' | 'content' | 'error';
 
@@ -48,13 +48,13 @@ export const SharePage: React.FC = () => {
   const { t } = useTranslation();
 
   const [phase, setPhase] = useState<Phase>('initial');
-  const [share, setShare] = useState<Share | null>(null);
+  const [share, setShare] = useState<ShareVisitorView | null>(null);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [passwordError, setPasswordError] = useState(false);
 
   // Review comments state
-  const [comments, setComments] = useState<ReviewComment[]>([]);
+  const [comments, setComments] = useState<ShareComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [commentTimecode, setCommentTimecode] = useState<number | null>(null);
@@ -107,15 +107,17 @@ export const SharePage: React.FC = () => {
   };
 
   // ─── Review comments ─────────────────────────────────────
+  const shareToken = share?.access_token ?? null;
+
   useEffect(() => {
     if (phase === 'content' && share?.share_type === 'review' && shareCode) {
       setCommentsLoading(true);
-      fetchShareComments(shareCode)
+      fetchShareComments(shareCode, shareToken)
         .then(setComments)
-        .catch(() => {})
+        .catch((err) => console.error('Failed to load share comments:', err))
         .finally(() => setCommentsLoading(false));
     }
-  }, [phase, share?.share_type, shareCode]);
+  }, [phase, share?.share_type, shareCode, shareToken]);
 
   const handleSubmitComment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,15 +125,20 @@ export const SharePage: React.FC = () => {
 
     setSubmittingComment(true);
     try {
-      const newComment = await createShareComment(shareCode, {
-        content: commentText.trim(),
-        timecode: commentTimecode ?? undefined,
-      });
+      const newComment = await createShareComment(
+        shareCode,
+        {
+          content: commentText.trim(),
+          timecode: commentTimecode ?? undefined,
+        },
+        shareToken,
+      );
       setComments((prev) => [...prev, newComment]);
       setCommentText('');
       setCommentTimecode(null);
-    } catch {
-      // Comment creation requires auth — silently skip for anonymous users
+    } catch (err) {
+      // Comment creation requires a signed-in user; anonymous posts get a 401.
+      console.error('Failed to post share comment:', err);
     } finally {
       setSubmittingComment(false);
     }
@@ -151,24 +158,8 @@ export const SharePage: React.FC = () => {
 
   const formatTimecode = (seconds: number): string => {
     const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
+    const s = Math.floor(seconds % 60);
     return `${m}:${String(s).padStart(2, '0')}`;
-  };
-
-  // ─── File URL helper ────────────────────────────────────
-  const getResourceUrl = (resourceId?: string | null): string | null => {
-    if (!resourceId) return null;
-    return `${API_BASE}/api/v1/resources/${resourceId}/file`;
-  };
-
-  const getMediaUrl = (mediaId?: string | null): string | null => {
-    if (!mediaId) return null;
-    return `${API_BASE}/media/${mediaId}?share_token=${shareCode}`;
-  };
-
-  const getCoverMediaUrl = (mediaId?: string | null): string | null => {
-    if (!mediaId) return null;
-    return `${API_BASE}/media/${mediaId}/cover?share_token=${shareCode}`;
   };
 
   const isVideoMime = (mime?: string | null) => mime?.startsWith('video/');
@@ -256,16 +247,11 @@ export const SharePage: React.FC = () => {
   // Content view
   if (!share) return null;
 
-  const resourceUrl = getResourceUrl(share.resource_id);
-  const shareAny = share as any;
-  const mimeType: string | null = shareAny.mime_type || null;
-  const fileType: string | null = shareAny.file_type || null;
-  const mediaId: string | null = shareAny.media_id || null;
-  const thumbnailPath: string | null = shareAny.thumbnail_path || null;
-
-  // Prefer /media/{id} route (supports share_token auth), fallback to resource file URL
-  const mediaUrl = getMediaUrl(mediaId) || resourceUrl;
-  const coverUrl = getCoverMediaUrl(mediaId) || (thumbnailPath ? `${API_BASE}/media/${share.resource_id}/cover?share_token=${shareCode}` : null);
+  const mimeType: string | null = share.mime_type || null;
+  const fileType: string | null = share.file_type || null;
+  const mediaId: string | null = share.media_id || null;
+  // Every file URL carries the share grant: the visitor has no session.
+  const { resourceUrl, mediaUrl, coverUrl } = buildShareMediaUrls(API_BASE, share);
 
   // Content type detection
   const isAlbum = fileType === '2' || fileType === '68'; // Douyin carousel/image-text
@@ -306,7 +292,7 @@ export const SharePage: React.FC = () => {
             <div className="bg-ink-900 rounded-2xl overflow-hidden" style={{ maxHeight: 'calc(100vh - 200px)', aspectRatio: '9/16' }}>
               <SlidePlayer
                 mediaId={mediaId}
-                mediaToken={shareCode}
+                shareToken={share.access_token}
                 downloadStatus="completed"
               />
             </div>
@@ -344,7 +330,7 @@ export const SharePage: React.FC = () => {
               <div className="flex flex-col items-center justify-center py-20">
                 {getFileTypeIcon(share.share_type)}
                 <h2 className="mt-4 text-lg font-medium text-ink-200">{share.share_name}</h2>
-                <p className="mt-1 text-sm text-ink-500">{shareAny.filename || 'Shared File'}</p>
+                <p className="mt-1 text-sm text-ink-500">{share.filename || 'Shared File'}</p>
                 {share.allow_download && (
                   <a
                     href={resourceUrl}
@@ -398,12 +384,12 @@ export const SharePage: React.FC = () => {
                         {new Date(comment.created_at).toLocaleString()}
                       </span>
                     </div>
-                    {comment.timestamp_seconds != null && (
+                    {comment.timecode != null && (
                       <button
-                        onClick={() => seekToTimecode(comment.timestamp_seconds!)}
+                        onClick={() => seekToTimecode(comment.timecode!)}
                         className="text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] font-mono"
                       >
-                        {formatTimecode(comment.timestamp_seconds)}
+                        {formatTimecode(comment.timecode)}
                       </button>
                     )}
                     <p className="text-sm text-ink-300">{comment.content}</p>

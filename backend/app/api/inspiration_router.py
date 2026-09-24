@@ -12,6 +12,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
     status,
 )
@@ -27,10 +28,13 @@ from app.schemas.inspiration import (
     ApiTokenCreateIn,
     ApiTokenOut,
     AttachmentOut,
+    InspirationNoteActivityDay,
+    InspirationNoteTagCount,
     NoteCreateIn,
     NoteOut,
     NoteUpdateIn,
 )
+from app.schemas.wire import binary_response
 from app.services.inspiration.attachment_service import (
     AttachmentService,
     AttachmentStorageFailed,
@@ -225,7 +229,7 @@ async def delete_note(note_id: str, current_user: dict = Depends(get_current_use
         raise HTTPException(status_code=502, detail="note deletion failed")
 
 
-@router.get("/notes/activity")
+@router.get("/notes/activity", response_model=list[InspirationNoteActivityDay])
 async def notes_activity(
     date_from: str,
     date_to: str,
@@ -234,7 +238,7 @@ async def notes_activity(
     return await get_notes_service().activity(_uid(current_user), date_from, date_to)
 
 
-@router.get("/notes/tags")
+@router.get("/notes/tags", response_model=list[InspirationNoteTagCount])
 async def notes_tags(current_user: dict = Depends(get_current_user)):
     return await get_notes_service().tag_counts(_uid(current_user))
 
@@ -274,7 +278,13 @@ async def upload_attachment(
     return AttachmentOut(**row)
 
 
-@router.get("/attachments/{attachment_id}")
+@router.get(
+    "/attachments/{attachment_id}",
+    response_class=Response,
+    responses=binary_response(
+        "The attachment's bytes, served with its stored mime (Range-aware)", "*/*"
+    ),
+)
 async def get_attachment(
     attachment_id: str,
     request: Request,

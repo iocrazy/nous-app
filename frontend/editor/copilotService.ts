@@ -15,6 +15,7 @@ import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from '../services/parserService';
 import { unwrapResponse } from '../utils/apiHelpers';
 import { OpRejectedError } from './sceneService';
+import type { ScriptSceneCopilotOps } from '../types/api';
 import type { ElementOp, ElementType, ScriptElement } from './types';
 
 // 422 (OpRejectedError) reuses sceneService's typed error so the card + queue
@@ -35,14 +36,11 @@ export class CopilotDisabledError extends Error {
  * Reconciler result. `proposal` is present+true when the scene advanced past the
  * `read_version` we sent (spec v3 §2.2 stale handling): the server regenerated
  * the ops against the CURRENT elements and `base_version` is that current
- * version — the editor must let the user review before applying.
+ * version — the editor must let the user review before applying. The wire
+ * types `ops` as plain objects; they are the anchored element ops the server
+ * dry-ran through `apply_ops`.
  */
-export interface CopilotOpsResult {
-  ops: ElementOp[];
-  base_version: number;
-  summary: string;
-  proposal?: boolean;
-}
+export type CopilotOpsResult = Omit<ScriptSceneCopilotOps, 'ops'> & { ops: ElementOp[] };
 
 /**
  * Ask the backend to turn a free-text `instruction` into element ops for the
@@ -66,7 +64,8 @@ export async function requestCopilotOps(
     const body = await res.json();
     throw new OpRejectedError(body.code, body.detail);
   }
-  return unwrapResponse<CopilotOpsResult>(res);
+  const result = await unwrapResponse<ScriptSceneCopilotOps>(res);
+  return { ...result, ops: result.ops as ElementOp[] };
 }
 
 /**
