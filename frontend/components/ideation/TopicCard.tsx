@@ -1,6 +1,10 @@
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, FolderPlus, Archive, Hash, Lightbulb, Library, PenLine } from 'lucide-react';
-import type { Topic, TopicSource, TopicStatus } from '../../types';
+import type { TopicSource } from '../../types';
+import type {
+  IdeationTopic as Topic,
+  IdeationTopicStatus as TopicStatus,
+} from '../../types/api';
 
 /** Derive which library a topic references from its id columns (spec §1). */
 export function topicSource(topic: Topic): TopicSource {

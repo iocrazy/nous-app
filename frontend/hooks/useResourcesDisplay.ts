@@ -17,7 +17,8 @@
 
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Folder, ResourceItem, SmartCollection, Library } from '../types';
+import type { Folder, ResourceItem, SmartCollection } from '../types';
+import type { Library } from '../types/api';
 import type { SortBy } from '../contexts/ResourcesContext';
 import type { BreadcrumbSegment } from '../components/Breadcrumb';
 import type { ResourceSearchField } from '../components/resourceSearchScope';
