@@ -5,12 +5,17 @@ spec (verbose IDENTITY+SOUL+AGENT.md), the system prompt eats most of
 the window with no room for user input. The LLM call returns truncated
 nonsense or fails outright with cryptic provider errors.
 
-This module does pre-flight check: estimate tokens of (system +
+This module does pre-flight check: count tokens of (system +
 user_messages), compare against the model's known context window,
-warn at 50% / reject at 80%.
+warn at 50% / reject at ``REJECT_RATIO`` (90%).
 
-Mirrors OpenClaw ``agents/context-window-guard.ts`` thresholds and
-4-source pattern.
+It counts with the compactor's ruler (``tokenizer.count_tokens`` /
+``count_messages_tokens``: CJK = 1 token per char, tool_calls and
+per-message framing included), and the rejection line is the compactor's
+red threshold — one constant, imported there. Two rulers used to disagree:
+chars/4 made the guard ~4x too lenient on Chinese history, and an emergency
+cap targeting 0.80 left the turn only ~1% under the old 0.80 rejection line,
+so whether it was rejected anyway came down to the tokenizer.
 
 Usage from agent_runner:
 
@@ -21,6 +26,7 @@ Usage from agent_runner:
             system_prompt=composed.system,
             user_messages=user_messages,
             model=composed.model,
+            measured_tokens=stats.tokens_after,  # optional: compactor's count
         )
     except ContextWindowError as e:
         # Reject the run — return a structured error to the caller
@@ -31,20 +37,24 @@ Usage from agent_runner:
 from __future__ import annotations
 
 import warnings
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
 from app.agent_framework.catalog_windows import catalog_window
+from app.agent_framework.tokenizer import count_messages_tokens, count_tokens
 from app.core.config import settings
 
 # Warn when system+user takes >= this fraction of the window.
 WARN_RATIO: float = 0.5
-# Reject when system+user takes >= this fraction of the window.
-ERROR_RATIO: float = 0.8
+# Reject when system+user takes >= this fraction of the window. This is ALSO
+# the compactor's red tier (``CompactionThresholds.red_pct`` imports it), so
+# the tier that compacts hardest and the line that rejects cannot drift
+# apart. Order pinned by tests/agent_framework/test_budget_tokenizer_parity.py:
+# emergency target 0.70 < orange 0.80 < red == reject 0.90; the last 10 % is
+# left for the reply (``derive_output_budget``).
+REJECT_RATIO: float = 0.90
 
-# Approximation: ≈4 chars per token for English/code, ≈1.5 chars for
-# Chinese (per OpenAI tokenizer norms). Use the conservative ENG figure
-# of 4 — overcounts Chinese slightly which is OK (we'd rather warn early
-# than underestimate).
+# chars/4 for ``estimate_tokens`` only — a public quick estimate. The budget
+# guard does NOT use it (see ``check_context_budget``).
 _CHARS_PER_TOKEN: float = 4.0
 
 # Known model windows — the SECOND layer. The provider catalog
@@ -112,8 +122,10 @@ class ContextWindowWarning(UserWarning):
 
 
 def estimate_tokens(text: str) -> int:
-    """Cheap token estimate. Char-count / 4 — good enough for budgeting,
-    not exact.
+    """Cheap token estimate. Char-count / 4 — a rough number for display.
+
+    Not what ``check_context_budget`` counts with: it undercounts CJK ~4x.
+    Budget decisions go through ``tokenizer.count_messages_tokens``.
 
     For exact counts the caller should run the model's actual tokenizer
     (tiktoken for OpenAI, etc.). We deliberately don't depend on
@@ -168,56 +180,40 @@ def resolve_model_window(model: str) -> tuple[int, bool]:
     return settings.LLM_MAX_CONTEXT_TOKENS, False
 
 
-def _extract_text_from_user_messages(
-    user_messages: Optional[Iterable[dict[str, Any]]],
-) -> str:
-    """Pull plain text out of OpenAI-shape user_messages, ignoring
-    multimodal image blocks (those are tokenized separately by the
-    model and out of scope for this estimator)."""
-    if not user_messages:
-        return ""
-    parts: list[str] = []
-    for msg in user_messages:
-        content = msg.get("content")
-        if isinstance(content, str):
-            parts.append(content)
-        elif isinstance(content, list):
-            # Multimodal: take only text blocks
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "text":
-                    text = block.get("text", "")
-                    if isinstance(text, str):
-                        parts.append(text)
-        # else: dict / None / other — skip
-    return "\n".join(parts)
-
-
 def check_context_budget(
     *,
     system_prompt: str,
-    user_messages: Optional[Iterable[dict[str, Any]]] = None,
+    user_messages: Iterable[dict[str, Any]] | None = None,
     model: str,
+    measured_tokens: int | None = None,
 ) -> None:
     """Pre-flight check before sending to LLM. Raise or warn.
 
     Args:
         system_prompt: The composed system message (IDENTITY+SOUL+AGENT
             + skills + cache boundary etc.).
-        user_messages: OpenAI-shape user messages. Multimodal image
-            blocks are skipped (image tokens are a separate budget).
+        user_messages: OpenAI-shape messages, counted with
+            ``count_messages_tokens`` (text parts, tool_calls, per-message
+            framing; image blocks are a separate budget and count 0).
         model: The model the request will go to.
+        measured_tokens: system + messages already counted by the compactor
+            (``CompactionStats.tokens_after``) with the same functions. When
+            given it IS the count and the history is not scanned again;
+            ``None`` means "not measured, count here".
 
     Raises:
-        ContextWindowError: total tokens >= ERROR_RATIO * window.
+        ContextWindowError: total tokens >= REJECT_RATIO * window.
             Reject the run; the LLM call will fail or truncate.
     """
     window = model_window_size(model)
-    user_text = _extract_text_from_user_messages(user_messages)
-    total_tokens = estimate_tokens(system_prompt) + estimate_tokens(user_text)
+    if measured_tokens is None:
+        total_tokens = count_tokens(system_prompt or "", model) + count_messages_tokens(
+            list(user_messages or ()), model
+        )
+    else:
+        total_tokens = measured_tokens
 
-    if total_tokens >= int(window * ERROR_RATIO):
+    if total_tokens >= int(window * REJECT_RATIO):
         raise ContextWindowError(
             f"context budget exceeded: ~{total_tokens} tokens "
             f"vs window {window} (model={model!r}). "

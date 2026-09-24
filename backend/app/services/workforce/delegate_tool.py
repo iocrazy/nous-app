@@ -457,21 +457,23 @@ class DelegateToolService:
     ) -> Dict[str, Any]:
         """Translate a terminal task row into the awaited-response shape."""
         lifecycle = task.get("lifecycle_status")
-        if lifecycle == "done":
-            result = task.get("result") or {}
-            content = result.get("content") if isinstance(result, dict) else None
-            return {
-                "status": "done",
-                "waited_seconds": round(waited_seconds, 2),
-                "result": content,
-                "task_id": task.get("id"),
-                "run_id": (result.get("run_id") if isinstance(result, dict) else None),
-            }
-        # failed / cancelled
-        return {
+        result = task.get("result")
+        result = result if isinstance(result, dict) else {}
+        outcome = {
             "status": lifecycle,
             "waited_seconds": round(waited_seconds, 2),
+            "result": result.get("content"),
             "task_id": task.get("id"),
+            "run_id": result.get("run_id"),
+        }
+        if lifecycle == "done":
+            return outcome
+        # failed / cancelled. A cancelled worker still writes ``result`` (the
+        # partial answer it delivered to the outbox — agent_worker, framework
+        # hardening C3), so content + run_id ride along with the error fields
+        # instead of being dropped; a failed task simply has them as None.
+        return {
+            **outcome,
             "error_code": task.get("error_code"),
             "error_message": task.get("error_message"),
         }

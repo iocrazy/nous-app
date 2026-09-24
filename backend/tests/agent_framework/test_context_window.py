@@ -39,10 +39,9 @@ def test_estimate_tokens_scales_with_length():
 
 @pytest.mark.unit
 def test_estimate_tokens_handles_chinese():
-    """Chinese text returns a positive estimate. Our cheap chars/4
-    estimator UNDERCOUNTS Chinese (real tokenizers ~1 token per char),
-    but the budget check still works because we use the conservative
-    side throughout."""
+    """Chinese text returns a positive estimate. The chars/4 estimator
+    UNDERCOUNTS Chinese (real tokenizers ~1 token per char), which is why
+    the budget check no longer uses it — see test_budget_tokenizer_parity."""
     text = "中文测试" * 100  # 400 chars → 100 tokens by our estimator
     n = estimate_tokens(text)
     assert n >= 100
@@ -114,7 +113,8 @@ def test_check_warns_when_system_takes_over_warn_ratio():
 
 @pytest.mark.unit
 def test_check_rejects_when_system_takes_over_error_ratio():
-    """When system_tokens > 0.8 * window, RAISE — no room for user input."""
+    """When system_tokens >= REJECT_RATIO (0.9) * window, RAISE — no room
+    for user input."""
     huge_system = "X" * 200_000  # way too big for any small model
     with pytest.raises(ContextWindowError):
         check_context_budget(
@@ -135,7 +135,7 @@ def test_check_includes_user_messages_in_budget():
         model="qwen-max",
     )
 
-    big_user = "Y" * 100_000  # 33k tokens — pushes total over window
+    big_user = "Y" * 120_000  # 30k tokens — total past 0.9 * 32k
     with pytest.raises(ContextWindowError):
         check_context_budget(
             system_prompt=medium_system,

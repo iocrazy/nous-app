@@ -565,7 +565,25 @@ class AgentRunner:
                 # these messages; a second pass would compact twice per turn.
                 _preflight_done=True,
             )
-            if result.get("cancelled"):
+            from app.services.ai.runner.turn_end import result_was_cancelled
+
+            if result_was_cancelled(result):
+                # A terminal chunk, never a bare return (framework hardening
+                # C4). The true-stream path already files a hook cancel as a
+                # ``stop_reason`` chunk; this branch — production's only path
+                # — used to return silently, so the chat service never saw
+                # ``usage.stop_reason`` and the issue workflow's
+                # ``stop_reason == "cancelled"`` branches never fired here.
+                # run_turn's abort-mid-call shape has no ``stop_reason`` of its
+                # own, hence the default.
+                yield StreamChunk(
+                    delta_text=result.get("content") or "",
+                    finish_reason="stop",
+                    usage={
+                        "stop_reason": str(result.get("stop_reason") or "cancelled")
+                    },
+                    tool_call_trace=result.get("tool_calls") or [],
+                )
                 return
             raw = result.get("raw") or {}
             raw_choices = raw.get("choices") or [{}]
@@ -697,6 +715,7 @@ class AgentRunner:
                 recorder=recorder,
                 composed=composed,
                 messages=messages,
+                run_id=getattr(recorder, "run_id", None),
                 parent_run_id=self.parent_run_id,
                 is_stream=True,
             )
@@ -1701,6 +1720,16 @@ class AgentRunner:
                 system_prompt=composed.system_message,
                 user_messages=user_messages,
                 model=composed.model,
+                # Measure once: the compactor already counted system + these
+                # messages with the guard's own functions. 0 is its "not
+                # measured" sentinel (kill switch / no window) and a crashed
+                # compactor has no stats — the guard counts for itself then.
+                measured_tokens=(
+                    compaction_stats.tokens_after
+                    if compaction_stats is not None
+                    and compaction_stats.tokens_after > 0
+                    else None
+                ),
             )
         except ContextWindowError as exc:
             logger.warning(f"[AgentRunner] context budget rejected: {exc}")
@@ -1965,6 +1994,7 @@ class AgentRunner:
                 recorder=recorder,
                 composed=composed,
                 messages=messages,
+                run_id=getattr(recorder, "run_id", None),
                 parent_run_id=self.parent_run_id,
             )
             if await self.step_hooks.run(_step_ctx) is StepDecision.STOP:

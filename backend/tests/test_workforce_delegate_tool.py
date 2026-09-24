@@ -356,6 +356,52 @@ async def test_await_true_failed_task_returns_error_fields():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_await_true_cancelled_task_returns_partial_content_and_run_id():
+    """A cancelled worker still writes ``result`` (the partial answer) and
+    delivers it to the outbox (agent_worker, framework hardening C3). The
+    synchronous caller must get that content + run_id too — returning only
+    the error fields would drop an answer the worker did produce."""
+    target = {"id": str(uuid4()), "slug": "summary", "persistent": True}
+    svc, _, workforce, *_ = _service(target=target)
+    svc._detect_cycle = AsyncMock(return_value=None)
+
+    run_id = str(uuid4())
+    svc._lookup_task_by_inbox = AsyncMock(
+        return_value={
+            "id": str(uuid4()),
+            "lifecycle_status": "cancelled",
+            "result": {"content": "half a summary", "run_id": run_id},
+            "error_code": None,
+            "error_message": None,
+        }
+    )
+
+    out = await svc.execute({"agent_slug": "summary", "prompt": "x", "await": True})
+    assert out["status"] == "cancelled"
+    assert out["result"] == "half a summary"
+    assert out["run_id"] == run_id
+    assert "error_code" in out and "error_message" in out
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_await_true_failed_task_without_result_has_null_content():
+    """A failed task has no result payload — content/run_id read as None,
+    never a KeyError."""
+    target = {"id": str(uuid4()), "slug": "summary", "persistent": True}
+    svc, _, workforce, *_ = _service(target=target)
+    svc._detect_cycle = AsyncMock(return_value=None)
+    svc._lookup_task_by_inbox = AsyncMock(
+        return_value={"id": str(uuid4()), "lifecycle_status": "failed", "result": None}
+    )
+
+    out = await svc.execute({"agent_slug": "summary", "prompt": "x", "await": True})
+    assert out["status"] == "failed"
+    assert out.get("result") is None and out.get("run_id") is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_await_true_timeout_when_task_never_terminal():
     """When the target never lands a terminal lifecycle within the
     timeout, status='timeout' and the inbox_message_id is preserved so

@@ -5,8 +5,8 @@ wiped at end of turn, visible to nobody but the model. Every successful
 mutation now appends one ``todo_write`` transcript event (migration 443)
 carrying the COMPLETE list — dsh's whole-value rule: the current list is the
 last event, there are no deltas to reconcile — and ``RunRecorder`` mirrors
-the same payload into ``agent_runs.metadata_json.todos``, the row the Task
-Center already receives over Realtime.
+the same payload into ``agent_runs.metadata_json.view.todos`` (folded, with
+``view.step`` counts), the row the Task Center already receives over Realtime.
 
 Never raises: telemetry is never worth failing a tool call over.
 """

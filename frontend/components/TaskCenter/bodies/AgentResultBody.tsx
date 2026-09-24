@@ -3,8 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { UnifiedTask } from '../../../contexts/TaskManagerContext';
 import { TrajectoryRenderer } from '../../agentActivity/TrajectoryRenderer';
 import { useRunToolActivity } from '../../agentActivity/useRunToolActivity';
-import type { AgentTodoSnapshot } from '../agentRunPresentation';
-import { selectRunView, stepProgress } from '../runView';
+import { runTodos, selectRunView, stepProgress } from '../runView';
 
 export const AgentResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   const { t } = useTranslation();
@@ -15,13 +14,14 @@ export const AgentResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
     agent_completion_tokens?: number | null;
     agent_cost_cents?: number | null;
     agent_model?: string | null;
-    todos?: AgentTodoSnapshot | null;
   };
   const total = (m.agent_prompt_tokens ?? 0) + (m.agent_completion_tokens ?? 0);
-  const todos = Array.isArray(m.todos?.todos) ? m.todos!.todos : [];
-  // view-first (mig 453 fold), legacy todo counts as the transition fallback
-  const step = stepProgress(selectRunView(task.metadata as Record<string, unknown>));
-  const counts = step ? { completed: step.done, total: step.total } : m.todos?.counts;
+  // The folded run view (mig 453) is the only source — the phase-2 legacy
+  // `todos` key is no longer written or read (framework hardening B).
+  const view = selectRunView(task.metadata as Record<string, unknown>);
+  const todos = runTodos(view);
+  const step = stepProgress(view);
+  const counts = step ? { completed: step.done, total: step.total } : null;
   // The run's trajectory — same renderer as the issue timeline and the chat's
   // Trajectory tab. task.id IS the agent_runs id for an agent task.
   const { events } = useRunToolActivity(task.id, task.status === 'processing');

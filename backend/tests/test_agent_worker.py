@@ -116,6 +116,77 @@ def _run_recorder_cm(run_id: UUID):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_cancelled_turn_marks_the_task_cancelled():
+    """Framework hardening C3: a hook cancel returns normally from run_turn;
+    the task row must say ``cancelled``, not ``done``."""
+    agent_id = uuid4()
+    user_id = uuid4()
+    task = _task(agent_id=agent_id, user_id=user_id, prompt="summarise this PR")
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.claim_task = AsyncMock(
+        return_value={**task, "lifecycle_status": "assigned"}
+    )
+    workforce.update_task_status = AsyncMock(return_value=True)
+    workforce.enqueue_outbox = AsyncMock(return_value={"id": str(uuid4())})
+
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=_persistent_agent(agent_id=agent_id))
+
+    stack = _build_runner_stack_mock(content="")
+    stack.runner.run_turn = AsyncMock(
+        return_value={"content": "", "stop_reason": "cancelled", "cancelled": True}
+    )
+    cm, recorder = _run_recorder_cm(run_id=uuid4())
+
+    with (
+        patch(
+            "app.services.workforce.agent_worker.get_agent_workforce_repository",
+            return_value=workforce,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.get_agent_repository",
+            return_value=agent_repo,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.get_skill_repository",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.services.workforce.agent_worker.build_agent_runner_stack",
+            AsyncMock(return_value=stack),
+        ),
+        patch("app.services.workforce.agent_worker.PromptComposer") as PC,
+        patch("app.services.workforce.agent_worker.RunRecorder", return_value=cm),
+        patch(
+            "app.services.workforce.agent_worker._lookup_inbox_message",
+            AsyncMock(return_value=None),
+        ),
+        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
+    ):
+        composer = MagicMock()
+        composer.compose = AsyncMock(
+            return_value=MagicMock(
+                agent_id=agent_id,
+                agent_slug="summarize",
+                model="doubao-seed-2-0-pro-260215",
+            )
+        )
+        PC.return_value = composer
+
+        result = await run_one_task(task)
+
+    assert result["status"] == "cancelled"
+    statuses = [
+        c.kwargs["lifecycle_status"]
+        for c in workforce.update_task_status.await_args_list
+    ]
+    assert statuses == ["in_progress", "cancelled"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_happy_path_queued_to_done_with_outbox():
     agent_id = uuid4()
     user_id = uuid4()

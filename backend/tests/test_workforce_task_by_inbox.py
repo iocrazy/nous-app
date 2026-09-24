@@ -148,6 +148,67 @@ async def test_returns_task_and_outbox_when_done() -> None:
 
 
 @pytest.mark.asyncio
+async def test_returns_outbox_when_cancelled() -> None:
+    """A cancelled worker still delivers its partial answer to the outbox
+    (agent_worker, framework hardening C3) — the card must see it, so a
+    ``cancelled`` task reads the outbox just like done / failed."""
+    from app.api.workforce_router import get_task_by_inbox
+
+    user_id = uuid4()
+    inbox_id = uuid4()
+    task_row = {
+        "dbos_workflow_id": str(uuid4()),
+        "agent_id": str(uuid4()),
+        "phase": "cancelled",
+        "started_at": "2026-09-23T10:00:00Z",
+        "completed_at": "2026-09-23T10:00:24Z",
+        "error_code": None,
+        "error_msg": None,
+        "created_at": "2026-09-23T10:00:00Z",
+        "inbox_message_id": str(inbox_id),
+        "metadata": {"agent_result": {"content": "half an answer"}},
+    }
+    outbox_row = {
+        "id": str(uuid4()),
+        "sender_agent_id": task_row["agent_id"],
+        "message_type": "result",
+        "payload": {"content": "half an answer"},
+        "created_at": "2026-09-23T10:00:24Z",
+        "delivered": True,
+        "delivered_at": "2026-09-23T10:00:24Z",
+    }
+    executed: list = []
+    scope = _read_scope_for(
+        {
+            "agent_inbox": [
+                {
+                    "id": str(inbox_id),
+                    "recipient_agent_id": str(uuid4()),
+                    "sender_kind": "user",
+                    "sender_user_id": str(user_id),
+                    "sender_agent_id": None,
+                    "reply_to_message_id": None,
+                },
+            ],
+            "task_tracking": [task_row],
+            "agent_outbox": [[outbox_row]],
+        },
+        executed,
+    )
+    import importlib
+
+    wf_mod = importlib.import_module("app.api.workforce_router")
+    with patch.object(wf_mod, "read_scope", scope):
+        out = await get_task_by_inbox(
+            inbox_message_id=inbox_id, user=SimpleNamespace(id=user_id)
+        )
+
+    assert out["task"]["lifecycle_status"] == "cancelled"
+    assert "agent_outbox" in executed
+    assert out["outbox_response"]["payload"] == {"content": "half an answer"}
+
+
+@pytest.mark.asyncio
 async def test_no_task_yet_when_recipient_hasnt_ticked() -> None:
     """The Delegate just enqueued — no agent_tasks row exists yet.
     Endpoint returns task=None so the frontend keeps showing 'queued'."""

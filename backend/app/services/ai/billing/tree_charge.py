@@ -308,12 +308,12 @@ async def settle_tree_if_closed(
     **恰好一个**会走到扣费。
 
     ⚠️ **戳必须住在 ``billing`` 这个顶层兄弟键里，不能放进 ``cost``。**
-    ``RunEventWriter.mirror_keys()`` 把 ``cost`` 整个值写回去（``jsonb_set`` 五个顶层
-    键：``view`` / ``cost`` / ``todos`` / ``turn_end_reason`` / ``last_retry``），所以
+    ``RunEventWriter.mirror_keys()`` 把 ``cost`` 整个值写回去（``jsonb_set`` 两个顶层
+    键：``view`` / ``cost``），所以
     任何**在盖戳之前取过种子**的 writer 只要之后再镜像一次，就会把戳连同整个 ``cost``
     覆盖掉 —— 戳没了，下一条 run 收口时 ``IS NULL`` 又成立，**整棵树被第二次扣满**。
     两条真实路径：崩溃写方先翻状态收口、而这条 run 的 recorder 还活着并随后
-    ``persist_views()``；以及 ``for_run`` writer 的种子窗口。``billing`` 不在那五个键
+    ``persist_views()``；以及 ``for_run`` writer 的种子窗口。``billing`` 不在那两个键
     里，任何镜像都碰不到它。
 
     ⚠️ **``async_pending`` 是收口的前置条件之一。** workforce 异步派发**不建子 run 行**

@@ -91,6 +91,21 @@ WARNING_MARKERS: dict[str, TurnEndReason] = {
 }
 
 
+def result_was_cancelled(result: Optional[dict[str, Any]]) -> bool:
+    """The ONE mapping from a run_turn-shaped result to "this turn was
+    cancelled". Two shapes carry it: a hook STOP (``stop_reason ==
+    "cancelled"``, IssueStatusGate / CancelHook) and run_turn's
+    abort-mid-call return (``{"cancelled": True}``, no ``stop_reason``).
+
+    Every writer that files a terminal status off such a result — the run
+    row, the Delegate envelope, the workforce task — reads it here, so a
+    cancel is never filed as success just because the turn returned
+    normally (framework hardening C)."""
+    if not isinstance(result, dict):
+        return False
+    return result.get("stop_reason") == "cancelled" or bool(result.get("cancelled"))
+
+
 def _finish_reason_of(raw: Any) -> Optional[str]:
     try:
         return (raw or {}).get("choices", [{}])[0].get("finish_reason") or None

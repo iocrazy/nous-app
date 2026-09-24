@@ -260,9 +260,12 @@ async def test_stream_turn_buffered_fallback_carries_the_hook_stop_reason(reason
     assert len(ends) == 1 and ends[0]["reason"] == reason, ends
 
 
-async def test_stream_turn_buffered_fallback_files_cancelled_without_a_chunk():
-    """The cancelled stop returns before any terminal chunk (pre-existing
-    contract); the wrapper still files exactly one ``turn_end{cancelled}``."""
+async def test_stream_turn_buffered_fallback_carries_cancelled_on_a_terminal_chunk():
+    """A hook cancel (IssueStatusGate / CancelHook) on the production path.
+    It used to ``return`` before any terminal chunk, so the chat service never
+    saw ``usage.stop_reason`` and the issue workflow's ``stop_reason ==
+    "cancelled"`` branches were dead on the only path production takes
+    (framework hardening C4). The true-stream path already filed the chunk."""
     rec = _Rec()
     chunks = []
     async for ch in _runner(_NoStreamAdapter(), "cancelled").stream_turn(
@@ -272,7 +275,54 @@ async def test_stream_turn_buffered_fallback_files_cancelled_without_a_chunk():
         auto_recorder=False,
     ):
         chunks.append(ch)
-    assert chunks == []
+    assert len(chunks) == 1
+    assert chunks[-1].finish_reason == "stop"
+    assert (chunks[-1].usage or {}).get("stop_reason") == "cancelled"
+    assert chunks[-1].tool_call_trace == []
+    ends = rec.turn_ends()
+    assert len(ends) == 1 and ends[0]["reason"] == "cancelled", ends
+
+
+class _HangingNoStreamAdapter:  # no ``stream``; the call never finishes
+    async def call(self, *a, **k):
+        import asyncio
+
+        await asyncio.sleep(30)
+        raise AssertionError("the abort must win the race")
+
+
+async def test_stream_turn_buffered_fallback_abort_mid_call_files_cancelled_chunk():
+    """run_turn's abort-mid-call return is ``{"cancelled": True}`` with no
+    ``stop_reason`` — the terminal chunk still names ``cancelled``."""
+    from app.agent_framework import AbortController
+    from app.services.ai.runner.agent_runner import AgentRunner
+    from app.services.ai.runner.step_hooks import StepHookChain
+
+    class _Tool:
+        recorder = None
+
+        async def execute(self, args):
+            return {}
+
+    runner = AgentRunner(
+        adapter=_HangingNoStreamAdapter(),
+        skill_tool=_Tool(),
+        step_hooks=StepHookChain([]),
+    )
+    abort = AbortController()
+    abort.fire(reason="user cancel")
+    rec = _Rec()
+    chunks = [
+        ch
+        async for ch in runner.stream_turn(
+            _composed(),
+            [{"role": "user", "content": "q"}],
+            recorder=rec,
+            abort=abort,
+            auto_recorder=False,
+        )
+    ]
+    assert chunks and (chunks[-1].usage or {}).get("stop_reason") == "cancelled"
     ends = rec.turn_ends()
     assert len(ends) == 1 and ends[0]["reason"] == "cancelled", ends
 
