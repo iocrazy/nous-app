@@ -379,31 +379,29 @@ async def sign_out(
     background_tasks: BackgroundTasks,
     authorization: Optional[str] = Header(None),
 ):
-    """用户登出"""
-    # Try to extract user_id before signing out
-    user_id = None
-    if authorization:
-        try:
-            token = authorization.replace("Bearer ", "")
-            auth_svc = SupabaseAuthService()
-            user = await auth_svc.get_user(token)
-            if user:
-                user_id = user.get("id")
-        except Exception:
-            pass
+    """用户登出：撤销 Bearer token 所属用户的会话。
 
+    只动调用者自己的会话。没有（有效的）token 就没有可撤销的东西，照常回成功
+    —— 这里曾经对进程内共享的 GoTrue 客户端调 ``sign_out()``，撤销的是最后一个
+    经本进程登录的**别人**的全部会话。
+    """
     auth_service = SupabaseAuthService()
-    result = await auth_service.sign_out()
+    token = authorization.replace("Bearer ", "") if authorization else ""
+    user = await auth_service.get_user(token) if token else None
+    user_id = user.get("id") if user else None
+    if not user_id:
+        return {"success": True, "message": "登出成功"}
 
-    if user_id:
-        background_tasks.add_task(
-            log_user_action,
-            user_id=user_id,
-            action="auth",
-            message="User logged out",
-            status="success",
-        )
-        background_tasks.add_task(revoke_media_tokens, user_id)
+    result = await auth_service.sign_out(token)
+
+    background_tasks.add_task(
+        log_user_action,
+        user_id=user_id,
+        action="auth",
+        message="User logged out",
+        status="success",
+    )
+    background_tasks.add_task(revoke_media_tokens, user_id)
 
     return result
 

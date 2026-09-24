@@ -7,22 +7,72 @@ Supabase 认证服务
 使用异步 Supabase 客户端。
 """
 
-from typing import Any, Dict, Optional
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict, Optional
 
+import httpx
 from loguru import logger
+from supabase_auth import AsyncGoTrueClient
 
-from app.db.supabase_client import get_async_supabase, get_async_supabase_admin
+from app.core.config import settings
+from app.db.supabase_client import (
+    _HTTPX_LIMITS,
+    _HTTPX_TIMEOUT,
+    get_async_supabase_admin,
+)
+
+
+def _auth_http_client() -> httpx.AsyncClient:
+    """The httpx client one isolated GoTrue client talks through.
+
+    Same limits as the shared Supabase clients (keep-alive off — see
+    ``app/db/supabase_client.py``). Tests swap this for a ``MockTransport``.
+    """
+    return httpx.AsyncClient(limits=_HTTPX_LIMITS, timeout=_HTTPX_TIMEOUT)
+
+
+@asynccontextmanager
+async def _isolated_auth_client() -> AsyncIterator[AsyncGoTrueClient]:
+    """A GoTrue client that lives for ONE request and remembers nothing.
+
+    These calls used to go through the per-loop anon ``AsyncClient`` that the
+    whole process shares. GoTrue clients are stateful: ``sign_in`` /
+    ``sign_up`` / ``refresh_session`` / ``set_session`` store the session on
+    the client, and ``sign_out()`` revokes whatever session is stored. So
+    ``POST /auth/signout`` — which needs no credentials — logged out (scope
+    ``global``: every device) the last person who had signed in through this
+    process, and that person's refresh token sat in server memory with an
+    auto-refresh timer. A fresh client per call, with ``persist_session`` and
+    ``auto_refresh_token`` off, has no session to leak between callers.
+    """
+    headers = {
+        "apiKey": settings.SUPABASE_ANON_KEY or "",
+        "Authorization": f"Bearer {settings.SUPABASE_ANON_KEY or ''}",
+    }
+    if settings.SUPABASE_TENANT_ID:
+        headers["X-Tenant-ID"] = settings.SUPABASE_TENANT_ID
+    http_client = _auth_http_client()
+    try:
+        yield AsyncGoTrueClient(
+            url=f"{(settings.SUPABASE_URL or '').rstrip('/')}/auth/v1",
+            headers=headers,
+            auto_refresh_token=False,
+            persist_session=False,
+            http_client=http_client,
+        )
+    finally:
+        await http_client.aclose()
 
 
 class SupabaseAuthService:
-    """Supabase 认证服务 (异步)"""
+    """Supabase 认证服务 (异步)
+
+    Every call runs on its own :func:`_isolated_auth_client`; nothing about
+    one caller's session survives into the next call.
+    """
 
     def __init__(self):
         pass
-
-    async def _get_client(self):
-        """Get async client (loop-aware, safe for Celery workers)."""
-        return await get_async_supabase()
 
     async def sign_up(
         self, email: str, password: str, metadata: Optional[Dict[str, Any]] = None
@@ -39,7 +89,6 @@ class SupabaseAuthService:
             注册结果
         """
         try:
-            client = await self._get_client()
             # Omit the "options" key entirely when there is no metadata.
             # ``"options": None`` crashes inside gotrue-py (it chains
             # ``.get()`` off the value, and ``None.get`` raises
@@ -50,7 +99,8 @@ class SupabaseAuthService:
             if metadata:
                 credentials["options"] = {"data": metadata}
 
-            response = await client.auth.sign_up(credentials)
+            async with _isolated_auth_client() as auth:
+                response = await auth.sign_up(credentials)
 
             if response.user:
                 logger.info(f"用户注册成功: {email}")
@@ -106,10 +156,10 @@ class SupabaseAuthService:
             登录结果
         """
         try:
-            client = await self._get_client()
-            response = await client.auth.sign_in_with_password(
-                {"email": email, "password": password}
-            )
+            async with _isolated_auth_client() as auth:
+                response = await auth.sign_in_with_password(
+                    {"email": email, "password": password}
+                )
 
             if response.user and response.session:
                 logger.info(f"用户登录成功: {email}")
@@ -134,11 +184,15 @@ class SupabaseAuthService:
             logger.error(f"用户登录失败: {e}")
             return {"success": False, "message": str(e)}
 
-    async def sign_out(self) -> Dict[str, Any]:
-        """用户登出"""
+    async def sign_out(self, access_token: str) -> Dict[str, Any]:
+        """用户登出：撤销 ``access_token`` 所属用户的会话（scope ``global``）。
+
+        Only the caller's own token is ever revoked; there is no stored
+        session to fall back to.
+        """
         try:
-            client = await self._get_client()
-            await client.auth.sign_out()
+            async with _isolated_auth_client() as auth:
+                await auth.admin.sign_out(access_token, "global")
             logger.info("用户登出成功")
             return {"success": True, "message": "登出成功"}
         except Exception as e:
@@ -184,8 +238,8 @@ class SupabaseAuthService:
             新的会话信息
         """
         try:
-            client = await self._get_client()
-            response = await client.auth.refresh_session(refresh_token)
+            async with _isolated_auth_client() as auth:
+                response = await auth.refresh_session(refresh_token)
             if response.session:
                 return {
                     "success": True,
@@ -211,8 +265,8 @@ class SupabaseAuthService:
             结果
         """
         try:
-            client = await self._get_client()
-            await client.auth.reset_password_email(email)
+            async with _isolated_auth_client() as auth:
+                await auth.reset_password_email(email)
             logger.info(f"密码重置邮件已发送: {email}")
             return {"success": True, "message": "密码重置邮件已发送"}
         except Exception as e:
@@ -239,7 +293,6 @@ class SupabaseAuthService:
             更新结果
         """
         try:
-            client = await self._get_client()
             update_data = {}
             if email:
                 update_data["email"] = email
@@ -248,10 +301,10 @@ class SupabaseAuthService:
             if metadata:
                 update_data["data"] = metadata
 
-            # 设置当前会话
-            await client.auth.set_session(access_token, "")
-
-            response = await client.auth.update_user(update_data)
+            # 在这次请求自己的客户端上设置会话：update_user 只会作用于这个 token
+            async with _isolated_auth_client() as auth:
+                await auth.set_session(access_token, "")
+                response = await auth.update_user(update_data)
             if response.user:
                 logger.info(f"用户信息更新成功: {response.user.email}")
                 return {
