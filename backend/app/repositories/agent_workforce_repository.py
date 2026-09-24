@@ -139,6 +139,7 @@ from app.models import (
     AgentInbox,
     AgentOutbox,
     AgentRuns,
+    AgentRunTranscriptEvents,
     AgentStateHistory,
     AgentWorkers,
     TaskTracking,
@@ -878,8 +879,12 @@ class AgentWorkforceRepository:
     ) -> List[Dict[str, Any]]:
         """agent_task rows still ``assigned``/``in_progress`` whose ``updated_at``
         is older than ``older_than`` — the stale-task reaper's candidates,
-        oldest first. ``updated_at`` moves on every ``update_task_status`` /
-        claim, so this is "nothing has touched the row since".
+        oldest first. ``limit`` is a SCAN bound, deliberately wider than the
+        reaper's per-tick action cap: rows it skips (a live run, a workflow
+        DBOS still owns) stay stale forever, so a scan as narrow as the cap
+        would let them occupy every slot and starve the rows behind them.
+        ``updated_at`` moves on every ``update_task_status`` / claim, so this
+        is "nothing has touched the row since".
 
         ⚠️ Raises instead of returning ``[]`` (same reasoning as
         ``count_inflight_agent_tasks``): an empty list would read as "nothing
@@ -925,6 +930,37 @@ class AgentWorkforceRepository:
         if row is None:
             return None
         return {"id": str(row["id"]), "status": str(row["status"])}
+
+    async def subagent_done_status(
+        self, *, parent_run_id: str, task_id: str
+    ) -> Optional[str]:
+        """``status`` of the ``subagent_done`` this task already put on its
+        parent run, or None when there is none.
+
+        The stale-task reaper asks before emitting its own: the worker emits
+        ``subagent_done`` BEFORE it finalises the row, and ``_finalise`` only
+        logs a failed UPDATE — so "row still assigned" does not mean "parent
+        never heard". A second event would raise ``done`` and ``total`` by one
+        each and flip ``last.status`` (``fold_done`` has no per-child dedup).
+        Returns ``""`` for an event with no status. Raises on a DB error: the
+        caller must not read "could not look" as "not emitted"."""
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(AgentRunTranscriptEvents.payload["status"].astext)
+                    .where(AgentRunTranscriptEvents.run_id == int(parent_run_id))
+                    .where(AgentRunTranscriptEvents.event_type == "subagent_done")
+                    .where(
+                        AgentRunTranscriptEvents.payload["task_id"].astext
+                        == str(task_id)
+                    )
+                    .order_by(AgentRunTranscriptEvents.seq.desc())
+                    .limit(1)
+                )
+            ).first()
+        if row is None:
+            return None
+        return str(row[0] or "")
 
     async def update_task_status(
         self,

@@ -562,7 +562,7 @@ async def agent_runs_sweeper_workflow(
     stale_acted = {
         k: v
         for k, v in stale_tasks.items()
-        if k in ("failed", "requeued", "raced", "errors") and v
+        if k in ("done", "failed", "requeued", "raced", "errors") and v
     }
     if (
         heartbeat_lost

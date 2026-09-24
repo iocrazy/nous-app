@@ -630,6 +630,38 @@ async def test_stale_task_reaper_against_real_pg(
     assert rows[still_running]["phase"] == "in_progress"
     assert rows[fresh]["phase"] == "assigned"  # updated just now — not a candidate
 
+    # ``subagent_done_status`` reads the parent transcript by task id.
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        parent = await conn.fetchval(
+            "INSERT INTO agent_runs (agent_id, user_id, status, trigger) "
+            "VALUES ($1, $2, 'completed', 'chat') RETURNING id",
+            agent_id,
+            user_id,
+        )
+        await conn.execute(
+            "INSERT INTO agent_run_transcript_events (run_id, seq, event_type, payload) "
+            "VALUES ($1, 1, 'subagent_done', $2::jsonb)",
+            parent,
+            f'{{"task_id": "{lost}", "status": "success", "mode": "async"}}',
+        )
+        assert (
+            await repo.subagent_done_status(parent_run_id=str(parent), task_id=lost)
+            == "success"
+        )
+        assert (
+            await repo.subagent_done_status(
+                parent_run_id=str(parent), task_id=never_started
+            )
+            is None
+        )
+    finally:
+        await conn.execute(
+            "DELETE FROM agent_run_transcript_events WHERE run_id = $1", parent
+        )
+        await conn.execute("DELETE FROM agent_runs WHERE id = $1", parent)
+        await conn.close()
+
     # A second write through the CAS on the already-failed row is refused.
     assert (
         await repo.update_task_status(

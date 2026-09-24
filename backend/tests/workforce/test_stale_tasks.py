@@ -38,6 +38,8 @@ class _Repo:
         self.status_calls: list[dict[str, Any]] = []
         self.requeued: list[str] = []
         self.update_ok = True
+        self.done_events: dict[str, str] = {}
+        self.done_event_error: Exception | None = None
 
     async def list_stale_active_tasks(self, *, older_than, limit):
         self.list_calls.append({"older_than": older_than, "limit": limit})
@@ -56,6 +58,11 @@ class _Repo:
 
     async def get_worker(self, agent_id):
         return self.worker
+
+    async def subagent_done_status(self, *, parent_run_id, task_id):
+        if self.done_event_error is not None:
+            raise self.done_event_error
+        return self.done_events.get(str(task_id))
 
 
 def _task(phase="assigned", *, kind=None, parent_run_id=None, wf="workforce-x-1"):
@@ -220,11 +227,11 @@ async def test_threshold_and_limit_are_passed_to_the_candidate_query(wire):
     out = await st.reap_stale_workforce_tasks()
 
     (call,) = repo.list_calls
-    assert call["limit"] == 20
+    assert call["limit"] == 200  # scan bound, wider than the action cap
     cutoff = before - timedelta(minutes=10)
     assert abs((call["older_than"] - cutoff).total_seconds()) < 5
-    assert out["candidates"] == 20
-    assert len(repo.requeued) == 20
+    assert out["candidates"] == 25
+    assert len(repo.requeued) == 20  # action cap
 
 
 async def test_lost_cas_emits_nothing(wire):
@@ -278,3 +285,69 @@ async def test_candidate_scan_failure_is_reported_not_raised(wire):
 
     assert out["errors"] == 1
     assert out["candidates"] == 0
+
+
+async def test_permanently_skipped_rows_do_not_starve_the_orphan_behind_them(wire):
+    """21 rows DBOS still owns (an AskUser park can hold one for hours) sit at
+    the head of the oldest-first scan every tick. The real orphan behind them
+    must still be reached — skips do not count against the action cap."""
+    parked = [_task(phase="in_progress", wf=f"parked-{i}") for i in range(21)]
+    orphan = _task(phase="assigned", wf="gone")
+    repo = _Repo([*parked, orphan])
+    owns, _, _ = wire(repo)
+    owns.side_effect = lambda wf: wf.startswith("parked-")
+
+    out = await st.reap_stale_workforce_tasks()
+
+    assert out["skipped_pending"] == 21
+    assert repo.requeued == [orphan["id"]]
+
+
+async def test_parent_already_told_success_finalises_done_without_a_second_event(
+    wire,
+):
+    """Workflow SUCCESS, row stuck at ``assigned``: the worker emitted
+    ``subagent_done`` and then lost its finalise UPDATE. A second event would
+    count the child twice and flip ``last.status`` to failed."""
+    task = _task(kind="subagent", parent_run_id="777")
+    repo = _Repo([task], runs={task["id"]: {"id": "9", "status": "completed"}})
+    repo.done_events[task["id"]] = "success"
+    _, emit, idle = wire(repo)
+
+    out = await st.reap_stale_workforce_tasks()
+
+    assert out["done"] == 1 and out["failed"] == 0
+    emit.assert_not_awaited()
+    (call,) = repo.status_calls
+    assert call["lifecycle_status"] == "done"
+    assert call["only_from"] == ("assigned", "in_progress")
+    idle.assert_awaited_once()
+
+
+async def test_parent_already_told_failure_finalises_failed_without_event(wire):
+    task = _task(kind="subagent", parent_run_id="777")
+    repo = _Repo([task], runs={task["id"]: {"id": "9", "status": "failed"}})
+    repo.done_events[task["id"]] = "failed"
+    _, emit, _ = wire(repo)
+
+    out = await st.reap_stale_workforce_tasks()
+
+    assert out["failed"] == 1
+    emit.assert_not_awaited()
+    (call,) = repo.status_calls
+    assert call["lifecycle_status"] == "failed"
+    assert call["error_code"] == "worker_lost"
+
+
+async def test_unreadable_parent_transcript_writes_nothing(wire):
+    """ "Could not look" must not be read as "never emitted"."""
+    task = _task(kind="subagent", parent_run_id="777")
+    repo = _Repo([task], runs={task["id"]: {"id": "9", "status": "failed"}})
+    repo.done_event_error = RuntimeError("db down")
+    _, emit, _ = wire(repo)
+
+    out = await st.reap_stale_workforce_tasks()
+
+    assert out["errors"] == 1
+    assert not repo.status_calls
+    emit.assert_not_awaited()
