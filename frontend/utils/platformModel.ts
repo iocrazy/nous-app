@@ -26,7 +26,7 @@
 // Pure and i18n-free on purpose, like utils/modelHealth: any component can
 // import it cheaply.
 
-import type { NousModelPublic } from '../types';
+import type { NousModelPublic } from '../types/api';
 
 type LabelSource = Pick<NousModelPublic, 'name' | 'display_name' | 'actual_model'>;
 
@@ -57,7 +57,7 @@ export function platformModelText(m: LabelSource): string {
 
 /** False only for a row whose last probe failed. */
 export function isPlatformModelAvailable(
-  m: Pick<NousModelPublic, 'last_test_status'>,
+  m: Partial<Pick<NousModelPublic, 'last_test_status'>>,
 ): boolean {
   return m.last_test_status !== 'fail';
 }

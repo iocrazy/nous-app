@@ -214,12 +214,21 @@ def test_transcription_success_path_wires_the_consumer_after_the_tag_chain():
         / "workflows"
         / "ai_transcription.py"
     ).read_text()
-    assert "consume_summary_follow_up(parsed_media_id)" in src, (
+    flat = " ".join(src.split())
+    # Both consumers are told which resource was transcribed: by media id
+    # alone they picked an arbitrary holder of a shared media.
+    assert (
+        "consume_summary_follow_up( parsed_media_id, resource_id=str(target_resource_id) )"
+        in flat
+    ), (
         "the transcription success path no longer consumes the follow-up "
-        "intent — 438's column has a writer but no reader"
+        "intent (for the transcribed resource) — 438's column has a writer "
+        "but no reader"
     )
-    chain_call = src.index("chain_summary_for_tags(parsed_media_id")
-    consume_call = src.index("consume_summary_follow_up(parsed_media_id)")
+    chain_call = flat.index(
+        "chain_summary_for_tags( parsed_media_id, user_id, resource_id=str(target_resource_id) )"
+    )
+    consume_call = flat.index("consume_summary_follow_up( parsed_media_id")
     assert chain_call < consume_call, (
         "consume runs before the tag chain — its Summary-tag guard would "
         "see an un-dispatched tag and double-dispatch"

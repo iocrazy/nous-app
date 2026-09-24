@@ -9,18 +9,16 @@
  * the agent editor and AI Settings can't drift on what "unhealthy" means.
  */
 import { describe, it, expect } from 'vitest';
-import type { NousModelPublic } from '../types';
+import type { NousModelPublic } from '../types/api';
+import { makeNousModel } from '../tests/fixtures/ai';
 import { buildModelHealth, healthReasonKey } from './modelHealth';
 
 const model = (over: Partial<NousModelPublic>): NousModelPublic =>
-  ({
+  makeNousModel({
     name: 'mediahub-deepseek-v4-flash',
     display_name: 'DeepSeek V4 Flash',
-    type: 'llm',
-    pricing_type: 'per_token',
-    pricing_value: 1,
     ...over,
-  }) as NousModelPublic;
+  });
 
 describe('buildModelHealth', () => {
   it('keys health by model name, carrying the check time', () => {

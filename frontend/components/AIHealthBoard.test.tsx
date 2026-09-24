@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { AIHealthBoard } from './AIHealthBoard';
-import type { CapabilityHealth } from '../services/aiService';
+import type { CapabilityHealth } from '../types/api';
 
 vi.mock('react-i18next', () => {
   // Factory-scoped so `t` is referentially stable across renders, like the real hook.

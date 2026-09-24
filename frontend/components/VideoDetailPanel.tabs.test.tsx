@@ -38,7 +38,6 @@ vi.mock('../services/aiService', () => ({
   triggerSummaryByResource: vi.fn(),
   getSummary: ai.getSummary,
   getSummaryByResource: vi.fn().mockResolvedValue(null),
-  triggerVisualAnalysis: vi.fn(),
   triggerVisualAnalysisByResource: vi.fn(),
   getVisualAnalysisByResource: vi.fn().mockResolvedValue(null),
   pollForResult: vi.fn(),

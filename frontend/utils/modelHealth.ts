@@ -23,7 +23,8 @@
 // keeps it free of the i18n instance — importing it must stay cheap enough
 // that any component can, which is not true of utils/relativeTime.
 
-import type { NousModelPublic, NousModelType } from '../types';
+import type { NousModelType } from '../types';
+import type { NousModelPublic } from '../types/api';
 
 export type ModelHealthStatus = 'ok' | 'fail';
 

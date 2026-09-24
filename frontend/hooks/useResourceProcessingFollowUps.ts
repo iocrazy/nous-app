@@ -29,7 +29,7 @@
 
 import { useEffect, useRef } from 'react';
 import { triggerSummaryByResource } from '../services/aiService';
-import type { ResourceAITriggerResponse } from '../services/aiService';
+import type { SummarizeTriggerResponse } from '../types/api';
 import { useOptionalTaskManager } from './useOptionalTaskManager';
 import { isDedupedResponse } from '../utils/ensureResourceProcessed';
 import type { EnsureResourceProcessedResult } from '../utils/ensureResourceProcessed';
@@ -71,7 +71,7 @@ const DEAD_STATUSES = new Set(['failed', 'cancelled', 'lost']);
  * asset is "already being processed" when nothing at all is running.
  */
 function summaryOutcome(
-  res: ResourceAITriggerResponse | undefined,
+  res: SummarizeTriggerResponse | undefined,
   extra: Partial<EnsureResourceProcessedResult> = {},
 ): EnsureResourceProcessedResult {
   if (res?.already_summarized) {

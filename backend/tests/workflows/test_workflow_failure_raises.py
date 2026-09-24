@@ -89,10 +89,11 @@ class TestAiTranscriptionWorkflowReraises:
         ):
             with pytest.raises(RuntimeError, match="whisper 500"):
                 await inspect.unwrap(m.ai_transcription_workflow)(
-                    parsed_media_id=1, user_id="u-1"
+                    parsed_media_id=1, user_id="u-1", resource_id=7
                 )
 
-        mark_failed.assert_awaited_once()
+        # The dispatcher named the resource, so the failure is marked there.
+        mark_failed.assert_awaited_once_with(7)
         record_failure.assert_awaited_once()
         ctx = record_failure.await_args.kwargs["context"]
         assert ctx["workflow"] == "ai_transcription"

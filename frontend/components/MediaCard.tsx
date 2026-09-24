@@ -20,7 +20,7 @@ import { useToast } from './Toast';
 import {
   triggerTranscription, getTranscript,
   triggerSummary, getSummary,
-  triggerVisualAnalysis,
+  triggerVisualAnalysisByResource,
 } from '../services/aiService';
 import { fetchResourceTags, addResourceTag, removeResourceTag } from '../services/resourceService';
 import { fetchAllTags, createTag } from '../services/unifiedTagService';
@@ -575,19 +575,20 @@ export const MediaCard: React.FC<MediaCardProps> = ({
         setLoadingAction(null);
       }
     } else if (action === 'analyze') {
-      if (!platformId) return;
+      // Visual analysis runs on a library resource (analyze_l1_workflow).
+      // The platform-id endpoint this used to call was a stub that answered
+      // 501 on every click (after a consume + refund pair in the points
+      // ledger) and has been removed.
+      if (!resourceId) {
+        addToast('Visual analysis is not yet available', 'info');
+        return;
+      }
       setLoadingAction('analyze');
       try {
-        await triggerVisualAnalysis(platformId);
+        await triggerVisualAnalysisByResource(resourceId);
         addToast('Visual analysis started', 'info');
       } catch (err: any) {
-        const msg = err?.message || 'Visual analysis failed';
-        // Handle 501 Not Implemented gracefully
-        if (msg.includes('501') || msg.includes('Not Implemented')) {
-          addToast('Visual analysis is not yet available', 'info');
-        } else {
-          addToast(msg, 'error');
-        }
+        addToast(err?.message || 'Visual analysis failed', 'error');
       } finally {
         setLoadingAction(null);
       }

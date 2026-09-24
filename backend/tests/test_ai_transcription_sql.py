@@ -123,7 +123,7 @@ async def test_load_transcribe_inputs_raises_when_no_media():
     import app.workflows.ai_transcription as m
 
     with patch("app.db.session.read_scope", _fake_read_scope(execute_row=None)):
-        with pytest.raises(RuntimeError, match="no parsed_media"):
+        with pytest.raises(RuntimeError, match="no resource to transcribe"):
             await m.load_transcribe_inputs(1, "u")
 
 
@@ -325,7 +325,7 @@ async def test_assert_audio_present_sb_source_zero_size_raises():
             await m.assert_audio_present_step(audio_path)
 
 
-async def test_mark_transcript_completed_uses_media_id_column():
+async def test_mark_transcript_completed_keys_on_the_resource_id():
     import app.workflows.ai_transcription as m
 
     session = _CapturingWriteSession()
@@ -334,17 +334,20 @@ async def test_mark_transcript_completed_uses_media_id_column():
 
     assert len(session.statements) == 1
     sql_text, params = _compiled(session.statements[0])
-    # Must key on media_id, NOT id — wrong column silently updates 0 rows.
-    assert "resources.media_id" in sql_text
+    # The ONE resource the transcript was written to — keying on media_id
+    # flipped every holder of a shared media to "completed".
+    assert "resources.id = " in sql_text
+    assert "resources.media_id" not in sql_text
     assert "transcript_status" in sql_text
     assert 42 in params.values()
     assert "completed" in params.values()
 
 
-async def test_mark_transcript_failed_uses_media_id_column():
+async def test_mark_transcript_failed_keys_on_the_resource_id():
     """On failure the resource's transcript_status must flip to 'failed' so
-    the frontend Transcript tab stops polling. Must key on media_id (not id)
-    and never clobber an already-'completed' row."""
+    the frontend Transcript tab stops polling. Only this run's resource (not
+    every holder of the media), and never clobber an already-'completed'
+    row."""
     import app.workflows.ai_transcription as m
 
     session = _CapturingWriteSession()
@@ -353,7 +356,8 @@ async def test_mark_transcript_failed_uses_media_id_column():
 
     assert len(session.statements) == 1
     sql_text, params = _compiled(session.statements[0])
-    assert "resources.media_id" in sql_text
+    assert "resources.id = " in sql_text
+    assert "resources.media_id" not in sql_text
     # Both the SET clause and the "not already completed" guard reference
     # transcript_status — one occurrence of each.
     assert sql_text.count("transcript_status") >= 2
@@ -381,8 +385,8 @@ def test_transcription_workflow_marks_failed_before_recording():
     import app.workflows.ai_transcription as m
 
     source = inspect.getsource(m.ai_transcription_workflow)
-    assert "await mark_transcript_failed(parsed_media_id)" in source
-    fail_idx = source.index("await mark_transcript_failed(parsed_media_id)")
+    assert "await mark_transcript_failed(target_resource_id)" in source
+    fail_idx = source.index("await mark_transcript_failed(target_resource_id)")
     record_idx = source.index("record_workflow_failure(", fail_idx)
     assert fail_idx < record_idx, "must mark failed BEFORE record_workflow_failure"
 
@@ -539,5 +543,6 @@ async def test_load_transcribe_inputs_carries_billing_facts():
 def test_transcribe_inputs_select_reads_duration_and_title():
     import app.workflows.ai_transcription as m
 
-    cols = {c.key for c in m._transcribe_inputs_select_stmt(1).selected_columns}
+    stmt = m._transcribe_inputs_select_stmt(1, resource_id=100)
+    cols = {c.key for c in stmt.selected_columns}
     assert {"duration", "title"} <= cols

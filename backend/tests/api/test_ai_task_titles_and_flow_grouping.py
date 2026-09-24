@@ -471,24 +471,60 @@ class TestLegacySummaryEndpoint:
         assert join_spy.await_args.args == ("res-9", "caller-uuid")
 
     @pytest.mark.asyncio
-    async def test_no_resource_means_no_summary_row_and_no_flow_lookup(
+    async def test_no_resource_of_the_caller_is_404_before_any_charge(
         self, monkeypatch
     ) -> None:
-        """Without a resource there is no per-user transcript to summarise,
-        so this endpoint dispatches transcription instead and never reaches
-        the summary row. The flow lookup must not run either: it is keyed on
-        resource_id, and ``resource_id IS NULL`` would match parse roots —
-        grouping this summary into an unrelated submission's card."""
+        """``parsed_media`` is shared, so a platform id the caller holds no
+        resource for is not theirs to process. This used to dispatch a
+        transcription (which the workflow lands on whichever user's resource
+        the media join finds first) and, before that, charge the summary.
+        Now: 404, nothing charged, nothing dispatched, no flow lookup."""
+        from fastapi import HTTPException
+
         created: list = []
         join_spy = self._patch(monkeypatch, created, resource=None)
+        pts = MagicMock()
+        pts.check_and_consume = AsyncMock()
+        pts.ensure_team_quota = AsyncMock()
+        monkeypatch.setattr(ai_router, "PointsService", lambda: pts)
+        monkeypatch.setattr(
+            ai_router, "get_team_id_for_user", AsyncMock(return_value="team-1")
+        )
         import app.services.infra.dbos_orchestrator as orch
 
-        res = await ai_router.trigger_summary("7643786260724632866", _auth(), None)
+        with pytest.raises(HTTPException) as exc:
+            await ai_router.trigger_summary("7643786260724632866", _auth(), None)
 
+        assert exc.value.status_code == 404
+        pts.check_and_consume.assert_not_awaited()
         join_spy.assert_not_awaited()
         assert created == []
-        assert orch.start_workflow_routed.await_args.args[0] == "ai_transcription"
-        assert "Transcription queued" in res["message"]
+        orch.start_workflow_routed.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unknown_platform_id_is_404_before_any_charge(
+        self, monkeypatch
+    ) -> None:
+        """The charge used to run first, so an unknown id cost points and
+        the 404 that followed refunded nothing."""
+        from fastapi import HTTPException
+
+        async def _missing(_pid):
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        monkeypatch.setattr(ai_router, "_get_media_or_404", _missing)
+        pts = MagicMock()
+        pts.check_and_consume = AsyncMock()
+        monkeypatch.setattr(ai_router, "PointsService", lambda: pts)
+        monkeypatch.setattr(
+            ai_router, "get_team_id_for_user", AsyncMock(return_value="team-1")
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await ai_router.trigger_summary("nope", _auth(), None)
+
+        assert exc.value.status_code == 404
+        pts.check_and_consume.assert_not_awaited()
 
 
 # ─── endpoint wiring: transcribe row titles ───────────────────────

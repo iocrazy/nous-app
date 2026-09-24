@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Activity, CheckCircle2, AlertTriangle, XCircle, Loader2, RefreshCw } from 'lucide-react';
 import { Loading } from './common/Loading';
 import { useTranslation } from 'react-i18next';
-import { getAIHealth, type CapabilityHealth } from '../services/aiService';
+import { getAIHealth } from '../services/aiService';
+import type { CapabilityHealth } from '../types/api';
 
 /**
  * Capability health board. Surfaces the otherwise-invisible
