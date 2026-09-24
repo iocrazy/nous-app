@@ -747,8 +747,6 @@ export function AIModelsPage() {
         <Button type="primary" icon={<IconPlus />} onClick={openAddProvider}>Add Provider</Button>
       </div>
 
-      <JimengAuthCard />
-
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin /></div>
       ) : groups.length === 0 ? (
@@ -861,6 +859,11 @@ export function AIModelsPage() {
                       </div>
                     ) : null
                   })()}
+                  {/* The server-session credential lives on this card, not in a
+                      separate panel above the list: its OAuth login state and
+                      the Login / Logout controls render here so "Jimeng CLI"
+                      appears exactly once. */}
+                  {g.provider === 'jimeng-cli' && <JimengAuthCard embedded />}
                   {/* WHY a dot is red, visible at a glance — the persisted probe
                       reason (e.g. "HTTP 402: Insufficient Balance") used to hide
                       in an 8px-dot hover tooltip only. Full text stays on title. */}

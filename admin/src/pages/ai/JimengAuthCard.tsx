@@ -20,7 +20,13 @@ const POLL_IDLE_MS = 30000
  * the admin UI instead of an SSH `dreamina login` on the NAS. Shows the login
  * badge + credit, and a Login button that opens the OAuth device-flow link.
  */
-export function JimengAuthCard() {
+/**
+ * ``embedded`` renders the same status + Login/Logout controls as a compact row
+ * for use INSIDE the jimeng-cli provider card, instead of a standalone card
+ * above the list — the page used to show "Jimeng CLI" twice (login panel on
+ * top, catalog card below), and they are one and the same server session.
+ */
+export function JimengAuthCard({ embedded = false }: { embedded?: boolean } = {}) {
   const [modalOpen, setModalOpen] = useState(false)
   const [material, setMaterial] = useState<JimengLoginMaterial | null>(null)
 
@@ -71,12 +77,12 @@ export function JimengAuthCard() {
     )
   }, [])
 
-  return (
-    <Card style={{ marginBottom: 16 }}>
+  const body = (
+    <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>Jimeng CLI (即梦)</div>
-          <div style={{ marginTop: 6 }}>
+          {!embedded && <div style={{ fontWeight: 600, fontSize: 15 }}>Jimeng CLI (即梦)</div>}
+          <div style={{ marginTop: embedded ? 0 : 6 }}>
             {status.isLoading ? (
               <Spin size={14} />
             ) : loggedIn ? (
@@ -100,12 +106,12 @@ export function JimengAuthCard() {
           <Button icon={<IconSync />} onClick={() => status.refetch()} size="small">
             Refresh
           </Button>
-          <Button type="primary" loading={login.isPending} onClick={handleLogin}>
+          <Button type="primary" size="small" loading={login.isPending} onClick={handleLogin}>
             {loggedIn ? 'Re-login' : 'Login'}
           </Button>
           {loggedIn && (
             <Popconfirm title="Log out of Jimeng CLI?" onOk={handleLogout}>
-              <Button status="danger" loading={logout.isPending}>
+              <Button status="danger" size="small" loading={logout.isPending}>
                 Logout
               </Button>
             </Popconfirm>
@@ -174,6 +180,11 @@ export function JimengAuthCard() {
           </Space>
         </Space>
       </Modal>
-    </Card>
+    </>
+  )
+  return embedded ? (
+    <div style={{ marginTop: 8 }}>{body}</div>
+  ) : (
+    <Card style={{ marginBottom: 16 }}>{body}</Card>
   )
 }
