@@ -195,7 +195,7 @@ function resolveTargets(storages: StorageTargets): {
  *  (guarded by MIGRATION_MARKER_KEY), never overwrites a new value, never
  *  throws. Must run before any reader.
  *
- *  Copy only — deleting the old keys is `purgeLegacyStorageKeys`' job, which
+ *  Copy only — deleting the old keys is `purgeLegacyBrowserStorageEntries`' job, which
  *  `storageKeysBoot.ts` runs right after this. */
 export function migrateLegacyStorageKeys(storages: StorageTargets = {}): void {
   try {
@@ -218,7 +218,7 @@ export function migrateLegacyStorageKeys(storages: StorageTargets = {}): void {
  *  Once it runs, rolling the frontend back past the rename release loses the
  *  users' stored team selection / API key / preferences (the old build reads
  *  only the `mediahub*` names). */
-export function purgeLegacyStorageKeys(storages: StorageTargets = {}): void {
+export function purgeLegacyBrowserStorageEntries(storages: StorageTargets = {}): void {
   try {
     const { local, session } = resolveTargets(storages);
     const run = (

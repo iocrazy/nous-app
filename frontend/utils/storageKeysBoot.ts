@@ -8,7 +8,7 @@
 // Order matters: migrate (copy old → new, then write the marker), THEN purge.
 // The purge only touches a storage whose marker was written, and only removes
 // an old key whose new key holds a value.
-import { migrateLegacyStorageKeys, purgeLegacyStorageKeys } from './storageKeys';
+import { migrateLegacyStorageKeys, purgeLegacyBrowserStorageEntries } from './storageKeys';
 
 migrateLegacyStorageKeys();
-purgeLegacyStorageKeys();
+purgeLegacyBrowserStorageEntries();

@@ -11,7 +11,7 @@ import {
   SESSION_KEYS,
   migrateLegacyStorageKeys,
   projectEpisodeKey,
-  purgeLegacyStorageKeys,
+  purgeLegacyBrowserStorageEntries,
   TODOLIST_ATTENTION_PREFIX,
   TODOLIST_COLUMNS_PREFIX,
 } from './storageKeys';
@@ -158,14 +158,14 @@ describe('migrateLegacyStorageKeys (copy only — deletion is the purge\'s job)'
   });
 });
 
-describe('purgeLegacyStorageKeys', () => {
+describe('purgeLegacyBrowserStorageEntries', () => {
   it('skips a storage whose migration marker is absent (migration never finished)', () => {
     localStorage.setItem('mediahub.theme', 'light');
     localStorage.setItem(STORAGE_KEYS.theme, 'light');
     sessionStorage.setItem('mediahub_error_session_id', 'abc');
     sessionStorage.setItem(SESSION_KEYS.errorSessionId, 'abc');
 
-    purgeLegacyStorageKeys();
+    purgeLegacyBrowserStorageEntries();
 
     // Both new keys hold values, so only the marker guard can have kept these.
     expect(localStorage.getItem('mediahub.theme')).toBe('light');
@@ -182,7 +182,7 @@ describe('purgeLegacyStorageKeys', () => {
     localStorage.setItem('mediahub_volume_pref', '{"volume":0.3}');
     localStorage.setItem('unrelated', 'keep');
 
-    purgeLegacyStorageKeys();
+    purgeLegacyBrowserStorageEntries();
 
     expect(localStorage.getItem('mediahub.theme')).toBeNull();
     expect(localStorage.getItem('mediahub_selected_team')).toBeNull();
@@ -198,7 +198,7 @@ describe('purgeLegacyStorageKeys', () => {
   it('never throws when storage throws', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const broken = brokenStorage();
-    expect(() => purgeLegacyStorageKeys({ local: broken, session: broken })).not.toThrow();
+    expect(() => purgeLegacyBrowserStorageEntries({ local: broken, session: broken })).not.toThrow();
   });
 });
 
@@ -237,8 +237,8 @@ describe('storageKeysBoot (migrate, then purge)', () => {
     const calls = src
       .split('\n')
       .map((l) => l.trim())
-      .filter((l) => /^(migrate|purge)LegacyStorageKeys\(\);$/.test(l));
-    expect(calls).toEqual(['migrateLegacyStorageKeys();', 'purgeLegacyStorageKeys();']);
+      .filter((l) => /^(migrateLegacyStorageKeys|purgeLegacyBrowserStorageEntries)\(\);$/.test(l));
+    expect(calls).toEqual(['migrateLegacyStorageKeys();', 'purgeLegacyBrowserStorageEntries();']);
   });
 
   it('a boot moves legacy values to the new keys and removes the old ones', async () => {
