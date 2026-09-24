@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from app.core.config import settings
+from app.schemas.auth_responses import AuthAck, AuthMediaToken
 from app.services.infra.supabase_auth_service import SupabaseAuthService
 
 router = APIRouter(prefix="/auth", tags=["Media Auth"])
@@ -175,7 +176,7 @@ async def validate_media_cookie(cookie_value: str) -> Optional[str]:
     return parsed.user_id
 
 
-@router.post("/media-session")
+@router.post("/media-session", response_model=AuthAck)
 async def create_media_session(
     request: Request,
     authorization: str = Header(...),
@@ -224,7 +225,7 @@ async def create_media_session(
         raise HTTPException(status_code=500, detail="Failed to create media session")
 
 
-@router.delete("/media-session")
+@router.delete("/media-session", response_model=AuthAck)
 async def delete_media_session(request: Request):
     """Clear the media session cookie AND revoke the user's media tokens (#275)."""
     cookie_value = request.cookies.get(COOKIE_NAME, "")
@@ -242,7 +243,7 @@ async def delete_media_session(request: Request):
     return response
 
 
-@router.post("/media-token")
+@router.post("/media-token", response_model=AuthMediaToken)
 async def create_media_token(
     authorization: str = Header(...),
 ):

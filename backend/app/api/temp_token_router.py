@@ -22,11 +22,13 @@ import secrets
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from app.api.row_guard import require_row
 from app.core.api_key_scopes import check_scope_permission
 from app.core.deps import AuthContext, AuthDep
 from app.core.redis import get_async_redis
 from app.repositories.tags_repository import get_tags_repository
-from app.schemas.tags import TagListResponse
+from app.schemas.auth_responses import AuthAck, TempTokenCreatedTagResponse
+from app.schemas.tags import GroupIdIn, TagListResponse
 
 router = APIRouter(prefix="/auth/temp-token", tags=["Temp Token"])
 
@@ -178,10 +180,13 @@ async def get_tags_by_token(
     return TagListResponse(tags=tags, total=len(tags))
 
 
-@router.post("/{token}/selection")
+@router.post("/{token}/selection", response_model=AuthAck)
 async def save_selection(token: str, request: SelectionRequest):
     """
     Save tag selection to the token. Called by the web page on confirm.
+
+    A token that expires between the read and the write is refused like any
+    expired token (401): the selection was NOT saved, and the page must say so.
     """
     data = await _get_token_data(token)
     data["selection"] = request.tags
@@ -189,24 +194,44 @@ async def save_selection(token: str, request: SelectionRequest):
 
     redis = await get_async_redis()
     ttl = await redis.ttl(f"{REDIS_PREFIX}{token}")
-    if ttl > 0:
-        await redis.setex(
-            f"{REDIS_PREFIX}{token}",
-            ttl,
-            json.dumps(data),
+    if ttl <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
         )
+    await redis.setex(
+        f"{REDIS_PREFIX}{token}",
+        ttl,
+        json.dumps(data),
+    )
 
     return {"success": True}
 
 
 class CreateTagRequest(BaseModel):
-    name: str
-    name_zh: str | None = None
-    group_id: str | None = None
-    color: str | None = "#6366f1"
+    # Bounds are the ``tags`` column widths: past them the INSERT failed as a 500.
+    name: str = Field(..., min_length=1, max_length=50)
+    name_zh: str | None = Field(None, max_length=50)
+    group_id: GroupIdIn | None = None
+    color: str | None = Field("#6366f1", max_length=20)
 
 
-@router.post("/{token}/tags")
+async def _group_exists(group_id: str) -> bool:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TagGroups
+
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(TagGroups.id).where(TagGroups.id == int(group_id)).limit(1)
+            )
+        ).first()
+    return row is not None
+
+
+@router.post("/{token}/tags", response_model=TempTokenCreatedTagResponse)
 async def create_tag_by_token(token: str, request: CreateTagRequest):
     """Create a new tag using a temporary token. No auth header needed."""
     data = await _get_token_data(token)
@@ -217,6 +242,11 @@ async def create_tag_by_token(token: str, request: CreateTagRequest):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Token does not have tags:write scope",
         )
+
+    # An unknown group used to fail the group UPDATE with a foreign-key 500
+    # AFTER the tag had been created. Check it before writing anything.
+    if request.group_id and not await _group_exists(request.group_id):
+        require_row(None)
 
     repo = get_tags_repository()
 
@@ -286,7 +316,17 @@ async def create_tag_by_token(token: str, request: CreateTagRequest):
     return {"success": True, "data": created}
 
 
-@router.get("/{token}/selection")
+@router.get(
+    "/{token}/selection",
+    response_model=SelectionResponse,
+    responses={
+        200: {
+            "description": "JSON by default; with ``format=text`` a plain-text "
+            "tag CSV, or one option's value when ``field`` is given.",
+            "content": {"text/plain": {"schema": {"type": "string"}}},
+        }
+    },
+)
 async def get_selection(
     token: str,
     format: str = Query("json", description="Response format: json or text"),
