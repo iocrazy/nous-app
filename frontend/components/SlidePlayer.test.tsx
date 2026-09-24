@@ -83,3 +83,39 @@ describe('SlidePlayer — no slide, no report', () => {
     expect(onSlideChange).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The public share page has no session: the slide list, each slide and the
+ * audio must all carry the share grant as `?share_token=`. SharePage used to
+ * pass the share code as `mediaToken` (`?token=`, which only takes a signed
+ * media token) and the list went out with no credential at all — every shared
+ * album was a 401.
+ */
+describe('SlidePlayer — share page credential', () => {
+  it('sends the share grant on the list, the slides and the audio', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => slidesResponse });
+    vi.stubGlobal('fetch', fetchMock);
+    const { container } = render(
+      <SlidePlayer mediaId="m1" shareToken="sg1.7.9.abc" downloadStatus="completed" />,
+    );
+    await waitFor(() => expect(screen.getByAltText('Slide 1')).toBeInTheDocument());
+
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/api\/v1\/media\/m1\/slides\?share_token=sg1\.7\.9\.abc$/);
+    expect(screen.getByAltText('Slide 1').getAttribute('src')).toMatch(
+      /\/api\/v1\/media\/m1\/slides\/a\.jpg\?share_token=sg1\.7\.9\.abc$/,
+    );
+    expect(container.querySelector('audio')?.getAttribute('src')).toMatch(
+      /\/api\/v1\/media\/m1\/audio\?share_token=sg1\.7\.9\.abc$/,
+    );
+  });
+
+  it('keeps the signed media token for signed-in hosts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => slidesResponse });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<SlidePlayer mediaId="m1" mediaToken="u.1.2.sig" downloadStatus="completed" />);
+    await waitFor(() => expect(screen.getByAltText('Slide 1')).toBeInTheDocument());
+
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/api\/v1\/media\/m1\/slides$/);
+    expect(screen.getByAltText('Slide 1').getAttribute('src')).toMatch(/\?token=u\.1\.2\.sig$/);
+  });
+});

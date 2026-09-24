@@ -240,19 +240,49 @@ async def _media_caller(
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
+async def _require_slide_read(
+    media_id: str,
+    auth: Optional[AuthContext],
+    token: Optional[str],
+    share_token: Optional[str],
+) -> None:
+    """Read check for the album routes.
+
+    A ``share_token`` (share grant, or the bare code of a share without a
+    password — ``app/api/share_access.py``) opens exactly the media of the
+    resource it shares; anything else goes through the caller's own access.
+    The public share page needs this: it has no user, and these routes used
+    to demand one, so a shared album never loaded (it passed the share code
+    as ``?token=``, which only takes a signed media token)."""
+    from app.api.media_access_guard import share_token_grants
+
+    if share_token and await share_token_grants(share_token, media_id):
+        return
+    if auth is None and token is None and share_token:
+        raise HTTPException(status_code=404, detail="Media not found")
+    caller = await _media_caller(auth, token)
+    await require_media_access(media_id, caller)
+
+
 @router.get(
     "/{media_id}/slides",
     tags=TAGS_MEDIA_CONTENT,
     response_model=MediaSlidesResponse,
 )
-async def list_slides(media_id: str, auth: AuthDep):
+async def list_slides(
+    media_id: str,
+    auth: OptionalAuthDep = None,
+    share_token: Optional[str] = None,
+):
     """
     List slide files for a carousel/image-text media item.
 
     - **media_id**: parsed_media Snowflake ID
+
+    Authentication: Bearer Token, API Key, or ?share_token= (share page)
     """
+    await _require_slide_read(media_id, auth, None, share_token)
     try:
-        await require_media_access(media_id, auth.user_id)
         loc = await _resolve_album_location(media_id)
         if loc:
             from app.services.library.media_storage import ObjectStore
@@ -327,6 +357,7 @@ async def serve_slide_file(
     request: Request,
     auth: OptionalAuthDep = None,
     token: str = None,
+    share_token: Optional[str] = None,
 ):
     """
     Serve a single slide file.
@@ -334,7 +365,7 @@ async def serve_slide_file(
     - **media_id**: parsed_media Snowflake ID
     - **filename**: Slide filename (e.g. 001.jpg, 002.mp4)
 
-    Authentication: Bearer Token, API Key, or ?token= query param
+    Authentication: Bearer Token, API Key, ?token= or ?share_token=
     """
     import mimetypes as _mt
 
@@ -346,15 +377,13 @@ async def serve_slide_file(
         validate_slide_name,
     )
 
-    caller = await _media_caller(auth, token)
-
     try:
         validate_slide_name(filename)
     except InvalidSlideName:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
+    await _require_slide_read(media_id, auth, token, share_token)
     try:
-        await require_media_access(media_id, caller)
         loc = await _resolve_album_location(media_id)
         if loc:
             from app.services.library.media_serving import serve_stored_file
@@ -411,19 +440,19 @@ async def serve_audio_file(
     request: Request,
     auth: OptionalAuthDep = None,
     token: str = None,
+    share_token: Optional[str] = None,
 ):
     """
     Serve standalone background audio for carousel content.
 
     - **media_id**: parsed_media Snowflake ID
 
-    Authentication: Bearer Token, API Key, or ?token= query param
+    Authentication: Bearer Token, API Key, ?token= or ?share_token=
     """
-    caller = await _media_caller(auth, token)
+    await _require_slide_read(media_id, auth, token, share_token)
 
     try:
         media = await _get_media_row(media_id)
-        await require_media_access(media_id, caller)
         base_path = Utils.get_download_base_path()
 
         chosen = await _resolve_audio_source(media, base_path)
