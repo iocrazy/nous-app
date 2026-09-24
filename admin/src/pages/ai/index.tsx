@@ -83,6 +83,20 @@ interface ProviderGroup {
   models: NousModel[]
 }
 
+// Key of a card's admin-chosen name in the `ai_provider_card_labels` setting.
+// Must match the grouping key in `groups` below: rows sharing provider + base
+// URL are one card, so they share one name.
+function cardKey(provider: string, baseUrl: string): string {
+  return `${provider}|${baseUrl || ''}`
+}
+
+// Typed reason from the backend's ErrorResponse envelope ({details: {reason}})
+// when there is one, the HTTP status otherwise.
+async function errorReason(res: Response): Promise<string> {
+  const body = await res.json().catch(() => null)
+  return body?.details?.reason || body?.error || `HTTP ${res.status}`
+}
+
 const TYPE_COLORS: Record<string, string> = {
   llm: 'arcoblue',
   embedding: 'green',
@@ -272,6 +286,9 @@ export function AIModelsPage() {
   const [modalGroup, setModalGroup] = useState<ProviderGroup | null>(null)
   const [fetchedModels, setFetchedModels] = useState<string[]>([])
   const [protocols, setProtocols] = useState<ProviderProtocol[]>([])
+  // Admin-chosen card names, keyed by cardKey(). Empty until loaded; a card
+  // without an entry shows its protocol label.
+  const [cardLabels, setCardLabels] = useState<Record<string, string>>({})
   const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [probeLoading, setProbeLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -331,11 +348,44 @@ export function AIModelsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
+  useEffect(() => {
+    // Best-effort like the protocols list: a failure leaves the protocol
+    // labels on every card, which is the pre-rename look.
+    const loadCardLabels = async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/v1/admin/nous-models/card-labels`, { headers })
+        if (res.ok) {
+          const data = await res.json()
+          setCardLabels(data.labels || {})
+        } else {
+          console.error('[ai] failed to load card names', res.status)
+        }
+      } catch (err) {
+        console.error('[ai] failed to load card names', err)
+      }
+    }
+    loadCardLabels()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
+  // Merge a partial {cardKey: name} patch; a blank name restores the default.
+  // Throws with the backend's reason so the caller can say what went wrong.
+  const saveCardLabels = async (patch: Record<string, string>) => {
+    const res = await fetch(`${apiBase}/api/v1/admin/nous-models/card-labels`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ labels: patch }),
+    })
+    if (!res.ok) throw new Error(await errorReason(res))
+    const data = await res.json()
+    setCardLabels(data.labels || {})
+  }
+
   const groups = useMemo<ProviderGroup[]>(() => {
     const map = new Map<string, ProviderGroup>()
     for (const m of models) {
       if (!isAdminManaged(protocols, m.actual_provider)) continue
-      const key = `${m.actual_provider}|${m.base_url || ''}`
+      const key = cardKey(m.actual_provider, m.base_url || '')
       if (!map.has(key)) {
         map.set(key, {
           provider: m.actual_provider,
@@ -360,6 +410,12 @@ export function AIModelsPage() {
     () => new Map(protocols.map((p) => [p.key, p])),
     [protocols],
   )
+
+  // Card title: the admin's name, else the protocol's label, else the raw key.
+  const customName = (g: ProviderGroup): string | undefined =>
+    cardLabels[cardKey(g.provider, g.base_url)]
+  const cardTitle = (g: ProviderGroup): string =>
+    customName(g) || protocolByKey.get(g.provider)?.label || g.provider
 
   const protocolOptions = useMemo(
     () =>
@@ -610,6 +666,18 @@ export function AIModelsPage() {
         failures.push(`${model} (${err instanceof Error ? err.message : 'network error'})`)
       }
     }
+    // Name the new card only once it exists (at least one row saved); a name
+    // for a card with no rows would sit in the setting unseen.
+    const cardName = modalMode === 'new' ? ((values.card_name as string) || '').trim() : ''
+    if (ok && cardName) {
+      try {
+        await saveCardLabels({
+          [cardKey(providerFields.actual_provider, providerFields.base_url)]: cardName,
+        })
+      } catch (err) {
+        failures.push(`card name (${err instanceof Error ? err.message : 'error'})`)
+      }
+    }
     setSaving(false)
     if (ok) Message.success(`Added ${ok} model${ok > 1 ? 's' : ''}`)
     if (failures.length) Message.error(`Failed: ${failures.join('; ')}`)
@@ -645,6 +713,7 @@ export function AIModelsPage() {
     setEditModal({ mode: 'provider', group: g })
     editForm.resetFields()
     editForm.setFieldsValue({
+      card_name: customName(g) || '',
       base_url: g.base_url,
       app_id: g.app_id || '',
       api_key: '', // blank = keep current
@@ -699,7 +768,28 @@ export function AIModelsPage() {
         for (const m of editModal.group.models) {
           await putModel(m.id, shared)
         }
-        Message.success(`Updated ${editModal.group.models.length} model(s)`)
+        // The name follows the card: a changed base URL gives the card a new
+        // key, so write the name there and clear the old key.
+        const g = editModal.group
+        const oldKey = cardKey(g.provider, g.base_url)
+        const newKey = cardKey(g.provider, (values.base_url as string) || '')
+        const name = ((values.card_name as string) || '').trim()
+        const labelPatch: Record<string, string> = {}
+        // A blank, unchanged name is not written to the new key: if the rows
+        // join a card that already has a name, that name must survive.
+        const nameChanged = name !== (customName(g) || '')
+        if (nameChanged || (newKey !== oldKey && name)) labelPatch[newKey] = name
+        if (newKey !== oldKey && cardLabels[oldKey]) labelPatch[oldKey] = ''
+        if (Object.keys(labelPatch).length) {
+          try {
+            await saveCardLabels(labelPatch)
+          } catch (err) {
+            // Rows are already saved; report the name separately so the
+            // admin does not retry the whole edit.
+            Message.error(`Card name not saved: ${err instanceof Error ? err.message : 'error'}`)
+          }
+        }
+        Message.success(`Updated ${g.models.length} model(s)`)
       }
       setEditModal(null)
       fetchModels()
@@ -777,8 +867,19 @@ export function AIModelsPage() {
                         apart by nothing on screen. The label and description
                         were already in the /protocols payload this page
                         fetches; they were simply never used outside the Add
-                        Provider dropdown. */}
-                    {protocolByKey.get(g.provider)?.label || g.provider}
+                        Provider dropdown. An admin-chosen card name (Edit →
+                        Card Name) replaces the label, which then moves into
+                        the small text beside it so the protocol stays visible. */}
+                    {cardTitle(g)}
+                    {customName(g) && protocolByKey.get(g.provider)?.label ? (
+                      <Text
+                        type="secondary"
+                        style={{ fontSize: 12, fontWeight: 400 }}
+                        title="Protocol label"
+                      >
+                        {protocolByKey.get(g.provider)!.label}
+                      </Text>
+                    ) : null}
                     <Text
                       code
                       style={{ fontSize: 12, fontWeight: 400 }}
@@ -992,10 +1093,7 @@ export function AIModelsPage() {
         title={
           modalMode === 'new'
             ? 'Add Provider'
-            : `Add Models — ${
-                (modalGroup && protocolByKey.get(modalGroup.provider)?.label) ||
-                modalGroup?.provider
-              }`
+            : `Add Models — ${modalGroup ? cardTitle(modalGroup) : ''}`
         }
         visible={modalVisible}
         onOk={handleSaveModels}
@@ -1022,6 +1120,14 @@ export function AIModelsPage() {
                 />
               </FormItem>
               <FormItem
+                label="Card Name"
+                field="card_name"
+                rules={[{ maxLength: 64, message: 'At most 64 characters' }]}
+                extra="Optional. Shown as the card's title instead of the protocol name."
+              >
+                <Input placeholder="Default name" maxLength={64} allowClear />
+              </FormItem>
+              <FormItem
                 label="API Base URL"
                 field="base_url"
                 extra="OpenAI-compatible base URL (ends with /v1). Leave blank only for built-in providers with a default."
@@ -1039,8 +1145,7 @@ export function AIModelsPage() {
             <div style={{ marginBottom: 12, fontSize: 13, color: 'var(--color-text-2)' }}>
               <div>
                 <b>Provider:</b>{' '}
-                {(modalGroup && protocolByKey.get(modalGroup.provider)?.label) ||
-                  modalGroup?.provider}{' '}
+                {modalGroup ? cardTitle(modalGroup) : ''}{' '}
                 <Text code style={{ fontSize: 12 }}>{modalGroup?.provider}</Text>
               </div>
               <div style={{ fontFamily: 'monospace', fontSize: 12 }}>{modalGroup?.base_url}</div>
@@ -1077,7 +1182,7 @@ export function AIModelsPage() {
       <Modal
         title={
           editModal?.mode === 'provider'
-            ? `Edit Provider — ${editModal.group.provider}`
+            ? `Edit Provider — ${cardTitle(editModal.group)}`
             : editModal?.mode === 'model'
               ? `Edit Model — ${editModal.model.actual_model}`
               : 'Edit'
@@ -1095,6 +1200,19 @@ export function AIModelsPage() {
               Changes apply to all {editModal.group.models.length} model(s) on
               this provider (they share the base URL + key).
             </div>
+          )}
+
+          {editModal?.mode === 'provider' && (
+            <FormItem
+              label="Card Name"
+              field="card_name"
+              rules={[{ maxLength: 64, message: 'At most 64 characters' }]}
+              extra={`Shown as this card's title. Leave blank to use the default (${
+                protocolByKey.get(editModal.group.provider)?.label || editModal.group.provider
+              }).`}
+            >
+              <Input placeholder="Default name" maxLength={64} allowClear />
+            </FormItem>
           )}
 
           {editModal?.mode === 'model' && (
