@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Optional
+from uuid import UUID
 
 from loguru import logger
 
@@ -28,6 +29,32 @@ def _get_conversation_semaphore(conversation_id: int) -> asyncio.Semaphore:
             _CONVERSATION_TURN_CAP
         )
     return _conversation_agent_semaphores[conversation_id]
+
+
+async def _agent_usable_by(agent: dict[str, Any], user_id: str) -> bool:
+    """May ``user_id`` bring ``agent`` into a conversation?
+
+    Same visible set as the agent picker (``GET /ai-library/agents`` →
+    ``list_accessible``) and the by-slug routes since OpenAPI P5: system
+    presets, plus agents in the caller's own / team / project scope. Before
+    this, any member could add ANY chat-enabled agent by slug — including
+    someone else's private agent, whose prompts then answered in the
+    caller's group on every @-mention.
+    """
+    if agent.get("is_system_preset"):
+        return True
+    owner = agent.get("user_id")
+    if owner is not None and str(owner) == str(user_id):
+        return True
+    try:
+        user_uuid = UUID(str(user_id))
+    except ValueError:
+        return False
+    # Lazy: the P5 row-scope rule lives with the ai-library router; importing
+    # it at module load would pull the router into every service import.
+    from app.api.ai_library_router import _in_row_scope
+
+    return await _in_row_scope(agent, user_uuid, owner_key="user_id")
 
 
 class ConversationService:
@@ -184,7 +211,10 @@ class ConversationService:
             raise ValueError(f"conversation {conversation_id} not found")
         ar = get_agent_repository()
         agent = await ar.get_by_slug(agent_slug)
-        if agent is None:
+        # An agent the caller cannot see is answered exactly like a missing
+        # slug, BEFORE the caps check: otherwise "not enabled for chat" (403)
+        # vs "not found" (400) tells an outsider the slug exists.
+        if agent is None or not await _agent_usable_by(agent, user_id):
             raise ValueError(f"agent {agent_slug!r} not found")
         caps = agent_chat_caps(agent)
         if not caps.enabled or not caps.allows_team(conversation["scope_id"]):
