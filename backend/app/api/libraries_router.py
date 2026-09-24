@@ -9,7 +9,9 @@ Team library CRUD endpoints.
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
+from app.api.library_access import library_not_found, require_library_access, team_role
 from app.core.deps import AuthDep
+from app.core.workflow_roles import WRITE_ROLES
 from app.schemas.libraries import LibraryCreate, LibraryUpdate
 from app.services.library.libraries_service import LibrariesService
 
@@ -22,6 +24,8 @@ async def list_libraries(
     scope_id: str = Query(..., description="Team ID"),
 ):
     """List all libraries for a team."""
+    if await team_role(scope_id, auth.user_id) is None:
+        raise HTTPException(status_code=403, detail="You are not a member of this team")
     try:
         svc = LibrariesService()
         libraries = await svc.list_libraries(scope_id)
@@ -34,6 +38,11 @@ async def list_libraries(
 @router.post("")
 async def create_library(data: LibraryCreate, auth: AuthDep):
     """Create a new team library."""
+    role = await team_role(data.scope_id, auth.user_id)
+    if role is None:
+        raise HTTPException(status_code=403, detail="You are not a member of this team")
+    if role not in WRITE_ROLES:
+        raise HTTPException(status_code=403, detail="Insufficient role")
     try:
         svc = LibrariesService()
         library = await svc.create_library(
@@ -49,14 +58,22 @@ async def create_library(data: LibraryCreate, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to create library")
 
 
+async def _load(svc: LibrariesService, library_id: str) -> dict | None:
+    """The row, or None — also for an id that is not a number (was a 500)."""
+    try:
+        int(library_id)
+    except ValueError:
+        raise library_not_found()
+    return await svc.get_library(library_id)
+
+
 @router.get("/{library_id}")
 async def get_library(library_id: str, auth: AuthDep):
     """Get a single library by ID."""
     try:
         svc = LibrariesService()
-        library = await svc.get_library(library_id)
-        if not library:
-            raise HTTPException(status_code=404, detail="Library not found")
+        library = await _load(svc, library_id)
+        await require_library_access(library, auth.user_id, write=False)
         return {"success": True, "data": library}
     except HTTPException:
         raise
@@ -70,9 +87,8 @@ async def update_library(library_id: str, data: LibraryUpdate, auth: AuthDep):
     """Update a library."""
     try:
         svc = LibrariesService()
-        library = await svc.get_library(library_id)
-        if not library:
-            raise HTTPException(status_code=404, detail="Library not found")
+        library = await _load(svc, library_id)
+        await require_library_access(library, auth.user_id, write=True)
 
         update_data = data.model_dump(exclude_none=True)
         if not update_data:
@@ -92,9 +108,8 @@ async def delete_library(library_id: str, auth: AuthDep):
     """Delete a library and all its contents."""
     try:
         svc = LibrariesService()
-        library = await svc.get_library(library_id)
-        if not library:
-            raise HTTPException(status_code=404, detail="Library not found")
+        library = await _load(svc, library_id)
+        await require_library_access(library, auth.user_id, write=True)
 
         await svc.delete_library(library_id)
         return {"success": True, "message": "Library deleted"}
