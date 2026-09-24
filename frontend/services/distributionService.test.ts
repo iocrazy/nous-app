@@ -213,13 +213,13 @@ describe('listLibraryMedia — gallery entities in images mode', () => {
           id: 'j1', resource_id: 'gal-1',
           resource: {
             filename: 'trip', thumbnail_path: 'x.jpg',
-            mime_type: 'application/x-mediahub-gallery', gallery_count: 4,
+            mime_type: 'application/x-nous-gallery', gallery_count: 4,
           },
         }],
       }),
     );
     const rows = await listLibraryVideos('scope-1', { mediaType: 'image' });
-    expect(rows[0].mime_type).toBe('application/x-mediahub-gallery');
+    expect(rows[0].mime_type).toBe('application/x-nous-gallery');
     expect(rows[0].gallery_count).toBe(4);
   });
 });

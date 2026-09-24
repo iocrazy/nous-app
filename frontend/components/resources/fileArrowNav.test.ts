@@ -4,8 +4,6 @@ import { shouldSuppressFileArrowNav } from './fileArrowNav';
 
 describe('shouldSuppressFileArrowNav', () => {
   it('suppresses file-level ← / → for galleries (GalleryViewer owns the keys)', () => {
-    // Both spellings: legacy rows keep x-mediahub until the data migration.
-    expect(shouldSuppressFileArrowNav('application/x-mediahub-gallery')).toBe(true);
     expect(shouldSuppressFileArrowNav('application/x-nous-gallery')).toBe(true);
   });
 

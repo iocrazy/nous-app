@@ -60,7 +60,7 @@ printf 'BROWSER_INTERNAL_TOKEN=%s\n' "$TOKEN" \
   >> /media/heygo/program/datahub/nous/secrets/backend.env
 ```
 
-**为什么不让 browser 直接共用 `backend.env`**（gateway 就是共用的）：`backend.env` 里有 `SUPABASE_SERVICE_ROLE_KEY`、`MEDIAHUB_TOKEN_ENCRYPTION_KEY`（解密所有账号 `session_state` 的主密钥）和带密码的 PG DSN。而 `nous-browser` 的全部工作就是驱动 Chromium 去加载抖音等外部站点。把主密钥注入这个进程，等于让一次渲染器逃逸把「单账号会话泄露」升级成「全库沦陷」，spec §7.6 的加密存储也就白做了。代价是这个 token 要在两个文件里各写一份；写歪了 browser 返回 401，是可见的类型化失败，比密钥过度暴露这种静默风险好诊断。
+**为什么不让 browser 直接共用 `backend.env`**（gateway 就是共用的）：`backend.env` 里有 `SUPABASE_SERVICE_ROLE_KEY`、`NOUS_TOKEN_ENCRYPTION_KEY`（解密所有账号 `session_state` 的主密钥）和带密码的 PG DSN。而 `nous-browser` 的全部工作就是驱动 Chromium 去加载抖音等外部站点。把主密钥注入这个进程，等于让一次渲染器逃逸把「单账号会话泄露」升级成「全库沦陷」，spec §7.6 的加密存储也就白做了。代价是这个 token 要在两个文件里各写一份；写歪了 browser 返回 401，是可见的类型化失败，比密钥过度暴露这种静默风险好诊断。
 
 改完 env 文件必须 `docker compose up -d`（不是 `restart`）才会重读，见 CLAUDE.md「部署陷阱」。
 

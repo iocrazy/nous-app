@@ -1,8 +1,10 @@
 """The single place that knows an env var has two names.
 
-The project was renamed mediahub → nous. Process env that lives OUTSIDE
-this repo (production ``secrets/backend.env``, the retired NAS stack's
-compose) still says ``MEDIAHUB_*``, so every reader accepts both:
+The project was renamed mediahub → nous. Production (gpupc
+``secrets/backend.env`` + ``deploy/gpu-server`` compose) now sets only the
+``NOUS_*`` names, but env that lives outside that path — the retired NAS
+stack's compose (``docker/`` / ``deploy/nas/``), old local ``.env`` files —
+may still say ``MEDIAHUB_*``, so every reader accepts both:
 
     env_alias("TOKEN_ENCRYPTION_KEY")
         → NOUS_TOKEN_ENCRYPTION_KEY, else MEDIAHUB_TOKEN_ENCRYPTION_KEY

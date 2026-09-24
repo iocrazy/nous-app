@@ -31,7 +31,7 @@ import './cover-studio.css';
 // A gallery is a container of images, not an image. Handing one to the model
 // as a single reference is meaningless, and `listLibraryMedia` includes them
 // in image mode on purpose for the publish picker, which CAN post a gallery.
-// So library rows are filtered with `isGalleryMime` (both mime spellings).
+// So library rows are filtered with `isGalleryMime`.
 
 interface Props {
   open: boolean;

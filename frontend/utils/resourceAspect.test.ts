@@ -64,7 +64,7 @@ describe('aspectRatioOf priority order', () => {
       'audio/mpeg',
       'application/pdf',
       'text/plain',
-      'application/x-mediahub-gallery',
+      'application/x-nous-gallery',
     ]) {
       expect(aspectRatioOf({ mime_type: mime })).toBe(NON_VISUAL_ASPECT)
       expect(needsAspectMeasurement({ mime_type: mime })).toBe(false)

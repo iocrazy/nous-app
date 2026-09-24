@@ -2276,7 +2276,7 @@ export async function trashResources(
 // ─── Gallery (first-class gallery entity, PR-A) ──────────────────────
 
 // A gallery is one `resources` row whose mime is a gallery mime (see
-// `utils/galleryMime.ts` — both spellings are accepted during the rename); its
+// `utils/galleryMime.ts` — the single accept list); its
 // ordered child images are ordinary image resources linked through the
 // `gallery_items` junction.
 

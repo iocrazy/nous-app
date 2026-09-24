@@ -47,7 +47,7 @@ const GALLERY_ROW = {
   id: '888',
   filename: 'My album',
   thumbnail_url: null,
-  mime_type: 'application/x-mediahub-gallery',
+  mime_type: 'application/x-nous-gallery',
   gallery_count: 9,
 };
 // Same entity written after the MIME rename — must be filtered out too.

@@ -79,10 +79,11 @@ export const LEGACY_LOCAL_PREFIXES: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /** Set in each storage once every legacy value has been copied. The copy runs
- *  only while it is absent: the legacy keys are deliberately kept this release
- *  (see below), so without the marker every boot would copy them again and
- *  resurrect values the app removed on purpose — an invalid selected team
- *  dropped by `useTeams`, or the one-shot `auth_expired` flag LoginPage consumes. */
+ *  only while it is absent, so a legacy key that outlives the purge (its copy
+ *  failed, or the storage cannot be enumerated) is never copied again to
+ *  resurrect a value the app removed on purpose — an invalid selected team
+ *  dropped by `useTeams`, or the one-shot `auth_expired` flag LoginPage consumes.
+ *  It is also the purge's go-ahead: no marker, no purge (see below). */
 export const MIGRATION_MARKER_KEY = 'nous_storage_keys_migrated_v1';
 
 type StorageTargets = { local?: Storage | null; session?: Storage | null };
@@ -194,9 +195,8 @@ function resolveTargets(storages: StorageTargets): {
  *  (guarded by MIGRATION_MARKER_KEY), never overwrites a new value, never
  *  throws. Must run before any reader.
  *
- *  The legacy keys are deliberately KEPT: if this frontend is rolled back, the
- *  previous build still finds the team selection, API key, theme, etc. under
- *  their old names instead of logging people out of their team context. */
+ *  Copy only — deleting the old keys is `purgeLegacyBrowserStorageEntries`' job, which
+ *  `storageKeysBoot.ts` runs right after this. */
 export function migrateLegacyStorageKeys(storages: StorageTargets = {}): void {
   try {
     const { local, session } = resolveTargets(storages);
@@ -207,14 +207,18 @@ export function migrateLegacyStorageKeys(storages: StorageTargets = {}): void {
   }
 }
 
-/** Delete the legacy `mediahub*` keys — each one only when its `nous*`
- *  counterpart holds a value, so nothing whose copy failed is ever lost.
+/** Delete the legacy `mediahub*` keys. Two guards, both per storage, so
+ *  nothing whose copy failed is ever lost:
+ *  - the storage must carry MIGRATION_MARKER_KEY — a migration that did not
+ *    finish (quota, unreadable storage) leaves every legacy key in place for
+ *    the next boot's retry;
+ *  - each old key is removed only when its `nous*` counterpart holds a value.
  *
- *  ⚠️ INTENTIONALLY NOT CALLED YET. Wire it in a follow-up release, once the
- *  release that introduced `migrateLegacyStorageKeys` has shipped and will not
- *  be rolled back: add `purgeLegacyStorageKeys();` after the migrate call in
- *  `storageKeysBoot.ts` (a one-line change). */
-export function purgeLegacyStorageKeys(storages: StorageTargets = {}): void {
+ *  Called from `storageKeysBoot.ts` right after `migrateLegacyStorageKeys()`.
+ *  Once it runs, rolling the frontend back past the rename release loses the
+ *  users' stored team selection / API key / preferences (the old build reads
+ *  only the `mediahub*` names). */
+export function purgeLegacyBrowserStorageEntries(storages: StorageTargets = {}): void {
   try {
     const { local, session } = resolveTargets(storages);
     const run = (
@@ -222,6 +226,12 @@ export function purgeLegacyStorageKeys(storages: StorageTargets = {}): void {
       exact: Readonly<Record<string, string>>,
       prefixes: ReadonlyArray<readonly [string, string]>,
     ): void => {
+      try {
+        if (storage.getItem(MIGRATION_MARKER_KEY) === null) return;
+      } catch (err) {
+        console.error('[storageKeys] failed to read migration marker before purge', err);
+        return;
+      }
       const pairs = legacyPairs(storage, exact, prefixes);
       if (pairs === null) return;
       for (const [oldKey, newKey] of pairs) removeLegacyKey(storage, oldKey, newKey);

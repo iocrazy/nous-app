@@ -112,7 +112,7 @@ vi.mock('../../services/distributionService', () => ({
             // `types=gallery`). Its own id is never published — picking it
             // expands into child image ids.
             { id: 'gal-1', filename: 'my-gallery', thumbnail_url: null,
-              mime_type: 'application/x-mediahub-gallery', gallery_count: 2 },
+              mime_type: 'application/x-nous-gallery', gallery_count: 2 },
           ]
         : [{ id: '30', filename: 'clip-a.mp4', thumbnail_url: null }],
     ),

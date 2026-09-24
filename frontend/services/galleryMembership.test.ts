@@ -34,7 +34,7 @@ function row(resourceId: string, mime = 'image/jpeg'): ResourceItem {
   } as unknown as ResourceItem;
 }
 
-const GALLERY_MIME = 'application/x-mediahub-gallery';
+const GALLERY_MIME = 'application/x-nous-gallery';
 
 describe('fetchGalleryScopeMembership — HTTP + parsing', () => {
   beforeEach(() => {
