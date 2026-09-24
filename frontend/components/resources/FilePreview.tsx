@@ -6,7 +6,7 @@
 import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, File, FileText, Film, Image, Music } from 'lucide-react';
-import type { Resource } from '../../types';
+import type { ResourceRow } from '../../types/api';
 import { getResourceCoverUrl, setResourceChorus, uploadResourceCover } from '../../services/resourceService';
 import { useToast } from '../Toast';
 import { AudioHero } from '../AudioHero';
@@ -24,10 +24,10 @@ function getFileIcon(mimeType: string | null | undefined) {
 }
 
 export const FilePreview: React.FC<{
-  resource: Resource;
+  resource: ResourceRow;
   fileUrl: string | null;
   currentUserId?: string;
-  onCoverUpdated?: (updated: Resource) => void;
+  onCoverUpdated?: (updated: ResourceRow) => void;
 }> = ({ resource, fileUrl, currentUserId, onCoverUpdated }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -39,7 +39,7 @@ export const FilePreview: React.FC<{
     e.target.value = ''; // allow re-selecting the same file
     if (!f) return;
     try {
-      const updated = await uploadResourceCover(resource.id, f);
+      const updated = await uploadResourceCover(String(resource.id), f);
       onCoverUpdated?.(updated);
       addToast(t('resources.detail.coverUpdated', 'Cover updated'), 'success');
     } catch (err) {
@@ -114,7 +114,7 @@ export const FilePreview: React.FC<{
               ? async (sec) => {
                   try {
                     const ms = sec == null ? null : Math.round(sec * 1000);
-                    const updated = await setResourceChorus(resource.id, ms);
+                    const updated = await setResourceChorus(String(resource.id), ms);
                     onCoverUpdated?.(updated);
                     addToast(
                       t(

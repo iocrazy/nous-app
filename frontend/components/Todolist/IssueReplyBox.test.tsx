@@ -6,7 +6,7 @@ import { IssueReplyBox } from './IssueReplyBox';
 import { createResourceMentionExtension } from '../chat/ChatInputResourceMention';
 import { MAX_ASSET_REF_ATTACHMENTS, MAX_OUTPUT_REF_ATTACHMENTS } from '../chat/attachmentLimits';
 import type { OutputObject, OutputVersion } from '../../services/outputsService';
-import type { ResourceSearchResult } from '../../types';
+import type { ResourceSearchResult } from '../../types/api';
 import { issueDeepLink } from '../../utils/issueLinks';
 
 // Mock the upload service to avoid hitting the network.

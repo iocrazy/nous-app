@@ -7,7 +7,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { Resource } from '../types';
+import type { ResourceRow } from '../types/api';
+import { parseResourceLyrics } from '../utils/resourceLyrics';
 import type { LyricLine } from '../services/lyricsService';
 import { buildSodaTheme } from '../utils/sodaTheme';
 import { parseArtistTitle } from '../utils/parseArtistTitle';
@@ -36,11 +37,11 @@ import { MobileAudioShell, type MobileAudioMenuItem } from './MobileAudioShell';
  */
 
 interface MobileAudioUploadProps {
-  resource: Resource;
+  resource: ResourceRow;
   /** Audio stream URL (already token-signed). */
   fileUrl: string;
   /** Called with the fresh row after any mutation (cover / lrc / chorus / rating / notes). */
-  onResourceUpdated?: (updated: Resource) => void;
+  onResourceUpdated?: (updated: ResourceRow) => void;
   /** Floating back arrow handler (top-left). */
   onBack: () => void;
   /** Trash/delete the resource — reuses ResourceDetailPage's handler. */
@@ -70,7 +71,7 @@ export function MobileAudioUpload({
 
   // lyrics_json lines carry `line_start_ms: number | null`; the shell wants
   // `LyricLine` (`number | undefined`) — normalize null → undefined.
-  const lyricLines: LyricLine[] = (resource.lyrics_json?.lines ?? []).map((l) => ({
+  const lyricLines: LyricLine[] = (parseResourceLyrics(resource.lyrics_json)?.lines ?? []).map((l) => ({
     text: l.text,
     line_start_ms: l.line_start_ms ?? undefined,
   }));
@@ -102,7 +103,7 @@ export function MobileAudioUpload({
   // ── Mutations ─────────────────────────────────────────────────────────────
   const reloadLyrics = useCallback(async () => {
     try {
-      const data = await getResourceLyrics(resource.id);
+      const data = await getResourceLyrics(String(resource.id));
       if (data) onResourceUpdated?.({ ...resource, lyrics_json: data });
     } catch (err) {
       console.error('Failed to reload lyrics:', err);
@@ -113,7 +114,7 @@ export function MobileAudioUpload({
     async (sec: number | null) => {
       try {
         const ms = sec == null ? null : Math.round(sec * 1000);
-        const updated = await setResourceChorus(resource.id, ms);
+        const updated = await setResourceChorus(String(resource.id), ms);
         onResourceUpdated?.(updated);
         addToast(
           t(
@@ -133,7 +134,7 @@ export function MobileAudioUpload({
   const handleRatingChange = useCallback(
     async (n: number) => {
       try {
-        const updated = await updateResource(resource.id, { rating: n });
+        const updated = await updateResource(String(resource.id), { rating: n });
         onResourceUpdated?.(updated);
       } catch (err) {
         console.error('Failed to update rating:', err);
@@ -146,7 +147,7 @@ export function MobileAudioUpload({
     const val = notesValue.trim();
     if (val === (resource.notes || '').trim()) return;
     try {
-      const updated = await updateResource(resource.id, { notes: val });
+      const updated = await updateResource(String(resource.id), { notes: val });
       onResourceUpdated?.(updated);
     } catch (err) {
       console.error('Failed to update notes:', err);
@@ -159,7 +160,7 @@ export function MobileAudioUpload({
       e.target.value = ''; // allow re-selecting the same file
       if (!f) return;
       try {
-        const updated = await uploadResourceCover(resource.id, f);
+        const updated = await uploadResourceCover(String(resource.id), f);
         onResourceUpdated?.(updated);
         addToast(t('resources.detail.coverUpdated', 'Cover updated'), 'success');
       } catch (err) {
@@ -176,7 +177,7 @@ export function MobileAudioUpload({
       e.target.value = '';
       if (!f) return;
       try {
-        const lyricsJson = await uploadResourceLyrics(resource.id, f);
+        const lyricsJson = await uploadResourceLyrics(String(resource.id), f);
         onResourceUpdated?.({ ...resource, lyrics_json: lyricsJson });
         addToast(t('resources.detail.lyricsUploaded', 'Lyrics uploaded'), 'success');
       } catch (err) {

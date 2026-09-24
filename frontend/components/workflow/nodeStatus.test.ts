@@ -6,12 +6,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { isNodeOverdue, unmetDeps } from './nodeStatus';
-import type { ProjectStageNode } from '../../types';
+import type { ProjectStageNode } from '../../types/api';
+import { makeStageNode } from '../../tests/fixtures/projects';
 
 const TODAY = '2026-07-20';
 
 function node(over: Partial<ProjectStageNode>): ProjectStageNode {
-  return {
+  return makeStageNode({
     id: '1',
     project_id: '10',
     source_template_node_id: null,
@@ -32,7 +33,7 @@ function node(over: Partial<ProjectStageNode>): ProjectStageNode {
     completion_policy: 'owner',
     events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false, prepare_agent_run: false, auto_start: false },
     ...over,
-  };
+  });
 }
 
 describe('isNodeOverdue', () => {

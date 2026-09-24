@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, Video, FileText, Image, File } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ProjectFile } from '../types';
+import type { ProjectFile } from '../types/api';
 
 interface FileInfoPanelProps {
   file: ProjectFile;

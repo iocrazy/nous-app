@@ -66,7 +66,8 @@ import {
   Settings,
   User,
 } from 'lucide-react';
-import type { ProjectNodePatch, ProjectStageNode, WorkflowMemberRef } from '../../types';
+import type { ProjectNodePatch, WorkflowMemberRef } from '../../types';
+import type { ProjectStageNode } from '../../types/api';
 import { resolveSurface } from './nodeSurface';
 import { NODE_STATUS_CONFIG, NODE_STATUS_LABEL } from '../workflow/nodeStatus';
 import { DateTimePopover } from '../common/DateTimePopover';

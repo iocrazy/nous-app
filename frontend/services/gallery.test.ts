@@ -40,11 +40,11 @@ describe('gallery service — HTTP shapes', () => {
   });
 
   it('createGallery POSTs to /resources/galleries with scope + filename query', async () => {
-    const { fn, calls } = trackingFetch({ success: true, data: { id: '77' } });
+    const { fn, calls } = trackingFetch({ success: true, data: { id: 77 } });
     vi.stubGlobal('fetch', fn);
 
     const out = await createGallery('scope-1', 'My Trip', 'folder-9');
-    expect(out).toEqual({ id: '77' });
+    expect(out).toEqual({ id: 77 });
 
     const { url, init } = calls[0];
     expect(init.method).toBe('POST');
@@ -55,7 +55,7 @@ describe('gallery service — HTTP shapes', () => {
   });
 
   it('createGallery omits folder_id when not given', async () => {
-    const { fn, calls } = trackingFetch({ success: true, data: { id: '77' } });
+    const { fn, calls } = trackingFetch({ success: true, data: { id: 77 } });
     vi.stubGlobal('fetch', fn);
     await createGallery('scope-1', 'No Folder');
     expect(calls[0].url).not.toContain('folder_id');
@@ -77,8 +77,9 @@ describe('gallery service — HTTP shapes', () => {
 
   it('getGalleryItems GETs the ordered children', async () => {
     const rows = [
-      { id: '10', filename: 'a.jpg', thumbnail_path: 't/a', position: 0 },
-      { id: '20', filename: 'b.jpg', thumbnail_path: 't/b', position: 1 },
+      // Wire shape (GalleryChild): the child id is a JSON number.
+      { id: 10, filename: 'a.jpg', thumbnail_path: 't/a', position: 0 },
+      { id: 20, filename: 'b.jpg', thumbnail_path: 't/b', position: 1 },
     ];
     const { fn, calls } = trackingFetch({ success: true, data: rows });
     vi.stubGlobal('fetch', fn);

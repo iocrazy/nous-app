@@ -22,7 +22,7 @@ import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { ResourcePickerSuggestion, type OutputsTabProps } from './ResourcePickerSuggestion';
 import type { OutputMentionRow } from './outputMentionRows';
 import { OutputMentionList, type OutputMentionListHandle } from './OutputMentionList';
-import type { ResourceSearchResult } from '../../types';
+import type { ResourceSearchResult } from '../../types/api';
 
 afterEach(cleanup);
 

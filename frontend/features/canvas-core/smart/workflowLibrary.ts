@@ -12,13 +12,13 @@ import {
 } from '../../../services/resourceService';
 import { getSupabaseClient } from '../../../supabaseClient';
 import { workflowFilename, type WorkflowPayload } from './workflowIO';
-import type { Resource } from '../../../types';
+import type { ResourceRow } from '../../../types/api';
 
 /** Upload a serialized workflow into the team library as a JSON file. */
 export async function saveWorkflowToLibrary(
   payload: WorkflowPayload,
   scopeId: string,
-): Promise<Resource> {
+): Promise<ResourceRow> {
   const file = new File(
     [JSON.stringify(payload, null, 2)],
     workflowFilename(payload.nodes.length),

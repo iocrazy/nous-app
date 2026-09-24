@@ -1798,7 +1798,9 @@ export const PublishPage: React.FC = () => {
         undefined,
         signal,
       );
-      return { id: r.id, name: r.filename };
+      // The upload response id is a JSON number; the picker list and
+      // `selectedVideos` key on the string id `listLibraryMedia` produces.
+      return { id: String(r.id), name: r.filename };
     } catch (err) {
       console.error('distribution: inline image upload failed', err);
       return describeUploadFailure(file.name, err);

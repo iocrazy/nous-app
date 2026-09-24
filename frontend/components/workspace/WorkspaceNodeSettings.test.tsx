@@ -14,7 +14,8 @@ import { createInstance, type i18n as I18n } from 'i18next';
 import enJson from '../../public/locales/en.json';
 import { WorkspaceNodeSettings, type WorkspaceNodeSettingsProps } from './WorkspaceNodeSettings';
 import { ApiError } from '../../services/apiClient';
-import type { EpisodeProgress, ProjectStageNode, ProjectWorkflow } from '../../types';
+import type { EpisodeProgress } from '../../types';
+import type { ProjectStageNode, ProjectWorkflow } from '../../types/api';
 import type { PersonOption } from '../workflow/OwnerCandidateList';
 
 function makeI18n(): I18n {

@@ -12,7 +12,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AILibraryAgent, Team, Project } from '../../types';
+import type { AILibraryAgent, Team } from '../../types';
+import type { Project } from '../../types/api';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { fetchMyTeams } from '../../services/teamService';
 import { fetchProjects } from '../../services/projectsService';

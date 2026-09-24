@@ -49,6 +49,18 @@ describe('GenParamsBlock', () => {
     expect(grid.textContent).not.toContain('LoRAs');
   });
 
+  it('drops values of the wrong type from the open wire object', () => {
+    // `gen_params` is JSONB — the resources API types it as an open object.
+    render(<GenParamsBlock params={{ model: { nested: true }, steps: '10', cfg: 2, loras: ['a', 3] }} />);
+    const summary = screen.getByTestId('gen-params-summary');
+    expect(summary.textContent).toBe('cfg 2');
+    fireEvent.click(screen.getByRole('button', { name: /Generation Params/ }));
+    const grid = screen.getByTestId('gen-params-grid');
+    expect(grid.textContent).not.toContain('[object Object]');
+    expect(grid.textContent).toContain('LoRAs');
+    expect(grid.textContent).not.toContain('Steps');
+  });
+
   it('copies the seed to the clipboard', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });

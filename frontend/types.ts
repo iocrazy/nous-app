@@ -401,26 +401,6 @@ export interface ResourceItem {
   resource?: Resource;
 }
 
-// Resource version
-export interface ResourceVersion {
-  id: string;
-  resource_id: string;
-  version_number: number;
-  filename: string | null;
-  file_path: string | null;
-  file_size_bytes: number | null;
-  mime_type: string | null;
-  duration_seconds: number | null;
-  resolution: string | null;
-  thumbnail_path: string | null;
-  uploaded_by: string | null;
-  notes: string | null;
-  hls_path: string | null;
-  transcode_status: string | null;
-  transcode_at: string | null;
-  created_at: string;
-}
-
 // Notification types
 export interface Notification {
   id: string;
@@ -697,57 +677,6 @@ export interface QuotaCheck {
   reason: string | null;
 }
 
-// Project types (MediaTrack)
-export interface Project {
-  id: string;
-  name: string;
-  description: string | null;
-  owner_id: string;
-  team_id: string | null;
-  project_type: 'internal' | 'external' | 'personal';
-  project_group: string | null;
-  announcement: string | null;
-  is_starred: boolean;
-  color_label: string | null;
-  archived_at: string | null;
-  file_count: number;
-  display_code?: string;
-  modules_enabled?: string[];
-  // Ideation (M1.5): the topics.id this project was created from (soft
-  // pointer, null for a from-scratch project).
-  topic_id?: string | null;
-  created_at: string;
-  updated_at: string;
-  // Card enrichment (Phase B B1) — batch-derived on the list endpoint;
-  // null/absent when the project has no members/history rows.
-  members_preview?: ProjectMembersPreview | null;
-  latest_activity?: ProjectCardActivity | null;
-  // Workflow badge (M2-W3-3) — batch-derived; null/absent for a No-workflow
-  // project (no instance nodes).
-  workflow_badge?: ProjectWorkflowBadge | null;
-  /** M4 Autopilot (mig 395, task O1): project-level master switch — the
-   * `autopilot_tick` engine no-ops entirely when this is false (spec §2 step
-   * 1). Real NOT NULL DEFAULT true column, written straight through by
-   * `PATCH /projects/{id}` (`ProjectUpdate.autopilot_enabled`, no name
-   * mapping unlike `archived`). Optional here (like `modules_enabled` above)
-   * so pre-mig-395 literals across the codebase keep compiling untouched —
-   * callers should default a missing value to `true`, the server's own
-   * default. */
-  autopilot_enabled?: boolean;
-}
-
-/** Project-card workflow badge (M2-W3-3). Null for No-workflow projects. */
-export interface ProjectWorkflowBadge {
-  /** Name of the node at the cursor; null when no cursor is set. */
-  current_node_name: string | null;
-  /** Count of non-skipped nodes. */
-  workflow_total: number;
-  /** 1-based index of the current node among non-skipped nodes; null when no cursor. */
-  workflow_position: number | null;
-  /** Running agent_runs on this project. */
-  agents_active: number;
-}
-
 // ── Ideation topic pool (M1.5) ───────────────────────────────────────────────
 
 export type TopicStatus = 'candidate' | 'shortlisted' | 'produced' | 'archived';
@@ -778,78 +707,7 @@ export interface Topic {
   updated_at: string;
 }
 
-export interface ProjectMembersPreview {
-  count: number;
-  members: { user_id: string; username: string }[];
-}
-
-export interface ProjectCardActivity {
-  kind: 'file' | 'stage';
-  actor?: string;
-  at?: string | null;
-  label?: string; // stage: the stage name
-  stalled?: boolean;
-}
-
-export interface ProjectMember {
-  // project_members has a composite PK (project_id, user_id) and NO id column;
-  // user_id is the member identifier used on the /members/{member_id} route.
-  project_id: string;
-  user_id: string;
-  role: 'manager' | 'editor' | 'viewer' | 'external';
-  invited_by: string | null;
-  email?: string;
-  joined_at: string;
-}
-
-export interface ProjectFolder {
-  id: string;
-  project_id: string;
-  parent_id: string | null;
-  name: string;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 export type ReviewStatus = 'pending_review' | 'in_review' | 'feedback_collected' | 'approved';
-
-export interface ProjectShare {
-  id: string;
-  project_file_id: string | null;
-  share_type: string;
-  share_code: string;
-  password: string | null;
-  expires_at: string | null;
-  is_active: boolean;
-  view_count: number;
-  created_at: string;
-}
-
-export interface FileVersion {
-  id: string;
-  file_id: string;
-  version_number: number;
-  filename: string | null;
-  file_path: string | null;
-  file_size_bytes: number | null;
-  mime_type: string | null;
-  duration_seconds: number | null;
-  resolution: string | null;
-  fps: number | null;
-  video_codec: string | null;
-  audio_codec: string | null;
-  video_bitrate_kbps: number | null;
-  audio_bitrate_kbps: number | null;
-  chorus_start_ms?: number | null;
-  audio_channels: number | null;
-  audio_sample_rate: number | null;
-  thumbnail_path: string | null;
-  cover_image_path: string | null;
-  uploaded_by: string | null;
-  notes: string | null;
-  created_at: string;
-}
 
 // Annotation / Drawing types
 export interface DrawingData {
@@ -865,54 +723,6 @@ export interface Stroke {
   color: string;
   strokeWidth: number;
   text?: string;  // For text tool
-}
-
-export interface ReviewComment {
-  id: string;
-  file_id: string;
-  version_id: string | null;
-  author_id: string;
-  author_email?: string;
-  content: string;
-  timestamp_seconds: number | null;
-  drawing_data?: DrawingData | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ProjectFile {
-  id: string;
-  project_id: string;
-  filename: string;
-  file_type: string | null;
-  mime_type: string | null;
-  file_path: string | null;
-  file_size_bytes: number | null;
-  media_id: string | null;
-  duration_seconds: number | null;
-  resolution: string | null;
-  fps: number | null;
-  video_codec: string | null;
-  audio_codec: string | null;
-  video_bitrate_kbps: number | null;
-  audio_bitrate_kbps: number | null;
-  chorus_start_ms?: number | null;
-  audio_channels: number | null;
-  audio_sample_rate: number | null;
-  thumbnail_path: string | null;
-  cover_image_path: string | null;
-  uploaded_by: string | null;
-  notes: string | null;
-  is_trashed: boolean;
-  trashed_at: string | null;
-  review_status: ReviewStatus | null;
-  current_version: number;
-  created_at: string;
-  updated_at: string;
-  // Deliverable back-link (M2-W1): the mirror issue a file was filed from, plus
-  // its human identifier (MH-N) for the Files module's "from MH-xx" chip.
-  source_issue_id?: string | null;
-  source_issue_identifier?: string | null;
 }
 
 // Share types
@@ -1012,19 +822,6 @@ export interface ScriptProjectSummary {
 }
 
 export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'shares' | 'trash';
-
-/** A single row from the global ``project_stages`` catalog (Phase 5b SOP). */
-export interface ProjectStage {
-  /** Snowflake BIGINT serialised as string for JS-safe transport. */
-  id: string;
-  slug: string;
-  name: string;
-  sort_order: number;
-  /** Tool slugs recommended for this stage (advisory metadata from the catalog). */
-  tools_recommended: string[];
-  created_at?: string;
-  updated_at?: string;
-}
 
 // ============================================
 // Workflow templates + instances (Project Workflow M1, PR-C)
@@ -1136,127 +933,6 @@ export interface StageLibraryItem {
   review_required: boolean;
 }
 
-export type WorkflowNodeStatus =
-  | 'pending'
-  | 'in_progress'
-  | 'in_review'
-  | 'done'
-  | 'skipped';
-
-/** A live workflow node on a project (`project_stage_nodes`). */
-export interface ProjectStageNode {
-  id: string;
-  project_id: string;
-  source_template_node_id: string | null;
-  legacy_stage_id: string | null;
-  name: string;
-  sort_order: number;
-  parallel_group: number | null;
-  status: WorkflowNodeStatus;
-  owner_user_id: string | null;
-  owner_agent_id: string | null;
-  planned_start: string | null;
-  planned_due: string | null;
-  review_required: boolean;
-  deliverable_required: boolean;
-  deliverable_label: string | null;
-  skipped: boolean;
-  /** Creative surface this node maps to (B1, mig 402) — copied-frozen at
-   * instantiation from the template. `'script' | 'storyboard' | 'renders'`
-   * name a real creative face; `null` (or absent, on legacy pre-mig-402
-   * instance rows) means a deliverable-only node (upload / version / review).
-   * Optional like `form_schema?` so existing `ProjectStageNode` literals keep
-   * compiling; `normalizeInstanceNode` fills a real value once data flows
-   * through it, defaulting missing → `null` (the most conservative degrade,
-   * spec §5③). Drives B5's episode view tabs + deliverable-node dashed border. */
-  surface?: 'script' | 'storyboard' | 'renders' | null;
-  // Deliverable folder link + filed-file count (M2-W1).
-  folder_id?: string | null;
-  deliverable_file_count?: number;
-  members: WorkflowMemberRef[];
-  completion_policy: WorkflowCompletionPolicy;
-  events: WorkflowNodeEvents;
-  /** Instance-node JSONB decoration (mig 389). Today the only key written is
-   * `run_prepared_at` — an ISO timestamp the `stage_hook_dispatch` workflow
-   * stamps when `events.prepare_agent_run` fires on arrival. Optional/tolerant
-   * of a missing key entirely (pre-mig-389 rows, or a node the hook never
-   * touched because it has no agent owner). */
-  metadata?: { run_prepared_at?: string };
-  /** Deliverable form fields (mig 390, M3 PR-I §2) — copied verbatim from the
-   * template node at instantiation (I2); frozen on the instance (not
-   * PATCH-able, see `ProjectNodePatch`). Optional (like `metadata` above) so
-   * pre-mig-390 literals across the codebase keep compiling untouched;
-   * `normalizeInstanceNode` (workflowService.ts) fills a real `[]` once data
-   * flows through it. */
-  form_schema?: FormFieldDef[];
-  /** Live values entered into this node's deliverable form (Stage Board,
-   * task I4) — instance-only, PATCH-able via `ProjectNodePatch.form_data`.
-   * Unknown keys (not present in this node's own `form_schema`) are dropped
-   * server-side on write. Optional/normalized the same way as `form_schema`. */
-  form_data?: Record<string, unknown>;
-  /** Dependency edges (mig 391, M3 PR-J) — REAL, stable instance node ids
-   * (contrast the template-side payload-index contract) this node depends
-   * on. Optional/normalized the same way as `form_schema`/`form_data` so a
-   * pre-mig-391 row never hands `undefined` to a consumer. */
-  depends_on?: string[];
-  /** Pre-work notes for whoever works this stage (mig 395, M4 Autopilot task
-   * O1/O2) — instance-only runtime text, writable any time before the node
-   * finishes (PATCH-able, see `ProjectNodePatch.brief`). Injected into an
-   * agent's task context on auto-start/dispatch/start-early alike; surfaced
-   * read-only once the node reaches `in_review` (pinned in the Stage Board's
-   * review context + the mirror issue) and permanently read-only once
-   * `done`/`skipped`. Optional/normalized the same way as `form_schema` above
-   * so a pre-mig-395 row never hands `undefined` to a consumer. */
-  brief?: string;
-}
-
-/** GET /projects/{id}/workflow payload. */
-export interface ProjectWorkflow {
-  has_workflow: boolean;
-  current_node_id: string | null;
-  agents_active: number;
-  nodes: ProjectStageNode[];
-}
-
-/** Minimal read-only issue reference used by the Stage Board (mirror issue /
- * sub-issue row) — a slice of the full `Issue` shape (services/issuesService.ts),
- * only what `GET .../board` actually projects. */
-export interface StageBoardIssueRef {
-  id: string;
-  identifier: string | null;
-  title: string | null;
-  status: string;
-  assignee: { user_id: string | null; agent_id: string | null };
-}
-
-/** The node's mirror issue, with its sub-issues inlined (Stage Board F1). */
-export interface StageBoardIssue extends StageBoardIssueRef {
-  sub_issues: StageBoardIssueRef[];
-}
-
-/** One file filed into the node's deliverable folder (Stage Board F1). */
-export interface StageBoardFile {
-  id: string;
-  filename: string | null;
-  size: number | null;
-  created_at: string | null;
-  /** Identifier of the issue the file was uploaded from, when known. */
-  source_issue_identifier: string | null;
-}
-
-/**
- * `GET /projects/{id}/workflow/nodes/{node_id}/board` payload (M2 PR-F F1) —
- * the Stage Board workspace module's single data source: the node's full row,
- * its mirror issue (or `null` — no mirror yet, or a legacy project whose
- * mirror predates the current origin-id format), and the files filed into its
- * deliverable folder.
- */
-export interface StageBoardData {
-  node: ProjectStageNode;
-  issue: StageBoardIssue | null;
-  files: StageBoardFile[];
-}
-
 /** POST body to add a node to a live instance (M2-W3-1). Exactly one of
  * `source_stage_id` (from the node bank) or `name` (blank). */
 export interface ProjectNodeCreate {
@@ -1346,50 +1022,6 @@ export interface EpisodeWorkflowRollup {
 export interface EpisodeSurfaceState {
   script: boolean;
   storyboard: boolean;
-}
-
-/**
- * Project-level ASSETS "main library" rows from
- * `GET /api/v1/projects/{id}/entities` (PR-10b, spec G13) — characters and
- * locations are derived from script cues/scene headers, never hand-authored,
- * so there's no separate write path here.
- */
-export interface ProjectEntityCharacter {
-  name: string;
-  cue_count: number;
-  episode_ids: string[];
-}
-
-export interface ProjectEntityLocation {
-  name: string;
-  scene_count: number;
-  episode_ids: string[];
-}
-
-export interface ProjectEntities {
-  characters: ProjectEntityCharacter[];
-  locations: ProjectEntityLocation[];
-}
-
-/**
- * A single `generated_media` row from `GET /api/v1/projects/{id}/renders`
- * (PR-10b, spec G12 Renders module) — image frames and shot videos produced
- * for the project's episodes. No `cover`/`stream` URL field on the row
- * itself; the frontend builds `/api/v1/generated-media/{id}/cover` (image)
- * or `/api/v1/generated-media/{id}/stream` (video) from `id` + `media_kind`.
- */
-export interface RenderItem {
-  id: string;
-  media_kind: 'image' | 'video' | string;
-  mime: string | null;
-  origin_kind: string;
-  node_id: string | null;
-  created_at: string;
-}
-
-export interface RenderItemPage {
-  items: RenderItem[];
-  next_cursor: string | null;
 }
 
 export type ScriptAssetType = 'worldview' | 'character' | 'location' | 'prop' | 'plot_point';
@@ -2335,30 +1967,6 @@ export type ResourceProcessingStatus =
   | 'completed'
   | 'failed'
   | 'skipped';
-
-/** Search result row from GET /api/v1/resources/search */
-export type ResourceSearchResult = {
-  id: string;
-  name: string;
-  kind: 'video' | 'image' | 'doc' | 'audio' | 'pdf';
-  mime: string | null;
-  size: number | null;
-  scope: { type: 'personal' | 'team'; id: string };
-  updated_at: string;
-  /** Relative path (`/api/v1/resources/{id}/cover`) or null when the
-   *  resource has no cover — prefix with the API base before use. */
-  thumbnail_url: string | null;
-  /** AI processing state mirrored from `resources`. Optional because
-   *  older callers build this shape by hand; the API always sends both. */
-  transcript_status?: ResourceProcessingStatus | null;
-  summary_status?: ResourceProcessingStatus | null;
-};
-
-export type ResourceSearchResponse = {
-  results: ResourceSearchResult[];
-  counts: { all: number; video: number; image: number; doc: number; audio: number; pdf: number };
-  next_cursor: string | null;
-};
 
 export interface Channel {
   id: string;

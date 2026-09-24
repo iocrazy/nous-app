@@ -61,8 +61,9 @@ const TEMPLATE = {
   usage_count: 12,
   last_used_at: null,
 };
-/** What uploadResource / linkExistingResource hand back (a Resource). */
-const RESOURCE = { id: '341590000000001', filename: 'new-pick.png', mime_type: 'image/png' };
+/** What uploadResource / linkExistingResource hand back (a `ResourceRow`:
+ *  the id is a JSON number on the wire). */
+const RESOURCE = { id: 341590000000001, filename: 'new-pick.png', mime_type: 'image/png' };
 
 function respond(data: unknown) {
   mockApiFetch.mockResolvedValueOnce({ json: async () => ({ data }) });
@@ -111,7 +112,7 @@ describe('adding a template puts a picture INTO THE FOLDER', () => {
     expect(mockUpload).toHaveBeenCalledWith(file, 'scope-1', FOLDER.folder_id);
     expect(mockImportResource).not.toHaveBeenCalled();
     expect(tpl).toEqual({
-      resource_id: RESOURCE.id,
+      resource_id: String(RESOURCE.id),
       name: 'new-pick.png',
       mime_type: 'image/png',
       thumb_url: `/api/v1/resources/${RESOURCE.id}/cover`,
@@ -138,7 +139,7 @@ describe('adding a template puts a picture INTO THE FOLDER', () => {
     expect(mockLink).toHaveBeenCalledWith('777', 'scope-1', FOLDER.folder_id);
     expect(mockUpload).not.toHaveBeenCalled();
     expect(mockImportResource).not.toHaveBeenCalled();
-    expect(tpl.resource_id).toBe(RESOURCE.id);
+    expect(tpl.resource_id).toBe(String(RESOURCE.id));
   });
 
   it('a failed link surfaces as a typed error, not a bare one', async () => {
@@ -201,7 +202,7 @@ describe('saving a generated cover as a template', () => {
   it('promotes once, then links the resource into the folder', async () => {
     mockPromote.mockResolvedValueOnce({ promoted_resource_id: '9000' });
     respond(FOLDER);
-    mockLink.mockResolvedValueOnce({ ...RESOURCE, id: '9000' });
+    mockLink.mockResolvedValueOnce({ ...RESOURCE, id: 9000 });
 
     const out = await saveGeneratedCoverAsTemplate('600', 'scope-1');
 
@@ -212,7 +213,7 @@ describe('saving a generated cover as a template', () => {
 
   it('reuses an already-promoted resource id instead of promoting twice', async () => {
     respond(FOLDER);
-    mockLink.mockResolvedValueOnce({ ...RESOURCE, id: '9000' });
+    mockLink.mockResolvedValueOnce({ ...RESOURCE, id: 9000 });
 
     await saveGeneratedCoverAsTemplate('600', 'scope-1', '9000');
 

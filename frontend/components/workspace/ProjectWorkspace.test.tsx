@@ -17,7 +17,10 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { ApiError } from '../../services/apiClient';
 import { requestShotFocus } from '../agentActivity/shotFocusBus';
-import type { EpisodeProgress, Project, ProjectStageNode, ProjectWorkflow } from '../../types';
+import type { EpisodeProgress } from '../../types';
+import type { Project, ProjectStageNode, ProjectWorkflow } from '../../types/api';
+import { makeProject } from '../../tests/fixtures/projects';
+import { makeStageNode } from '../../tests/fixtures/projects';
 
 const navigate = vi.fn();
 // Mutable so a single test can seed the initial URL (e.g. `?module=stage`
@@ -218,9 +221,9 @@ vi.mock('../../features/canvas-core/services/canvasService', () => ({
 
 /** Minimal-but-complete ProjectStageNode builder (mirrors WorkflowStrip.test.tsx's factory). */
 function stageNode(over: Partial<ProjectStageNode>): ProjectStageNode {
-  return {
+  return makeStageNode({
     id: '1',
-    project_id: 'p1',
+    project_id: '501',
     source_template_node_id: null,
     legacy_stage_id: null,
     name: 'Storyboard',
@@ -240,7 +243,7 @@ function stageNode(over: Partial<ProjectStageNode>): ProjectStageNode {
     completion_policy: 'owner',
     events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false, prepare_agent_run: false, auto_start: false },
     ...over,
-  };
+  });
 }
 
 /** A one-node workflow instance whose current node is the storyboard-surface node above. */
@@ -249,22 +252,12 @@ function storyboardWorkflow(nodeOver: Partial<ProjectStageNode> = {}): ProjectWo
   return { has_workflow: true, current_node_id: node.id, agents_active: 0, nodes: [node] };
 }
 
-const PROJECT: Project = {
-  id: 'p1',
+const PROJECT: Project = makeProject({
+  id: 501,
   name: 'Spring Campaign',
-  description: null,
-  owner_id: 'u1',
-  team_id: 't1',
-  project_type: 'internal',
-  project_group: null,
-  announcement: null,
-  is_starred: false,
-  color_label: null,
-  archived_at: null,
+  team_id: 601,
   file_count: 128,
-  created_at: '2026-06-01T00:00:00Z',
-  updated_at: '2026-07-01T00:00:00Z',
-};
+});
 
 // Deliberately unsorted (Ep 2 first) to pin the "default = lowest
 // sort_order" selection logic rather than trivially picking array[0].
@@ -403,7 +396,7 @@ describe('ProjectWorkspace', () => {
       expect(screen.getByTestId('ws-ep-card')).toHaveTextContent('Ep 2 — Cutdown'),
     );
     expect(screen.getByTestId('ws-ep-storyboard')).toHaveTextContent('0/4');
-    expect(localStorage.getItem('nous.project.p1.ep')).toBe('2');
+    expect(localStorage.getItem('nous.project.501.ep')).toBe('2');
   });
 
   // Task 2 review carry-over: `view`/`scene`/`shot` are scoped to whichever
@@ -647,7 +640,7 @@ describe('ProjectWorkspace', () => {
     // localStorage says Ep 1, but the URL says Ep 2 — a deep link (e.g.
     // shared, or back/forward navigated) must win over what this browser
     // last remembered.
-    localStorage.setItem('nous.project.p1.ep', '1');
+    localStorage.setItem('nous.project.501.ep', '1');
     mockSearchParams.current = new URLSearchParams('ep=2');
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
@@ -656,7 +649,7 @@ describe('ProjectWorkspace', () => {
   });
 
   it('falls back to localStorage, then the first episode, when URL `ep` is missing or invalid', async () => {
-    localStorage.setItem('nous.project.p1.ep', '2');
+    localStorage.setItem('nous.project.501.ep', '2');
     mockSearchParams.current = new URLSearchParams('ep=does-not-exist');
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
@@ -696,7 +689,7 @@ describe('ProjectWorkspace', () => {
     fireEvent.click(await screen.findByTestId('ws-ep-script'));
     const shell = await screen.findByTestId('mock-editor-shell');
     expect(shell).toHaveAttribute('data-script-id', 's1');
-    expect(shell).toHaveAttribute('data-project-id', 'p1');
+    expect(shell).toHaveAttribute('data-project-id', '501');
     expect(shell).toHaveAttribute('data-embedded', 'true');
     // Script view — its own default (no storyboard preset here, but studioView
     // defaults to 'script', so the shell is told 'script').
@@ -1054,7 +1047,7 @@ describe('ProjectWorkspace', () => {
     expect(await screen.findByTestId('scene-column-200')).toBeInTheDocument();
     expect(mockScriptService.createScriptProject).toHaveBeenCalledTimes(1);
     expect(mockScriptService.createScriptProject).toHaveBeenCalledWith({
-      project_id: 'p1',
+      project_id: '501',
       name: 'Ep 1 — Pilot',
       episode_id: '1',
     });
@@ -1085,7 +1078,7 @@ describe('ProjectWorkspace', () => {
     await waitFor(() =>
       expect(screen.getByTestId('mock-editor-shell')).toHaveAttribute('data-script-id', 's2'),
     );
-    expect(screen.getByTestId('mock-editor-shell')).toHaveAttribute('data-project-id', 'p1');
+    expect(screen.getByTestId('mock-editor-shell')).toHaveAttribute('data-project-id', '501');
     expect(navigate).not.toHaveBeenCalled();
     // Exactly one extra fetch for the re-resolve on top of the initial resolve.
     expect(mockScriptService.fetchScriptProjects).toHaveBeenCalledTimes(2);
@@ -1124,7 +1117,7 @@ describe('ProjectWorkspace', () => {
     // follow-up update. This collapses the old create-then-bind two-call dance
     // that raced into duplicate scripts (#1432).
     expect(mockScriptService.createScriptProject).toHaveBeenCalledWith({
-      project_id: 'p1',
+      project_id: '501',
       name: 'Ep 1 — Pilot',
       episode_id: '1',
     });
@@ -1198,7 +1191,7 @@ describe('ProjectWorkspace', () => {
 
       const panel = await screen.findByTestId('ws-entities');
       expect(panel.getAttribute('data-kind')).toBe(module);
-      expect(panel.getAttribute('data-project-id')).toBe(PROJECT.id);
+      expect(panel.getAttribute('data-project-id')).toBe(String(PROJECT.id));
       expect(screen.queryByTestId('ws-overview')).toBeNull();
     },
   );
@@ -1212,14 +1205,14 @@ describe('ProjectWorkspace', () => {
     mockSearchParams.current = new URLSearchParams('module=characters');
     render(
       <ProjectWorkspace
-        project={{ ...PROJECT, team_id: 't-owner' }}
+        project={{ ...PROJECT, team_id: 602 }}
         teamId="t1"
         onBack={noop}
       />,
     );
 
     const panel = await screen.findByTestId('ws-entities');
-    expect(panel.getAttribute('data-project-team-id')).toBe('t-owner');
+    expect(panel.getAttribute('data-project-team-id')).toBe('602');
   });
 
   it('falls back to Overview when ?module=stage is loaded without a node id (#final-review)', async () => {
@@ -1379,7 +1372,7 @@ describe('ProjectWorkspace — Task 9 node config inline edit', () => {
   it('selecting an owner PATCHes via updateProjectNode and reloads the workflow on success', async () => {
     mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
     mockProjectsService.fetchProjectMembers.mockResolvedValue([
-      { project_id: 'p1', user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
+      { project_id: 501, user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
     ]);
     mockWorkflowService.updateProjectNode.mockResolvedValue(stageNode({ owner_user_id: 'alice-uuid' }));
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
@@ -1388,7 +1381,7 @@ describe('ProjectWorkspace — Task 9 node config inline edit', () => {
     fireEvent.click(await screen.findByText('alice@example.com'));
 
     await waitFor(() =>
-      expect(mockWorkflowService.updateProjectNode).toHaveBeenCalledWith('p1', '1', {
+      expect(mockWorkflowService.updateProjectNode).toHaveBeenCalledWith('501', '1', {
         owner_user_id: 'alice-uuid',
         owner_agent_id: null,
       }),
@@ -1402,7 +1395,7 @@ describe('ProjectWorkspace — Task 9 node config inline edit', () => {
   it('a 403 node_config_forbidden PATCH reverts the optimistic value and shows the typed forbidden toast', async () => {
     mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
     mockProjectsService.fetchProjectMembers.mockResolvedValue([
-      { project_id: 'p1', user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
+      { project_id: 501, user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
     ]);
     mockWorkflowService.updateProjectNode.mockRejectedValue(
       new ApiError('Forbidden', 403, { details: { code: 'node_config_forbidden' } }),
@@ -1439,7 +1432,7 @@ describe('ProjectWorkspace — Task 9 node config inline edit', () => {
   it('a non-403 PATCH failure reverts the optimistic value and shows the generic error toast', async () => {
     mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
     mockProjectsService.fetchProjectMembers.mockResolvedValue([
-      { project_id: 'p1', user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
+      { project_id: 501, user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
     ]);
     mockWorkflowService.updateProjectNode.mockRejectedValue(new Error('network blip'));
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
@@ -1474,7 +1467,7 @@ describe('ProjectWorkspace — Task 9 node config inline edit', () => {
       .mockResolvedValueOnce({ has_workflow: true, current_node_id: '1', agents_active: 0, nodes: [afterSchedule] }) // reload after schedule PATCH succeeds
       .mockResolvedValueOnce({ has_workflow: true, current_node_id: '1', agents_active: 0, nodes: [afterSchedule] }); // revert-reload after owner PATCH fails — schedule is untouched server-side
     mockProjectsService.fetchProjectMembers.mockResolvedValue([
-      { project_id: 'p1', user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
+      { project_id: 501, user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
     ]);
     mockWorkflowService.updateProjectNode
       .mockResolvedValueOnce(afterSchedule) // schedule PATCH succeeds
@@ -1488,7 +1481,7 @@ describe('ProjectWorkspace — Task 9 node config inline edit', () => {
     fireEvent.click(await screen.findByTestId('node-card-schedule'));
     fireEvent.click(await screen.findByRole('button', { name: '2026-08-10' }));
     await waitFor(() =>
-      expect(mockWorkflowService.updateProjectNode).toHaveBeenNthCalledWith(1, 'p1', '1', {
+      expect(mockWorkflowService.updateProjectNode).toHaveBeenNthCalledWith(1, '501', '1', {
         planned_start: '2026-08-01',
         planned_due: '2026-08-10',
       }),

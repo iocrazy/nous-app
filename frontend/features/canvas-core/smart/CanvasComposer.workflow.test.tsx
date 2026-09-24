@@ -140,7 +140,7 @@ describe('CanvasComposer — library glue (②-4)', () => {
   it('Save uploads the selected subgraph into the team scope', async () => {
     const { saveWorkflowToLibrary } = await import('./workflowLibrary');
     (saveWorkflowToLibrary as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      id: '77',
+      id: 77,
       filename: 'workflow-1nodes.json',
     });
     seed(['p1']);

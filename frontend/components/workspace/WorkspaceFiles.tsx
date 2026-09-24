@@ -30,7 +30,8 @@ import { getApiUrl } from '../../utils/apiConfig';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { FileInfoPanel } from '../FileInfoPanel';
 import { useToast } from '../Toast';
-import type { EpisodeProgress, ProjectFile, ProjectFolder, RenderItem } from '../../types';
+import type { EpisodeProgress } from '../../types';
+import type { GeneratedMediaRow, ProjectFile, ProjectFolder } from '../../types/api';
 
 export type FilesChip = 'all' | 'media' | 'renders' | 'docs';
 
@@ -44,7 +45,7 @@ interface WorkspaceFilesProps {
 type GridItem =
   | { kind: 'folder'; data: ProjectFolder }
   | { kind: 'file'; data: ProjectFile }
-  | { kind: 'render'; data: RenderItem };
+  | { kind: 'render'; data: GeneratedMediaRow };
 
 function isMediaFile(f: ProjectFile): boolean {
   return f.file_type === 'video' || f.file_type === 'image';
@@ -55,7 +56,7 @@ function isMediaFile(f: ProjectFile): boolean {
  *  has to say which one it wants: `mediaSrc` for a thumbnail, `fullResSrc`
  *  for the file the user asked to open. `/stream` is single-tier and passes
  *  through both helpers untouched. */
-function renderUrl(r: RenderItem): string {
+function renderUrl(r: GeneratedMediaRow): string {
   const path = r.media_kind === 'video' ? 'stream' : 'cover';
   return `${getApiUrl()}/api/v1/generated-media/${r.id}/${path}`;
 }
@@ -77,7 +78,7 @@ export function WorkspaceFiles({
   const [folderChain, setFolderChain] = useState<ProjectFolder[]>([]);
   const [folders, setFolders] = useState<ProjectFolder[]>([]);
   const [files, setFiles] = useState<ProjectFile[]>([]);
-  const [renders, setRenders] = useState<RenderItem[]>([]);
+  const [renders, setRenders] = useState<GeneratedMediaRow[]>([]);
   const [renderCursor, setRenderCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -164,7 +165,7 @@ export function WorkspaceFiles({
       setFolderChain([]);
       return;
     }
-    setCurrentFolderId(folder.id);
+    setCurrentFolderId(String(folder.id));
     setFolderChain((chain) => {
       const idx = chain.findIndex((f) => f.id === folder.id);
       if (idx >= 0) return chain.slice(0, idx + 1);

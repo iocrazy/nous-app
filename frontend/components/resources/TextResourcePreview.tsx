@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, Pencil, Save, X } from 'lucide-react';
-import type { Resource } from '../../types';
+import type { ResourceRow } from '../../types/api';
 import { classifyTextResource } from '../../utils/textResourceMode';
 import {
   saveTextAsNewVersion,
@@ -17,7 +17,7 @@ import { PlainTextResourceEditor } from './PlainTextResourceEditor';
 import { useToast } from '../Toast';
 
 interface Props {
-  resource: Resource;
+  resource: ResourceRow;
   fileUrl: string;
   canEdit: boolean;
   onSaved?: () => void;

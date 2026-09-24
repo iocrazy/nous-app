@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Project, ProjectFile, Topic } from '../types';
-import type { RecentItem } from '../types/api';
+import { Topic } from '../types';
+import type { Project, ProjectFile, RecentItem } from '../types/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
@@ -237,7 +237,7 @@ export function ProjectsPage() {
   if (reviewFile && selectedProject) {
     return (
       <VideoReviewPage
-        projectId={selectedProject.id}
+        projectId={String(selectedProject.id)}
         file={reviewFile}
         onBack={() => {
           setReviewFile(null);

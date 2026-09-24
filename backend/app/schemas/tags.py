@@ -94,7 +94,9 @@ class TagResponse(TagBase):
     """Schema for tag response."""
 
     id: SnowflakeId
-    type: Literal["system", "user", "time"]
+    # mig 468 retired 'system' and made it structural: tags_type_check is
+    # CHECK (type IN ('user','time')), validated against every row when added.
+    type: Literal["user", "time"]
     slug: Optional[str] = Field(
         None,
         description=(

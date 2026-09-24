@@ -25,7 +25,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { fetchProjectWorkflow } from '../services/workflowService';
-import type { ProjectStageNode, ProjectWorkflow } from '../types';
+import type { ProjectStageNode, ProjectWorkflow } from '../types/api';
 
 interface UseProjectWorkflow {
   workflow: ProjectWorkflow | null;

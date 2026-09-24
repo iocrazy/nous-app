@@ -21,8 +21,8 @@ import type { Editor } from '@tiptap/core';
 
 import { aiLibraryService } from '../services/aiLibraryService';
 import type { ChatScriptContextInput } from '../services/aiLibraryService';
-import type { AILibraryAgent, AIChatMessage, AIChatMessageAttachment, ChatSession, ResourceRefAttachment, ResourceSearchResult, RunCost } from '../types';
-import type { ChatToolCall } from '../types/api';
+import type { AILibraryAgent, AIChatMessage, AIChatMessageAttachment, ChatSession, ResourceRefAttachment, RunCost } from '../types';
+import type { ChatToolCall, ResourceSearchResult } from '../types/api';
 import { AgentSelector } from './AgentSelector';
 import { AgentIdentityHeader } from './agentActivity/AgentIdentityHeader';
 import {

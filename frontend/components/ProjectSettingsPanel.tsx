@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { X, Trash2, Loader2 } from 'lucide-react';
-import { Project } from '../types';
+import type { Project } from '../types/api';
 import { UiSelect } from './ui';
 import { updateProject, deleteProject } from '../services/projectsService';
 import { useIslandWork } from '../contexts/IslandWorkContext';
@@ -87,13 +87,15 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
     if (!name.trim()) return;
     setIsSaving(true);
     try {
-      const updated = await updateProject(project.id, {
+      const updated = await updateProject(String(project.id), {
         name: name.trim(),
         announcement: announcement.trim() || null,
         project_type: projectType,
         project_group: projectGroup.trim() || null,
-      } as any);
-      onUpdated(updated);
+      });
+      // PUT returns the bare row (no card enrichment) — merge so the caller
+      // keeps members_preview / workflow_badge / latest_activity.
+      onUpdated({ ...project, ...updated });
     } catch (err) {
       console.error('Failed to update project:', err);
     } finally {
@@ -104,7 +106,7 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   const handleDelete = async () => {
     setIsDeleting(true);
     try {
-      await deleteProject(project.id);
+      await deleteProject(String(project.id));
       onDeleted();
     } catch (err) {
       console.error('Failed to delete project:', err);
@@ -177,7 +179,7 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
           </label>
           <UiSelect
             value={projectType}
-            onChange={(e) => setProjectType(e.target.value as any)}
+            onChange={(e) => setProjectType(e.target.value)}
             className="w-full"
           >
             <option value="internal">{t('projects.settings.typeInternal', 'Internal')}</option>

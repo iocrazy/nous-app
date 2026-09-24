@@ -15,7 +15,8 @@ import { createInstance, type i18n as I18n } from 'i18next';
 import enJson from '../../public/locales/en.json';
 import { CurrentNodeCard } from './CurrentNodeCard';
 import type { AgentOption, PersonOption } from './OwnerPicker';
-import type { ProjectStageNode } from '../../types';
+import type { ProjectStageNode } from '../../types/api';
+import { makeStageNode } from '../../tests/fixtures/projects';
 
 // CurrentNodeCard's owner/schedule/brief edits all round-trip through
 // updateProjectNode — mocked so a brief blur-save test never hits a real
@@ -37,7 +38,7 @@ function makeI18n(): I18n {
 }
 
 function node(over: Partial<ProjectStageNode>): ProjectStageNode {
-  return {
+  return makeStageNode({
     id: '1',
     project_id: '10',
     source_template_node_id: null,
@@ -58,7 +59,7 @@ function node(over: Partial<ProjectStageNode>): ProjectStageNode {
     completion_policy: 'owner',
     events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false, prepare_agent_run: false, auto_start: false },
     ...over,
-  };
+  });
 }
 
 const people: PersonOption[] = [];

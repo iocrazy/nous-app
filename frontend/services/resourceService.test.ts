@@ -117,6 +117,28 @@ describe('getResourceLyrics', () => {
     stubResponse({}, 404);
     expect(await getResourceLyrics('77')).toBeNull();
   });
+
+  it('narrows the open lyrics_json object, dropping malformed lines', async () => {
+    stubResponse({
+      success: true,
+      data: {
+        lrc: '[00:01.00]hi',
+        lines: [{ text: 'hi', line_start_ms: 1000 }, { text: 'x', line_start_ms: 'bad' }, { nope: 1 }],
+      },
+    });
+    expect(await getResourceLyrics('77')).toEqual({
+      lrc: '[00:01.00]hi',
+      lines: [
+        { text: 'hi', line_start_ms: 1000 },
+        { text: 'x', line_start_ms: null },
+      ],
+    });
+  });
+
+  it('returns null when the resource has no lyrics', async () => {
+    stubResponse({ success: true, data: null });
+    expect(await getResourceLyrics('77')).toBeNull();
+  });
 });
 
 describe('uploadResourceCover', () => {
@@ -125,13 +147,13 @@ describe('uploadResourceCover', () => {
       ok: true,
       status: 200,
       headers: new Headers(),
-      text: async () => JSON.stringify({ success: true, data: { id: '77' } }),
-      json: async () => ({ success: true, data: { id: '77' } }),
+      text: async () => JSON.stringify({ success: true, data: { id: 77 } }),
+      json: async () => ({ success: true, data: { id: 77 } }),
     } as unknown as Response);
 
     const file = new File(['img'], 'cover.jpg', { type: 'image/jpeg' });
     const out = await uploadResourceCover('77', file);
-    expect(out).toEqual({ id: '77' });
+    expect(out).toEqual({ id: 77 });
     const [url, init] = spy.mock.calls[0];
     expect(url).toBe('https://api.test/api/v1/resources/77/cover');
     expect((init as RequestInit).method).toBe('POST');
@@ -183,11 +205,21 @@ describe('checkDuplicatesBatch', () => {
   it('unwraps the { results } envelope the endpoint actually returns', async () => {
     // Real prod shape (CheckDuplicatesResponse) — the raw-array assumption
     // once threw "not iterable" downstream and blocked ALL uploads.
+    // `existing` is the whole matching row on the wire, id a JSON number;
+    // the service hands the import pipeline just the stringified id.
     stubResponse({
-      results: [{ file_hash: 'abc', duplicate: true, existing: { id: '1' } }],
+      results: [
+        {
+          file_hash: 'abc',
+          duplicate: true,
+          existing: { id: 341590000000001, filename: 'a.png', file_size_bytes: 10 },
+        },
+      ],
     });
     const out = await checkDuplicatesBatch(items);
-    expect(out).toEqual([{ file_hash: 'abc', duplicate: true, existing: { id: '1' } }]);
+    expect(out).toEqual([
+      { file_hash: 'abc', duplicate: true, existing: { id: '341590000000001' } },
+    ]);
   });
 
   it('accepts a bare array shape unchanged', async () => {

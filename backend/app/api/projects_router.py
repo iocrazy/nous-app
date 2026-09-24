@@ -17,6 +17,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
 )
 from loguru import logger
@@ -24,10 +25,37 @@ from loguru import logger
 from app.core.config import settings
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
+    verify_project_media_read_access,
     verify_project_read_access,
     verify_project_write_access,
 )
 from app.repositories.generated_media_repository import GeneratedMediaRepository
+from app.schemas.envelope import Envelope
+from app.schemas.generated_media import GeneratedMediaPage
+from app.schemas.project_responses import (
+    ProjectCollectionRow,
+    ProjectDetail,
+    ProjectEntities,
+    ProjectFileCommentRow,
+    ProjectFileListRow,
+    ProjectFileRow,
+    ProjectFileVersionRow,
+    ProjectFolderRow,
+    ProjectListItem,
+    ProjectMemberRow,
+    ProjectMemberWithEmail,
+    ProjectMessage,
+    ProjectRow,
+    ProjectShareRow,
+    ProjectStageCatalogEntry,
+    ProjectStageHistoryEntry,
+    ProjectStyleProfileRow,
+    StageBoard,
+    SurfaceCompletionSyncResult,
+    WorkflowNodeDeleted,
+    WorkflowNodeRow,
+    WorkflowReinstantiateResult,
+)
 from app.schemas.projects import (
     AddMemberRequest,
     CreateCollectionRequest,
@@ -47,6 +75,7 @@ from app.schemas.projects import (
     StyleProfileUpdate,
     UpdateMemberRoleRequest,
 )
+from app.schemas.wire import binary_response
 from app.schemas.workflow import (
     BLOCK_DEPS_PENDING,
     AdvancePreview,
@@ -75,7 +104,7 @@ MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 # ============================================
 
 
-@router.get("")
+@router.get("", response_model=Envelope[list[ProjectListItem]])
 async def list_projects(
     auth: AuthDep,
     project_type: Optional[str] = Query(None, description="Filter by project type"),
@@ -117,7 +146,7 @@ async def list_projects(
         raise HTTPException(status_code=500, detail="Failed to list projects")
 
 
-@router.post("")
+@router.post("", response_model=Envelope[ProjectRow])
 async def create_project(data: ProjectCreate, auth: AuthDep):
     """Create a new project owned by the current user."""
     try:
@@ -168,7 +197,7 @@ async def get_recent_items(
     return RecentItemsResponse(items=items)
 
 
-@router.get("/{project_id}")
+@router.get("/{project_id}", response_model=Envelope[ProjectDetail])
 async def get_project(
     project_id: str,
     auth: AuthDep,
@@ -200,7 +229,7 @@ async def get_project(
         raise HTTPException(status_code=500, detail="Failed to get project")
 
 
-@router.put("/{project_id}")
+@router.put("/{project_id}", response_model=Envelope[ProjectRow])
 async def update_project(
     project_id: str,
     data: ProjectUpdate,
@@ -223,7 +252,7 @@ async def update_project(
         raise HTTPException(status_code=500, detail="Failed to update project")
 
 
-@router.delete("/{project_id}")
+@router.delete("/{project_id}", response_model=ProjectMessage)
 async def delete_project(
     project_id: str,
     auth: AuthDep,
@@ -248,7 +277,10 @@ async def delete_project(
 # ============================================
 
 
-@router.get("/{project_id}/style-profile")
+@router.get(
+    "/{project_id}/style-profile",
+    response_model=Envelope[ProjectStyleProfileRow | None],
+)
 async def get_style_profile(
     project_id: str,
     auth: AuthDep,
@@ -271,7 +303,9 @@ async def get_style_profile(
         raise HTTPException(status_code=500, detail="Failed to get style profile")
 
 
-@router.put("/{project_id}/style-profile")
+@router.put(
+    "/{project_id}/style-profile", response_model=Envelope[ProjectStyleProfileRow]
+)
 async def put_style_profile(
     project_id: str,
     data: StyleProfileUpdate,
@@ -306,7 +340,7 @@ async def put_style_profile(
 # ============================================
 
 
-@router.get("/stages/catalog")
+@router.get("/stages/catalog", response_model=Envelope[list[ProjectStageCatalogEntry]])
 async def list_stage_catalog(auth: AuthDep):
     """Global catalog of all SOP stages, ordered by sort_order."""
     from app.repositories.project_stages_repository import (
@@ -319,7 +353,10 @@ async def list_stage_catalog(auth: AuthDep):
     }
 
 
-@router.get("/{project_id}/stage_history")
+@router.get(
+    "/{project_id}/stage_history",
+    response_model=Envelope[list[ProjectStageHistoryEntry]],
+)
 async def get_stage_history(
     project_id: str,
     auth: AuthDep,
@@ -449,7 +486,7 @@ async def get_project_workflow(
     )
 
 
-@router.post("/{project_id}/workflow")
+@router.post("/{project_id}/workflow", response_model=Envelope[list[WorkflowNodeRow]])
 async def attach_project_workflow(
     project_id: str,
     payload: AttachWorkflowRequest,
@@ -545,7 +582,10 @@ async def attach_project_workflow(
     return {"success": True, "data": nodes}
 
 
-@router.post("/{project_id}/workflow/reinstantiate-per-episode")
+@router.post(
+    "/{project_id}/workflow/reinstantiate-per-episode",
+    response_model=Envelope[WorkflowReinstantiateResult],
+)
 async def reinstantiate_workflow_per_episode(
     project_id: str,
     auth: AuthDep,
@@ -574,7 +614,10 @@ async def reinstantiate_workflow_per_episode(
     return {"success": True, "data": result}
 
 
-@router.post("/{project_id}/workflow/surface-completion/sync")
+@router.post(
+    "/{project_id}/workflow/surface-completion/sync",
+    response_model=Envelope[SurfaceCompletionSyncResult],
+)
 async def sync_surface_completion_for_project(
     project_id: str,
     auth: AuthDep,
@@ -596,7 +639,9 @@ async def sync_surface_completion_for_project(
         raise HTTPException(status_code=500, detail="Surface completion sync failed")
 
 
-@router.get("/{project_id}/workflow/nodes/{node_id}/board")
+@router.get(
+    "/{project_id}/workflow/nodes/{node_id}/board", response_model=Envelope[StageBoard]
+)
 async def get_stage_board(
     project_id: str,
     node_id: str,
@@ -723,7 +768,9 @@ async def get_stage_board(
     }
 
 
-@router.patch("/{project_id}/workflow/nodes/{node_id}")
+@router.patch(
+    "/{project_id}/workflow/nodes/{node_id}", response_model=Envelope[WorkflowNodeRow]
+)
 async def patch_workflow_node(
     project_id: str,
     node_id: str,
@@ -847,7 +894,7 @@ async def patch_workflow_node(
     return {"success": True, "data": row}
 
 
-@router.post("/{project_id}/workflow/nodes")
+@router.post("/{project_id}/workflow/nodes", response_model=Envelope[WorkflowNodeRow])
 async def add_workflow_node(
     project_id: str,
     payload: NodeCreate,
@@ -877,7 +924,10 @@ async def add_workflow_node(
     return {"success": True, "data": node}
 
 
-@router.delete("/{project_id}/workflow/nodes/{node_id}")
+@router.delete(
+    "/{project_id}/workflow/nodes/{node_id}",
+    response_model=Envelope[WorkflowNodeDeleted],
+)
 async def delete_workflow_node(
     project_id: str,
     node_id: str,
@@ -902,7 +952,10 @@ async def delete_workflow_node(
     return {"success": True, "data": {"deleted": True}}
 
 
-@router.post("/{project_id}/workflow/nodes/{node_id}/start-early")
+@router.post(
+    "/{project_id}/workflow/nodes/{node_id}/start-early",
+    response_model=Envelope[WorkflowNodeRow],
+)
 async def start_workflow_node_early(
     project_id: str,
     node_id: str,
@@ -1046,7 +1099,7 @@ async def get_advance_preview(
     )
 
 
-@router.post("/{project_id}/advance")
+@router.post("/{project_id}/advance", response_model=Envelope[AdvancePreview])
 async def post_advance(
     project_id: str,
     auth: AuthDep,
@@ -1079,7 +1132,7 @@ async def post_advance(
 # ============================================
 
 
-@router.get("/{project_id}/entities")
+@router.get("/{project_id}/entities", response_model=Envelope[ProjectEntities])
 async def get_project_entities(
     project_id: str,
     auth: AuthDep,
@@ -1123,7 +1176,7 @@ async def get_project_entities(
 # ============================================
 
 
-@router.get("/{project_id}/renders")
+@router.get("/{project_id}/renders", response_model=Envelope[GeneratedMediaPage])
 async def list_project_renders(
     project_id: str,
     auth: AuthDep,
@@ -1152,7 +1205,11 @@ async def list_project_renders(
 # ============================================
 
 
-@router.get("/{project_id}/files")
+@router.get(
+    "/{project_id}/files",
+    response_model=Envelope[list[ProjectFileListRow]],
+    response_model_exclude_unset=True,
+)
 async def list_files(
     project_id: str,
     auth: AuthDep,
@@ -1177,7 +1234,7 @@ async def list_files(
         raise HTTPException(status_code=500, detail="Failed to list files")
 
 
-@router.post("/{project_id}/files/upload")
+@router.post("/{project_id}/files/upload", response_model=Envelope[ProjectFileRow])
 async def upload_file(
     project_id: str,
     auth: AuthDep,
@@ -1224,7 +1281,7 @@ async def upload_file(
         raise HTTPException(status_code=500, detail="Failed to upload file")
 
 
-@router.post("/{project_id}/files/link-media")
+@router.post("/{project_id}/files/link-media", response_model=Envelope[ProjectFileRow])
 async def link_media(
     project_id: str,
     data: LinkMediaRequest,
@@ -1249,7 +1306,7 @@ async def link_media(
         raise HTTPException(status_code=500, detail="Failed to link media")
 
 
-@router.get("/{project_id}/files/{file_id}")
+@router.get("/{project_id}/files/{file_id}", response_model=Envelope[ProjectFileRow])
 async def get_file_info(
     project_id: str,
     file_id: str,
@@ -1268,7 +1325,13 @@ async def get_file_info(
         raise HTTPException(status_code=500, detail="Failed to get file info")
 
 
-@router.get("/{project_id}/files/{file_id}/download")
+@router.get(
+    "/{project_id}/files/{file_id}/download",
+    response_class=Response,
+    responses=binary_response(
+        "The file as an attachment, or a 302 to a signed URL", "*/*"
+    ),
+)
 async def download_file(
     project_id: str,
     file_id: str,
@@ -1324,7 +1387,59 @@ async def download_file(
         raise HTTPException(status_code=500, detail="Failed to serve file")
 
 
-@router.put("/{project_id}/files/{file_id}")
+@router.get(
+    "/{project_id}/files/{file_id}/stream",
+    response_class=Response,
+    responses=binary_response(
+        "The file (or one of its versions) inline and Range-aware, for a "
+        "bare <video>/<audio>; a 302 to a signed URL for object-store rows",
+        "video/*",
+        "audio/*",
+        "*/*",
+    ),
+)
+async def stream_file(
+    project_id: str,
+    file_id: str,
+    request: Request,
+    version_id: Optional[str] = Query(None, description="A file_versions id"),
+    _project_guard: None = Depends(verify_project_media_read_access),
+):
+    """Play a project file in the review page's player.
+
+    A ``<video src>`` cannot carry a Bearer header, and ``project_files`` /
+    ``file_versions`` have no ``resource_id`` for ``/media/{id}`` to resolve,
+    so the review page had no URL that could play an uploaded file. This is
+    that URL. Its guard is the media variant of the project read guard: the
+    same read check, with the caller also accepted from the signed media
+    token in ``?token=``. The body serves the file inline via
+    ``serve_stored_file`` (Range-aware; ``sb://`` rows may 302 to a signed URL).
+    """
+    from app.services.library.media_serving import serve_stored_file
+
+    svc = ProjectsService()
+    try:
+        record = await svc.get_file_info(project_id, file_id)
+        if version_id is not None:
+            versions = await svc.get_file_versions(project_id, file_id)
+            matches = [v for v in versions if str(v.get("id")) == version_id]
+            if not matches:
+                raise HTTPException(status_code=404, detail="Version not found")
+            record = matches[0]
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    file_path = record.get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No file available")
+    return await serve_stored_file(
+        file_path,
+        mime=record.get("mime_type") or "application/octet-stream",
+        request=request,
+    )
+
+
+@router.put("/{project_id}/files/{file_id}", response_model=Envelope[ProjectFileRow])
 async def update_file(
     project_id: str,
     file_id: str,
@@ -1346,7 +1461,9 @@ async def update_file(
         raise HTTPException(status_code=500, detail="Failed to update file")
 
 
-@router.put("/{project_id}/files/{file_id}/restore")
+@router.put(
+    "/{project_id}/files/{file_id}/restore", response_model=Envelope[ProjectFileRow]
+)
 async def restore_file(
     project_id: str,
     file_id: str,
@@ -1365,7 +1482,15 @@ async def restore_file(
         raise HTTPException(status_code=500, detail="Failed to restore file")
 
 
-@router.get("/{project_id}/shares")
+def _redact_share(share: dict) -> dict:
+    """The share without its plain-text ``password``, plus ``has_password``
+    (same redaction as ``shares_router._enrich_share``). Returns a new dict."""
+    public = {key: value for key, value in share.items() if key != "password"}
+    public["has_password"] = share.get("password") is not None
+    return public
+
+
+@router.get("/{project_id}/shares", response_model=Envelope[list[ProjectShareRow]])
 async def list_project_shares(
     project_id: str,
     auth: AuthDep,
@@ -1375,13 +1500,13 @@ async def list_project_shares(
     try:
         svc = ProjectsService()
         shares = await svc.list_shares(project_id)
-        return {"success": True, "data": shares}
+        return {"success": True, "data": [_redact_share(s) for s in shares]}
     except Exception as e:
         logger.error(f"Failed to list shares for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list project shares")
 
 
-@router.post("/{project_id}/shares")
+@router.post("/{project_id}/shares", response_model=Envelope[ProjectShareRow])
 async def create_share(
     project_id: str,
     data: CreateShareRequest,
@@ -1394,7 +1519,7 @@ async def create_share(
         share = await svc.create_share(
             project_id, data.model_dump(exclude_none=True), auth.user_id
         )
-        return {"success": True, "data": share}
+        return {"success": True, "data": _redact_share(share)}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -1407,7 +1532,7 @@ async def create_share(
 # ============================================
 
 
-@router.get("/{project_id}/folders")
+@router.get("/{project_id}/folders", response_model=Envelope[list[ProjectFolderRow]])
 async def list_folders(
     project_id: str,
     auth: AuthDep,
@@ -1426,7 +1551,7 @@ async def list_folders(
         raise HTTPException(status_code=500, detail="Failed to list folders")
 
 
-@router.post("/{project_id}/folders")
+@router.post("/{project_id}/folders", response_model=Envelope[ProjectFolderRow])
 async def create_folder(
     project_id: str,
     data: CreateFolderRequest,
@@ -1445,7 +1570,9 @@ async def create_folder(
         raise HTTPException(status_code=500, detail="Failed to create folder")
 
 
-@router.put("/{project_id}/folders/{folder_id}")
+@router.put(
+    "/{project_id}/folders/{folder_id}", response_model=Envelope[ProjectFolderRow]
+)
 async def rename_folder(
     project_id: str,
     folder_id: str,
@@ -1465,7 +1592,7 @@ async def rename_folder(
         raise HTTPException(status_code=500, detail="Failed to rename folder")
 
 
-@router.delete("/{project_id}/folders/{folder_id}")
+@router.delete("/{project_id}/folders/{folder_id}", response_model=ProjectMessage)
 async def delete_folder(
     project_id: str,
     folder_id: str,
@@ -1484,7 +1611,9 @@ async def delete_folder(
         raise HTTPException(status_code=500, detail="Failed to delete folder")
 
 
-@router.put("/{project_id}/files/{file_id}/move")
+@router.put(
+    "/{project_id}/files/{file_id}/move", response_model=Envelope[ProjectFileRow]
+)
 async def move_file(
     project_id: str,
     file_id: str,
@@ -1504,7 +1633,7 @@ async def move_file(
         raise HTTPException(status_code=500, detail="Failed to move file")
 
 
-@router.delete("/{project_id}/files/{file_id}")
+@router.delete("/{project_id}/files/{file_id}", response_model=ProjectMessage)
 async def delete_file(
     project_id: str,
     file_id: str,
@@ -1528,7 +1657,10 @@ async def delete_file(
 # ============================================
 
 
-@router.get("/{project_id}/files/{file_id}/versions")
+@router.get(
+    "/{project_id}/files/{file_id}/versions",
+    response_model=Envelope[list[ProjectFileVersionRow]],
+)
 async def list_versions(
     project_id: str,
     file_id: str,
@@ -1547,7 +1679,10 @@ async def list_versions(
         raise HTTPException(status_code=500, detail="Failed to list versions")
 
 
-@router.post("/{project_id}/files/{file_id}/versions")
+@router.post(
+    "/{project_id}/files/{file_id}/versions",
+    response_model=Envelope[ProjectFileVersionRow],
+)
 async def upload_version(
     project_id: str,
     file_id: str,
@@ -1588,7 +1723,10 @@ async def upload_version(
 # ============================================
 
 
-@router.get("/{project_id}/files/{file_id}/comments")
+@router.get(
+    "/{project_id}/files/{file_id}/comments",
+    response_model=Envelope[list[ProjectFileCommentRow]],
+)
 async def list_comments(
     project_id: str,
     file_id: str,
@@ -1608,7 +1746,10 @@ async def list_comments(
         raise HTTPException(status_code=500, detail="Failed to list comments")
 
 
-@router.post("/{project_id}/files/{file_id}/comments")
+@router.post(
+    "/{project_id}/files/{file_id}/comments",
+    response_model=Envelope[ProjectFileCommentRow],
+)
 async def add_comment(
     project_id: str,
     file_id: str,
@@ -1636,7 +1777,9 @@ async def add_comment(
         raise HTTPException(status_code=500, detail="Failed to add comment")
 
 
-@router.delete("/{project_id}/files/{file_id}/comments/{comment_id}")
+@router.delete(
+    "/{project_id}/files/{file_id}/comments/{comment_id}", response_model=ProjectMessage
+)
 async def delete_comment(
     project_id: str,
     file_id: str,
@@ -1663,7 +1806,10 @@ async def delete_comment(
 # ============================================
 
 
-@router.put("/{project_id}/files/{file_id}/review-status")
+@router.put(
+    "/{project_id}/files/{file_id}/review-status",
+    response_model=Envelope[ProjectFileRow],
+)
 async def update_review_status(
     project_id: str,
     file_id: str,
@@ -1693,7 +1839,11 @@ async def update_review_status(
 # ============================================
 
 
-@router.get("/{project_id}/members")
+@router.get(
+    "/{project_id}/members",
+    response_model=Envelope[list[ProjectMemberWithEmail]],
+    response_model_exclude_unset=True,
+)
 async def list_members(
     project_id: str,
     auth: AuthDep,
@@ -1709,7 +1859,7 @@ async def list_members(
         raise HTTPException(status_code=500, detail="Failed to list members")
 
 
-@router.post("/{project_id}/members")
+@router.post("/{project_id}/members", response_model=Envelope[ProjectMemberWithEmail])
 async def add_member(
     project_id: str,
     data: AddMemberRequest,
@@ -1731,7 +1881,9 @@ async def add_member(
         raise HTTPException(status_code=500, detail="Failed to add member")
 
 
-@router.put("/{project_id}/members/{member_id}")
+@router.put(
+    "/{project_id}/members/{member_id}", response_model=Envelope[ProjectMemberRow]
+)
 async def update_member_role(
     project_id: str,
     member_id: str,
@@ -1751,7 +1903,7 @@ async def update_member_role(
         raise HTTPException(status_code=500, detail="Failed to update member role")
 
 
-@router.delete("/{project_id}/members/{member_id}")
+@router.delete("/{project_id}/members/{member_id}", response_model=ProjectMessage)
 async def remove_member(
     project_id: str,
     member_id: str,
@@ -1773,7 +1925,9 @@ async def remove_member(
 # ============================================
 
 
-@router.get("/{project_id}/collections")
+@router.get(
+    "/{project_id}/collections", response_model=Envelope[list[ProjectCollectionRow]]
+)
 async def list_collections(
     project_id: str,
     auth: AuthDep,
@@ -1789,7 +1943,7 @@ async def list_collections(
         raise HTTPException(status_code=500, detail="Failed to list collections")
 
 
-@router.post("/{project_id}/collections")
+@router.post("/{project_id}/collections", response_model=Envelope[ProjectCollectionRow])
 async def create_collection(
     project_id: str,
     data: CreateCollectionRequest,
@@ -1808,7 +1962,9 @@ async def create_collection(
         raise HTTPException(status_code=500, detail="Failed to create collection")
 
 
-@router.delete("/{project_id}/collections/{collection_id}")
+@router.delete(
+    "/{project_id}/collections/{collection_id}", response_model=ProjectMessage
+)
 async def delete_collection(
     project_id: str,
     collection_id: str,

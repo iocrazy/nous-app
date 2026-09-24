@@ -188,6 +188,8 @@ class FakeStagePub:
                 "name": "Planning",
                 "sort_order": 10,
                 "tools_recommended": ["files"],
+                "created_at": "2026-09-24T01:02:03.456789+00:00",
+                "updated_at": "2026-09-24T01:02:03.456789+00:00",
             }
         ]
 

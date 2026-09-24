@@ -11668,6 +11668,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/files/{file_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream File
+         * @description Play a project file in the review page's player.
+         *
+         *     A ``<video src>`` cannot carry a Bearer header, and ``project_files`` /
+         *     ``file_versions`` have no ``resource_id`` for ``/media/{id}`` to resolve,
+         *     so the review page had no URL that could play an uploaded file. This is
+         *     that URL. Its guard is the media variant of the project read guard: the
+         *     same read check, with the caller also accepted from the signed media
+         *     token in ``?token=``. The body serves the file inline via
+         *     ``serve_stored_file`` (Range-aware; ``sb://`` rows may 302 to a signed URL).
+         */
+        get: operations["stream_file_api_v1_projects__project_id__files__file_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/files/{file_id}/versions": {
         parameters: {
             query?: never;
@@ -21630,6 +21658,30 @@ export interface components {
             /** Y */
             y: number;
         };
+        /** DataEnvelope[GeneratedMediaDeleted] */
+        DataEnvelope_GeneratedMediaDeleted_: {
+            data: components["schemas"]["GeneratedMediaDeleted"];
+        };
+        /** DataEnvelope[GeneratedMediaImported] */
+        DataEnvelope_GeneratedMediaImported_: {
+            data: components["schemas"]["GeneratedMediaImported"];
+        };
+        /** DataEnvelope[GeneratedMediaPage] */
+        DataEnvelope_GeneratedMediaPage_: {
+            data: components["schemas"]["GeneratedMediaPage"];
+        };
+        /** DataEnvelope[GeneratedMediaPromoted] */
+        DataEnvelope_GeneratedMediaPromoted_: {
+            data: components["schemas"]["GeneratedMediaPromoted"];
+        };
+        /** DataEnvelope[GeneratedMediaRow] */
+        DataEnvelope_GeneratedMediaRow_: {
+            data: components["schemas"]["GeneratedMediaRow"];
+        };
+        /** DataEnvelope[GeneratedMediaUpscaled] */
+        DataEnvelope_GeneratedMediaUpscaled_: {
+            data: components["schemas"]["GeneratedMediaUpscaled"];
+        };
         /** DatesResponse */
         DatesResponse: {
             /** Dates */
@@ -21777,6 +21829,15 @@ export interface components {
                 [key: string]: number;
             };
         };
+        /** Envelope[AdvancePreview] */
+        Envelope_AdvancePreview_: {
+            data: components["schemas"]["AdvancePreview"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[AssetCountsResponse] */
         Envelope_AssetCountsResponse_: {
             data: components["schemas"]["AssetCountsResponse"];
@@ -21840,6 +21901,51 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[FolderContentCount] */
+        Envelope_FolderContentCount_: {
+            data: components["schemas"]["FolderContentCount"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[FolderRestoreResult] */
+        Envelope_FolderRestoreResult_: {
+            data: components["schemas"]["FolderRestoreResult"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[FolderRow] */
+        Envelope_FolderRow_: {
+            data: components["schemas"]["FolderRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[FolderTrashResult] */
+        Envelope_FolderTrashResult_: {
+            data: components["schemas"]["FolderTrashResult"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[GalleryMembership] */
+        Envelope_GalleryMembership_: {
+            data: components["schemas"]["GalleryMembership"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[GenerateSlotPreview] */
         Envelope_GenerateSlotPreview_: {
             data: components["schemas"]["GenerateSlotPreview"];
@@ -21852,6 +21958,15 @@ export interface components {
         /** Envelope[GenerateSlotResponse] */
         Envelope_GenerateSlotResponse_: {
             data: components["schemas"]["GenerateSlotResponse"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[GeneratedMediaPage] */
+        Envelope_GeneratedMediaPage_: {
+            data: components["schemas"]["GeneratedMediaPage"];
             /**
              * Success
              * @default true
@@ -21886,6 +22001,66 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[List[FolderRow]] */
+        Envelope_List_FolderRow__: {
+            /** Data */
+            data: components["schemas"]["FolderRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[List[GalleryChild]] */
+        Envelope_List_GalleryChild__: {
+            /** Data */
+            data: components["schemas"]["GalleryChild"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[List[ResourceListItem]] */
+        Envelope_List_ResourceListItem__: {
+            /** Data */
+            data: components["schemas"]["ResourceListItem"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[List[ResourcePlacement]] */
+        Envelope_List_ResourcePlacement__: {
+            /** Data */
+            data: components["schemas"]["ResourcePlacement"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[List[ResourceTagWithTag]] */
+        Envelope_List_ResourceTagWithTag__: {
+            /** Data */
+            data: components["schemas"]["ResourceTagWithTag"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[List[ResourceVersionRow]] */
+        Envelope_List_ResourceVersionRow__: {
+            /** Data */
+            data: components["schemas"]["ResourceVersionRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[List[UsedInCanvasRef]] */
         Envelope_List_UsedInCanvasRef__: {
             /** Data */
@@ -21899,6 +22074,114 @@ export interface components {
         /** Envelope[LoadoutResponse] */
         Envelope_LoadoutResponse_: {
             data: components["schemas"]["LoadoutResponse"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectCollectionRow] */
+        Envelope_ProjectCollectionRow_: {
+            data: components["schemas"]["ProjectCollectionRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectDetail] */
+        Envelope_ProjectDetail_: {
+            data: components["schemas"]["ProjectDetail"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectEntities] */
+        Envelope_ProjectEntities_: {
+            data: components["schemas"]["ProjectEntities"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectFileCommentRow] */
+        Envelope_ProjectFileCommentRow_: {
+            data: components["schemas"]["ProjectFileCommentRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectFileRow] */
+        Envelope_ProjectFileRow_: {
+            data: components["schemas"]["ProjectFileRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectFileVersionRow] */
+        Envelope_ProjectFileVersionRow_: {
+            data: components["schemas"]["ProjectFileVersionRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectFolderRow] */
+        Envelope_ProjectFolderRow_: {
+            data: components["schemas"]["ProjectFolderRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectMemberRow] */
+        Envelope_ProjectMemberRow_: {
+            data: components["schemas"]["ProjectMemberRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectMemberWithEmail] */
+        Envelope_ProjectMemberWithEmail_: {
+            data: components["schemas"]["ProjectMemberWithEmail"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectRow] */
+        Envelope_ProjectRow_: {
+            data: components["schemas"]["ProjectRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectShareRow] */
+        Envelope_ProjectShareRow_: {
+            data: components["schemas"]["ProjectShareRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ProjectStyleProfileRow] */
+        Envelope_ProjectStyleProfileRow_: {
+            data: components["schemas"]["ProjectStyleProfileRow"];
             /**
              * Success
              * @default true
@@ -21941,6 +22224,117 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[ResourceGenPrompts] */
+        Envelope_ResourceGenPrompts_: {
+            data: components["schemas"]["ResourceGenPrompts"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ResourceItemRow] */
+        Envelope_ResourceItemRow_: {
+            data: components["schemas"]["ResourceItemRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ResourceLyricsUpload] */
+        Envelope_ResourceLyricsUpload_: {
+            data: components["schemas"]["ResourceLyricsUpload"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ResourcePermissions] */
+        Envelope_ResourcePermissions_: {
+            data: components["schemas"]["ResourcePermissions"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ResourceRow] */
+        Envelope_ResourceRow_: {
+            data: components["schemas"]["ResourceRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ResourceSaveAsAssetResult] */
+        Envelope_ResourceSaveAsAssetResult_: {
+            data: components["schemas"]["ResourceSaveAsAssetResult"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ResourceSplitResult] */
+        Envelope_ResourceSplitResult_: {
+            data: components["schemas"]["ResourceSplitResult"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ResourceTagRow] */
+        Envelope_ResourceTagRow_: {
+            data: components["schemas"]["ResourceTagRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ResourceVersionRow] */
+        Envelope_ResourceVersionRow_: {
+            data: components["schemas"]["ResourceVersionRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[StageBoard] */
+        Envelope_StageBoard_: {
+            data: components["schemas"]["StageBoard"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[SurfaceCompletionSyncResult] */
+        Envelope_SurfaceCompletionSyncResult_: {
+            data: components["schemas"]["SurfaceCompletionSyncResult"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[Union[Dict[str, Any], NoneType]] */
+        Envelope_Union_Dict_str__Any___NoneType__: {
+            /** Data */
+            data: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[Union[List[AssetFileResponse], AssetFileResponse]] */
         Envelope_Union_List_AssetFileResponse___AssetFileResponse__: {
             /** Data */
@@ -21951,9 +22345,156 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[Union[ProjectStyleProfileRow, NoneType]] */
+        Envelope_Union_ProjectStyleProfileRow__NoneType__: {
+            data: components["schemas"]["ProjectStyleProfileRow"] | null;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[Union[WorkflowReinstantiateConverted, WorkflowReinstantiateSkipped]] */
+        Envelope_Union_WorkflowReinstantiateConverted__WorkflowReinstantiateSkipped__: {
+            /** Data */
+            data: components["schemas"]["WorkflowReinstantiateConverted"] | components["schemas"]["WorkflowReinstantiateSkipped"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[UnlinkedResponse] */
         Envelope_UnlinkedResponse_: {
             data: components["schemas"]["UnlinkedResponse"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[WorkflowNodeDeleted] */
+        Envelope_WorkflowNodeDeleted_: {
+            data: components["schemas"]["WorkflowNodeDeleted"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[WorkflowNodeRow] */
+        Envelope_WorkflowNodeRow_: {
+            data: components["schemas"]["WorkflowNodeRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ProjectCollectionRow]] */
+        Envelope_list_ProjectCollectionRow__: {
+            /** Data */
+            data: components["schemas"]["ProjectCollectionRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ProjectFileCommentRow]] */
+        Envelope_list_ProjectFileCommentRow__: {
+            /** Data */
+            data: components["schemas"]["ProjectFileCommentRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ProjectFileListRow]] */
+        Envelope_list_ProjectFileListRow__: {
+            /** Data */
+            data: components["schemas"]["ProjectFileListRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ProjectFileVersionRow]] */
+        Envelope_list_ProjectFileVersionRow__: {
+            /** Data */
+            data: components["schemas"]["ProjectFileVersionRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ProjectFolderRow]] */
+        Envelope_list_ProjectFolderRow__: {
+            /** Data */
+            data: components["schemas"]["ProjectFolderRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ProjectListItem]] */
+        Envelope_list_ProjectListItem__: {
+            /** Data */
+            data: components["schemas"]["ProjectListItem"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ProjectMemberWithEmail]] */
+        Envelope_list_ProjectMemberWithEmail__: {
+            /** Data */
+            data: components["schemas"]["ProjectMemberWithEmail"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ProjectShareRow]] */
+        Envelope_list_ProjectShareRow__: {
+            /** Data */
+            data: components["schemas"]["ProjectShareRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ProjectStageCatalogEntry]] */
+        Envelope_list_ProjectStageCatalogEntry__: {
+            /** Data */
+            data: components["schemas"]["ProjectStageCatalogEntry"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ProjectStageHistoryEntry]] */
+        Envelope_list_ProjectStageHistoryEntry__: {
+            /** Data */
+            data: components["schemas"]["ProjectStageHistoryEntry"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[WorkflowNodeRow]] */
+        Envelope_list_WorkflowNodeRow__: {
+            /** Data */
+            data: components["schemas"]["WorkflowNodeRow"][];
             /**
              * Success
              * @default true
@@ -22152,6 +22693,16 @@ export interface components {
             user_id: string;
         };
         /**
+         * FolderContentCount
+         * @description Resources and sub-folders under a folder, nested ones included.
+         */
+        FolderContentCount: {
+            /** Resource Count */
+            resource_count: number;
+            /** Subfolder Count */
+            subfolder_count: number;
+        };
+        /**
          * FolderCreate
          * @description Request body for creating a folder.
          */
@@ -22169,6 +22720,85 @@ export interface components {
              * @description Team ID (teams.id snowflake)
              */
             scope_id: string;
+        };
+        /**
+         * FolderDeleteEnvelope
+         * @description ``DELETE /resources/folders/{id}`` also carries a ``message``.
+         */
+        FolderDeleteEnvelope: {
+            data: components["schemas"]["FolderDeleteResult"];
+            /** Message */
+            message: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** FolderDeleteResult */
+        FolderDeleteResult: {
+            /** Deleted Folders */
+            deleted_folders: number;
+            /** Deleted Resources */
+            deleted_resources: number;
+        };
+        /** FolderRestoreResult */
+        FolderRestoreResult: {
+            /** Restored Folders */
+            restored_folders: number;
+            /** Restored Resources */
+            restored_resources: number;
+        };
+        /**
+         * FolderRow
+         * @description One ``folders`` row (regular and smart folders share the table).
+         */
+        FolderRow: {
+            /** Color */
+            color: string | null;
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Icon */
+            icon: string | null;
+            /** Id */
+            id: number;
+            /** Is Smart */
+            is_smart: boolean | null;
+            /** Is System */
+            is_system: boolean;
+            /** Is Trashed */
+            is_trashed: boolean;
+            /** Library Id */
+            library_id: number | null;
+            /** Name */
+            name: string;
+            /** Parent Id */
+            parent_id: number | null;
+            /** Scope Id */
+            scope_id: number;
+            /** Smart Rules */
+            smart_rules: {
+                [key: string]: unknown;
+            } | null;
+            /** Sort Order */
+            sort_order: number;
+            /** System Key */
+            system_key: string | null;
+            /** Trashed At */
+            trashed_at: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Visibility */
+            visibility: string;
+        };
+        /** FolderTrashResult */
+        FolderTrashResult: {
+            /** Trashed Folders */
+            trashed_folders: number;
+            /** Trashed Resources */
+            trashed_resources: number;
         };
         /**
          * FolderUpdate
@@ -22312,6 +22942,32 @@ export interface components {
             url?: string | null;
             /** User Agent */
             user_agent?: string | null;
+        };
+        /**
+         * GalleryChild
+         * @description One child image of a gallery, in gallery order.
+         */
+        GalleryChild: {
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: number;
+            /** Position */
+            position: number;
+            /** Thumbnail Path */
+            thumbnail_path: string | null;
+        };
+        /**
+         * GalleryMembership
+         * @description Child image ids to hide + per-gallery child counts, for one scope.
+         */
+        GalleryMembership: {
+            /** Child Image Ids */
+            child_image_ids: string[];
+            /** Gallery Counts */
+            gallery_counts: {
+                [key: string]: number;
+            };
         };
         /**
          * GallerySetItemsRequest
@@ -22458,6 +23114,194 @@ export interface components {
             inbox_state: "unreviewed";
             /** Skipped References */
             skipped_references?: components["schemas"]["SkippedReference"][];
+        };
+        /** GeneratedItem */
+        GeneratedItem: {
+            /** Canvas Id */
+            canvas_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Media Kind */
+            media_kind: string;
+            /** Mime */
+            mime?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Node Id */
+            node_id?: string | null;
+            /** Origin Kind */
+            origin_kind: string;
+            /** Promoted Resource Id */
+            promoted_resource_id?: string | null;
+            /** Prompt */
+            prompt?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /**
+             * Review State
+             * @enum {string}
+             */
+            review_state: "unreviewed" | "saved" | "in_assets" | "deleted";
+            /** Scope Id */
+            scope_id: string;
+            source: components["schemas"]["GeneratedSource"];
+            /** Source Asset Id */
+            source_asset_id?: string | null;
+            /** Title */
+            title: string;
+        };
+        /**
+         * GeneratedMediaDeleted
+         * @description ``deleted`` is false when no row matched in the caller's scope.
+         */
+        GeneratedMediaDeleted: {
+            /** Deleted */
+            deleted: boolean;
+        };
+        /**
+         * GeneratedMediaImported
+         * @description A file minted into the store, with the URL the canvas should read.
+         *
+         *     ``url`` ends in ``/cover`` for images, ``/stream`` for videos and
+         *     ``/file`` otherwise.
+         */
+        GeneratedMediaImported: {
+            /** Id */
+            id: string;
+            /** Media Kind */
+            media_kind: string;
+            /** Mime */
+            mime: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * GeneratedMediaPage
+         * @description A keyset page; ``next_cursor`` is null on the last page.
+         */
+        GeneratedMediaPage: {
+            /** Items */
+            items?: components["schemas"]["GeneratedMediaRow"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** GeneratedMediaPromoted */
+        GeneratedMediaPromoted: {
+            /** Promoted Resource Id */
+            promoted_resource_id: string;
+        };
+        /**
+         * GeneratedMediaRow
+         * @description One ``generated_media`` row as the repository projects it (``_GM_COLS``).
+         *
+         *     ``content_sha256`` is deliberately absent: the projection keeps it
+         *     internal. ``tests/api/test_generated_media_wire.py`` pins this field set
+         *     to the projection, so a column added there fails until it is declared.
+         */
+        GeneratedMediaRow: {
+            /** Agent Id */
+            agent_id: string | null;
+            /** Canvas Id */
+            canvas_id: string | null;
+            /** Conversation Id */
+            conversation_id: string | null;
+            /** Cost Cents */
+            cost_cents: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Creator Id */
+            creator_id: string;
+            /** Derivation Kind */
+            derivation_kind: string | null;
+            /** File Path */
+            file_path: string;
+            /** File Size Bytes */
+            file_size_bytes: number | null;
+            /** Id */
+            id: string;
+            /** Media Kind */
+            media_kind: string;
+            /** Mime */
+            mime: string | null;
+            /** Model */
+            model: string | null;
+            /** Node Id */
+            node_id: string | null;
+            /** Origin Kind */
+            origin_kind: string;
+            /** Origin Run Id */
+            origin_run_id: string | null;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Parent Resource Id */
+            parent_resource_id: string | null;
+            /** Promoted Resource Id */
+            promoted_resource_id: string | null;
+            /** Prompt */
+            prompt: string | null;
+            /** Provider */
+            provider: string | null;
+            /** Review State */
+            review_state: string;
+            /** Scope Id */
+            scope_id: string;
+            /** Source Asset Id */
+            source_asset_id: string | null;
+        };
+        /**
+         * GeneratedMediaUpscaled
+         * @description The NEW row holding the upscaled image; the source row is untouched.
+         */
+        GeneratedMediaUpscaled: {
+            /** Id */
+            id: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * GeneratedSource
+         * @description Mirror of ``app.services.library.generated_source.describe_source``.
+         *
+         *     ``deep_link`` is ``None`` for kinds that have no route today (shot, chat) —
+         *     never an invented URL.
+         *
+         *     ``issue_id`` / ``run_id`` / ``step`` are the 3a run provenance, filled only
+         *     for ``agent_run`` rows that are actually in ``run_deliverables``. They stay
+         *     ``None`` for everything else, historical rows included — a card with no
+         *     provenance is normal history, not a fault. Ids are strings: they are
+         *     Snowflake BIGINTs.
+         */
+        GeneratedSource: {
+            /** Canvas Id */
+            canvas_id?: string | null;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Deep Link */
+            deep_link?: string | null;
+            /** Issue Id */
+            issue_id?: string | null;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Node Id */
+            node_id?: string | null;
+            /** Run Id */
+            run_id?: string | null;
+            /** Shot Id */
+            shot_id?: string | null;
+            /** Step */
+            step?: number | null;
         };
         /**
          * GraphMemorySettingsResponse
@@ -23659,6 +24503,107 @@ export interface components {
             scope_type: string;
         };
         /**
+         * LibraryResource
+         * @description The embedded resource of ``GET /resources``: the row plus its gallery
+         *     child count (``0`` for anything that is not a gallery).
+         */
+        LibraryResource: {
+            /** Aspect Bucket */
+            aspect_bucket: string | null;
+            /** Audio Bitrate Kbps */
+            audio_bitrate_kbps: number | null;
+            /** Chorus Start Ms */
+            chorus_start_ms: number | null;
+            /** Cover Image Path */
+            cover_image_path: string | null;
+            /** Created At */
+            created_at: string;
+            /** Creator Id */
+            creator_id: string;
+            /** Current Version */
+            current_version: number;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** File Hash */
+            file_hash: string | null;
+            /** File Path */
+            file_path: string | null;
+            /** File Size Bytes */
+            file_size_bytes: number | null;
+            /** File Type */
+            file_type: string | null;
+            /** Filename */
+            filename: string;
+            /** Gallery Count */
+            gallery_count: number;
+            /** Gen Params */
+            gen_params: {
+                [key: string]: unknown;
+            } | null;
+            /** Gen Prompt */
+            gen_prompt: string | null;
+            /** Gen Prompt Json */
+            gen_prompt_json: string | null;
+            /** Gen Prompt Negative */
+            gen_prompt_negative: string | null;
+            /** Gen Prompt Negative Zh */
+            gen_prompt_negative_zh: string | null;
+            /** Gen Prompt Zh */
+            gen_prompt_zh: string | null;
+            /** Id */
+            id: number;
+            /** Is Trashed */
+            is_trashed: boolean;
+            /** Last Folder Id */
+            last_folder_id: number | null;
+            /** Last Library Id */
+            last_library_id: number | null;
+            /** Last Scope Id */
+            last_scope_id: string | null;
+            /** Last Scope Type */
+            last_scope_type: string | null;
+            /** Lyrics Json */
+            lyrics_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Media Id */
+            media_id: number | null;
+            /** Mime Type */
+            mime_type: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Prompt Origin */
+            prompt_origin: string | null;
+            /** Rating */
+            rating: number | null;
+            /** Resolution */
+            resolution: string | null;
+            /** Slide Prompts */
+            slide_prompts: {
+                [key: string]: unknown;
+            } | null;
+            /** Source Type */
+            source_type: string;
+            /** Summary Follow Up */
+            summary_follow_up: {
+                [key: string]: unknown;
+            } | null;
+            /** Summary Status */
+            summary_status: string;
+            /** Thumbnail Path */
+            thumbnail_path: string | null;
+            /** Transcript Status */
+            transcript_status: string;
+            /** Trashed At */
+            trashed_at: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Url */
+            url: string | null;
+            /** Visual Analysis Status */
+            visual_analysis_status: string;
+        };
+        /**
          * LibrarySkillCreate
          * @description Payload for POST /skills — create a new user-owned (non-preset) skill.
          *
@@ -24594,8 +25539,11 @@ export interface components {
             sort_order: number;
             /** Source Template Node Id */
             source_template_node_id?: string | null;
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "in_progress" | "in_review" | "done" | "skipped";
             /** Surface */
             surface?: ("script" | "storyboard" | "renders") | null;
         };
@@ -25657,6 +26605,38 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** ProjectCharacterEntity */
+        ProjectCharacterEntity: {
+            /** Cue Count */
+            cue_count: number;
+            /** Episode Ids */
+            episode_ids: string[];
+            /** Name */
+            name: string;
+        };
+        /** ProjectCollectionRow */
+        ProjectCollectionRow: {
+            /** Allowed Types */
+            allowed_types: string[] | null;
+            /** Collection Code */
+            collection_code: string;
+            /** Collection Name */
+            collection_name: string;
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Deadline */
+            deadline: string | null;
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean | null;
+            /** Max File Size Mb */
+            max_file_size_mb: number | null;
+            /** Project Id */
+            project_id: number;
+        };
         /**
          * ProjectCreate
          * @description Request body for creating a new project
@@ -25685,6 +26665,242 @@ export interface components {
             workflow_template_id?: string | null;
         };
         /**
+         * ProjectDetail
+         * @description ``GET /projects/{id}``: the row + file count + the caller's role.
+         */
+        ProjectDetail: {
+            /** Announcement */
+            announcement: string | null;
+            /** Archived At */
+            archived_at: string | null;
+            /** Autopilot Enabled */
+            autopilot_enabled: boolean;
+            /** Color Label */
+            color_label: string | null;
+            /** Created At */
+            created_at: string;
+            /** Current Canvas Id */
+            current_canvas_id: number | null;
+            /** Current Node Id */
+            current_node_id: number | null;
+            /** Description */
+            description: string | null;
+            /** Effective Role */
+            effective_role: string | null;
+            /** File Count */
+            file_count: number;
+            /** Id */
+            id: number;
+            /** Is Starred */
+            is_starred: boolean;
+            /** Name */
+            name: string;
+            /** Owner Id */
+            owner_id: string;
+            /** Project Group */
+            project_group: string | null;
+            /** Project Type */
+            project_type: string;
+            /** Team Id */
+            team_id: number | null;
+            /** Topic Id */
+            topic_id: number | null;
+            /** Updated At */
+            updated_at: string;
+            /** Visibility */
+            visibility: string;
+            /** Workflow Id */
+            workflow_id: string | null;
+            /** Workflow Method */
+            workflow_method: string | null;
+            /** Workflow Template Id */
+            workflow_template_id: number | null;
+        };
+        /** ProjectEntities */
+        ProjectEntities: {
+            /** Characters */
+            characters: components["schemas"]["ProjectCharacterEntity"][];
+            /** Locations */
+            locations: components["schemas"]["ProjectLocationEntity"][];
+        };
+        /**
+         * ProjectFileActivity
+         * @description Latest activity = the newest file add (``_merge_activity``).
+         */
+        ProjectFileActivity: {
+            /** Actor */
+            actor: string;
+            /** At */
+            at: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "file";
+            /** Stalled */
+            stalled: boolean;
+        };
+        /**
+         * ProjectFileCommentRow
+         * @description ``_comment_row``: the three ids ARE strings on this surface.
+         */
+        ProjectFileCommentRow: {
+            /** Author Id */
+            author_id: string;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: string;
+            /** Drawing Data */
+            drawing_data: {
+                [key: string]: unknown;
+            } | null;
+            /** File Id */
+            file_id: string;
+            /** Id */
+            id: string;
+            /** Timestamp Seconds */
+            timestamp_seconds: number | null;
+            /** Updated At */
+            updated_at: string;
+            /** Version Id */
+            version_id: string | null;
+        };
+        /**
+         * ProjectFileListRow
+         * @description ``GET /projects/{id}/files`` row.
+         *
+         *     When any listed file carries a ``source_issue_id`` the service rewrites
+         *     that key to a string and adds ``source_issue_identifier`` to EVERY row;
+         *     otherwise neither happens (the key is absent, not null).
+         */
+        ProjectFileListRow: {
+            /** Audio Bitrate Kbps */
+            audio_bitrate_kbps: number | null;
+            /** Audio Channels */
+            audio_channels: number | null;
+            /** Audio Codec */
+            audio_codec: string | null;
+            /** Audio Sample Rate */
+            audio_sample_rate: number | null;
+            /** Cover Image Path */
+            cover_image_path: string | null;
+            /** Created At */
+            created_at: string;
+            /** Current Version */
+            current_version: number;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** File Path */
+            file_path: string | null;
+            /** File Size Bytes */
+            file_size_bytes: number | null;
+            /** File Type */
+            file_type: string | null;
+            /** Filename */
+            filename: string;
+            /** Folder Id */
+            folder_id: number | null;
+            /** Fps */
+            fps: number | null;
+            /** Id */
+            id: number;
+            /** Is Trashed */
+            is_trashed: boolean;
+            /** Media Id */
+            media_id: number | null;
+            /** Mime Type */
+            mime_type: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Project Id */
+            project_id: number;
+            /** Resolution */
+            resolution: string | null;
+            /** Review Status */
+            review_status: string | null;
+            /** Source Issue Id */
+            source_issue_id: string | null;
+            /** Source Issue Identifier */
+            source_issue_identifier?: string | null;
+            /** Thumbnail Path */
+            thumbnail_path: string | null;
+            /** Trashed At */
+            trashed_at: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Uploaded By */
+            uploaded_by: string | null;
+            /** Video Bitrate Kbps */
+            video_bitrate_kbps: number | null;
+            /** Video Codec */
+            video_codec: string | null;
+        };
+        /**
+         * ProjectFileRow
+         * @description One ``project_files`` row as ``projects_repository._row`` returns it.
+         */
+        ProjectFileRow: {
+            /** Audio Bitrate Kbps */
+            audio_bitrate_kbps: number | null;
+            /** Audio Channels */
+            audio_channels: number | null;
+            /** Audio Codec */
+            audio_codec: string | null;
+            /** Audio Sample Rate */
+            audio_sample_rate: number | null;
+            /** Cover Image Path */
+            cover_image_path: string | null;
+            /** Created At */
+            created_at: string;
+            /** Current Version */
+            current_version: number;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** File Path */
+            file_path: string | null;
+            /** File Size Bytes */
+            file_size_bytes: number | null;
+            /** File Type */
+            file_type: string | null;
+            /** Filename */
+            filename: string;
+            /** Folder Id */
+            folder_id: number | null;
+            /** Fps */
+            fps: number | null;
+            /** Id */
+            id: number;
+            /** Is Trashed */
+            is_trashed: boolean;
+            /** Media Id */
+            media_id: number | null;
+            /** Mime Type */
+            mime_type: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Project Id */
+            project_id: number;
+            /** Resolution */
+            resolution: string | null;
+            /** Review Status */
+            review_status: string | null;
+            /** Source Issue Id */
+            source_issue_id: number | null;
+            /** Thumbnail Path */
+            thumbnail_path: string | null;
+            /** Trashed At */
+            trashed_at: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Uploaded By */
+            uploaded_by: string | null;
+            /** Video Bitrate Kbps */
+            video_bitrate_kbps: number | null;
+            /** Video Codec */
+            video_codec: string | null;
+        };
+        /**
          * ProjectFileUpdate
          * @description Request body for updating an existing file
          */
@@ -25696,10 +26912,374 @@ export interface components {
             /** Notes */
             notes?: string | null;
         };
+        /** ProjectFileVersionRow */
+        ProjectFileVersionRow: {
+            /** Audio Bitrate Kbps */
+            audio_bitrate_kbps: number | null;
+            /** Audio Channels */
+            audio_channels: number | null;
+            /** Audio Codec */
+            audio_codec: string | null;
+            /** Audio Sample Rate */
+            audio_sample_rate: number | null;
+            /** Cover Image Path */
+            cover_image_path: string | null;
+            /** Created At */
+            created_at: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** File Id */
+            file_id: number;
+            /** File Path */
+            file_path: string | null;
+            /** File Size Bytes */
+            file_size_bytes: number | null;
+            /** Filename */
+            filename: string | null;
+            /** Fps */
+            fps: number | null;
+            /** Id */
+            id: number;
+            /** Mime Type */
+            mime_type: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Resolution */
+            resolution: string | null;
+            /** Thumbnail Path */
+            thumbnail_path: string | null;
+            /** Uploaded By */
+            uploaded_by: string | null;
+            /** Version Number */
+            version_number: number;
+            /** Video Bitrate Kbps */
+            video_bitrate_kbps: number | null;
+            /** Video Codec */
+            video_codec: string | null;
+        };
+        /** ProjectFolderRow */
+        ProjectFolderRow: {
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Parent Id */
+            parent_id: number | null;
+            /** Project Id */
+            project_id: number;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * ProjectListItem
+         * @description ``GET /projects`` card: the row + file count + card enrichment.
+         */
+        ProjectListItem: {
+            /** Announcement */
+            announcement: string | null;
+            /** Archived At */
+            archived_at: string | null;
+            /** Autopilot Enabled */
+            autopilot_enabled: boolean;
+            /** Color Label */
+            color_label: string | null;
+            /** Created At */
+            created_at: string;
+            /** Current Canvas Id */
+            current_canvas_id: number | null;
+            /** Current Node Id */
+            current_node_id: number | null;
+            /** Current Stage */
+            current_stage: null;
+            /** Description */
+            description: string | null;
+            /** File Count */
+            file_count: number;
+            /** Id */
+            id: number;
+            /** Is Starred */
+            is_starred: boolean;
+            /** Latest Activity */
+            latest_activity: (components["schemas"]["ProjectFileActivity"] | components["schemas"]["ProjectStageActivity"]) | null;
+            members_preview: components["schemas"]["ProjectMembersPreview"] | null;
+            /** Name */
+            name: string;
+            /** Owner Id */
+            owner_id: string;
+            /** Project Group */
+            project_group: string | null;
+            /** Project Type */
+            project_type: string;
+            /** Team Id */
+            team_id: number | null;
+            /** Topic Id */
+            topic_id: number | null;
+            /** Updated At */
+            updated_at: string;
+            /** Visibility */
+            visibility: string;
+            workflow_badge: components["schemas"]["ProjectWorkflowBadge"] | null;
+            /** Workflow Id */
+            workflow_id: string | null;
+            /** Workflow Method */
+            workflow_method: string | null;
+            /** Workflow Template Id */
+            workflow_template_id: number | null;
+        };
+        /** ProjectLocationEntity */
+        ProjectLocationEntity: {
+            /** Episode Ids */
+            episode_ids: string[];
+            /** Name */
+            name: string;
+            /** Scene Count */
+            scene_count: number;
+        };
+        /** ProjectMemberPreviewEntry */
+        ProjectMemberPreviewEntry: {
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username: string;
+        };
+        /**
+         * ProjectMemberRow
+         * @description ``project_members`` has a composite PK and no ``id``.
+         */
+        ProjectMemberRow: {
+            /** Invited By */
+            invited_by: string | null;
+            /** Joined At */
+            joined_at: string;
+            /** Project Id */
+            project_id: number;
+            /** Role */
+            role: string;
+            /** User Id */
+            user_id: string;
+        };
+        /**
+         * ProjectMemberWithEmail
+         * @description ``email`` comes from the auth admin API; when that lookup fails the
+         *     list is returned without the key at all.
+         */
+        ProjectMemberWithEmail: {
+            /**
+             * Email
+             * @default
+             */
+            email: string;
+            /** Invited By */
+            invited_by: string | null;
+            /** Joined At */
+            joined_at: string;
+            /** Project Id */
+            project_id: number;
+            /** Role */
+            role: string;
+            /** User Id */
+            user_id: string;
+        };
+        /** ProjectMembersPreview */
+        ProjectMembersPreview: {
+            /** Count */
+            count: number;
+            /** Members */
+            members: components["schemas"]["ProjectMemberPreviewEntry"][];
+        };
+        /**
+         * ProjectMessage
+         * @description ``{"success": true, "message": ...}`` — deletes carry no ``data``.
+         */
+        ProjectMessage: {
+            /** Message */
+            message: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** ProjectRefRequest */
         ProjectRefRequest: {
             /** Project Id */
             project_id: string;
+        };
+        /**
+         * ProjectRow
+         * @description One ``projects`` row as ``projects_repository._row`` returns it.
+         */
+        ProjectRow: {
+            /** Announcement */
+            announcement: string | null;
+            /** Archived At */
+            archived_at: string | null;
+            /** Autopilot Enabled */
+            autopilot_enabled: boolean;
+            /** Color Label */
+            color_label: string | null;
+            /** Created At */
+            created_at: string;
+            /** Current Canvas Id */
+            current_canvas_id: number | null;
+            /** Current Node Id */
+            current_node_id: number | null;
+            /** Description */
+            description: string | null;
+            /** Id */
+            id: number;
+            /** Is Starred */
+            is_starred: boolean;
+            /** Name */
+            name: string;
+            /** Owner Id */
+            owner_id: string;
+            /** Project Group */
+            project_group: string | null;
+            /** Project Type */
+            project_type: string;
+            /** Team Id */
+            team_id: number | null;
+            /** Topic Id */
+            topic_id: number | null;
+            /** Updated At */
+            updated_at: string;
+            /** Visibility */
+            visibility: string;
+            /** Workflow Id */
+            workflow_id: string | null;
+            /** Workflow Method */
+            workflow_method: string | null;
+            /** Workflow Template Id */
+            workflow_template_id: number | null;
+        };
+        /**
+         * ProjectShareRow
+         * @description One ``shares`` row, without its ``password``.
+         *
+         *     The column holds the password in plain text, and these two routes used to
+         *     return it to every project reader. ``has_password`` replaces it, the same
+         *     redaction ``shares_router._enrich_share`` already applies.
+         */
+        ProjectShareRow: {
+            /** Allow Download */
+            allow_download: boolean;
+            /** Created At */
+            created_at: string;
+            /** Expires At */
+            expires_at: string | null;
+            /** Folder Id */
+            folder_id: number | null;
+            /** Has Password */
+            has_password: boolean;
+            /** Id */
+            id: number;
+            /** Library Id */
+            library_id: number | null;
+            /** Max Views */
+            max_views: number | null;
+            /** Project File Id */
+            project_file_id: number | null;
+            /** Resource Id */
+            resource_id: number | null;
+            /** Share Code */
+            share_code: string;
+            /** Share Name */
+            share_name: string;
+            /** Share Type */
+            share_type: string;
+            /** Shared By */
+            shared_by: string;
+            /** Status */
+            status: string;
+            /** Team Id */
+            team_id: number | null;
+            /** Version Id */
+            version_id: number | null;
+            /** View Count */
+            view_count: number;
+            /** Watermark */
+            watermark: boolean;
+        };
+        /**
+         * ProjectStageActivity
+         * @description Latest activity = the newest stage transition (``_merge_activity``).
+         */
+        ProjectStageActivity: {
+            /** Actor */
+            actor: string;
+            /** At */
+            at: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "stage";
+            /** Label */
+            label: string;
+            /** Stalled */
+            stalled: boolean;
+        };
+        /** ProjectStageCatalogEntry */
+        ProjectStageCatalogEntry: {
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Tools Recommended */
+            tools_recommended: unknown[];
+            /** Updated At */
+            updated_at: string;
+        };
+        /** ProjectStageHistoryEntry */
+        ProjectStageHistoryEntry: {
+            /** Entered At */
+            entered_at: string;
+            /** Exited At */
+            exited_at: string | null;
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string;
+            /** Stage Id */
+            stage_id: string;
+            /** Stage Name */
+            stage_name: string;
+            /** Stage Slug */
+            stage_slug: string;
+            /** Tools Recommended */
+            tools_recommended: unknown[];
+            /** Transitioned By */
+            transitioned_by: string | null;
+        };
+        /** ProjectStyleProfileRow */
+        ProjectStyleProfileRow: {
+            /** Created At */
+            created_at: string;
+            /** Project Id */
+            project_id: number;
+            /** Reference Links */
+            reference_links: unknown[];
+            /** Style Md */
+            style_md: string;
+            /** Updated At */
+            updated_at: string;
+            /** Updated By */
+            updated_by: string | null;
+            /** Visual Style */
+            visual_style: {
+                [key: string]: unknown;
+            };
         };
         /**
          * ProjectSuggestionItem
@@ -25757,6 +27337,17 @@ export interface components {
             project_group?: string | null;
             /** Project Type */
             project_type?: string | null;
+        };
+        /** ProjectWorkflowBadge */
+        ProjectWorkflowBadge: {
+            /** Agents Active */
+            agents_active: number;
+            /** Current Node Name */
+            current_node_name: string | null;
+            /** Workflow Position */
+            workflow_position: number | null;
+            /** Workflow Total */
+            workflow_total: number;
         };
         /**
          * ProjectWorkflowOut
@@ -26445,10 +28036,174 @@ export interface components {
             /** Asset Id */
             asset_id?: string | null;
         };
+        /** ResourceAiDispatched */
+        ResourceAiDispatched: {
+            /** Resource Id */
+            resource_id: string;
+            /** Task Id */
+            task_id: string;
+        };
+        /** ResourceAiSkipped */
+        ResourceAiSkipped: {
+            /** Reason */
+            reason: string;
+            /** Resource Id */
+            resource_id: string;
+        };
+        /**
+         * ResourceBatchAiResult
+         * @description ``POST /resources/ai/batch``: per-resource outcome, input order.
+         */
+        ResourceBatchAiResult: {
+            /** Dispatched */
+            dispatched: components["schemas"]["ResourceAiDispatched"][];
+            /** Skipped */
+            skipped: components["schemas"]["ResourceAiSkipped"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * ResourceBatchTranscodeResult
+         * @description ``POST /resources/transcode/batch``. ``has_more`` = a full batch was
+         *     queued, so re-invoking drains the rest.
+         */
+        ResourceBatchTranscodeResult: {
+            /** Has More */
+            has_more: boolean;
+            /** Queued */
+            queued: number;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Total Found */
+            total_found: number;
+        };
+        /**
+         * ResourceDuplicateCandidate
+         * @description The projection ``find_by_hash`` selects (no ``file_hash``: the batch
+         *     endpoint's ``existing`` carries one, this does not).
+         */
+        ResourceDuplicateCandidate: {
+            /** Cover Image Path */
+            cover_image_path: string | null;
+            /** Created At */
+            created_at: string;
+            /** File Size Bytes */
+            file_size_bytes: number | null;
+            /** File Type */
+            file_type: string | null;
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: number;
+            /** Mime Type */
+            mime_type: string | null;
+            /** Thumbnail Path */
+            thumbnail_path: string | null;
+        };
+        /**
+         * ResourceDuplicateCheck
+         * @description ``GET /resources/check-duplicate`` — no ``success`` key.
+         */
+        ResourceDuplicateCheck: {
+            /** Duplicate */
+            duplicate: boolean;
+            existing: components["schemas"]["ResourceDuplicateCandidate"] | null;
+        };
+        /**
+         * ResourceGenPrompts
+         * @description The four prompt columns after a translation wrote one side.
+         */
+        ResourceGenPrompts: {
+            /** Gen Prompt */
+            gen_prompt: string | null;
+            /** Gen Prompt Negative */
+            gen_prompt_negative: string | null;
+            /** Gen Prompt Negative Zh */
+            gen_prompt_negative_zh: string | null;
+            /** Gen Prompt Zh */
+            gen_prompt_zh: string | null;
+        };
         /** ResourceImportRequest */
         ResourceImportRequest: {
             /** Resource Id */
             resource_id: string;
+        };
+        /**
+         * ResourceItemRow
+         * @description One ``resource_items`` row — a resource's placement in a scope/folder.
+         */
+        ResourceItemRow: {
+            /** Added By */
+            added_by: string | null;
+            /** Created At */
+            created_at: string;
+            /** Folder Id */
+            folder_id: number | null;
+            /** Id */
+            id: number;
+            /** Library Id */
+            library_id: number | null;
+            /** Resource Id */
+            resource_id: number;
+            /** Scope Id */
+            scope_id: number;
+        };
+        /**
+         * ResourceLinkExisting
+         * @description ``POST /resources/link-existing``. ``already_linked`` is sent only when
+         *     the placement already existed; the route uses
+         *     ``response_model_exclude_unset`` so an absent key stays absent.
+         */
+        ResourceLinkExisting: {
+            /**
+             * Already Linked
+             * @default false
+             */
+            already_linked: boolean;
+            data: components["schemas"]["ResourceRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * ResourceListItem
+         * @description ``GET /resources``: a placement with its resource embedded.
+         */
+        ResourceListItem: {
+            /** Added By */
+            added_by: string | null;
+            /** Created At */
+            created_at: string;
+            /** Folder Id */
+            folder_id: number | null;
+            /** Id */
+            id: number;
+            /** Library Id */
+            library_id: number | null;
+            resource: components["schemas"]["LibraryResource"];
+            /** Resource Id */
+            resource_id: number;
+            /** Scope Id */
+            scope_id: number;
+        };
+        /**
+         * ResourceLyricsUpload
+         * @description ``POST /resources/{id}/lyrics``: the parsed lyrics and the updated row.
+         */
+        ResourceLyricsUpload: {
+            /** Lyrics Json */
+            lyrics_json: {
+                [key: string]: unknown;
+            } | null;
+            resource: components["schemas"]["ResourceRow"];
         };
         /**
          * ResourceMoveRequest
@@ -26467,6 +28222,327 @@ export interface components {
             scope_id: string;
         };
         /**
+         * ResourcePermissions
+         * @description The caller's effective role on an object and what it allows.
+         */
+        ResourcePermissions: {
+            /** Capabilities */
+            capabilities: string[];
+            /** Role */
+            role: string;
+        };
+        /**
+         * ResourcePlacement
+         * @description A placement with its resource embedded, no gallery count (the trash
+         *     list and smart-folder results).
+         */
+        ResourcePlacement: {
+            /** Added By */
+            added_by: string | null;
+            /** Created At */
+            created_at: string;
+            /** Folder Id */
+            folder_id: number | null;
+            /** Id */
+            id: number;
+            /** Library Id */
+            library_id: number | null;
+            resource: components["schemas"]["ResourceRow"];
+            /** Resource Id */
+            resource_id: number;
+            /** Scope Id */
+            scope_id: number;
+        };
+        /**
+         * ResourceRow
+         * @description One ``resources`` row (``SELECT *`` shape).
+         */
+        ResourceRow: {
+            /** Aspect Bucket */
+            aspect_bucket: string | null;
+            /** Audio Bitrate Kbps */
+            audio_bitrate_kbps: number | null;
+            /** Chorus Start Ms */
+            chorus_start_ms: number | null;
+            /** Cover Image Path */
+            cover_image_path: string | null;
+            /** Created At */
+            created_at: string;
+            /** Creator Id */
+            creator_id: string;
+            /** Current Version */
+            current_version: number;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** File Hash */
+            file_hash: string | null;
+            /** File Path */
+            file_path: string | null;
+            /** File Size Bytes */
+            file_size_bytes: number | null;
+            /** File Type */
+            file_type: string | null;
+            /** Filename */
+            filename: string;
+            /** Gen Params */
+            gen_params: {
+                [key: string]: unknown;
+            } | null;
+            /** Gen Prompt */
+            gen_prompt: string | null;
+            /** Gen Prompt Json */
+            gen_prompt_json: string | null;
+            /** Gen Prompt Negative */
+            gen_prompt_negative: string | null;
+            /** Gen Prompt Negative Zh */
+            gen_prompt_negative_zh: string | null;
+            /** Gen Prompt Zh */
+            gen_prompt_zh: string | null;
+            /** Id */
+            id: number;
+            /** Is Trashed */
+            is_trashed: boolean;
+            /** Last Folder Id */
+            last_folder_id: number | null;
+            /** Last Library Id */
+            last_library_id: number | null;
+            /** Last Scope Id */
+            last_scope_id: string | null;
+            /** Last Scope Type */
+            last_scope_type: string | null;
+            /** Lyrics Json */
+            lyrics_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Media Id */
+            media_id: number | null;
+            /** Mime Type */
+            mime_type: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Prompt Origin */
+            prompt_origin: string | null;
+            /** Rating */
+            rating: number | null;
+            /** Resolution */
+            resolution: string | null;
+            /** Slide Prompts */
+            slide_prompts: {
+                [key: string]: unknown;
+            } | null;
+            /** Source Type */
+            source_type: string;
+            /** Summary Follow Up */
+            summary_follow_up: {
+                [key: string]: unknown;
+            } | null;
+            /** Summary Status */
+            summary_status: string;
+            /** Thumbnail Path */
+            thumbnail_path: string | null;
+            /** Transcript Status */
+            transcript_status: string;
+            /** Trashed At */
+            trashed_at: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Url */
+            url: string | null;
+            /** Visual Analysis Status */
+            visual_analysis_status: string;
+        };
+        /**
+         * ResourceSaveAsAssetResult
+         * @description ``POST /resources/{id}/save-as-asset`` — the generation route's three
+         *     keys plus the inbox row that was found or minted.
+         */
+        ResourceSaveAsAssetResult: {
+            /** Asset Id */
+            asset_id: string;
+            /** Generated Id */
+            generated_id: string;
+            generation: components["schemas"]["GeneratedItem"];
+            /** Resource Id */
+            resource_id: string;
+        };
+        /**
+         * ResourceSearchCounts
+         * @description Tab badges over the whole visible set, zero-filled.
+         */
+        ResourceSearchCounts: {
+            /** All */
+            all: number;
+            /** Audio */
+            audio: number;
+            /** Doc */
+            doc: number;
+            /** Image */
+            image: number;
+            /** Pdf */
+            pdf: number;
+            /** Video */
+            video: number;
+        };
+        /**
+         * ResourceSearchHit
+         * @description One @-reference picker result. A whitelist, not the row: storage paths
+         *     and ``media_id`` are inputs to ``thumbnail_url``, never output.
+         */
+        ResourceSearchHit: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "video" | "image" | "audio" | "pdf" | "doc";
+            /** Mime */
+            mime: string | null;
+            /** Name */
+            name: string;
+            scope: components["schemas"]["ResourceSearchScope"];
+            /** Size */
+            size: number | null;
+            /** Summary Status */
+            summary_status: string | null;
+            /** Thumbnail Url */
+            thumbnail_url: string | null;
+            /** Transcript Status */
+            transcript_status: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ResourceSearchResponse
+         * @description ``GET /resources/search``. ``next_cursor`` is reserved (always null).
+         */
+        ResourceSearchResponse: {
+            counts: components["schemas"]["ResourceSearchCounts"];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Results */
+            results: components["schemas"]["ResourceSearchHit"][];
+        };
+        /** ResourceSearchScope */
+        ResourceSearchScope: {
+            /** Id */
+            id: string;
+            /** Type */
+            type: string;
+        };
+        /**
+         * ResourceSplitFrame
+         * @description One grid cell persisted as a new resource, with its grid position.
+         */
+        ResourceSplitFrame: {
+            /** Aspect Bucket */
+            aspect_bucket: string | null;
+            /** Audio Bitrate Kbps */
+            audio_bitrate_kbps: number | null;
+            /** Chorus Start Ms */
+            chorus_start_ms: number | null;
+            /** Col */
+            col: number;
+            /** Cover Image Path */
+            cover_image_path: string | null;
+            /** Created At */
+            created_at: string;
+            /** Creator Id */
+            creator_id: string;
+            /** Current Version */
+            current_version: number;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** File Hash */
+            file_hash: string | null;
+            /** File Path */
+            file_path: string | null;
+            /** File Size Bytes */
+            file_size_bytes: number | null;
+            /** File Type */
+            file_type: string | null;
+            /** Filename */
+            filename: string;
+            /** Gen Params */
+            gen_params: {
+                [key: string]: unknown;
+            } | null;
+            /** Gen Prompt */
+            gen_prompt: string | null;
+            /** Gen Prompt Json */
+            gen_prompt_json: string | null;
+            /** Gen Prompt Negative */
+            gen_prompt_negative: string | null;
+            /** Gen Prompt Negative Zh */
+            gen_prompt_negative_zh: string | null;
+            /** Gen Prompt Zh */
+            gen_prompt_zh: string | null;
+            /** Id */
+            id: number;
+            /** Index */
+            index: number;
+            /** Is Trashed */
+            is_trashed: boolean;
+            /** Last Folder Id */
+            last_folder_id: number | null;
+            /** Last Library Id */
+            last_library_id: number | null;
+            /** Last Scope Id */
+            last_scope_id: string | null;
+            /** Last Scope Type */
+            last_scope_type: string | null;
+            /** Lyrics Json */
+            lyrics_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Media Id */
+            media_id: number | null;
+            /** Mime Type */
+            mime_type: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Prompt Origin */
+            prompt_origin: string | null;
+            /** Rating */
+            rating: number | null;
+            /** Resolution */
+            resolution: string | null;
+            /** Row */
+            row: number;
+            /** Slide Prompts */
+            slide_prompts: {
+                [key: string]: unknown;
+            } | null;
+            /** Source Type */
+            source_type: string;
+            /** Summary Follow Up */
+            summary_follow_up: {
+                [key: string]: unknown;
+            } | null;
+            /** Summary Status */
+            summary_status: string;
+            /** Thumbnail Path */
+            thumbnail_path: string | null;
+            /** Transcript Status */
+            transcript_status: string;
+            /** Trashed At */
+            trashed_at: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Url */
+            url: string | null;
+            /** Visual Analysis Status */
+            visual_analysis_status: string;
+        };
+        /** ResourceSplitResult */
+        ResourceSplitResult: {
+            /** Frames */
+            frames: components["schemas"]["ResourceSplitFrame"][];
+        };
+        /**
          * ResourceTagRequest
          * @description Request body for tagging a resource.
          */
@@ -26476,6 +28552,96 @@ export interface components {
              * @description Tag ID to associate
              */
             tag_id: string;
+        };
+        /**
+         * ResourceTagRow
+         * @description One ``resource_tags`` junction row.
+         */
+        ResourceTagRow: {
+            /** Confidence */
+            confidence: number | null;
+            /** Created At */
+            created_at: string;
+            /** Resource Id */
+            resource_id: number;
+            /** Source */
+            source: string | null;
+            /** Tag Id */
+            tag_id: number;
+            /** Tagged By */
+            tagged_by: string | null;
+        };
+        /**
+         * ResourceTagTagRow
+         * @description The raw ``tags`` row embedded under a resource tag.
+         *
+         *     Not :class:`app.schemas.tags.TagResponse`: that is the tags API's derived
+         *     shape (string id, ``media_count`` …); this is the table row as-is.
+         */
+        ResourceTagTagRow: {
+            /** Color */
+            color: string | null;
+            /** Created At */
+            created_at: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Group Id */
+            group_id: number | null;
+            /** Icon */
+            icon: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Name Zh */
+            name_zh: string | null;
+            /** Origin */
+            origin: string;
+            /** Prompt Trigger */
+            prompt_trigger: boolean;
+            /** Scope Id */
+            scope_id: number | null;
+            /** Slug */
+            slug: string | null;
+            /** Sort Order */
+            sort_order: number | null;
+            /** Type */
+            type: string;
+            /** User Id */
+            user_id: string | null;
+        };
+        /**
+         * ResourceTagWithTag
+         * @description ``GET /resources/{id}/tags``: the junction row with its tag embedded.
+         */
+        ResourceTagWithTag: {
+            /** Confidence */
+            confidence: number | null;
+            /** Created At */
+            created_at: string;
+            /** Resource Id */
+            resource_id: number;
+            /** Source */
+            source: string | null;
+            tag: components["schemas"]["ResourceTagTagRow"];
+            /** Tag Id */
+            tag_id: number;
+            /** Tagged By */
+            tagged_by: string | null;
+        };
+        /**
+         * ResourceTaskDispatch
+         * @description A dispatched asset-AI workflow; ``task_id`` is the task_tracking id
+         *     (= the DBOS workflow id).
+         */
+        ResourceTaskDispatch: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Task Id */
+            task_id: string;
         };
         /**
          * ResourceUpdate
@@ -26551,6 +28717,63 @@ export interface components {
              * @description User video download status
              */
             video_download_status?: string | null;
+        };
+        /**
+         * ResourceVersionRow
+         * @description One ``resource_versions`` row.
+         */
+        ResourceVersionRow: {
+            /** Audio Bitrate Kbps */
+            audio_bitrate_kbps: number | null;
+            /** Created At */
+            created_at: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** File Hash */
+            file_hash: string | null;
+            /** File Path */
+            file_path: string | null;
+            /** File Size Bytes */
+            file_size_bytes: number | null;
+            /** Filename */
+            filename: string | null;
+            /** Hls Path */
+            hls_path: string | null;
+            /** Id */
+            id: number;
+            /** Mime Type */
+            mime_type: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Resolution */
+            resolution: string | null;
+            /** Resource Id */
+            resource_id: number;
+            /** Storage Status */
+            storage_status: string;
+            /** Thumbnail Path */
+            thumbnail_path: string | null;
+            /** Transcode At */
+            transcode_at: string | null;
+            /** Transcode Status */
+            transcode_status: string | null;
+            /** Uploaded By */
+            uploaded_by: string | null;
+            /** Version Number */
+            version_number: number;
+        };
+        /**
+         * ResourcesMessage
+         * @description ``{"success": true, "message": ...}`` — the no-payload success body.
+         */
+        ResourcesMessage: {
+            /** Message */
+            message: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
         };
         /**
          * RetryDownloadRequest
@@ -28524,6 +30747,59 @@ export interface components {
             /** Rows */
             rows: number;
         };
+        /** StageBoard */
+        StageBoard: {
+            /** Files */
+            files: components["schemas"]["StageBoardFile"][];
+            issue: components["schemas"]["StageBoardIssue"] | null;
+            node: components["schemas"]["WorkflowNodeRow"];
+        };
+        /** StageBoardAssignee */
+        StageBoardAssignee: {
+            /** Agent Id */
+            agent_id: string | null;
+            /** User Id */
+            user_id: string | null;
+        };
+        /** StageBoardFile */
+        StageBoardFile: {
+            /** Created At */
+            created_at: string | null;
+            /** Filename */
+            filename: string | null;
+            /** Id */
+            id: string;
+            /** Size */
+            size: number | null;
+            /** Source Issue Identifier */
+            source_issue_identifier: string | null;
+        };
+        /** StageBoardIssue */
+        StageBoardIssue: {
+            assignee: components["schemas"]["StageBoardAssignee"];
+            /** Id */
+            id: string;
+            /** Identifier */
+            identifier: string | null;
+            /** Status */
+            status: string | null;
+            /** Sub Issues */
+            sub_issues: components["schemas"]["StageBoardIssueRef"][];
+            /** Title */
+            title: string | null;
+        };
+        /** StageBoardIssueRef */
+        StageBoardIssueRef: {
+            assignee: components["schemas"]["StageBoardAssignee"];
+            /** Id */
+            id: string;
+            /** Identifier */
+            identifier: string | null;
+            /** Status */
+            status: string | null;
+            /** Title */
+            title: string | null;
+        };
         /** StatusCount */
         StatusCount: {
             /** Count */
@@ -28668,6 +30944,13 @@ export interface components {
             summary_type?: string | null;
             /** Topics */
             topics?: string[] | null;
+        };
+        /** SurfaceCompletionSyncResult */
+        SurfaceCompletionSyncResult: {
+            /** Episodes */
+            episodes: number;
+            /** Failed */
+            failed: number;
         };
         /**
          * SystemSettingResponse
@@ -28964,7 +31247,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "system" | "user" | "time";
+            type: "user" | "time";
             /** User Id */
             user_id?: string | null;
         };
@@ -30357,6 +32640,11 @@ export interface components {
             /** Visual Description */
             visual_description?: string | null;
         };
+        /** WorkflowNodeDeleted */
+        WorkflowNodeDeleted: {
+            /** Deleted */
+            deleted: boolean;
+        };
         /**
          * WorkflowNodeEvents
          * @description The three configurable event toggles on a node (mig 386). The two
@@ -30393,6 +32681,116 @@ export interface components {
              * @default false
              */
             suggest_agent_run: boolean;
+        };
+        /** WorkflowNodeMemberRow */
+        WorkflowNodeMemberRow: {
+            /** Agent Id */
+            agent_id: string | null;
+            /** Id */
+            id: string;
+            /** Node Id */
+            node_id: string;
+            /** User Id */
+            user_id: string | null;
+        };
+        /**
+         * WorkflowNodeRow
+         * @description ``project_stage_nodes_repository._node_row`` verbatim.
+         *
+         *     Unlike ``NodeOut`` (the ``GET /workflow`` projection) this carries the
+         *     member row ids, raw ``events`` / ``form_schema`` JSONB, and no
+         *     ``deliverable_file_count``.
+         */
+        WorkflowNodeRow: {
+            /** Brief */
+            brief: string;
+            /** Completion Policy */
+            completion_policy: string;
+            /** Deliverable Label */
+            deliverable_label: string | null;
+            /** Deliverable Required */
+            deliverable_required: boolean;
+            /** Depends On */
+            depends_on: string[];
+            /** Episode Id */
+            episode_id: string | null;
+            /** Events */
+            events: {
+                [key: string]: unknown;
+            };
+            /** Folder Id */
+            folder_id: string | null;
+            /** Form Data */
+            form_data: {
+                [key: string]: unknown;
+            };
+            /** Form Schema */
+            form_schema: unknown[];
+            /** Id */
+            id: string;
+            /** Legacy Stage Id */
+            legacy_stage_id: string | null;
+            /** Members */
+            members: components["schemas"]["WorkflowNodeMemberRow"][];
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Name */
+            name: string;
+            /** Owner Agent Id */
+            owner_agent_id: string | null;
+            /** Owner User Id */
+            owner_user_id: string | null;
+            /** Parallel Group */
+            parallel_group: number | null;
+            /** Planned Due */
+            planned_due: string | null;
+            /** Planned Start */
+            planned_start: string | null;
+            /** Project Id */
+            project_id: string;
+            /** Review Required */
+            review_required: boolean;
+            /** Skipped */
+            skipped: boolean;
+            /** Sort Order */
+            sort_order: number;
+            /** Source Template Node Id */
+            source_template_node_id: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "in_progress" | "in_review" | "done" | "skipped";
+            /** Surface */
+            surface: string | null;
+        };
+        /** WorkflowReinstantiateConverted */
+        WorkflowReinstantiateConverted: {
+            /**
+             * Converted
+             * @constant
+             */
+            converted: true;
+            /** Episodes */
+            episodes: number;
+            /** Method */
+            method: string | null;
+            /** Nodes */
+            nodes: number;
+            /** Template Id */
+            template_id: string;
+        };
+        /** WorkflowReinstantiateSkipped */
+        WorkflowReinstantiateSkipped: {
+            /**
+             * Converted
+             * @constant
+             */
+            converted: false;
+            /** Reason */
+            reason: string;
         };
         /** _ApprovalDecision */
         _ApprovalDecision: {
@@ -46088,9 +48486,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_GeneratedMediaPage_"];
                 };
             };
             /** @description Validation Error */
@@ -46126,9 +48522,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_GeneratedMediaImported_"];
                 };
             };
             /** @description Validation Error */
@@ -46164,9 +48558,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_GeneratedMediaImported_"];
                 };
             };
             /** @description Validation Error */
@@ -46200,9 +48592,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_GeneratedMediaRow_"];
                 };
             };
             /** @description Validation Error */
@@ -46236,9 +48626,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_GeneratedMediaDeleted_"];
                 };
             };
             /** @description Validation Error */
@@ -46265,13 +48653,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The image: a WebP preview, or the original */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "image/*": string;
                 };
             };
             /** @description Validation Error */
@@ -46299,13 +48687,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The stored file, served with its own mime */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "*/*": string;
                 };
             };
             /** @description Validation Error */
@@ -46339,9 +48727,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_GeneratedMediaPromoted_"];
                 };
             };
             /** @description Validation Error */
@@ -46366,13 +48752,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The video or audio bytes (Range-aware) */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "audio/*": string;
+                    "video/*": string;
                 };
             };
             /** @description Validation Error */
@@ -46410,9 +48797,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_GeneratedMediaUpscaled_"];
                 };
             };
             /** @description Validation Error */
@@ -50743,7 +53128,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ProjectListItem__"];
                 };
             };
             /** @description Validation Error */
@@ -50779,7 +53164,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectRow_"];
                 };
             };
             /** @description Validation Error */
@@ -50846,7 +53231,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ProjectStageCatalogEntry__"];
                 };
             };
             /** @description Validation Error */
@@ -50915,7 +53300,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectDetail_"];
                 };
             };
             /** @description Validation Error */
@@ -50953,7 +53338,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectRow_"];
                 };
             };
             /** @description Validation Error */
@@ -50987,7 +53372,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectMessage"];
                 };
             };
             /** @description Validation Error */
@@ -51025,7 +53410,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_AdvancePreview_"];
                 };
             };
             /** @description Validation Error */
@@ -51336,7 +53721,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ProjectCollectionRow__"];
                 };
             };
             /** @description Validation Error */
@@ -51374,7 +53759,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectCollectionRow_"];
                 };
             };
             /** @description Validation Error */
@@ -51409,7 +53794,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectMessage"];
                 };
             };
             /** @description Validation Error */
@@ -51443,7 +53828,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectEntities_"];
                 };
             };
             /** @description Validation Error */
@@ -51596,7 +53981,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ProjectFileListRow__"];
                 };
             };
             /** @description Validation Error */
@@ -51634,7 +54019,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectFileRow_"];
                 };
             };
             /** @description Validation Error */
@@ -51677,7 +54062,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectFileRow_"];
                 };
             };
             /** @description Validation Error */
@@ -51712,7 +54097,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectFileRow_"];
                 };
             };
             /** @description Validation Error */
@@ -51751,7 +54136,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectFileRow_"];
                 };
             };
             /** @description Validation Error */
@@ -51786,7 +54171,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectMessage"];
                 };
             };
             /** @description Validation Error */
@@ -51824,7 +54209,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ProjectFileCommentRow__"];
                 };
             };
             /** @description Validation Error */
@@ -51863,7 +54248,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectFileCommentRow_"];
                 };
             };
             /** @description Validation Error */
@@ -51899,7 +54284,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectMessage"];
                 };
             };
             /** @description Validation Error */
@@ -51928,13 +54313,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The file as an attachment, or a 302 to a signed URL */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "*/*": string;
                 };
             };
             /** @description Validation Error */
@@ -51973,7 +54358,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectFileRow_"];
                 };
             };
             /** @description Validation Error */
@@ -52008,7 +54393,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectFileRow_"];
                 };
             };
             /** @description Validation Error */
@@ -52047,7 +54432,49 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectFileRow_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_file_api_v1_projects__project_id__files__file_id__stream_get: {
+        parameters: {
+            query?: {
+                /** @description A file_versions id */
+                version_id?: string | null;
+                /** @description Signed media token */
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path: {
+                project_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file (or one of its versions) inline and Range-aware, for a bare <video>/<audio>; a 302 to a signed URL for object-store rows */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                    "audio/*": string;
+                    "video/*": string;
                 };
             };
             /** @description Validation Error */
@@ -52082,7 +54509,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ProjectFileVersionRow__"];
                 };
             };
             /** @description Validation Error */
@@ -52124,7 +54551,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectFileVersionRow_"];
                 };
             };
             /** @description Validation Error */
@@ -52161,7 +54588,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ProjectFolderRow__"];
                 };
             };
             /** @description Validation Error */
@@ -52199,7 +54626,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectFolderRow_"];
                 };
             };
             /** @description Validation Error */
@@ -52238,7 +54665,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectFolderRow_"];
                 };
             };
             /** @description Validation Error */
@@ -52273,7 +54700,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectMessage"];
                 };
             };
             /** @description Validation Error */
@@ -52307,7 +54734,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ProjectMemberWithEmail__"];
                 };
             };
             /** @description Validation Error */
@@ -52345,7 +54772,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectMemberWithEmail_"];
                 };
             };
             /** @description Validation Error */
@@ -52384,7 +54811,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectMemberRow_"];
                 };
             };
             /** @description Validation Error */
@@ -52419,7 +54846,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectMessage"];
                 };
             };
             /** @description Validation Error */
@@ -52459,7 +54886,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_GeneratedMediaPage_"];
                 };
             };
             /** @description Validation Error */
@@ -52493,7 +54920,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ProjectShareRow__"];
                 };
             };
             /** @description Validation Error */
@@ -52531,7 +54958,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectShareRow_"];
                 };
             };
             /** @description Validation Error */
@@ -52565,7 +54992,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ProjectStageHistoryEntry__"];
                 };
             };
             /** @description Validation Error */
@@ -52633,7 +55060,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_Union_ProjectStyleProfileRow__NoneType__"];
                 };
             };
             /** @description Validation Error */
@@ -52671,7 +55098,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ProjectStyleProfileRow_"];
                 };
             };
             /** @description Validation Error */
@@ -52746,7 +55173,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_WorkflowNodeRow__"];
                 };
             };
             /** @description Validation Error */
@@ -52784,7 +55211,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_WorkflowNodeRow_"];
                 };
             };
             /** @description Validation Error */
@@ -52819,7 +55246,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_WorkflowNodeDeleted_"];
                 };
             };
             /** @description Validation Error */
@@ -52858,7 +55285,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_WorkflowNodeRow_"];
                 };
             };
             /** @description Validation Error */
@@ -52893,7 +55320,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_StageBoard_"];
                 };
             };
             /** @description Validation Error */
@@ -52931,7 +55358,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_WorkflowNodeRow_"];
                 };
             };
             /** @description Validation Error */
@@ -52969,7 +55396,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_Union_WorkflowReinstantiateConverted__WorkflowReinstantiateSkipped__"];
                 };
             };
             /** @description Validation Error */
@@ -53003,9 +55430,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_SurfaceCompletionSyncResult_"];
                 };
             };
             /** @description Validation Error */
@@ -53235,7 +55660,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_ResourceListItem__"];
                 };
             };
             /** @description Validation Error */
@@ -53271,7 +55696,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourceBatchAiResult"];
                 };
             };
             /** @description Validation Error */
@@ -53307,7 +55732,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourcesMessage"];
                 };
             };
             /** @description Validation Error */
@@ -53343,7 +55768,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourcesMessage"];
                 };
             };
             /** @description Validation Error */
@@ -53379,7 +55804,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourcesMessage"];
                 };
             };
             /** @description Validation Error */
@@ -53414,7 +55839,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourceDuplicateCheck"];
                 };
             };
             /** @description Validation Error */
@@ -53480,13 +55905,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful Response */
+            /** @description LoRA training zip: images plus same-stem .txt captions. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/zip": string;
                 };
             };
             /** @description Validation Error */
@@ -53522,7 +55947,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_FolderRow_"];
                 };
             };
             /** @description Validation Error */
@@ -53556,7 +55981,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_FolderRow__"];
                 };
             };
             /** @description Validation Error */
@@ -53590,7 +56015,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["FolderDeleteEnvelope"];
                 };
             };
             /** @description Validation Error */
@@ -53628,7 +56053,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_FolderRow_"];
                 };
             };
             /** @description Validation Error */
@@ -53662,7 +56087,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_FolderContentCount_"];
                 };
             };
             /** @description Validation Error */
@@ -53696,7 +56121,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_FolderRestoreResult_"];
                 };
             };
             /** @description Validation Error */
@@ -53730,7 +56155,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_FolderTrashResult_"];
                 };
             };
             /** @description Validation Error */
@@ -53766,7 +56191,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceRow_"];
                 };
             };
             /** @description Validation Error */
@@ -53800,7 +56225,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_GalleryMembership_"];
                 };
             };
             /** @description Validation Error */
@@ -53837,7 +56262,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourceLinkExisting"];
                 };
             };
             /** @description Validation Error */
@@ -53873,7 +56298,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourcePermissions_"];
                 };
             };
             /** @description Validation Error */
@@ -53946,9 +56371,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ResourceSearchResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53982,7 +56405,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_FolderRow__"];
                 };
             };
             /** @description Validation Error */
@@ -54018,7 +56441,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_FolderRow_"];
                 };
             };
             /** @description Validation Error */
@@ -54052,7 +56475,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourcesMessage"];
                 };
             };
             /** @description Validation Error */
@@ -54090,7 +56513,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_FolderRow_"];
                 };
             };
             /** @description Validation Error */
@@ -54126,7 +56549,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_ResourcePlacement__"];
                 };
             };
             /** @description Validation Error */
@@ -54158,7 +56581,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourceBatchTranscodeResult"];
                 };
             };
             /** @description Validation Error */
@@ -54192,7 +56615,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_ResourcePlacement__"];
                 };
             };
             /** @description Validation Error */
@@ -54226,7 +56649,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_FolderRow__"];
                 };
             };
             /** @description Validation Error */
@@ -54266,7 +56689,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceRow_"];
                 };
             };
             /** @description Validation Error */
@@ -54300,7 +56723,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_GalleryChild__"];
                 };
             };
             /** @description Validation Error */
@@ -54340,7 +56763,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_GalleryChild__"];
                 };
             };
             /** @description Validation Error */
@@ -54374,7 +56797,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceRow_"];
                 };
             };
             /** @description Validation Error */
@@ -54411,7 +56834,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourcesMessage"];
                 };
             };
             /** @description Validation Error */
@@ -54449,7 +56872,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceRow_"];
                 };
             };
             /** @description Validation Error */
@@ -54521,7 +56944,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceRow_"];
                 };
             };
             /** @description Validation Error */
@@ -54555,7 +56978,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourceTaskDispatch"];
                 };
             };
             /** @description Validation Error */
@@ -54580,13 +57003,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Cover image, or an SVG placeholder while one is generated. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "image/*": string;
                 };
             };
             /** @description Validation Error */
@@ -54624,7 +57047,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceRow_"];
                 };
             };
             /** @description Validation Error */
@@ -54655,13 +57078,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The resource's current file (or a redirect to it). */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/octet-stream": string;
                 };
             };
             /** @description Validation Error */
@@ -54695,7 +57118,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourceTaskDispatch"];
                 };
             };
             /** @description Validation Error */
@@ -54733,7 +57156,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceGenPrompts_"];
                 };
             };
             /** @description Validation Error */
@@ -54767,7 +57190,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_Union_Dict_str__Any___NoneType__"];
                 };
             };
             /** @description Validation Error */
@@ -54805,7 +57228,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceLyricsUpload_"];
                 };
             };
             /** @description Validation Error */
@@ -54843,7 +57266,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceItemRow_"];
                 };
             };
             /** @description Validation Error */
@@ -54877,7 +57300,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourcesMessage"];
                 };
             };
             /** @description Validation Error */
@@ -54902,13 +57325,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Hover-scrub sprite sheet. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "image/jpeg": string;
                 };
             };
             /** @description Validation Error */
@@ -54976,7 +57399,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceRow_"];
                 };
             };
             /** @description Validation Error */
@@ -55016,7 +57439,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceSaveAsAssetResult_"];
                 };
             };
             /** @description Forbidden */
@@ -55078,7 +57501,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourceTaskDispatch"];
                 };
             };
             /** @description Validation Error */
@@ -55116,7 +57539,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceSplitResult_"];
                 };
             };
             /** @description Validation Error */
@@ -55150,7 +57573,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_ResourceTagWithTag__"];
                 };
             };
             /** @description Validation Error */
@@ -55188,7 +57611,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceTagRow_"];
                 };
             };
             /** @description Validation Error */
@@ -55223,7 +57646,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourcesMessage"];
                 };
             };
             /** @description Validation Error */
@@ -55257,7 +57680,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_ResourceVersionRow__"];
                 };
             };
             /** @description Validation Error */
@@ -55297,7 +57720,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceVersionRow_"];
                 };
             };
             /** @description Validation Error */
@@ -55332,7 +57755,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourcesMessage"];
                 };
             };
             /** @description Validation Error */
@@ -55371,7 +57794,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceVersionRow_"];
                 };
             };
             /** @description Validation Error */
@@ -55402,13 +57825,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The version's file as a download (or a redirect to it). */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/octet-stream": string;
                 };
             };
             /** @description Validation Error */
@@ -55440,13 +57863,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description An HLS playlist or segment. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/vnd.apple.mpegurl": string;
+                    "video/iso.segment": string;
+                    "video/mp2t": string;
+                    "video/mp4": string;
                 };
             };
             /** @description Validation Error */
@@ -55481,7 +57907,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResourcesMessage"];
                 };
             };
             /** @description Validation Error */
@@ -55516,7 +57942,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ResourceVersionRow_"];
                 };
             };
             /** @description Validation Error */

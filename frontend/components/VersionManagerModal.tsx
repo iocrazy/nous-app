@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Layers, Loader2, Upload, Trash2, Check, AlertTriangle } from 'lucide-react';
 import { Loading } from './common/Loading';
 import { useTranslation } from 'react-i18next';
-import { ResourceVersion } from '../types';
+import type { ResourceVersion } from '../types/api';
 import {
   fetchResourceVersions,
   uploadNewVersion,
@@ -123,7 +123,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
     setIsDeleting(true);
     setError(null);
     try {
-      await deleteVersion(resourceId, pendingDelete.id);
+      await deleteVersion(resourceId, String(pendingDelete.id));
       await loadVersions();
       onVersionChange();
     } catch (err: unknown) {

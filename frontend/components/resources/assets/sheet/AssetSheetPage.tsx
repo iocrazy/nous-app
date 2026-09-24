@@ -34,7 +34,7 @@ import { ChevronRight, Loader2 } from 'lucide-react';
 import { useResourcesContext } from '../../../../contexts/ResourcesContext';
 import { useToast } from '../../../Toast';
 import { fetchProjects } from '../../../../services/projectsService';
-import type { Project } from '../../../../types';
+import type { Project } from '../../../../types/api';
 import {
   createLink,
   deleteAsset,

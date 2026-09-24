@@ -41,8 +41,9 @@ import { useTranslation } from 'react-i18next';
 import { ResourceInspectorTabs, visibleInspectorTabs, type InspectorTab } from './resources/ResourceInspectorTabs';
 import { AiSubTabs, AI_SUB_TABS, busiestStatus, type AiSubTab } from './detail/AiSubTabs';
 import { ShotsTabPlaceholder } from './VideoDetailPanel/ShotsTabPlaceholder';
-import { Resource, ResourceItem, ResourceVersion } from '../types';
-import type { Tag } from '../types/api';
+import { ResourceItem } from '../types';
+import type { ResourceRow, ResourceVersion, Tag } from '../types/api';
+import type { ResourceLyrics } from '../utils/resourceLyrics';
 import {
   fetchResourceById,
   fetchResourceVersions,
@@ -214,7 +215,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const { teamId } = useParams();
 
   // State
-  const [resource, setResource] = useState<Resource | null>(null);
+  const [resource, setResource] = useState<ResourceRow | null>(null);
   // generateSimilar deep link (Task 1, spec 2026-07-28-extension-prompt-analyze):
   // `/resources/file/{id}?generateSimilar=1` — the Chrome extension's result
   // card ("Generate Similar in nous") opens this. Once resource data is
@@ -233,7 +234,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showVersionDropdown, setShowVersionDropdown] = useState(false);
   const [showVersionManager, setShowVersionManager] = useState(false);
-  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  // Version ids are JSON numbers on the wire (ResourceVersionRow); stringify
+  // only where they become a URL segment or a string-typed prop.
+  const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const versionDropdownRef = useRef<HTMLDivElement>(null);
@@ -319,7 +322,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   // Review state
   const [rightTab, setRightTab] = useState<InspectorTab>('info');
   const [aiSubTab, setAiSubTab] = useState<AiSubTab>('transcript');
-  const [lyrics, setLyrics] = useState<{ lrc: string; lines: Array<{ text: string; line_start_ms: number | null }> } | null>(null);
+  const [lyrics, setLyrics] = useState<ResourceLyrics | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string>('');
   // Island audio capsule stage: playback position drives the synced lyrics
   // column. island-desktop audio only — no-op elsewhere.
@@ -426,7 +429,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   // compare equal and send NO update — the edit is lost with zero feedback.
   // Same defect class and fix as `editor/beats/BeatCard.tsx`.
   type ResourceSeed = {
-    id: string;
+    id: number;
     filename: string;
     notes: string | null;
     url: string | null;
@@ -460,7 +463,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   }, [editingName]);
 
   // ─── Resource field update handler ───────────────────
-  const handleResourceUpdate = useCallback(async (data: Partial<Resource>) => {
+  const handleResourceUpdate = useCallback(async (data: Partial<ResourceRow>) => {
     if (!resource) return;
     try {
       await updateResource(resourceId, data as Parameters<typeof updateResource>[1]);
@@ -483,7 +486,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const commitNotes = useCallback(() => {
     const val = notesValue.trim();
     if (val !== (resource?.notes || '').trim()) {
-      handleResourceUpdate({ notes: val || null } as Partial<Resource>);
+      handleResourceUpdate({ notes: val || null });
     }
   }, [notesValue, resource?.notes, handleResourceUpdate]);
 
@@ -590,7 +593,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const commitUrl = useCallback(() => {
     const val = urlValue.trim();
     if (val !== (resource?.url || '').trim()) {
-      handleResourceUpdate({ url: val || null } as Partial<Resource>);
+      handleResourceUpdate({ url: val || null });
     }
   }, [urlValue, resource?.url, handleResourceUpdate]);
 
@@ -604,7 +607,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     e.target.value = ''; // allow re-selecting the same file
     if (!f || !resource) return;
     try {
-      const updated = await uploadResourceCover(resource.id, f);
+      const updated = await uploadResourceCover(String(resource.id), f);
       setResource(updated);
       addToast(t('resources.detail.coverUpdated', 'Cover updated'), 'success');
     } catch (err) {
@@ -651,7 +654,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           viewingVersion.transcode_status === 'completed' &&
           resource?.mime_type?.startsWith('video/')
         ) {
-          setFileUrl(getVersionHlsUrl(resourceId, viewingVersion.id, token || undefined));
+          setFileUrl(getVersionHlsUrl(resourceId, String(viewingVersion.id), token || undefined));
           // Also provide direct file URL for "Original" quality option
           // Provide direct /media/{id} URL for "Original" quality option
           setOriginalFileUrl(
@@ -676,7 +679,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
         // Fallback: use /media/{id} URL
         setFileUrl(getResourceMediaUrl(resourceId, mediaToken ?? undefined));
         if (selectedVersionId) {
-          setFileUrl(getVersionFileUrl(resourceId, selectedVersionId));
+          setFileUrl(getVersionFileUrl(resourceId, String(selectedVersionId)));
         } else {
           setFileUrl(getResourceFileUrl(resourceId));
         }
@@ -1112,7 +1115,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           ? async (sec) => {
               try {
                 const ms = sec == null ? null : Math.round(sec * 1000);
-                const updated = await setResourceChorus(resource.id, ms);
+                const updated = await setResourceChorus(String(resource.id), ms);
                 setResource(updated);
                 addToast(
                   t(
@@ -1263,7 +1266,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 <button
                   onClick={async () => {
                     try {
-                      await retryTranscode(resourceId, viewingVersion.id);
+                      await retryTranscode(resourceId, String(viewingVersion.id));
                       setVersions((prev) =>
                         prev.map((v) =>
                           v.id === viewingVersion.id
@@ -1527,7 +1530,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       ? async (sec) => {
                           try {
                             const ms = sec == null ? null : Math.round(sec * 1000);
-                            const updated = await setResourceChorus(resource.id, ms);
+                            const updated = await setResourceChorus(String(resource.id), ms);
                             setResource(updated);
                             addToast(
                               t(
@@ -1949,7 +1952,13 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           ) : rightTab === 'review' ? (
             <ResourceReviewPanel
               resourceId={resourceId}
-              versionId={selectedVersionId || viewingVersion?.id}
+              versionId={
+                selectedVersionId != null
+                  ? String(selectedVersionId)
+                  : viewingVersion
+                    ? String(viewingVersion.id)
+                    : undefined
+              }
               currentUserId={currentUserId}
               currentTime={videoCurrentTime}
               isVideo={!!isVideo}

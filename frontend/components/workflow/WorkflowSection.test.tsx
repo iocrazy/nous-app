@@ -14,7 +14,7 @@ import enJson from '../../public/locales/en.json';
 import { WorkflowSection } from './WorkflowSection';
 import { ToastProvider } from '../Toast';
 import { ApiError } from '../../services/apiClient';
-import type { ProjectWorkflow } from '../../types';
+import type { ProjectWorkflow } from '../../types/api';
 
 function makeI18n(): I18n {
   const instance = createInstance();

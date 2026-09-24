@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Settings, Users, Palette, Star, Archive, Trash2 } from 'lucide-react';
-import { Project } from '../types';
+import type { Project } from '../types/api';
 
 const COLOR_OPTIONS = [
   { value: null, label: 'None', color: 'bg-ink-600' },

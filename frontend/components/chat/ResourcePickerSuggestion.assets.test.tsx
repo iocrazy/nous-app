@@ -18,7 +18,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 
 import { ResourcePickerSuggestion, type AssetsTabProps } from './ResourcePickerSuggestion';
 import type { AssetGridRow } from '../assets/AssetGridPicker';
-import type { ResourceSearchResult } from '../../types';
+import type { ResourceSearchResult } from '../../types/api';
 
 /** `/api/v1/resources/search` rows — bare body, relative cover path. */
 const ROWS: ResourceSearchResult[] = [

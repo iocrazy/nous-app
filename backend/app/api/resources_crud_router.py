@@ -21,9 +21,10 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
 from app.core.scope_guards import verify_scope_access
@@ -34,12 +35,30 @@ from app.repositories.resources_repository import (
     ResourcesRepository,
 )
 from app.schemas.canvas_split_schema import SplitDeriveRequest
+from app.schemas.envelope import Envelope
+from app.schemas.resource_responses import (
+    ResourceBatchTranscodeResult,
+    ResourceLyricsUpload,
+    ResourcesMessage,
+    ResourceSplitResult,
+)
+from app.schemas.resource_rows import (
+    FolderRow,
+    LyricsJson,
+    ResourceItemRow,
+    ResourceListItem,
+    ResourcePlacement,
+    ResourceRow,
+    ResourceTagRow,
+    ResourceTagWithTag,
+)
 from app.schemas.resources import (
     ChorusUpdate,
     ResourceMoveRequest,
     ResourceTagRequest,
     ResourceUpdate,
 )
+from app.schemas.wire import binary_response
 from app.services.library.resource_file_path import resolve_resource_file_path
 from app.services.library.resources_service import ResourcesService
 from app.services.prompts.origin import stamp_origin
@@ -64,7 +83,7 @@ _ALLOWED_SOCIAL_COMBINE = {"and", "or"}
 _ALLOWED_SOURCE_TYPES = frozenset(RESOURCE_SOURCE_TYPES)
 
 
-@router.get("")
+@router.get("", response_model=Envelope[List[ResourceListItem]])
 async def list_resources(
     auth: AuthDep,
     _tenant_scope: ScopedRequestDep,
@@ -346,7 +365,7 @@ async def list_resources(
         raise HTTPException(status_code=500, detail="Failed to list resources")
 
 
-@router.get("/trash")
+@router.get("/trash", response_model=Envelope[List[ResourcePlacement]])
 async def list_trashed_resources(
     auth: AuthDep,
     _tenant_scope: ScopedRequestDep,
@@ -363,7 +382,7 @@ async def list_trashed_resources(
         raise HTTPException(status_code=500, detail="Failed to list trashed resources")
 
 
-@router.get("/trash/folders")
+@router.get("/trash/folders", response_model=Envelope[List[FolderRow]])
 async def list_trashed_folders(
     auth: AuthDep,
     _tenant_scope: ScopedRequestDep,
@@ -380,7 +399,7 @@ async def list_trashed_folders(
         raise HTTPException(status_code=500, detail="Failed to list trashed folders")
 
 
-@router.post("/transcode/batch")
+@router.post("/transcode/batch", response_model=ResourceBatchTranscodeResult)
 async def batch_transcode(auth: AuthDep, _scope: ScopedRequestDep):
     """Queue HLS transcoding for all video versions with NULL transcode_status."""
     try:
@@ -433,7 +452,7 @@ async def batch_transcode(auth: AuthDep, _scope: ScopedRequestDep):
         raise HTTPException(status_code=500, detail="Failed to batch transcode")
 
 
-@router.get("/{resource_id}")
+@router.get("/{resource_id}", response_model=Envelope[ResourceRow])
 async def get_resource(resource_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Get a single resource by ID (creator or team member only)."""
     from app.api.media_permissions import check_media_access
@@ -455,7 +474,14 @@ async def get_resource(resource_id: str, auth: AuthDep, _scope: ScopedRequestDep
         raise HTTPException(status_code=500, detail="Failed to get resource")
 
 
-@router.get("/{resource_id}/file")
+@router.get(
+    "/{resource_id}/file",
+    response_class=Response,
+    responses=binary_response(
+        "The resource's current file (or a redirect to it).",
+        "application/octet-stream",
+    ),
+)
 async def serve_resource_file(
     resource_id: str,
     request: Request,
@@ -563,8 +589,6 @@ _PLACEHOLDER_DEFAULT_FILL = "#221c2e"
 
 
 def _cover_placeholder(mime_type: str):
-    from fastapi.responses import Response
-
     kind = (mime_type or "").split("/", 1)[0]
     fill = _PLACEHOLDER_FILL.get(kind, _PLACEHOLDER_DEFAULT_FILL)
     svg = (
@@ -614,7 +638,13 @@ async def _enqueue_lazy_thumbnail(
         logger.warning(f"[cover] lazy thumbnail enqueue failed for {resource_id}: {e}")
 
 
-@router.get("/{resource_id}/cover")
+@router.get(
+    "/{resource_id}/cover",
+    response_class=Response,
+    responses=binary_response(
+        "Cover image, or an SVG placeholder while one is generated.", "image/*"
+    ),
+)
 async def serve_resource_cover(resource_id: str, request: Request):
     """Serve cover/thumbnail image for a resource (no auth required).
 
@@ -782,7 +812,11 @@ async def serve_resource_cover(resource_id: str, request: Request):
         raise HTTPException(status_code=500, detail="Failed to serve cover image")
 
 
-@router.get("/{resource_id}/preview-sprite")
+@router.get(
+    "/{resource_id}/preview-sprite",
+    response_class=Response,
+    responses=binary_response("Hover-scrub sprite sheet.", "image/jpeg"),
+)
 async def serve_preview_sprite(resource_id: str):
     """Serve preview sprite sheet for hover scrub (no auth required)."""
     try:
@@ -854,7 +888,7 @@ async def serve_preview_sprite(resource_id: str):
         raise HTTPException(status_code=500, detail="Failed to serve preview sprite")
 
 
-@router.patch("/{resource_id}")
+@router.patch("/{resource_id}", response_model=Envelope[ResourceRow])
 async def update_resource(
     resource_id: str,
     data: ResourceUpdate,
@@ -884,7 +918,7 @@ async def update_resource(
             return {"success": True, "data": resource}
 
         result = await repo.update_resource(resource_id, update_data)
-        return {"success": True, "data": result}
+        return {"success": True, "data": require_row(result)}
     except HTTPException:
         raise
     except Exception as e:
@@ -892,7 +926,7 @@ async def update_resource(
         raise HTTPException(status_code=500, detail="Failed to update resource")
 
 
-@router.post("/{resource_id}/cover")
+@router.post("/{resource_id}/cover", response_model=Envelope[ResourceRow])
 async def upload_resource_cover(
     resource_id: str,
     auth: AuthDep,
@@ -959,10 +993,10 @@ async def upload_resource_cover(
     )
 
     result = await repo.update_resource(resource_id, {"cover_image_path": rel})
-    return {"success": True, "data": result}
+    return {"success": True, "data": require_row(result)}
 
 
-@router.post("/{resource_id}/lyrics")
+@router.post("/{resource_id}/lyrics", response_model=Envelope[ResourceLyricsUpload])
 async def upload_resource_lyrics(
     resource_id: str,
     auth: AuthDep,
@@ -985,10 +1019,13 @@ async def upload_resource_lyrics(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid LRC: {e}")
     result = await repo.update_resource(resource_id, {"lyrics_json": lyrics})
-    return {"success": True, "data": {"lyrics_json": lyrics, "resource": result}}
+    return {
+        "success": True,
+        "data": {"lyrics_json": lyrics, "resource": require_row(result)},
+    }
 
 
-@router.get("/{resource_id}/lyrics")
+@router.get("/{resource_id}/lyrics", response_model=Envelope[LyricsJson])
 async def get_resource_lyrics(
     resource_id: str,
     auth: AuthDep,
@@ -1006,7 +1043,7 @@ async def get_resource_lyrics(
     return {"success": True, "data": resource.get("lyrics_json")}
 
 
-@router.put("/{resource_id}/chorus")
+@router.put("/{resource_id}/chorus", response_model=Envelope[ResourceRow])
 async def set_resource_chorus(
     resource_id: str,
     data: ChorusUpdate,
@@ -1032,10 +1069,10 @@ async def set_resource_chorus(
     result = await repo.update_resource(
         resource_id, {"chorus_start_ms": data.chorus_start_ms}
     )
-    return {"success": True, "data": result}
+    return {"success": True, "data": require_row(result)}
 
 
-@router.post("/by-platform-id/{platform_id}/trash")
+@router.post("/by-platform-id/{platform_id}/trash", response_model=ResourcesMessage)
 async def trash_resource_by_platform_id(
     platform_id: str,
     auth: AuthDep,
@@ -1090,7 +1127,7 @@ async def trash_resource_by_platform_id(
         raise HTTPException(status_code=500, detail="Failed to trash resource")
 
 
-@router.post("/by-media-id/{media_id}/trash")
+@router.post("/by-media-id/{media_id}/trash", response_model=ResourcesMessage)
 async def trash_resource_by_media_id(
     media_id: str,
     auth: AuthDep,
@@ -1141,7 +1178,7 @@ async def trash_resource_by_media_id(
         raise HTTPException(status_code=500, detail="Failed to trash resource")
 
 
-@router.delete("/by-platform-id/{platform_id}")
+@router.delete("/by-platform-id/{platform_id}", response_model=ResourcesMessage)
 async def unlink_resource_by_platform_id(
     platform_id: str,
     auth: AuthDep,
@@ -1226,7 +1263,7 @@ async def unlink_resource_by_platform_id(
         raise HTTPException(status_code=500, detail="Failed to unlink resource")
 
 
-@router.delete("/{resource_id}")
+@router.delete("/{resource_id}", response_model=ResourcesMessage)
 async def delete_resource(
     resource_id: str,
     auth: AuthDep,
@@ -1256,7 +1293,7 @@ async def delete_resource(
         raise HTTPException(status_code=500, detail="Failed to remove resource")
 
 
-@router.post("/{resource_id}/restore")
+@router.post("/{resource_id}/restore", response_model=Envelope[ResourceRow])
 async def restore_resource(resource_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Restore a trashed resource."""
     try:
@@ -1272,7 +1309,7 @@ async def restore_resource(resource_id: str, auth: AuthDep, _scope: ScopedReques
         raise HTTPException(status_code=500, detail="Failed to restore resource")
 
 
-@router.delete("/{resource_id}/permanent")
+@router.delete("/{resource_id}/permanent", response_model=ResourcesMessage)
 async def permanent_delete_resource(
     resource_id: str,
     auth: AuthDep,
@@ -1299,7 +1336,7 @@ async def permanent_delete_resource(
 # ============================================
 
 
-@router.post("/{resource_id}/move")
+@router.post("/{resource_id}/move", response_model=Envelope[ResourceItemRow])
 async def move_resource(
     resource_id: str,
     data: ResourceMoveRequest,
@@ -1315,7 +1352,9 @@ async def move_resource(
             scope_id=data.scope_id,
             folder_id=data.folder_id,
         )
-        return {"success": True, "data": result}
+        return {"success": True, "data": require_row(result)}
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -1328,7 +1367,7 @@ async def move_resource(
 # ============================================
 
 
-@router.get("/{resource_id}/tags")
+@router.get("/{resource_id}/tags", response_model=Envelope[List[ResourceTagWithTag]])
 async def list_resource_tags(resource_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Get all tags for a resource."""
     try:
@@ -1340,7 +1379,7 @@ async def list_resource_tags(resource_id: str, auth: AuthDep, _scope: ScopedRequ
         raise HTTPException(status_code=500, detail="Failed to list resource tags")
 
 
-@router.post("/{resource_id}/tags")
+@router.post("/{resource_id}/tags", response_model=Envelope[ResourceTagRow])
 async def add_resource_tag(
     resource_id: str,
     data: ResourceTagRequest,
@@ -1367,7 +1406,7 @@ async def add_resource_tag(
         raise HTTPException(status_code=500, detail="Failed to add tag")
 
 
-@router.delete("/{resource_id}/tags/{tag_id}")
+@router.delete("/{resource_id}/tags/{tag_id}", response_model=ResourcesMessage)
 async def remove_resource_tag(
     resource_id: str,
     tag_id: str,
@@ -1384,7 +1423,7 @@ async def remove_resource_tag(
         raise HTTPException(status_code=500, detail="Failed to remove tag")
 
 
-@router.post("/{resource_id}/split")
+@router.post("/{resource_id}/split", response_model=Envelope[ResourceSplitResult])
 async def derive_split_resource_endpoint(
     resource_id: str,
     body: SplitDeriveRequest,

@@ -13,7 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Canvas } from '../../../../features/canvas-core/types';
 import type { AssetRowDetail } from '../../../../services/assetsService';
-import type { Project } from '../../../../types';
+import type { Project } from '../../../../types/api';
+import { makeProject } from '../../../../tests/fixtures/projects';
 
 const listCanvases = vi.fn();
 const createCanvas = vi.fn();
@@ -79,22 +80,15 @@ const detail: AssetRowDetail = {
   used_in: { canvases: [], storyboards: [] },
 };
 
-const project: Project = {
-  id: PROJECT_ID,
+const project: Project = makeProject({
+  // Wire shape: the projects list sends Snowflake ids as JSON numbers.
+  id: Number(PROJECT_ID),
   name: 'Bamboo Sea',
-  description: null,
-  owner_id: 'u1',
-  team_id: SCOPE,
-  project_type: 'internal',
-  project_group: null,
-  announcement: null,
-  is_starred: false,
-  color_label: null,
-  archived_at: null,
-  file_count: 0,
+  // The dialog never reads team_id; any in-range Snowflake will do.
+  team_id: 337610660408222,
   created_at: '2026-09-01T00:00:00+00:00',
   updated_at: '2026-09-01T00:00:00+00:00',
-};
+});
 
 const canvasRow = (over: Partial<Canvas> = {}): Canvas => ({
   id: CANVAS_ID,

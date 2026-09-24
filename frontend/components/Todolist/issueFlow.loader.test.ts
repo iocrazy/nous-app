@@ -12,11 +12,12 @@ vi.mock('../../services/workflowService', () => ({
 
 import { deriveWorkflowFlow, loadProjectFlow } from './issueFlow';
 import { fetchProjectWorkflow } from '../../services/workflowService';
+import { makeStageNode } from '../../tests/fixtures/projects';
 
 const mockWorkflow = fetchProjectWorkflow as unknown as ReturnType<typeof vi.fn>;
 
 function node(id: string, name: string, sort_order: number) {
-  return {
+  return makeStageNode({
     id,
     project_id: '1',
     source_template_node_id: null,
@@ -34,7 +35,7 @@ function node(id: string, name: string, sort_order: number) {
     deliverable_label: null,
     skipped: false,
     members: [],
-  };
+  });
 }
 
 beforeEach(() => {

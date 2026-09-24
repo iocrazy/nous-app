@@ -32,7 +32,8 @@ import {
   MENTION_QUERY_TERMINATORS,
   MENTION_SCAN_CHARS,
 } from './ChatInputResourceMention';
-import type { ResourceRefAttachment, ResourceSearchResult } from '../../types';
+import type { ResourceRefAttachment } from '../../types';
+import type { ResourceSearchResult } from '../../types/api';
 
 export interface ChatInputProps {
   onSend: (text: string, refAttachments: ResourceRefAttachment[]) => void;

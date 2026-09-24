@@ -7,7 +7,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { ProjectsListView } from './ProjectsListView';
 import * as svc from '../services/projectsService';
-import type { Project } from '../types';
+import type { Project } from '../types/api';
+import { makeProject } from '../tests/fixtures/projects';
 
 vi.mock('react-i18next', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-i18next')>();
@@ -38,29 +39,10 @@ vi.mock('../services/projectsService', async () => {
   };
 });
 
-function makeProject(overrides: Partial<Project>): Project {
-  return {
-    id: '1',
-    name: 'Project',
-    description: null,
-    owner_id: 'u1',
-    team_id: null,
-    project_type: 'internal',
-    project_group: null,
-    announcement: null,
-    is_starred: false,
-    color_label: null,
-    archived_at: null,
-    file_count: 0,
-    created_at: '2026-06-01T00:00:00Z',
-    updated_at: '2026-07-01T00:00:00Z',
-    ...overrides,
-  };
-}
 
 const PROJECTS = [
-  makeProject({ id: '1', name: 'Spring Campaign', project_type: 'internal' }),
-  makeProject({ id: '2', name: 'Client Reel', project_type: 'external' }),
+  makeProject({ id: 1, name: 'Spring Campaign', project_type: 'internal' }),
+  makeProject({ id: 2, name: 'Client Reel', project_type: 'external' }),
 ];
 
 const noop = () => {};

@@ -15,6 +15,7 @@ from app.core.deps import AuthDep
 from app.core.scope_dep import scoped_request
 from app.models.media import RESOURCE_SOURCE_TYPES
 from app.repositories.resources_repository import ResourcesRepository
+from app.schemas.resource_responses import ResourceSearchResponse
 from app.services.ai._mime_kind import kind_from_mime
 from app.services.ai.resource_ai_status import effective_ai_statuses
 
@@ -61,7 +62,7 @@ def _thumbnail_url(row: dict, resource_id: str) -> Optional[str]:
     return None
 
 
-@router.get("/search")
+@router.get("/search", response_model=ResourceSearchResponse)
 async def search_resources(
     auth: AuthDep,
     q: str = Query("", max_length=128),

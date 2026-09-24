@@ -15,8 +15,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FolderOpen, Loader2, Star } from 'lucide-react';
-import type { Project, ProjectCardActivity } from '../types';
-import type { ProjectSuggestionItem } from '../types/api';
+import type { Project, ProjectCardActivity, ProjectSuggestionItem } from '../types/api';
 import { generateMissingFrames } from '../services/projectsService';
 import { useToast } from './Toast';
 import { StageRing, ringStageFromBadge } from './project/StageRing';

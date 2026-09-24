@@ -30,6 +30,20 @@ serving = sys.modules["app.services.library.media_serving"]
 FAKE_USER_ID = "00000000-0000-0000-0000-000000000042"
 
 
+def _real_row(**overrides) -> dict:
+    """A row in the repository's real shape: every projected column, bigint
+    ids stringified by ``_normalize``. The route now declares that shape, so
+    a partial fixture would be a 500, not a test of the route."""
+    from app.models.generated_media import GeneratedMedia
+    from tests.api.wire_parity import sample_row
+
+    repo_mod = sys.modules["app.repositories.generated_media_repository"]
+    projected = [col.key for col in repo_mod._GM_COLS]
+    row = repo_mod._normalize(sample_row(GeneratedMedia, only=projected))
+    row.update(overrides)
+    return row
+
+
 async def _fake_auth() -> AuthContext:
     return AuthContext(user_id=FAKE_USER_ID, auth_type="jwt")
 
@@ -79,7 +93,7 @@ async def test_list_uses_caller_personal_scope(monkeypatch, client):
 
     async def _fake_list(scope_id: int, **k):
         assert scope_id == 42, f"expected scope_id=42, got {scope_id!r}"
-        return {"items": [{"id": 1}], "next_cursor": None}
+        return {"items": [_real_row(id="1")], "next_cursor": None}
 
     monkeypatch.setattr(r, "_resolve_personal_team_id", _fake_scope)
     monkeypatch.setattr(
@@ -91,7 +105,7 @@ async def test_list_uses_caller_personal_scope(monkeypatch, client):
     resp = await client.get("/api/v1/generated-media")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["data"]["items"] == [{"id": 1}]
+    assert [item["id"] for item in body["data"]["items"]] == ["1"]
     assert body["data"]["next_cursor"] is None
 
 
@@ -173,7 +187,7 @@ async def test_get_detail_returns_data_envelope(monkeypatch, client):
         return "5"
 
     async def _fake_get(self, gen_id: int, scope_id: int):
-        return {"id": gen_id, "scope_id": scope_id, "media_kind": "image"}
+        return _real_row(id=str(gen_id), scope_id=str(scope_id), media_kind="image")
 
     monkeypatch.setattr(r, "_resolve_personal_team_id", _fake_scope)
     monkeypatch.setattr(r.GeneratedMediaRepository, "get", _fake_get)
@@ -181,7 +195,7 @@ async def test_get_detail_returns_data_envelope(monkeypatch, client):
     resp = await client.get("/api/v1/generated-media/123")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["data"]["id"] == 123
+    assert body["data"]["id"] == "123"
     assert body["data"]["media_kind"] == "image"
 
 

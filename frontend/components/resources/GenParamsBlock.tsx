@@ -16,7 +16,38 @@ import { ChevronDown, ChevronUp, Copy, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { GenParams } from '../../types';
+import type { ResourceRow } from '../../types/api';
 import { useOptionalToast } from '../Toast';
+
+const STRING_KEYS = [
+  'tool', 'provider', 'model', 'model_hash', 'sampler', 'scheduler',
+  'size', 'aspect_ratio', 'text_encoder', 'vae',
+] as const;
+const NUMBER_KEYS = ['steps', 'cfg', 'seed', 'denoise', 'width', 'height'] as const;
+
+/**
+ * `gen_params` is JSONB: the resources API types it as an open object, the
+ * PostgREST row as `GenParams`. Keep only keys whose value has the type the
+ * block renders, so a malformed value reads as "unknown" instead of leaking
+ * into the summary as `[object Object]`.
+ */
+export function parseGenParams(value: unknown): GenParams | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const out: GenParams = {};
+  for (const key of STRING_KEYS) {
+    const v = raw[key];
+    if (typeof v === 'string') out[key] = v;
+  }
+  for (const key of NUMBER_KEYS) {
+    const v = raw[key];
+    if (typeof v === 'number' && Number.isFinite(v)) out[key] = v;
+  }
+  if (Array.isArray(raw.loras)) {
+    out.loras = raw.loras.filter((l): l is string => typeof l === 'string');
+  }
+  return out;
+}
 
 const TOOL_LABELS: Record<string, string> = {
   comfyui: 'ComfyUI',
@@ -28,12 +59,17 @@ function fmtNumber(n: number): string {
   return Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000);
 }
 
-export function GenParamsBlock({ params }: { params: GenParams | null | undefined }) {
+export function GenParamsBlock({
+  params: rawParams,
+}: {
+  params: GenParams | ResourceRow['gen_params'] | undefined;
+}) {
   const { t } = useTranslation();
   const toast = useOptionalToast();
   const [open, setOpen] = useState(false);
 
-  if (!params || typeof params !== 'object') return null;
+  const params = parseGenParams(rawParams);
+  if (!params) return null;
 
   const size =
     typeof params.width === 'number' && typeof params.height === 'number'

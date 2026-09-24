@@ -1,6 +1,6 @@
 import { Extension } from '@tiptap/core';
 import { ResourceRefNode } from './ResourceChipNode';
-import type { ResourceSearchResult } from '../../types';
+import type { ResourceSearchResult } from '../../types/api';
 
 interface MentionOptions {
   /** Called when user opens the picker — parent renders the popover and
@@ -20,7 +20,9 @@ export interface ResourceRefInsertItem {
   name: string;
   kind: string;
   mime?: string | null;
-  scope?: { type: 'personal' | 'team'; id: string };
+  /** `type` is a plain string on the search wire (`ResourceSearchScope`);
+   *  `toStagedResource` narrows it to the attachment's two scope kinds. */
+  scope?: { type: string; id: string };
   /** Relative cover path (`/api/v1/resources/{id}/cover`) or null. */
   thumbnail_url?: string | null;
   transcript_status?: string | null;

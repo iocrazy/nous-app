@@ -54,9 +54,9 @@ import { BriefField } from '../workflow/BriefField';
 import type {
   EpisodeProgress,
   ProjectNodePatch,
-  ProjectStageNode,
   WorkflowMemberRef,
 } from '../../types';
+import type { ProjectStageNode } from '../../types/api';
 
 export interface WorkspaceNodeSettingsProps {
   projectId: string;

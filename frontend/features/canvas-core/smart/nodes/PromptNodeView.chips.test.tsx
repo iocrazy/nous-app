@@ -27,7 +27,7 @@ import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import type { CanvasNode } from '../../types';
 import { PromptNodeView } from './PromptNodeView';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
-import type { ResourceSearchResponse } from '../../../../types';
+import type { ResourceSearchResponse } from '../../../../types/api';
 
 const EMPTY: ResourceSearchResponse = {
   results: [],

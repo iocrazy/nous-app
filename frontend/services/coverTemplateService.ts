@@ -22,7 +22,7 @@ import { apiFetch } from './apiClient';
 import { promoteGeneration } from './generatedMediaService';
 import { linkExistingResource, uploadResource } from './resourceService';
 import { importResourceAsCanvasMedia } from '../features/canvas-core/smart/mediaImport';
-import type { Resource } from '../types';
+import type { ResourceRow } from '../types/api';
 
 /** The folder that backs the library. `adopted` = it was the user's own
  *  “封面” folder rather than one we created. */
@@ -200,7 +200,9 @@ export async function resolveCoverTemplateReference(
 }
 
 /** The template a freshly added resource becomes — same shape the list gives. */
-export function templateFromResource(resource: Resource): CoverTemplate {
+export function templateFromResource(
+  resource: Pick<ResourceRow, 'id' | 'filename' | 'mime_type'>,
+): CoverTemplate {
   return {
     resource_id: String(resource.id),
     name: resource.filename,
@@ -220,7 +222,7 @@ export async function addCoverTemplateFromFile(
     throw new CoverTemplateError('not-an-image', 'a cover template must be an image');
   }
   const folder = await getCoverTemplateFolder();
-  let resource: Resource;
+  let resource: ResourceRow;
   try {
     resource = await uploadResource(file, scopeId, folder.folder_id);
   } catch (err) {
@@ -240,7 +242,7 @@ export async function addCoverTemplateFromResource(
   scopeId: string,
 ): Promise<CoverTemplate> {
   const folder = await getCoverTemplateFolder();
-  let resource: Resource;
+  let resource: ResourceRow;
   try {
     resource = await linkExistingResource(resourceId, scopeId, folder.folder_id);
   } catch (err) {

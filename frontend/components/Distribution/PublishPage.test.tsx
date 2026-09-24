@@ -497,9 +497,10 @@ describe('PublishPage', () => {
   it('expands a gallery card into its child images in position order', async () => {
     // API returns the children OUT of position order — the picker must sort by
     // position, never trust the response order.
+    // Service mock returns the declared `GalleryChild[]`: numeric child ids.
     getGalleryItems.mockResolvedValueOnce([
-      { id: 'c-2', filename: 'child-2.jpg', thumbnail_path: null, position: 1 },
-      { id: 'c-1', filename: 'child-1.jpg', thumbnail_path: null, position: 0 },
+      { id: 12, filename: 'child-2.jpg', thumbnail_path: null, position: 1 },
+      { id: 11, filename: 'child-1.jpg', thumbnail_path: null, position: 0 },
     ]);
 
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
@@ -521,16 +522,16 @@ describe('PublishPage', () => {
     await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
     const arg = createPublishTask.mock.calls.at(-1)?.[0];
     expect(arg.content_type).toBe('images');
-    // Children are published in POSITION order (c-1 then c-2), not the API's
+    // Children are published in POSITION order (11 then 12), not the API's
     // reversed order — and the gallery entity id itself is never published.
-    expect(arg.resource_ids).toEqual(['c-1', 'c-2']);
+    expect(arg.resource_ids).toEqual(['11', '12']);
     expect(arg.resource_ids).not.toContain('gal-1');
   });
 
   it('removes the whole gallery group on a second pick (toggle)', async () => {
     getGalleryItems.mockResolvedValueOnce([
-      { id: 'c-1', filename: 'child-1.jpg', thumbnail_path: null, position: 0 },
-      { id: 'c-2', filename: 'child-2.jpg', thumbnail_path: null, position: 1 },
+      { id: 11, filename: 'child-1.jpg', thumbnail_path: null, position: 0 },
+      { id: 12, filename: 'child-2.jpg', thumbnail_path: null, position: 1 },
     ]);
 
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
@@ -562,8 +563,9 @@ describe('PublishPage', () => {
   it('uploads picked images inline and auto-selects them in pick order', async () => {
     uploadResource.mockReset();
     uploadResource
-      .mockResolvedValueOnce({ id: 'up-1', filename: 'up-a.jpg' })
-      .mockResolvedValueOnce({ id: 'up-2', filename: 'up-b.jpg' });
+      // `uploadResource` returns a `ResourceRow`: the id is a JSON number.
+      .mockResolvedValueOnce({ id: 501, filename: 'up-a.jpg' })
+      .mockResolvedValueOnce({ id: 502, filename: 'up-b.jpg' });
 
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
@@ -589,8 +591,9 @@ describe('PublishPage', () => {
     await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
     const arg = createPublishTask.mock.calls.at(-1)?.[0];
     expect(arg.content_type).toBe('images');
-    // Selection order follows the pick order, not upload completion timing.
-    expect(arg.resource_ids).toEqual(['up-1', 'up-2']);
+    // Selection order follows the pick order, not upload completion timing,
+    // and the ids are the string form the picker list keys on.
+    expect(arg.resource_ids).toEqual(['501', '502']);
   });
 
   it('shows an error toast when an image upload fails', async () => {

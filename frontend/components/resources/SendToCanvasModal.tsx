@@ -29,7 +29,7 @@ import { listCanvases } from '../../features/canvas-core/services/canvasService'
 import type { Canvas } from '../../features/canvas-core/types';
 import { getResourceCoverUrl } from '../../services/resourceService';
 import { fetchProjects } from '../../services/projectsService';
-import type { Project } from '../../types';
+import type { Project } from '../../types/api';
 
 export interface SendToCanvasModalProps {
   /** The picture that accompanies the prompt, or `null` for a TEXT-ONLY
@@ -94,7 +94,7 @@ export function SendToCanvasModal({
   const handlePickProject = (project: Project) => {
     setSelectedProject(project);
     setLoadingCanvases(true);
-    listCanvases(project.id)
+    listCanvases(String(project.id))
       .then((rows) => setCanvases(rows.filter((c) => c.kind !== 'classic')))
       .catch((err) => console.error('[SendToCanvasModal] listCanvases failed:', err))
       .finally(() => setLoadingCanvases(false));

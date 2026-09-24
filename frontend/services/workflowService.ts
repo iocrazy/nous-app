@@ -11,8 +11,8 @@
  *     so they return the model DIRECTLY — do NOT unwrap `.data` there.
  */
 
-import { ProjectNodeCreate, ProjectNodePatch, ProjectStageNode, ProjectWorkflow, StageBoardData, StageLibraryItem, WorkflowCompletionPolicy, WorkflowTemplate, WorkflowTemplateNode, WorkflowTemplateNodeInput } from '../types';
-import type { AdvancePreview, WorkflowNodeEvents } from '../types/api';
+import { ProjectNodeCreate, ProjectNodePatch, StageLibraryItem, WorkflowCompletionPolicy, WorkflowTemplate, WorkflowTemplateNode, WorkflowTemplateNodeInput } from '../types';
+import type { AdvancePreview, FormFieldDef, NodeOut, ProjectStageNode, ProjectWorkflow, ProjectWorkflowOut, StageBoard, StageBoardData, WorkflowNodeEvents, WorkflowNodeRow } from '../types/api';
 import { apiClient } from './apiClient';
 
 interface Envelope<T> {
@@ -77,39 +77,61 @@ const normalizeTemplate = (template: WorkflowTemplate): WorkflowTemplate => ({
   nodes: template.nodes?.map(normalizeTemplateNode),
 });
 
+const COMPLETION_POLICIES: readonly WorkflowCompletionPolicy[] = ['owner', 'any_editor'];
+const NODE_SURFACES = ['script', 'storyboard', 'renders'] as const;
+type NodeSurface = (typeof NODE_SURFACES)[number];
+
+const isCompletionPolicy = (v: unknown): v is WorkflowCompletionPolicy =>
+  typeof v === 'string' && (COMPLETION_POLICIES as readonly string[]).includes(v);
+const isNodeSurface = (v: unknown): v is NodeSurface =>
+  typeof v === 'string' && (NODE_SURFACES as readonly string[]).includes(v);
+
 /** Same normalization for a live instance node (`project_stage_nodes`) —
- * GET /projects/{id}/workflow, POST .../nodes and PATCH .../nodes/{id} all
- * round-trip through this so a pre-mig-386 row never hands `undefined` to a
- * consumer reading e.g. `node.events.notify_on_arrival`. */
-const normalizeInstanceNode = (
-  node: Partial<ProjectStageNode> & Omit<ProjectStageNode, 'completion_policy' | 'events'>,
-): ProjectStageNode => ({
+ * GET /projects/{id}/workflow (`NodeOut`) and the node write endpoints + the
+ * Stage Board (`WorkflowNodeRow`, the bare DB row) all round-trip through this
+ * so a pre-mig-386 row never hands `undefined` to a consumer reading e.g.
+ * `node.events.notify_on_arrival`. The two wire shapes differ only in how
+ * loosely the JSONB / enum columns are typed; this is the one place that
+ * narrows them. */
+const normalizeInstanceNode = (node: NodeOut | WorkflowNodeRow): ProjectStageNode => ({
   ...node,
-  completion_policy: node.completion_policy ?? DEFAULT_COMPLETION_POLICY,
-  events: normalizeEvents(node.events),
+  completion_policy: isCompletionPolicy(node.completion_policy)
+    ? node.completion_policy
+    : DEFAULT_COMPLETION_POLICY,
+  // `WorkflowNodeRow.events` is the raw JSONB dict; the server only ever
+  // writes a `WorkflowNodeEvents` into it, and normalizeEvents defaults any
+  // key that's missing, so reading it as a partial of that shape is safe.
+  events: normalizeEvents(node.events as Partial<WorkflowNodeEvents> | undefined),
   // mig 389 (M3 PR-H3): tolerate a row that predates the metadata column (or
   // one the stage hook never touched) — the Run now chip reads
   // `node.metadata?.run_prepared_at` and must never see `undefined` blow up
   // into a crash, just an absent key.
-  metadata: node.metadata ?? {},
+  metadata:
+    typeof node.metadata?.run_prepared_at === 'string'
+      ? { run_prepared_at: node.metadata.run_prepared_at }
+      : {},
   // mig 390 (M3 PR-I §2, task I4): same tolerance for a pre-mig-390 row —
   // StageNodeForm/CurrentNodeCard's form-count row iterate these directly
-  // and must never see `undefined`.
-  form_schema: node.form_schema ?? [],
+  // and must never see `undefined`. The row's column is `unknown[]`; it is
+  // copied verbatim from the template's validated `FormFieldDef[]` (I2).
+  form_schema: (node.form_schema ?? []) as FormFieldDef[],
   form_data: node.form_data ?? {},
   // mig 391 (M3 PR-J): dependency edges — real, stable instance node ids.
   // Tolerate a pre-mig-391 row the same way as the fields above.
   depends_on: node.depends_on ?? [],
-  // mig 402 (B1): the frozen creative surface. Missing (legacy instance rows
-  // pre-mig-402) degrades to `null` = deliverable-only node (spec §5③, the
-  // most conservative fallback). B5 reads this for episode view tabs + the
-  // deliverable-node dashed border.
-  surface: node.surface ?? null,
+  // mig 402 (B1): the frozen creative surface. Missing / unknown (legacy
+  // instance rows pre-mig-402) degrades to `null` = deliverable-only node
+  // (spec §5③, the most conservative fallback). B5 reads this for episode
+  // view tabs + the deliverable-node dashed border.
+  surface: isNodeSurface(node.surface) ? node.surface : null,
   // mig 395 (M4 Autopilot, task O1/O2): pre-work notes — CurrentNodeCard's
   // and WorkspaceStageBoard's brief textareas seed straight off this and must
   // never see `undefined` (the defaulted-seed idiom, StageNodeForm's
   // `lastSaved` fix) on a pre-mig-395 row.
   brief: node.brief ?? '',
+  members: node.members ?? [],
+  // `WorkflowNodeRow` doesn't carry the filed-file count (only NodeOut does).
+  deliverable_file_count: 'deliverable_file_count' in node ? node.deliverable_file_count : 0,
 });
 
 // ============================================
@@ -209,7 +231,7 @@ export const fetchProjectWorkflow = async (
 ): Promise<ProjectWorkflow> => {
   // NOTE: declares a FastAPI response_model → returns the model directly (no
   // `{data}` envelope). Do not add a `.data` unwrap here.
-  const workflow = await apiClient.get<ProjectWorkflow>(
+  const workflow = await apiClient.get<ProjectWorkflowOut>(
     `/api/v1/projects/${projectId}/workflow`,
     { query: { episode_id: episodeId } },
   );
@@ -229,7 +251,7 @@ export const attachProjectWorkflow = async (
   projectId: string,
   body: { template_id: string; method?: 'live' | 'ai' | 'hybrid' | null },
 ): Promise<ProjectStageNode[]> => {
-  const response = await apiClient.post<Envelope<ProjectStageNode[]>>(
+  const response = await apiClient.post<Envelope<WorkflowNodeRow[]>>(
     `/api/v1/projects/${projectId}/workflow`,
     body,
   );
@@ -244,7 +266,7 @@ export const addProjectNode = async (
   projectId: string,
   body: ProjectNodeCreate,
 ): Promise<ProjectStageNode> => {
-  const response = await apiClient.post<Envelope<ProjectStageNode>>(
+  const response = await apiClient.post<Envelope<WorkflowNodeRow>>(
     `/api/v1/projects/${projectId}/workflow/nodes`,
     body,
   );
@@ -272,7 +294,7 @@ export const updateProjectNode = async (
   nodeId: string,
   patch: ProjectNodePatch,
 ): Promise<ProjectStageNode> => {
-  const response = await apiClient.patch<Envelope<ProjectStageNode>>(
+  const response = await apiClient.patch<Envelope<WorkflowNodeRow>>(
     `/api/v1/projects/${projectId}/workflow/nodes/${nodeId}`,
     patch,
   );
@@ -299,7 +321,7 @@ export const startEarlyNode = async (
   nodeId: string,
   episodeId: string,
 ): Promise<ProjectStageNode> => {
-  const response = await apiClient.post<Envelope<ProjectStageNode>>(
+  const response = await apiClient.post<Envelope<WorkflowNodeRow>>(
     `/api/v1/projects/${projectId}/workflow/nodes/${nodeId}/start-early`,
     undefined,
     { query: { episode_id: episodeId } },
@@ -355,7 +377,7 @@ export const fetchStageBoard = async (
   projectId: string,
   nodeId: string,
 ): Promise<StageBoardData> => {
-  const response = await apiClient.get<Envelope<StageBoardData>>(
+  const response = await apiClient.get<Envelope<StageBoard>>(
     `/api/v1/projects/${projectId}/workflow/nodes/${nodeId}/board`,
   );
   if (!response.data) throw new Error('Empty response from fetchStageBoard');
