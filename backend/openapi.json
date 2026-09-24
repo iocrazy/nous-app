@@ -19267,6 +19267,11 @@
             ],
             "title": "Error"
           },
+          "idle": {
+            "default": false,
+            "title": "Idle",
+            "type": "boolean"
+          },
           "not_probed": {
             "default": false,
             "title": "Not Probed",

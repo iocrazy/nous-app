@@ -24877,6 +24877,11 @@ export interface components {
             /** Error */
             error?: string | null;
             /**
+             * Idle
+             * @default false
+             */
+            idle: boolean;
+            /**
              * Not Probed
              * @default false
              */
