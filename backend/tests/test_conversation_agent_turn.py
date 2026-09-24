@@ -438,3 +438,85 @@ async def test_empty_memory_block_leaves_instructions_unchanged() -> None:
 
     composer_input = captured["input"]
     assert composer_input.request_instructions == _UNTRUSTED_CHANNEL_INSTRUCTION
+
+
+# ─── PR 5: LibrarySearch on the @agent road ──────────────────────────────────
+
+
+async def _run_turn_with_caps(*, read: bool) -> tuple[MagicMock, MagicMock]:
+    mock_repo = MagicMock()
+    mock_repo.get_by_slug = AsyncMock(return_value=_make_agent())
+    mock_conv_repo = MagicMock()
+    mock_conv_repo.recent_messages = AsyncMock(
+        return_value=[{"sender_type": "user", "type": "text", "body": {"text": "hi"}}]
+    )
+    runner = _make_runner()
+    runner.library_search_handler = None
+
+    async def _fake_run_turn(composed, *, user_messages, recorder) -> dict:
+        return {"content": "ok"}
+
+    runner.run_turn = _fake_run_turn
+    fake_composed = _make_composed()
+    with (
+        patch(f"{_MOD}.get_agent_repository", return_value=mock_repo),
+        patch(f"{_MOD}.agent_chat_caps", return_value=_make_caps(read=read)),
+        patch(f"{_MOD}.get_conversation_repository", return_value=mock_conv_repo),
+        patch(f"{_MOD}.get_skill_repository", return_value=MagicMock()),
+        patch(
+            f"{_MOD}.build_agent_runner_stack",
+            AsyncMock(return_value=_make_stack(runner)),
+        ),
+        patch(f"{_MOD}.PromptComposer", _make_composer(fake_composed)),
+        patch(f"{_MOD}.RunRecorder", return_value=_make_recorder_cm()),
+        patch(f"{_MOD}.provider_key_for_model", return_value="qwen"),
+    ):
+        from app.services.chat.conversation_agent_turn import (
+            run_conversation_agent_turn,
+        )
+
+        assert (
+            await run_conversation_agent_turn(
+                agent_slug=AGENT_SLUG,
+                summoner_user_id=SUMMONER,
+                conversation=CONVERSATION,
+            )
+            == "ok"
+        )
+    return runner, fake_composed
+
+
+def _tool_names(composed: MagicMock) -> list[str]:
+    return [t["function"]["name"] for t in composed.tools]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_library_search_is_mounted_and_bound_to_the_summoner() -> None:
+    runner, composed = await _run_turn_with_caps(read=True)
+    assert "LibrarySearch" in _tool_names(composed)
+
+    seen: dict = {}
+
+    async def _fake_search(**kw):
+        seen.update(kw)
+        return {"hits": []}
+
+    with patch(
+        "app.services.ai.tools.library_search_tool.library_search", _fake_search
+    ):
+        out = await runner.library_search_handler({"query": "rain", "limit": 2})
+    assert out == {"hits": []}
+    assert seen["user_id"] == SUMMONER
+    assert seen["query"] == "rain" and seen["limit"] == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_library_search_is_withheld_without_read_permission() -> None:
+    """Same gate as ResourceFetch: results would be posted into a shared
+    channel, so an agent that may not read files does not search either."""
+    runner, composed = await _run_turn_with_caps(read=False)
+    assert "LibrarySearch" not in _tool_names(composed)
+    out = await runner.library_search_handler({"query": "rain"})
+    assert "not permitted" in out["error"]

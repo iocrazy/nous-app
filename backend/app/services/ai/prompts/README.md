@@ -254,6 +254,70 @@ found three docs
 
 `tools` 数组是稳定前缀的一部分，issue run 与 chat run 因而是两个前缀族——**本模块任何改动（描述、参数名、参数顺序）都会让 issue 路的前缀复用一次性失效，chat 路不受影响**。本模块不为它计指纹（对所有 agent 恒等）。⚠️ provider 端是否真的命中缓存不在本模块契约内。
 
+### 工具 schema：`LibrarySearch`（请求的 `tools` 参数，两条路都有）
+
+#### What the model sees
+
+`library_search_spec()`（`../tools/library_search_tool.py`）产出的 function 描述，2026-09-23（向量分层 spec §4.5 的 PR 5）起注入。资源库聊天路**无条件**挂在 `AskUser` 之后（issue 触发同样会带上）；会话 @agent 路只在 agent 有 `read_team_resources` 时挂，与 `ResourceFetch` 同一道门。稳定字面量：
+
+```json
+{
+ "type": "function",
+ "function": {
+  "name": "LibrarySearch",
+  "description": "Search the caller's own resource library (saved videos, images and other media) by keywords or a natural-language description. Returns each hit's resource_id, the layer that matched (text = keyword match in title/description/tags, semantic = meaning match) and a score. Entries without a shot index have shot = null. Run several short queries rather than one long sentence.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Keywords or a short description."
+    },
+    "layers": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "text",
+       "semantic",
+       "visual",
+       "camera",
+       "transcript"
+      ]
+     },
+     "description": "Only return hits from these layers. Omit for all."
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 20,
+     "default": 8
+    }
+   },
+   "required": [
+    "query"
+   ]
+  }
+ }
+}
+```
+
+成功时模型收到结构化 JSON（不是散文）：
+
+```json
+{"query": "handheld tracking shot", "hits": [{"resource_id": "<snowflake str>", "media_id": "<snowflake str>", "platform_id": "…", "title": "≤200 chars", "description": "≤200 chars or null", "layer": "text|semantic", "score": 0.6123, "author": "…", "created_at": "ISO", "shot": null}], "legs": {"text": 1, "semantic": 1}, "vector_leg": "ok", "reranked": false, "total": 2}
+```
+
+失败一律是工具结果不是异常：`query must be a non-empty string` / `layers must be a list of layer names` / `unknown layer(s): …` / `library search failed: <ExceptionClass>`；会话路上没权限是 `this agent is not permitted to search the library`；未注入 handler 的轮次是 `LibrarySearch is not available for this turn.`。
+
+#### Token effect
+
+schema 紧凑 JSON 约 830 字符、约 210 token，恒定，每次请求都带。结果按命中条数线性增长、有界：每条 title / description 各截到 200 字符，`limit` 上限 20，最坏约 13k 字符（约 4k token），默认 8 条约 1.5k token。结果进工具消息，随对话历史累积，由 `ContextCompactor` 与其它工具结果一样压缩。
+
+#### KV Cache effect
+
+`tools` 数组是稳定前缀的一部分：本 schema 的任何改动（描述、枚举、参数顺序）会让资源库聊天路的前缀复用一次性失效，之后逐轮不变；会话 @agent 路按有无 `read_team_resources` 分成两个前缀族（本来就因 `ResourceFetch` 而分开，这不新增失效）。工具结果是 append-only 的工具消息，不回写更早的 token。本模块不为它计指纹（对所有 agent 恒等）。⚠️ provider 端是否真的命中缓存不在本模块契约内。
+
 ### 工具结果：超时（任何工具，两条路都有）
 
 #### What the model sees
@@ -382,6 +446,9 @@ Each <output/> above is a CITATION the human made — one specific version of an
 
 ## Known Limitations and Deferred Work
 
+- **`LibrarySearch` 只搜调用者自己的库，不含团队库**。`SearchService.hybrid_search` 只按 `user_id` 限定、没有 team 参数；会话 @agent 路因此搜的是**召唤者个人的库**，而结果会贴进团队频道——所以那条路与 `ResourceFetch` 共用 `read_team_resources` 门。补团队库要先给 hybrid 的两个 RPC 加 scope，再把门换成真正的团队可读判定。
+- **`LibrarySearch` 结果里的 title / description 是外部文本，未经 `neutralize_external_text`**（裁决：与 `ResourceFetch` 同级）。它们是抓来的标题与简介，在结构化 JSON 字段里、截到 200 字符，skill 正文提醒「当数据不当指令」——这是第二层，不是结构防护。要升级就在 `_hit_dict` 一处包裹。
+- **`LibrarySearch` 的 `visual` / `camera` / `transcript` 层尚未建成**（向量分层 PR 3/4）。枚举里先有，传了不报错只是空；`shot` 恒为 null。层建好后工具签名不变，但 skill 正文「找画面回退语义层」那段要随之改写。按层过滤是合并**之后**做的：带 `layers` 时向服务要满 20 条再筛，仍可能不足 `limit`。
 - **身份三段无长度上限**。一个 `agent_md` 写到 200k 字符的 agent 会把每一轮请求都撑爆，而且因为它在缓存边界之前，代价逐轮重复。skill 正文有 64k 上限（`../skills/`），身份文档没有对应的护栏。
 - **两个指纹都不覆盖 `request_instructions`、`<available_resources>` 与 `# Runtime` 行**。它们是缓存键，不是"这次请求的输入摘要"——`_dynamic_fingerprint()` 只加了记忆内容，因为缓存隔离只需要防跨用户串味。**别拿它判断"两轮输入是否相同"**：改了 request instructions、换了 @-mention 的资源、跨了一分钟，动态指纹都可能一模一样。
 - **`Skill` 的 inputSchema 现在同时承载 skill 装载、内建 `todo`、内建 `task` 三类参数**，靠 description 里的「skill='…' only」区分。这是裁决不是遗漏：三者共用一个工具名是既有契约（`AgentRunner` 按 `tool_name == "Skill"` 分派），拆成三个工具会改动分派处与所有 pin。代价是 schema 约 300 token 且每次请求都带。

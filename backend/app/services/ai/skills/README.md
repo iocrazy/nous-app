@@ -60,3 +60,4 @@ This file is a binary reference (PDF/image/etc.) and cannot be returned inline. 
 - **重复调用不去重**：同一个 skill 在一次会话里调 N 次，正文进历史 N 次。系统提示词里那句"Never call Skill more than once per turn"是靠模型自觉，没有机制拦截。
 - **64k 上限是按字符不是按 token 数**。CJK 内容的实际 token 数可以是英文同等字符数的两倍以上，所以对中文 skill 而言这个上限比预期宽松得多。
 - **`binary_url` 直接给模型**，能不能取到取决于模型自己有没有 file-reader 工具；本模块不代取，也不校验 URL 是否仍然有效。
+- **`library-search` 的改写效果未量化**（正文标 v1）。中英互补、长句拆分的指导来自向量分层 spec §4.5 的设计，没有跑过检索基准；spec 的口径是先量再定正文，所以改这份正文要带数字。它绑定在 `script_ai` / `coordinator` / `storyboard` 三个 agent 上（`seed_loader.AGENT_SKILL_SLUGS`）。

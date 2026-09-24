@@ -15,6 +15,7 @@ SRC = (
 HANDLERS = [
     r"self\.skill_tool\.execute\(",
     r"self\.resource_fetch_handler\(",
+    r"self\.library_search_handler\(",
     r"self\.generate_image_handler\(",
     r"self\.generate_video_handler\(",
     r"self\.mcp_registry\.call\(",
@@ -32,7 +33,7 @@ def test_every_tool_await_is_wrapped():
         for m in re.finditer(r"await\s+" + pat, text):
             bare.append((pat, text[: m.start()].count("\n") + 1))
     assert bare == [], f"tool handlers awaited without _timed: {bare}"
-    # 9 handler sites per loop × 2 loops
+    # 10 handler sites per loop × 2 loops
     assert (
-        text.count("self._timed(") >= 18
+        text.count("self._timed(") >= 20
     ), "both loops must route every handler through _timed"

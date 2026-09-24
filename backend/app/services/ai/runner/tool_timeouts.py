@@ -24,6 +24,9 @@ DEFAULTS: dict[str, Optional[float]] = {
     "FinishIssue": None,
     "AskUser": None,
     "ResourceFetch": 200,
+    # Hybrid search: the embed call is capped at HYBRID_EMBED_TIMEOUT_S (5s)
+    # and degrades to text-only; the rest is two indexed RPCs + one lookup.
+    "LibrarySearch": 30,
     "GenerateImage": 600,
     # Submit-only since #2398: validate, file a task, start the workflow —
     # seconds. The render outlives the turn, so a hung submit must fail fast

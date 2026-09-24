@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 
 import type { ChatToolCall } from '../../types';
+import { LibrarySearchCard } from './LibrarySearchCard';
 import { getSupabaseClient } from '../../supabaseClient';
 import {
   workforceService,
@@ -76,6 +77,13 @@ export function summarizeToolCall(call: ChatToolCall): ToolCallSummary {
     const label = file ? `${skillSlug} · ${file}` : skillSlug;
     const status = errorText || (file ? 'loaded' : 'read');
     return { label, status, isError };
+  }
+
+  if (call.name === 'LibrarySearch') {
+    const query = typeof args.query === 'string' ? args.query : '';
+    const hits = Array.isArray(result.hits) ? result.hits.length : 0;
+    const label = query ? `LibrarySearch · ${query}` : 'LibrarySearch';
+    return { label, status: errorText || `${hits} hits`, isError };
   }
 
   return {
@@ -336,12 +344,16 @@ export function SubTaskList({ calls }: SubTaskListProps): React.ReactElement | n
   if (!calls || calls.length === 0) return null;
   return (
     <div className="px-3 pt-2">
-      {calls.map((call, idx) => (
-        <SubTaskCard
-          key={`${call.iteration}-${call.name}-${idx}`}
-          call={call}
-        />
-      ))}
+      {calls.map((call, idx) =>
+        call.name === 'LibrarySearch' ? (
+          <LibrarySearchCard key={`${call.iteration}-${call.name}-${idx}`} call={call} />
+        ) : (
+          <SubTaskCard
+            key={`${call.iteration}-${call.name}-${idx}`}
+            call={call}
+          />
+        ),
+      )}
     </div>
   );
 }

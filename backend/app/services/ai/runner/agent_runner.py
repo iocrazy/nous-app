@@ -136,6 +136,9 @@ SUPPORTED_TOOLS: frozenset[str] = frozenset(
         "Skill",
         "Delegate",
         "ResourceFetch",
+        # PR 5: search the caller's own library; handler injected per turn
+        # on both chat roads, like ResourceFetch.
+        "LibrarySearch",
         "FinishIssue",
         "GenerateImage",
         "GenerateVideo",
@@ -320,6 +323,10 @@ class AgentRunner:
         # attachments. None means no @-referenced resources for this turn —
         # calls to ResourceFetch return a clear error instead of crashing.
         self.resource_fetch_handler: Optional[Any] = None
+        # PR 5: per-request LibrarySearch handler (bound to the caller's
+        # user id by the chat service / conversation @agent turn). None ->
+        # a clear error result, never a crash.
+        self.library_search_handler: Optional[Any] = None
         # Whether the turn's model accepts image parts. Set by the chat
         # service (model_supports_vision) each turn; gates the promotion of
         # image-bearing tool results into user-message image parts. Default
@@ -950,6 +957,23 @@ class AgentRunner:
                             )
                             result = {
                                 "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
+                            }
+                elif tool_name == "LibrarySearch":
+                    if self.library_search_handler is None:
+                        result = {
+                            "error": "LibrarySearch is not available for this turn."
+                        }
+                    else:
+                        try:
+                            result = await self._timed(
+                                tool_name, self.library_search_handler(args)
+                            )
+                        except Exception as ls_exc:
+                            logger.warning(
+                                f"[AgentRunner] LibrarySearch handler raised: {ls_exc!r}"
+                            )
+                            result = {
+                                "error": f"LibrarySearch failed: {ls_exc.__class__.__name__}"
                             }
                 elif tool_name == ASK_USER_TOOL_NAME:
                     result = await self._timed(
@@ -2185,6 +2209,23 @@ class AgentRunner:
                             )
                             result = {
                                 "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
+                            }
+                elif tool_name == "LibrarySearch":
+                    if self.library_search_handler is None:
+                        result = {
+                            "error": "LibrarySearch is not available for this turn."
+                        }
+                    else:
+                        try:
+                            result = await self._timed(
+                                tool_name, self.library_search_handler(args)
+                            )
+                        except Exception as ls_exc:
+                            logger.warning(
+                                f"[AgentRunner] LibrarySearch handler raised: {ls_exc!r}"
+                            )
+                            result = {
+                                "error": f"LibrarySearch failed: {ls_exc.__class__.__name__}"
                             }
                 elif tool_name == ASK_USER_TOOL_NAME:
                     result = await self._timed(

@@ -183,54 +183,110 @@ async def test_load_skills_categorizes_scripts(tmp_path: Path) -> None:
     assert kwargs["file_type"] == "script"
 
 
-# ─── _bind_script_ai_skills ───────────────────────────────────────────
+# ─── _bind_agent_skills (AGENT_SKILL_SLUGS) ───────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_bindings_set_when_all_three_skills_present(
-    tmp_path: Path,
-) -> None:
-    """All 3 target skills exist + script_ai agent exists → bindings=3."""
-    agent_id = str(uuid4())
-    agent_repo = _make_agent_repo(
-        get_by_slug_result={"id": agent_id, "slug": "script_ai"}
-    )
-
-    # Return a resolved skill for each slug
-    skill_rows = {
-        "script-outline": {"id": 10},
-        "script-expand": {"id": 20},
-        "script-branch": {"id": 30},
-    }
-
+def _skill_repo_with(rows: dict[str, Any]) -> AsyncMock:
     async def _get_skill_by_slug(slug: str) -> Any:
-        return skill_rows.get(slug)
+        return rows.get(slug)
 
     skill_repo = _make_skill_repo()
     skill_repo.get_by_slug.side_effect = _get_skill_by_slug
+    return skill_repo
 
-    loader = SeedLoader(agent_repo, skill_repo, tmp_path)
-    bound = await loader._bind_script_ai_skills([])
 
-    assert bound == 3
-    agent_repo.update_skill_bindings.assert_awaited_once()
-    args = agent_repo.update_skill_bindings.await_args.args
-    assert args[1] == [10, 20, 30]
+def _agent_repo_with(agents: dict[str, Any]) -> AsyncMock:
+    agent_repo = _make_agent_repo()
+
+    async def _get_agent_by_slug(slug: str) -> Any:
+        return agents.get(slug)
+
+    agent_repo.get_by_slug.side_effect = _get_agent_by_slug
+    return agent_repo
 
 
 @pytest.mark.asyncio
-async def test_bindings_skip_when_script_ai_missing(
-    tmp_path: Path,
-) -> None:
-    """script_ai agent not found → bindings returns 0, never calls update."""
-    agent_repo = _make_agent_repo(get_by_slug_result=None)
-    skill_repo = _make_skill_repo()
+async def test_bindings_follow_the_agent_skill_table(tmp_path: Path) -> None:
+    """Every agent in AGENT_SKILL_SLUGS gets exactly its listed skills, in
+    table order; script_ai keeps its three and gains library-search."""
+    ids = {str(uuid4()): slug for slug in ("script_ai", "coordinator", "storyboard")}
+    agents = {slug: {"id": aid, "slug": slug} for aid, slug in ids.items()}
+    skill_repo = _skill_repo_with(
+        {
+            "script-outline": {"id": 10},
+            "script-expand": {"id": 20},
+            "script-branch": {"id": 30},
+            "library-search": {"id": 40},
+        }
+    )
+    agent_repo = _agent_repo_with(agents)
 
     loader = SeedLoader(agent_repo, skill_repo, tmp_path)
-    bound = await loader._bind_script_ai_skills([])
+    bound = await loader._bind_agent_skills([])
 
-    assert bound == 0
-    agent_repo.update_skill_bindings.assert_not_awaited()
+    got = {
+        ids[str(c.args[0])]: c.args[1]
+        for c in agent_repo.update_skill_bindings.await_args_list
+    }
+    assert got == {
+        "script_ai": [10, 20, 30, 40],
+        "coordinator": [40],
+        "storyboard": [40],
+    }
+    assert bound == 6
+
+
+@pytest.mark.asyncio
+async def test_bindings_skip_missing_agents(tmp_path: Path) -> None:
+    """An agent absent from the DB is skipped; the others still bind."""
+    aid = str(uuid4())
+    agent_repo = _agent_repo_with({"coordinator": {"id": aid, "slug": "coordinator"}})
+    skill_repo = _skill_repo_with({"library-search": {"id": 40}})
+
+    loader = SeedLoader(agent_repo, skill_repo, tmp_path)
+    bound = await loader._bind_agent_skills([])
+
+    assert bound == 1
+    agent_repo.update_skill_bindings.assert_awaited_once()
+    assert agent_repo.update_skill_bindings.await_args.args[1] == [40]
+
+
+@pytest.mark.asyncio
+async def test_one_failing_agent_does_not_abort_the_others(tmp_path: Path) -> None:
+    agents = {
+        slug: {"id": str(uuid4()), "slug": slug}
+        for slug in ("script_ai", "coordinator", "storyboard")
+    }
+    agent_repo = _agent_repo_with(agents)
+    calls: list[Any] = []
+
+    async def _update(agent_id: Any, skill_ids: list[int]) -> None:
+        calls.append(skill_ids)
+        if len(calls) == 1:
+            raise RuntimeError("db hiccup")
+
+    agent_repo.update_skill_bindings.side_effect = _update
+    skill_repo = _skill_repo_with({"library-search": {"id": 40}})
+    errors: list[dict[str, Any]] = []
+
+    loader = SeedLoader(agent_repo, skill_repo, tmp_path)
+    await loader._bind_agent_skills(errors)
+
+    assert len(calls) == 3
+    assert len(errors) == 1 and errors[0]["scope"] == "binding"
+
+
+def test_agent_skill_table_matches_seed_directories() -> None:
+    """Every agent slug has a seed directory and every skill slug a SKILL.md,
+    so a typo cannot silently bind nothing."""
+    from app.services.ai.runner.seed_loader import AGENT_SKILL_SLUGS
+
+    seeds = Path(__file__).resolve().parents[1] / "seeds"
+    agents_on_disk = {p.name for p in (seeds / "agents").iterdir() if p.is_dir()}
+    assert set(AGENT_SKILL_SLUGS) <= agents_on_disk
+    for slugs in AGENT_SKILL_SLUGS.values():
+        for slug in slugs:
+            assert (seeds / "skills" / slug / "SKILL.md").is_file(), slug
 
 
 # ─── _load_skill_subfiles reconcile (V6pre②) ─────────────────────────

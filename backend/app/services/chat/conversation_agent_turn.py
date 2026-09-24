@@ -286,6 +286,43 @@ def _build_resource_fetch_handler(
     return _handler
 
 
+def _build_library_search_handler(
+    *,
+    caps: Any,
+    summoner_user_id: str,
+    conversation: dict[str, Any],
+    agent_slug: str,
+) -> Any:
+    """LibrarySearch on the @agent road (PR 5), bound to the summoner.
+
+    Searches the SUMMONER's own library only — ``hybrid_search`` has no team
+    argument yet. Gated by the same ``read_team_resources`` cap as
+    ResourceFetch: the hits get posted into a shared channel, so an agent that
+    may not read files may not search them either.
+    """
+    conversation_id = conversation["id"]
+
+    async def _handler(args: dict[str, Any]) -> dict[str, Any]:
+        if not caps.read_team_resources:
+            logger.warning(
+                f"[CHAT-SEC-AGENT-08] library_search_denied(read_team_resources=False): "
+                f"agent={agent_slug} summoner={summoner_user_id} "
+                f"conversation={conversation_id}"
+            )
+            return {"error": "this agent is not permitted to search the library"}
+
+        from app.services.ai.tools import library_search_tool
+
+        return await library_search_tool.library_search(
+            query=args.get("query"),
+            layers=args.get("layers"),
+            limit=args.get("limit"),
+            user_id=summoner_user_id,
+        )
+
+    return _handler
+
+
 async def run_conversation_agent_turn(
     *,
     agent_slug: str,
@@ -409,9 +446,17 @@ async def run_conversation_agent_turn(
     )
     # Expose the ResourceFetch tool in the tool list only when permitted.
     # (The handler will refuse if invoked without read_team_resources.)
+    runner.library_search_handler = _build_library_search_handler(
+        caps=caps,
+        summoner_user_id=summoner_user_id,
+        conversation=conversation,
+        agent_slug=agent_slug,
+    )
     tools_list = list(composed.tools or [])
     if caps.read_team_resources:
-        tools_list = tools_list + [_RESOURCE_FETCH_SPEC]
+        from app.services.ai.tools.library_search_tool import library_search_spec
+
+        tools_list = tools_list + [_RESOURCE_FETCH_SPEC, library_search_spec()]
     composed = composed.model_copy(update={"tools": tools_list})
 
     model = composed.model or ""

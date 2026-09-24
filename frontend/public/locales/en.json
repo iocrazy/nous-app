@@ -4072,6 +4072,13 @@
       "run": "Run",
       "noRuns": "No agent runs in this conversation yet",
       "noTrajectory": "No recorded steps for this run"
+    },
+    "librarySearch": {
+      "title": "Library Search",
+      "noMatches": "No matches in your library",
+      "untitled": "Untitled",
+      "notInLibrary": "Not linked to a library item",
+      "vectorLegDegraded": "Keyword matches only · semantic search {{outcome}}"
     }
   },
   "mcp": {
