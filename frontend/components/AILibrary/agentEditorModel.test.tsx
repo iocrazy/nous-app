@@ -198,3 +198,51 @@ describe('renderModelSelect — non-chat note', () => {
     expect(flash.dataset.note).toBe('non-chat');
   });
 });
+
+describe('visiblePlatformModels — failed probe (2026-09-24)', () => {
+  const rows = [
+    { name: 'ok', last_test_status: 'ok' as const },
+    { name: 'failed', last_test_status: 'fail' as const },
+    { name: 'unprobed', last_test_status: 'not_probed' as const },
+    { name: 'never', last_test_status: null },
+    { name: 'absent' },
+  ];
+
+  it('drops failed rows and keeps ok / not_probed / never-probed', async () => {
+    const { visiblePlatformModels } = await import('./agentEditorModel');
+    expect(visiblePlatformModels(rows, undefined).map((m) => m.name)).toEqual([
+      'ok',
+      'unprobed',
+      'never',
+      'absent',
+    ]);
+  });
+
+  it('applies the failed filter on top of the user blacklist', async () => {
+    const { visiblePlatformModels } = await import('./agentEditorModel');
+    const cfg = { enabled: true, disabled_models: ['ok'] } as never;
+    expect(visiblePlatformModels(rows, cfg).map((m) => m.name)).toEqual([
+      'unprobed',
+      'never',
+      'absent',
+    ]);
+  });
+});
+
+describe('renderModelSelect — orphan labels', () => {
+  it('says "unavailable" for a saved model the caller knows was hidden', () => {
+    renderSelect({
+      value: 'nous-hidden',
+      orphanLabels: { 'nous-hidden': 'hidden-model-id (unavailable)' },
+    });
+    const opt = document.querySelector('option[data-orphan="unavailable"]');
+    expect(opt?.textContent).toBe('hidden-model-id (unavailable)');
+    expect(screen.queryByText(/provider not enabled/)).toBeNull();
+  });
+
+  it('keeps the generic stale wording for any other orphan', () => {
+    renderSelect({ value: 'gone-model', orphanLabels: {} });
+    const opt = document.querySelector('option[data-orphan="stale"]');
+    expect(opt?.textContent).toContain('gone-model');
+  });
+});
