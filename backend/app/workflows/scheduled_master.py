@@ -682,6 +682,9 @@ _AGENT_WAKEUP_INACTIVE_STATUSES = ("in_review", "needs_followup")
 #: Same spelling as ``user_schedules_repository.ISSUE_NOT_ACTIVE`` (the disarm
 #: on completion writes it too), so the Schedules block shows one label.
 _WAKEUP_ISSUE_NOT_ACTIVE = "issue_not_active"
+#: Order flag: the issue is parked on the needs_input gate, so the body puts
+#: the wake-up on the inbox directly instead of calling deliver_or_dispatch.
+_WAKEUP_DELIVER_INBOX = "inbox"
 
 
 def _as_dict(value: Any) -> Dict[str, Any]:
@@ -701,8 +704,10 @@ def _as_dict(value: Any) -> Dict[str, Any]:
 
 
 async def _load_issue(issue_id: int) -> Optional[Dict[str, Any]]:
-    """Status + hidden_at of the issue a wake-up targets. Its own function so
-    the fire logic can be tested without a database."""
+    """What the fire guard reads about the issue a wake-up targets: status,
+    ``hidden_at``, and the two columns the parked predicate
+    (``is_parked_on_input``) needs. Its own function so the fire logic can be
+    tested without a database."""
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -712,9 +717,12 @@ async def _load_issue(issue_id: int) -> Optional[Dict[str, Any]]:
         return (
             (
                 await session.execute(
-                    select(Issues.status, Issues.hidden_at).where(
-                        Issues.id == int(issue_id)
-                    )
+                    select(
+                        Issues.status,
+                        Issues.hidden_at,
+                        Issues.execution_state,
+                        Issues.execution_locked_at,
+                    ).where(Issues.id == int(issue_id))
                 )
             )
             .mappings()
@@ -875,9 +883,17 @@ async def _fire_issue_wakeup(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     will never accept it, so the row is disabled and counted as skipped. A
     wake-up that can never land, retried every minute, is pure noise.
 
+    A PARKED issue — a workflow suspended on the needs_input gate, lock held
+    (``is_parked_on_input``) — takes the wake-up into its inbox: the order
+    carries ``deliver="inbox"`` and the body enqueues it without asking the
+    idle question (FH2 T2). Checked BEFORE the inactive guard below, because
+    a parked issue is ``needs_followup`` and that guard used to disable the
+    row and lose the note.
+
     An AGENT's wake-up on an issue waiting on a person (in_review /
-    needs_followup) is disabled the same way, with ``issue_not_active``
-    (defect B). A user's wake-up there is delivered as before."""
+    needs_followup) with nothing parked is disabled the same way, with
+    ``issue_not_active`` (defect B). A user's wake-up there is delivered as
+    before."""
     payload = _as_dict(row.get("payload"))
     issue_id = payload.get("issue_id")
     text = (payload.get("text") or "").strip()
@@ -897,8 +913,12 @@ async def _fire_issue_wakeup(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         )
         return None
 
+    from app.services.issues.execution_state import is_parked_on_input
+
+    parked = is_parked_on_input(issue)
     if (
-        payload.get("created_by") == "agent"
+        not parked
+        and payload.get("created_by") == "agent"
         and issue.get("status") in _AGENT_WAKEUP_INACTIVE_STATUSES
     ):
         await _disable_schedule(row["id"], _WAKEUP_ISSUE_NOT_ACTIVE, bump_skipped=True)
@@ -913,7 +933,7 @@ async def _fire_issue_wakeup(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # advanced, so a retry of the SAME wake-up produces the SAME key — which
     # is what makes the retry safe to attempt at all.
     fire_at = row.get("next_fire_at")
-    return {
+    order: Dict[str, Any] = {
         "kind": "issue_wakeup",
         "sched_id": str(row["id"]),
         "fire_key": (
@@ -928,6 +948,9 @@ async def _fire_issue_wakeup(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "created_by": payload.get("created_by") or "user",
         },
     }
+    if parked:
+        order["deliver"] = _WAKEUP_DELIVER_INBOX
+    return order
 
 
 async def _resolve_workflow_callable(task_type: str):
@@ -1039,22 +1062,42 @@ async def _dispatch_issue_wakeup(
     idempotent: this function runs in the workflow BODY, whose writes no step
     record covers, so a crash makes DBOS replay it verbatim.
 
+    An order flagged ``deliver="inbox"`` (the issue is parked on the
+    needs_input gate) skips ``deliver_or_dispatch`` entirely. None of its three
+    busy signals is up while a workflow is parked — no running root run, not
+    paused, no dispatch marker — so it would answer idle and start a reply
+    workflow racing the parked one. ``enqueue_to_inbox`` puts the note on the
+    inbox under the same fire key; the turn the user's answer starts claims it
+    at its first step boundary.
+
     Every outcome — delivered, typed failure, exception, or a skip for some
     other reason — goes through ``finish_issue_wakeup_step``. There is no
     branch that leaves the row saying nothing about what happened."""
-    from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
+    from app.services.issues import inbox_or_dispatch as delivery
 
     sched_id, fire_key = str(order["sched_id"]), str(order["fire_key"])
+    issue_id = int(order["issue_id"])
+    content = {"text": order["text"], "source": order["source"]}
+    user_id = str(order.get("user_id") or "")
     try:
-        result = await deliver_or_dispatch(
-            int(order["issue_id"]),
-            kind="steer",
-            content={"text": order["text"], "source": order["source"]},
-            user_id=str(order.get("user_id") or ""),
-            message_body=order["text"],
-            source=order["source"],
-            dedupe_key=fire_key,
-        )
+        if order.get("deliver") == _WAKEUP_DELIVER_INBOX:
+            result = await delivery.enqueue_to_inbox(
+                issue_id,
+                kind="steer",
+                content=content,
+                user_id=user_id,
+                dedupe_key=fire_key,
+            )
+        else:
+            result = await delivery.deliver_or_dispatch(
+                issue_id,
+                kind="steer",
+                content=content,
+                user_id=user_id,
+                message_body=order["text"],
+                source=order["source"],
+                dedupe_key=fire_key,
+            )
     except Exception as exc:  # noqa: BLE001 — booked, never swallowed
         counters["errors"] = (counters.get("errors") or 0) + 1
         logger.opt(exception=True).warning(

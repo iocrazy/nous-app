@@ -199,3 +199,164 @@ def test_final_status_reread_is_not_a_dbos_step():
         .default
     )
     assert default is fn
+
+
+# ── FH2 T2: a parked issue takes the wake-up into its inbox ─────────────────
+
+
+_NOW_ISO = "2026-09-23T10:00:00+00:00"
+
+
+def _parked(*, answered: bool = False, locked: bool = True, marker: bool = True):
+    state: Dict[str, Any] = {}
+    if marker:
+        state["awaiting_input"] = {"question_id": "q1", "asked_at": _NOW_ISO}
+        if answered:
+            state["awaiting_input"]["answered_at"] = _NOW_ISO
+    return AsyncMock(
+        return_value={
+            "status": "needs_followup",
+            "hidden_at": None,
+            "execution_state": state,
+            "execution_locked_at": _NOW_ISO if locked else None,
+        }
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("created_by", ["agent", "user"])
+async def test_a_parked_issue_orders_an_inbox_delivery(
+    monkeypatch, disable, created_by
+):
+    """The workflow is suspended on the needs_input gate with the lock held.
+    Disabling the wake-up (the old ``needs_followup`` arm) lost the note; the
+    order must say "inbox" so the body never runs the idle→dispatch half,
+    which would start a reply workflow racing the parked one."""
+    monkeypatch.setattr(sm, "_load_issue", _parked())
+    order = await sm._fire_issue_wakeup(_row(created_by))
+    assert order is not None and order["deliver"] == "inbox"
+    disable.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "shape",
+    [
+        dict(answered=True),
+        dict(locked=False),
+        dict(marker=False),
+    ],
+    ids=["answered", "lock_released", "no_marker"],
+)
+async def test_non_parked_needs_followup_is_still_issue_not_active(
+    monkeypatch, disable, shape
+):
+    monkeypatch.setattr(sm, "_load_issue", _parked(**shape))
+    assert await sm._fire_issue_wakeup(_row("agent")) is None
+    disable.assert_awaited_once_with("s1", "issue_not_active", bump_skipped=True)
+
+
+@pytest.mark.asyncio
+async def test_a_live_issue_order_carries_no_inbox_flag(monkeypatch, disable):
+    monkeypatch.setattr(sm, "_load_issue", _status("in_progress"))
+    order = await sm._fire_issue_wakeup(_row("agent"))
+    assert order is not None and "deliver" not in order
+
+
+@pytest.mark.asyncio
+async def test_a_terminal_issue_beats_a_stale_parked_marker(monkeypatch, disable):
+    load = _parked()
+    load.return_value = {**load.return_value, "status": "cancelled"}
+    monkeypatch.setattr(sm, "_load_issue", load)
+    assert await sm._fire_issue_wakeup(_row("agent")) is None
+    disable.assert_awaited_once_with("s1", "issue_terminal", bump_skipped=True)
+
+
+def test_the_issue_read_selects_what_the_parked_predicate_needs():
+    import inspect
+
+    src = inspect.getsource(sm._load_issue)
+    assert "execution_state" in src and "execution_locked_at" in src
+
+
+@pytest.mark.parametrize(
+    "row, expected",
+    [
+        (
+            {
+                "execution_locked_at": _NOW_ISO,
+                "execution_state": {"awaiting_input": {"question_id": "q"}},
+            },
+            True,
+        ),
+        (
+            {
+                "execution_locked_at": _NOW_ISO,
+                "execution_state": '{"awaiting_input": {"question_id": "q"}}',
+            },
+            True,
+        ),
+        (
+            {
+                "execution_locked_at": _NOW_ISO,
+                "execution_state": {"awaiting_input": {"answered_at": _NOW_ISO}},
+            },
+            False,
+        ),
+        (
+            {
+                "execution_locked_at": None,
+                "execution_state": {"awaiting_input": {"question_id": "q"}},
+            },
+            False,
+        ),
+        ({"execution_locked_at": _NOW_ISO, "execution_state": {}}, False),
+        ({"execution_locked_at": _NOW_ISO, "execution_state": None}, False),
+        ({}, False),
+    ],
+    ids=[
+        "parked",
+        "jsonb_as_str",
+        "answered",
+        "unlocked",
+        "no_marker",
+        "null",
+        "empty",
+    ],
+)
+def test_is_parked_on_input_truth_table(row, expected):
+    from app.services.issues.execution_state import is_parked_on_input
+
+    assert is_parked_on_input(row) is expected
+
+
+def test_resume_uses_the_shared_parked_predicate():
+    """One predicate, two readers: the resume decision table and the wake-up
+    fire. A copy in either place is how they drift."""
+    import importlib
+    import inspect
+
+    src = inspect.getsource(importlib.import_module("app.api.issues_router"))
+    assert "is_parked_on_input" in src
+    assert 'marker.get("answered_at")' not in src
+
+
+def test_the_issue_cap_count_is_one_orm_statement():
+    """Compiled, not ``text()``: the anchor is the issue's session
+    conversation, a person is a user-role message with no ``meta.source``
+    that is not the continuation nudge, and the fallback is the issue's own
+    ``created_at``."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.repositories.user_schedules_repository import (
+        count_agent_wakeups_since_human_stmt,
+    )
+
+    sql = str(
+        count_agent_wakeups_since_human_stmt(7).compile(dialect=postgresql.dialect())
+    )
+    assert "FROM user_schedules" in sql or "FROM public.user_schedules" in sql
+    assert "messages.sender_type" in sql
+    assert "issues.ai_session_id" in sql
+    assert "coalesce" in sql.lower() and "issues.created_at" in sql
+    assert "IS NULL" in sql  # body -> meta -> source IS NULL

@@ -496,3 +496,75 @@ async def test_a_replayed_body_delivers_once(monkeypatch):
 
     assert len(delivered) == 1
     assert counters.get("errors") is None
+
+
+# ── FH2 T2: a parked issue's wake-up goes straight onto the inbox ───────────
+
+
+def _patch_enqueue(monkeypatch, result, seen: list):
+    import app.services.issues.inbox_or_dispatch as iod
+
+    async def _enqueue(issue_id: int, **kw: Any):
+        seen.append((issue_id, kw))
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(iod, "enqueue_to_inbox", _enqueue)
+
+
+@pytest.mark.asyncio
+async def test_a_parked_order_is_enqueued_and_never_dispatched(monkeypatch):
+    """None of ``deliver_or_dispatch``'s three busy signals is up while the
+    workflow is parked on the needs_input gate, so it would answer idle and
+    start a second reply workflow racing the parked one. The parked order
+    must not touch it at all."""
+    import app.services.issues.inbox_or_dispatch as iod
+
+    delivered: list = []
+    _patch_delivery(monkeypatch, _R("dispatched"), delivered)
+    enqueued: list = []
+    _patch_enqueue(monkeypatch, iod.DeliverResult("inbox", inbox_id=9), enqueued)
+    finished = _patch_finish(monkeypatch)
+
+    counters: Dict[str, Any] = {}
+    order = _order(deliver="inbox")
+    await sm._dispatch_routine_orders([order], counters)
+
+    assert delivered == []
+    assert len(enqueued) == 1
+    issue_id, kw = enqueued[0]
+    assert issue_id == 7
+    assert kw["kind"] == "steer"
+    assert kw["content"] == {"text": "ping", "source": order["source"]}
+    assert kw["user_id"] == "u1"
+    assert kw["dedupe_key"] == order["fire_key"]
+    assert counters.get("errors") is None
+    # burned exactly like any other delivery
+    assert finished == [("s1", order["fire_key"], "inbox", None)]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_parked_enqueue_is_booked_not_swallowed(monkeypatch):
+    enqueued: list = []
+    _patch_enqueue(monkeypatch, RuntimeError("inbox down"), enqueued)
+    finished = _patch_finish(monkeypatch)
+
+    counters: Dict[str, Any] = {}
+    await sm._dispatch_routine_orders([_order(deliver="inbox")], counters)
+
+    assert counters["errors"] == 1
+    assert finished[0][2] == "error" and "inbox down" in finished[0][3]
+
+
+def test_the_parked_enqueue_is_not_a_dbos_step():
+    """It runs in the workflow BODY (``_dispatch_issue_wakeup``). A new step
+    there would shift the recorded step sequence of a tick workflow recovered
+    across the deploy; the fire key already makes a replay reuse its item."""
+    import inspect
+
+    import app.services.issues.inbox_or_dispatch as iod
+
+    fn = iod.enqueue_to_inbox
+    assert not hasattr(fn, "dbos_function_name")
+    assert inspect.unwrap(fn) is fn

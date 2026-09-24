@@ -232,7 +232,7 @@ Attached (open with ResourceFetch where an id is given):
  "type": "function",
  "function": {
   "name": "ScheduleWakeup",
-  "description": "Schedule a one-time wake-up for this issue; when it fires you will receive the note as a message. Use it to wait for long external work instead of polling.",
+  "description": "Schedule a one-time wake-up for this issue; when it fires you will receive the note as a message. Use it to wait for long external work instead of polling. At most 3 per run, and at most 5 consecutive wake-ups per issue without a user reply.",
   "parameters": {
    "type": "object",
    "properties": {
@@ -257,13 +257,13 @@ Attached (open with ResourceFetch where an id is given):
 }
 ```
 
-调用成功后模型收到 `{"schedule_id": "<uuid>", "fire_at": "<ISO>"}`，**本轮照常继续**（与 `AskUser` 不同，它不停靠）。拒绝一律是工具结果不是异常，模型可以据此改时间重试：`at or delay_minutes required` / `note is required` / `at must be an ISO-8601 timestamp` / `delay_minutes must be a whole number of minutes` / `fire_at must be in the future` / `fire_at must be within 30 days` / `too_many_wakeups`（每个 **run** 最多 3 次——按 `payload.run_id` 在表上数，所以跨轮次也是 3 次不是每轮 3 次；被拒的调用不计数）/ `ScheduleWakeup failed: <ExceptionClass>`。未注册该工具的轮次上误调用得到 `ScheduleWakeup is not available on this turn — it only applies while working an assigned issue.`。
+调用成功后模型收到 `{"schedule_id": "<uuid>", "fire_at": "<ISO>"}`，**本轮照常继续**（与 `AskUser` 不同，它不停靠）。拒绝一律是工具结果不是异常，模型可以据此改时间重试：`at or delay_minutes required` / `note is required` / `at must be an ISO-8601 timestamp` / `delay_minutes must be a whole number of minutes` / `fire_at must be in the future` / `fire_at must be within 30 days` / `too_many_wakeups`（每个 **run** 最多 3 次——按 `payload.run_id` 在表上数，所以跨轮次也是 3 次不是每轮 3 次；被拒的调用不计数）/ `{"error": "too_many_wakeups_on_issue", "limit": 5, "hint": "wait for the user to reply; stop scheduling"}`（2026-09-23 FH2 T2：每个 **issue** 自上次有人说话以来最多连续 5 次 agent 唤醒——每次唤醒起的是新 run、per-run 预算随之重置，单靠上一条挡不住链条。按 `user_schedules` 里该 issue 的 agent 行数、锚点是 issue 会话里最后一条**人**写的 user 消息（带 `meta.source` 的投递与续跑 nudge 不算人），没有就用 `issues.created_at`；人一评论就归零；在 per-run 检查之后判，拒绝同时记 WARN）/ `ScheduleWakeup failed: <ExceptionClass>`。未注册该工具的轮次上误调用得到 `ScheduleWakeup is not available on this turn — it only applies while working an assigned issue.`。
 
-到点时模型看到的**不是**这个工具的返回，而是一条普通用户消息（issue 空闲）或收件箱里的 steer 框（run 在跑）——正文就是 `note` 原文。
+到点时模型看到的**不是**这个工具的返回，而是一条普通用户消息（issue 空闲）或收件箱里的 steer 框（run 在跑，或 issue 停在 needs_input 闸门上等人回答——后者由用户回答起的那一轮在首个步边界领取）——正文就是 `note` 原文。
 
 #### Token effect
 
-紧凑 JSON 约 480 字符、约 120 token，恒定，不随 agent 配置或对话增长。只在 issue 根 run 的 `tools` 数组里；聊天路与子代理 run 上完全不存在，那两条路的请求体一个字节都不变。
+紧凑 JSON 约 560 字符、约 140 token（FH2 T2 描述加了一句上限说明，+约 20 token），恒定，不随 agent 配置或对话增长。只在 issue 根 run 的 `tools` 数组里；聊天路与子代理 run 上完全不存在，那两条路的请求体一个字节都不变。
 
 #### KV Cache effect
 

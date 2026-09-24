@@ -36,6 +36,17 @@ SCHEDULE_WAKEUP_TOOL_NAME = "ScheduleWakeup"
 # been saying "run" about a number that meant something else.
 MAX_WAKEUPS_PER_RUN = 3
 
+# How many wake-ups the agent may arm on ONE issue in a row before a person
+# speaks on it (FH2 T2). The per-run budget above resets with every woken run
+# — each fire starts a new run with a fresh 3 — so on its own it bounds
+# nothing: prod issue 352659236423172 fired 4 agent wake-ups and billed 3
+# woken runs before someone paused it by hand. Counted in the database
+# (``user_schedules_repository.count_agent_wakeups_since_human``); a human
+# comment resets it.
+MAX_AGENT_WAKEUPS_PER_ISSUE = 5
+_ISSUE_CAP_ERROR = "too_many_wakeups_on_issue"
+_ISSUE_CAP_HINT = "wait for the user to reply; stop scheduling"
+
 # How far ahead a wake-up may be armed. The API path imports THIS constant
 # (``schedules_router``), so the ceiling the model is told about and the one a
 # human is held to are the same number.
@@ -44,7 +55,9 @@ MAX_WAKEUP_HORIZON = timedelta(days=30)
 _DESCRIPTION = (
     "Schedule a one-time wake-up for this issue; when it fires you will "
     "receive the note as a message. Use it to wait for long external work "
-    "instead of polling."
+    f"instead of polling. At most {MAX_WAKEUPS_PER_RUN} per run, and at most "
+    f"{MAX_AGENT_WAKEUPS_PER_ISSUE} consecutive wake-ups per issue without a "
+    "user reply."
 )
 
 
@@ -126,6 +139,10 @@ def make_schedule_wakeup_handler(
         if already >= MAX_WAKEUPS_PER_RUN:
             return {"error": "too_many_wakeups"}
 
+        refusal = await _issue_cap_refusal(issue_id)
+        if refusal is not None:
+            return refusal
+
         row = {
             "user_id": str(user_id),
             "name": note[:200],
@@ -172,6 +189,32 @@ def make_schedule_wakeup_handler(
         return {"schedule_id": schedule_id, "fire_at": fire_at_iso}
 
     return handler
+
+
+async def _issue_cap_refusal(issue_id: int) -> Optional[dict[str, Any]]:
+    """The per-issue cap as a tool result, or None when the call may go on.
+
+    A refusal is a RESULT the model reads (never a raise), and a failed count
+    is one too — refusing on a read we could not make is the safe side of an
+    unbounded chain, and the model can simply try again later."""
+    try:
+        armed = await _count_agent_wakeups_since_human(issue_id)
+    except Exception as exc:  # noqa: BLE001 — a result the model reads
+        logger.opt(exception=True).warning(
+            f"[ScheduleWakeup] issue {issue_id}: issue cap read failed: {exc}"
+        )
+        return {"error": f"ScheduleWakeup failed: {exc.__class__.__name__}"}
+    if armed < MAX_AGENT_WAKEUPS_PER_ISSUE:
+        return None
+    logger.warning(
+        f"[ScheduleWakeup] issue {issue_id}: {_ISSUE_CAP_ERROR} — {armed} agent "
+        f"wake-ups since the last user message (limit {MAX_AGENT_WAKEUPS_PER_ISSUE})"
+    )
+    return {
+        "error": _ISSUE_CAP_ERROR,
+        "limit": MAX_AGENT_WAKEUPS_PER_ISSUE,
+        "hint": _ISSUE_CAP_HINT,
+    }
 
 
 def _resolve_fire_at(args: dict[str, Any]) -> tuple[Optional[datetime], str]:
@@ -229,6 +272,17 @@ async def _count_wakeups_for_run(run_id: str) -> int:
         )
 
 
+async def _count_agent_wakeups_since_human(issue_id: int) -> int:
+    """Consecutive agent-armed wake-ups on the issue since a person last spoke.
+    The statement lives in the repository; this seam keeps the handler
+    testable without a database."""
+    from app.repositories.user_schedules_repository import (
+        count_agent_wakeups_since_human,
+    )
+
+    return await count_agent_wakeups_since_human(int(issue_id))
+
+
 async def _insert_wakeup_row(row: dict[str, Any]) -> str:
     """Insert the ``user_schedules`` row and return its id as a string.
 
@@ -250,6 +304,7 @@ async def _insert_wakeup_row(row: dict[str, Any]) -> str:
 
 
 __all__ = [
+    "MAX_AGENT_WAKEUPS_PER_ISSUE",
     "MAX_WAKEUPS_PER_RUN",
     "MAX_WAKEUP_HORIZON",
     "SCHEDULE_WAKEUP_TOOL_NAME",

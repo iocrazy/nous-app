@@ -18,7 +18,10 @@ The two halves are exported separately because the comment path interposes a
 step between them: a workflow parked on the needs_input gate consumes the
 reply in place, and only when there is no such waiter does the reply start a
 fresh turn. ``deliver_or_dispatch`` composes the halves for the paths that
-have nothing to interpose.
+have nothing to interpose. ``enqueue_to_inbox`` is the busy half's enqueue
+alone, for a caller that knows the answer without asking (a wake-up on an
+issue parked on the needs_input gate — see its docstring for why parked is
+not a fourth busy signal).
 
 Everything this module touches is resolved INSIDE the call: the router imports
 it, so a module-level import back would be circular, and the worker process
@@ -203,6 +206,51 @@ async def _decide(
     if already_enqueued:
         return DeliverResult("inbox", reason="already_enqueued")
 
+    result = await enqueue_to_inbox(
+        issue_id,
+        kind=kind,
+        content=content,
+        user_id=user_id,
+        message_body=message_body,
+        session_id=session_id,
+        dedupe_key=dedupe_key,
+        attachments=attachments,
+        append_as_user_id=append_as_user_id,
+    )
+    logger.info(f"[deliver] issue {issue_id}: {kind} diverted to inbox ({why})")
+    return result
+
+
+async def enqueue_to_inbox(
+    issue_id: int,
+    *,
+    kind: str,
+    content: dict[str, Any],
+    user_id: str,
+    message_body: Optional[str] = None,
+    session_id: Optional[str] = None,
+    dedupe_key: Optional[str] = None,
+    attachments: Optional[list] = None,
+    append_as_user_id: Optional[str] = None,
+) -> DeliverResult:
+    """Put ``content`` on the issue's inbox WITHOUT asking whether the issue
+    is busy — the enqueue half of ``_decide``, for a caller that already knows
+    the answer must be "inbox".
+
+    Today's caller is a wake-up that fired while the issue is parked on the
+    needs_input gate (FH2 T2). None of the three busy signals is up then, so
+    the composed path would answer idle and start a second reply workflow
+    racing the parked one. Parked is deliberately NOT a busy signal: the
+    comment path asks ``divert_to_inbox_if_busy`` before it looks for a
+    waiting workflow, and a parked-means-busy rule would divert the human's
+    ANSWER to the inbox instead of waking the gate.
+
+    ``message_body`` (with ``session_id``) is appended to the conversation
+    FIRST, so a failed enqueue never loses a human's words; a wake-up passes
+    none, exactly as it does on a busy issue — the claim injects the note into
+    the turn, and a history copy would make the model read it twice.
+    ``dedupe_key`` makes a replayed caller reuse the live item it already
+    wrote."""
     if message_body and session_id:
         await _append_to_conversation(
             session_id=session_id,
@@ -223,7 +271,6 @@ async def _decide(
         content=content,
         dedupe_key=dedupe_key,
     )
-    logger.info(f"[deliver] issue {issue_id}: {kind} diverted to inbox ({why})")
     return DeliverResult("inbox", inbox_id=int(enqueued["id"]))
 
 
@@ -465,4 +512,5 @@ __all__ = [
     "deliver_or_dispatch",
     "dispatch_issue_reply",
     "divert_to_inbox_if_busy",
+    "enqueue_to_inbox",
 ]

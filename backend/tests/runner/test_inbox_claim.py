@@ -129,6 +129,43 @@ async def test_root_run_claims_injects_and_records_coordinates():
 
 
 @pytest.mark.asyncio
+async def test_the_answer_turn_claims_a_parked_wakeup_through_its_session(
+    monkeypatch,
+):
+    """FH2 T2: a wake-up that fired while the issue was parked on the
+    needs_input gate waits on the ISSUE target. The turn the user's answer
+    starts is a chat-wired turn on the issue's session conversation, so the
+    hook must reach the issue through that conversation and claim the item —
+    rendered as its note, not as the JSON blob the wake-up stored."""
+
+    class _Repo:
+        async def issue_id_for_conversation(self, cid):
+            return 7 if cid == 9 else None
+
+    monkeypatch.setattr(inbox_mod, "get_agent_run_inbox_repository", lambda: _Repo())
+    wake = _item(
+        content={
+            "text": "check whether the render finished",
+            "source": {"kind": "schedule", "schedule_id": "s1", "created_by": "agent"},
+        }
+    )
+    calls: list = []
+
+    async def claim(tg, run_id, turn, step):
+        calls.append(list(tg))
+        return [wake] if ("issue", 7) in tg else []
+
+    hook = InboxClaimHook(claim=claim)
+    ctx = StepContext(turn=1, step=1, recorder=_Rec(conversation_id=9))
+    await hook.before_llm_call(ctx)
+
+    assert calls == [[("conversation", 9), ("issue", 7)]]
+    injected = ctx.injected[0]["content"]
+    assert "check whether the render finished" in injected
+    assert '"source"' not in injected and "schedule_id" not in injected
+
+
+@pytest.mark.asyncio
 async def test_child_run_never_claims():
     calls = []
     hook = _hook([_item()], calls)

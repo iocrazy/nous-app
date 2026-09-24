@@ -697,8 +697,9 @@ async def resume_issue(issue_id: int, auth: AuthDep) -> IssueResumeResponse:
         )
 
     if existing.get("execution_locked_at"):
-        marker = (existing.get("execution_state") or {}).get("awaiting_input") or {}
-        parked = bool(marker) and not marker.get("answered_at")
+        from app.services.issues.execution_state import is_parked_on_input
+
+        parked = is_parked_on_input(existing)
         if paused:
             await issue_repository.set_paused_at(issue_id, None)
         return IssueResumeResponse(

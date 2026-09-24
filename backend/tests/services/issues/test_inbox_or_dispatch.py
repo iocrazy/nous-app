@@ -402,3 +402,83 @@ async def test_a_duplicate_dispatch_leaves_the_window_open(monkeypatch):
 
     await mod.dispatch_issue_reply(5, user_id=ME, body="hi")
     assert cleared == []
+
+
+# ── FH2 T2: enqueue_to_inbox, and parked is NOT busy ─────────────────────────
+
+_PARKED = {
+    "execution_locked_at": "2026-09-23T10:00:00+00:00",
+    "status": "needs_followup",
+    "execution_state": {"awaiting_input": {"question_id": "q1"}},
+}
+
+
+async def test_enqueue_to_inbox_puts_the_item_on_the_inbox_and_starts_nothing(
+    monkeypatch,
+):
+    from app.services.issues.inbox_or_dispatch import enqueue_to_inbox
+
+    inbox_repo, store, dispatch, rows = _wire(
+        monkeypatch, issue=_issue(**_PARKED), running=None
+    )
+    out = await enqueue_to_inbox(
+        5,
+        kind="steer",
+        content={"text": "wake", "source": {"kind": "schedule"}},
+        user_id=ME,
+        dedupe_key="sched:s1:2026-09-11T09:00:00+00:00",
+    )
+    assert out.mode == "inbox" and out.inbox_id == 310819108761499
+    kw = inbox_repo.enqueue.await_args.kwargs
+    assert kw["target_kind"] == "issue" and kw["target_id"] == 5
+    assert kw["kind"] == "steer"
+    assert kw["content"] == {"text": "wake", "source": {"kind": "schedule"}}
+    assert kw["dedupe_key"] == "sched:s1:2026-09-11T09:00:00+00:00"
+    dispatch.assert_not_called()
+    # No body given → nothing appended to the conversation (same as a
+    # wake-up on a busy issue: the claim injects it, history does not).
+    store.append_user_message.assert_not_awaited()
+    assert rows == []
+
+
+async def test_enqueue_to_inbox_appends_the_body_before_enqueuing(monkeypatch):
+    from app.services.issues.inbox_or_dispatch import enqueue_to_inbox
+
+    order: list[str] = []
+    _inbox, store, _dispatch, _rows = _wire(
+        monkeypatch, issue=_issue(), running=None, order=order
+    )
+    await enqueue_to_inbox(
+        5,
+        kind="steer",
+        content={"body": "hi"},
+        user_id=ME,
+        message_body="hi",
+        session_id="55",
+    )
+    assert order == ["append", "enqueue"]
+    assert store.append_user_message.await_args.kwargs["session_id"] == 55
+
+
+async def test_a_parked_issue_still_reads_idle_to_the_comment_path(monkeypatch):
+    """⚠️ The comment path asks ``divert_to_inbox_if_busy`` BEFORE it looks
+    for a waiting workflow. If parked counted as busy, the human's ANSWER
+    would be diverted to the inbox instead of waking the parked workflow via
+    the input gate. Parked is a wake-up-only rule; it must stay out of
+    ``_busy_reason``."""
+    from app.services.issues.inbox_or_dispatch import divert_to_inbox_if_busy
+
+    inbox_repo, _store, dispatch, _rows = _wire(
+        monkeypatch, issue=_issue(**_PARKED), running=None
+    )
+    out = await divert_to_inbox_if_busy(
+        5,
+        kind="steer",
+        content={"body": "option B"},
+        user_id=ME,
+        message_body="option B",
+        check_terminal=False,
+    )
+    assert out.mode == "skipped" and out.reason == "idle"
+    inbox_repo.enqueue.assert_not_awaited()
+    dispatch.assert_not_called()
