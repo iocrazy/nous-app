@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import asyncpg
@@ -539,3 +540,102 @@ async def test_count_inflight_counts_assigned_too(
         task_id=UUID(created["id"]), lifecycle_status="done"
     )
     assert await repo.count_inflight_agent_tasks() == before - 1
+
+
+# ─── framework-hardening T5: stale-task reaper against real PG ──────────
+
+
+async def _backdate(conn, task_id: str, *, phase: str, minutes: int) -> None:
+    """Put a row at ``phase`` with ``updated_at`` in the past. The BEFORE UPDATE
+    trigger (``trg_unified_tasks_updated_at``) would stamp now() back on, so the
+    fixture write suppresses triggers for its own transaction only."""
+    async with conn.transaction():
+        await conn.execute("SET LOCAL session_replication_role = replica")
+        await conn.execute(
+            "UPDATE task_tracking SET phase = $2, "
+            "updated_at = now() - make_interval(mins => $3) "
+            "WHERE dbos_workflow_id = $1",
+            task_id,
+            phase,
+            minutes,
+        )
+
+
+async def test_stale_task_reaper_against_real_pg(
+    integration_db_url, patched_engine, agent_id, user_id, cleanup, monkeypatch
+):
+    """The three candidate classes plus a fresh row, through the real candidate
+    query, the ``agent_runs.task_id`` run lookup, the CAS'd failure write and
+    ``requeue_task``. Only the DBOS ownership probe is stubbed (the drift
+    database has no DBOS system schema): here every workflow is gone."""
+    from app.services.workforce import stale_tasks as st
+
+    monkeypatch.setattr(st, "_dbos_still_owns", AsyncMock(return_value=False))
+    repo = _repo()
+
+    async def _task(workflow_id: str) -> str:
+        created = await repo.create_task(
+            agent_id=UUID(str(agent_id)),
+            user_id=UUID(str(user_id)),
+            payload={},
+            title=_title(),
+        )
+        assert await repo.claim_task(created["id"], workflow_id=workflow_id)
+        return created["id"]
+
+    never_started = await _task("wf-t5-a")
+    lost = await _task("wf-t5-b")
+    still_running = await _task("wf-t5-c")
+    fresh = await _task("wf-t5-d")
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        await _backdate(conn, never_started, phase="assigned", minutes=30)
+        await _backdate(conn, lost, phase="in_progress", minutes=30)
+        await _backdate(conn, still_running, phase="in_progress", minutes=30)
+        for tid, status in ((lost, "heartbeat_lost"), (still_running, "running")):
+            await conn.execute(
+                "INSERT INTO agent_runs (agent_id, user_id, status, trigger, task_id) "
+                "VALUES ($1, $2, $3, 'workforce', $4)",
+                agent_id,
+                user_id,
+                status,
+                tid,
+            )
+
+        out = await st.reap_stale_workforce_tasks()
+
+        rows = {
+            r["dbos_workflow_id"]: r
+            for r in await conn.fetch(
+                "SELECT dbos_workflow_id, phase, status, error_msg, "
+                "metadata->>'error_code' AS error_code FROM task_tracking "
+                "WHERE dbos_workflow_id = ANY($1::text[])",
+                [never_started, lost, still_running, fresh],
+            )
+        }
+    finally:
+        await conn.execute(
+            "DELETE FROM agent_runs WHERE task_id = ANY($1::text[])",
+            [lost, still_running],
+        )
+        await conn.close()
+
+    assert out["errors"] == 0, out
+    assert rows[never_started]["phase"] == "queued"
+    assert rows[lost]["phase"] == "failed"
+    assert rows[lost]["status"] == "failed"
+    assert rows[lost]["error_code"] == "worker_lost"
+    assert "heartbeat_lost" in rows[lost]["error_msg"]
+    assert rows[still_running]["phase"] == "in_progress"
+    assert rows[fresh]["phase"] == "assigned"  # updated just now — not a candidate
+
+    # A second write through the CAS on the already-failed row is refused.
+    assert (
+        await repo.update_task_status(
+            task_id=UUID(lost),
+            lifecycle_status="failed",
+            only_from=("assigned", "in_progress"),
+        )
+        is False
+    )

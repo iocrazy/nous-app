@@ -138,6 +138,7 @@ from app.db.session import read_scope, write_scope
 from app.models import (
     AgentInbox,
     AgentOutbox,
+    AgentRuns,
     AgentStateHistory,
     AgentWorkers,
     TaskTracking,
@@ -720,8 +721,10 @@ class AgentWorkforceRepository:
           ``workflow_id``. This is a DBOS replay walking back into its own run
           after the worker died mid-flight. A queued-only CAS makes that a dead
           end: the replay is refused, records SUCCESS/skipped, and the row is
-          stranded at ``assigned`` where the dispatch list cannot see it and
-          nothing requeues it (``force_terminate`` has no caller in ``app/``).
+          stranded at ``assigned`` where the dispatch list cannot see it. The
+          stale-task reaper (``services/workforce/stale_tasks.py``, minute
+          sweeper) is the backstop when DBOS itself gives up on the workflow;
+          while the workflow is still PENDING it stays out of DBOS's way.
           Ownership is keyed on the workflow id, so a DIFFERENT worker's replay
           or a second dispatch attempt still cannot steal an in-flight row.
 
@@ -870,6 +873,59 @@ class AgentWorkforceRepository:
             )
         return int(total or 0)
 
+    async def list_stale_active_tasks(
+        self, *, older_than: datetime, limit: int
+    ) -> List[Dict[str, Any]]:
+        """agent_task rows still ``assigned``/``in_progress`` whose ``updated_at``
+        is older than ``older_than`` — the stale-task reaper's candidates,
+        oldest first. ``updated_at`` moves on every ``update_task_status`` /
+        claim, so this is "nothing has touched the row since".
+
+        ⚠️ Raises instead of returning ``[]`` (same reasoning as
+        ``count_inflight_agent_tasks``): an empty list would read as "nothing
+        is stuck" when the truth is "I could not look"."""
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(TaskTracking)
+                        .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                        .where(TaskTracking.phase.in_(("assigned", "in_progress")))
+                        .where(TaskTracking.updated_at < older_than)
+                        .order_by(TaskTracking.updated_at.asc())
+                        .limit(limit)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [s for s in (_task_shape(r) for r in rows) if s]
+
+    async def latest_run_for_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """The newest ``agent_runs`` row linked to this task via
+        ``agent_runs.task_id`` (mig 282, partial index), or None.
+
+        Returns ``{"id": str, "status": str}`` — id as a numeric string (Snowflake BIGINT; JS-safe and what every run-id
+        consumer downstream expects). Raises on a DB error: "no run" is a
+        decision input (it permits a requeue), so a failed read must not be
+        mistaken for one."""
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(AgentRuns.id, AgentRuns.status)
+                        .where(AgentRuns.task_id == str(task_id))
+                        .order_by(AgentRuns.started_at.desc())
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        return {"id": str(row["id"]), "status": str(row["status"])}
+
     async def update_task_status(
         self,
         *,
@@ -880,11 +936,17 @@ class AgentWorkforceRepository:
         result: Optional[Dict[str, Any]] = None,
         error_code: Optional[str] = None,
         error_message: Optional[str] = None,
+        only_from: Optional[tuple[str, ...]] = None,
     ) -> bool:
         """Generic status update for an agent_task row. Read-modify-write the
         JSONB metadata (so unrelated keys survive), then persist phase/status
         (+ conditional started_at/completed_at/error_msg) — reproducing the
-        legacy write set exactly."""
+        legacy write set exactly.
+
+        ``only_from`` turns the UPDATE into a CAS on the current phase: the row
+        is written only while its phase is one of these, and False comes back
+        when it was not. The stale-task reaper uses it so a row that finished
+        between its scan and its write keeps the real outcome."""
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
         task_id_str = str(task_id)
@@ -921,12 +983,15 @@ class AgentWorkforceRepository:
                 if lifecycle_status in ("done", "failed", "cancelled"):
                     values["completed_at"] = now
 
-                upd = await session.execute(
+                stmt = (
                     sa_update(TaskTracking)
                     .where(TaskTracking.task_kind == TASK_KIND_AGENT)
                     .where(TaskTracking.dbos_workflow_id == task_id_str)
-                    .values(**values)
-                    .returning(TaskTracking.dbos_workflow_id)
+                )
+                if only_from is not None:
+                    stmt = stmt.where(TaskTracking.phase.in_(only_from))
+                upd = await session.execute(
+                    stmt.values(**values).returning(TaskTracking.dbos_workflow_id)
                 )
                 return upd.scalars().first() is not None
         except Exception as e:
@@ -987,8 +1052,8 @@ class AgentWorkforceRepository:
             return {"items": [], "total": 0}
 
     async def requeue_task(self, task_id: UUID) -> bool:
-        """Sweeper helper: send a reaped task back to the queue. Wipes
-        assigned/started timestamps so it looks fresh."""
+        """Stale-task reaper helper: send a task that never started back to
+        the queue. Wipes assigned/started timestamps so it looks fresh."""
         task_id_str = str(task_id)
         try:
             async with write_scope() as session:
@@ -1001,6 +1066,9 @@ class AgentWorkforceRepository:
                 md_row = existing.first()
                 md: Dict[str, Any] = dict((md_row[0] if md_row else None) or {})
                 md.pop("current_run_id", None)
+                # ``run_id`` is the RunRecorder's task→run stamp (mig 282
+                # linkage). A requeued attempt has not run yet.
+                md.pop("run_id", None)
                 md.pop("assigned_at", None)
                 # The dispatch tick skips rows that carry ``dispatched_at``.
                 # Leaving the stamp on a requeued task makes it queued forever

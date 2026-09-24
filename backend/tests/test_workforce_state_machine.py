@@ -147,35 +147,6 @@ async def test_transition_first_touch_registers_then_moves():
     assert result.to_state == "working"
 
 
-# ─── force_terminate ─────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_force_terminate_records_history():
-    """Sweeper path: force termination always lands a state row + history."""
-    repo = _build_repo(current_state="working")
-    sm = WorkerStateMachine(repo=repo)
-
-    result = await sm.force_terminate(agent_id=uuid4(), reason="heartbeat_lost")
-    assert result.to_state == "terminated"
-    repo.update_worker_state.assert_awaited()
-    repo.log_state_transition.assert_awaited()
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_force_terminate_first_touch_creates_then_logs():
-    repo = _build_repo(current_state=None)
-    sm = WorkerStateMachine(repo=repo)
-
-    result = await sm.force_terminate(agent_id=uuid4(), reason="heartbeat_lost")
-    assert result.to_state == "terminated"
-    assert result.from_state is None
-    repo.upsert_worker.assert_awaited()
-    repo.log_state_transition.assert_awaited()
-
-
 # ─── UUID parameter sanity ───────────────────────────────────────────
 
 
@@ -204,36 +175,3 @@ async def test_transition_passes_correct_args_to_repo():
     assert log_call.kwargs["to_state"] == "working"
     assert log_call.kwargs["trigger"] == "task_assigned"
     assert log_call.kwargs["task_id"] == task_id
-
-
-# ─── AI-016: orphan-task requeue on force-terminate ──────────────────
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_force_terminate_requeues_orphan_task():
-    """A dead worker holding an in-flight task → that task is requeued so it
-    isn't orphaned in assigned/in_progress forever."""
-    task_id = uuid4()
-    repo = _build_repo(current_state="working")
-    repo.get_worker = AsyncMock(
-        return_value={"state": "working", "current_task_id": str(task_id)}
-    )
-    sm = WorkerStateMachine(repo=repo)
-
-    result = await sm.force_terminate(agent_id=uuid4(), reason="heartbeat_lost")
-
-    assert result.to_state == "terminated"
-    repo.requeue_task.assert_awaited_once_with(task_id)
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_force_terminate_no_task_skips_requeue():
-    """Worker with no in-flight task → no requeue call."""
-    repo = _build_repo(current_state="idle")  # no current_task_id key
-    sm = WorkerStateMachine(repo=repo)
-
-    await sm.force_terminate(agent_id=uuid4(), reason="heartbeat_lost")
-
-    repo.requeue_task.assert_not_awaited()

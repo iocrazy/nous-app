@@ -294,6 +294,9 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             trigger="workforce",
             session_id=None,
             team_id=child_team_id,
+            # agent_runs.task_id (mig 282) — the run↔task link the stale-task
+            # reaper reads to tell "worker died mid-run" from "never started".
+            task_id=str(task_id),
             # 3c 终审 I1：这一行缺席时，委派出去的活与钱在议题维度整个消失。
             # `issue_id` 从「Runs 树上的一个链接」变成了四个读面的连接键 ——
             # 驾驶舱效率两格、`¢/output` 的分母、`/usage/issues/{id}` 的 token
@@ -449,8 +452,6 @@ async def _run_subagent_task(
     from app.repositories.agent_run_inbox_repository import (
         get_agent_run_inbox_repository,
     )
-    from app.services.ai.runner.inbox import clip_claimed_text
-    from app.services.ai.runner.run_recorder import RunEventWriter
     from app.services.ai.runner.subagent_task_service import SubAgentTaskService
 
     started = time.monotonic()
@@ -483,7 +484,7 @@ async def _run_subagent_task(
     # ── run the child ────────────────────────────────────────────────
     failures: list[str] = []
     try:
-        envelope = await service.run_background_task(payload)
+        envelope = await service.run_background_task(payload, task_id=str(task_id))
     except Exception as err:  # noqa: BLE001 — the child must not sink the task
         logger.exception(f"[agent-worker] subagent task {task_id} crashed: {err}")
         envelope = {"status": "failed", "error": f"{err!s:.200}", "summary": ""}
@@ -597,66 +598,26 @@ async def _run_subagent_task(
 
     # ── always: the parent's transcript, then the task row ───────────
     if parent_run_id:
-        try:
-            writer = await RunEventWriter.for_run(int(parent_run_id))
-            await writer.append(
-                "subagent_done",
-                {
-                    "child_run_id": content["child_run_id"],
-                    "task_id": str(task_id),
-                    "mode": "async",
-                    "subagent_type": content["subagent_type"],
-                    "status": content["status"],
-                    # The card's summary line. A background child's inbox
-                    # claim lands in a LATER run — the parent had already
-                    # finished — so the fold's same-run claim/card pairing
-                    # never fires and this is the only source the card has
-                    # (MH-90/91/92). Bounded by the helper ``inbox_claimed``
-                    # uses, so the two projections of one result agree.
-                    #
-                    # A crashed child has NO summary — falling through to the
-                    # error text is what keeps its card from going blank,
-                    # which is defect J's own symptom. The synchronous crash
-                    # branch does the same.
-                    "summary": clip_claimed_text(
-                        content["summary"] or envelope.get("error") or ""
-                    ),
-                    "cost_cents": content["cost_cents"],
-                    "byok_cents": content["byok_cents"],
-                    "tokens_used": content["tokens_used"],
-                    "duration_ms": int((time.monotonic() - started) * 1000),
-                },
-            )
-        except Exception as err:  # noqa: BLE001 — observability, not the work
-            logger.exception(
-                f"[agent-worker] subagent_done on parent run {parent_run_id} "
-                f"failed: {err}"
-            )
-
-        # 这一刻是这棵树上**最后一个可观测事件**，也是积分收口唯一能成立的时机。
-        #
-        # 收口要求全树 ``view.children.async_pending == 0``（异步派发时子 run 的行
-        # 还没建出来，「行全终态」不蕴含「树跑完了」）。而那个计数**只在上面这条
-        # subagent_done 折进父视图时才减一** —— 它比子 run 自己的 ``_finish`` 晚。
-        # 于是异步链上的时序恒为：root 结束 → pending=1 不收口；子 run 结束 →
-        # pending 仍是 1，还是不收口；``subagent_done`` 落地归零 —— 而到这一步为止
-        # 全仓没有任何人会再调收口（调用点只有 ``_finish`` 与三个崩溃写方）。
-        # 不补这一次，每棵异步委派树都要等清扫器 2 小时后强制收口，而那条路径还会
-        # 打一条「async child never materialised」的 WARNING —— 与事实正好相反。
-        #
-        # 传 child：它在树里（``root_run_id`` 指向真 root），而 ``parent_run_id``
-        # 未必是 root。收口自己会沿 ``root_run_id`` 解析，并靠 CAS 保证只扣一次。
-        child_run_id = content.get("child_run_id")
-        if child_run_id:
-            try:
-                from app.services.ai.billing.tree_charge import settle_tree_if_closed
-
-                await settle_tree_if_closed(run_id=str(child_run_id))
-            except Exception as err:  # noqa: BLE001 — 计费绝不连坐这次已完成的委派
-                logger.warning(
-                    f"[agent-worker] tree settle after subagent_done "
-                    f"(child={child_run_id}) failed: {err}"
-                )
+        await emit_async_subagent_done(
+            parent_run_id=str(parent_run_id),
+            task_id=str(task_id),
+            child_run_id=content["child_run_id"],
+            subagent_type=content["subagent_type"],
+            status=content["status"],
+            # The card's summary line. A background child's inbox claim lands
+            # in a LATER run — the parent had already finished — so the fold's
+            # same-run claim/card pairing never fires and this is the only
+            # source the card has (MH-90/91/92).
+            #
+            # A crashed child has NO summary — falling through to the error
+            # text is what keeps its card from going blank, which is defect
+            # J's own symptom. The synchronous crash branch does the same.
+            summary=content["summary"] or envelope.get("error") or "",
+            cost_cents=content["cost_cents"],
+            byok_cents=content["byok_cents"],
+            tokens_used=content["tokens_used"],
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
 
     ok = content["status"] == "success" and not failures
     error_code = failures[0] if failures else (None if ok else "subagent_failed")
@@ -669,6 +630,89 @@ async def _run_subagent_task(
         "run_id": content["child_run_id"],
         "idle_dispatch": idle_dispatch,
     }
+
+
+async def emit_async_subagent_done(
+    *,
+    parent_run_id: str,
+    task_id: str,
+    child_run_id: Optional[str],
+    subagent_type: Optional[str],
+    status: Optional[str],
+    summary: str,
+    cost_cents: Any,
+    byok_cents: Any,
+    tokens_used: Any,
+    duration_ms: Optional[int],
+) -> None:
+    """Close one background child on its PARENT run: append ``subagent_done``
+    (``mode: async``), then try to settle the tree. Both halves are guarded —
+    the delegation already happened, so neither telemetry nor billing may fail
+    the caller.
+
+    Two callers, one bookkeeping: the worker's normal completion
+    (:func:`_run_subagent_task`) and the stale-task reaper
+    (``stale_tasks.reap_stale_workforce_tasks``) closing a child whose worker
+    died. A second hand-written copy would let the two drift, and the fold
+    only drains ``children.async_pending`` on this exact event shape.
+
+    ``subagent_done`` goes on the PARENT run. That run may have ended turns
+    ago; events outlive runs, and the fold counts a ``done`` with no matching
+    ``spawned`` (spec §2.4). ``fold_done`` drops the event when
+    ``child_run_id`` is falsy, so a caller without one should not expect
+    ``async_pending`` to move.
+    """
+    from app.services.ai.runner.inbox import clip_claimed_text
+    from app.services.ai.runner.run_recorder import RunEventWriter
+
+    try:
+        writer = await RunEventWriter.for_run(int(parent_run_id))
+        await writer.append(
+            "subagent_done",
+            {
+                "child_run_id": child_run_id,
+                "task_id": task_id,
+                "mode": "async",
+                "subagent_type": subagent_type,
+                "status": status,
+                # Bounded by the helper ``inbox_claimed`` uses, so the two
+                # projections of one result agree.
+                "summary": clip_claimed_text(summary or ""),
+                "cost_cents": cost_cents,
+                "byok_cents": byok_cents,
+                "tokens_used": tokens_used,
+                "duration_ms": duration_ms,
+            },
+        )
+    except Exception as err:  # noqa: BLE001 — observability, not the work
+        logger.exception(
+            f"[agent-worker] subagent_done on parent run {parent_run_id} "
+            f"failed: {err}"
+        )
+
+    # 这一刻是这棵树上**最后一个可观测事件**，也是积分收口唯一能成立的时机。
+    #
+    # 收口要求全树 ``view.children.async_pending == 0``（异步派发时子 run 的行
+    # 还没建出来，「行全终态」不蕴含「树跑完了」）。而那个计数**只在上面这条
+    # subagent_done 折进父视图时才减一** —— 它比子 run 自己的 ``_finish`` 晚。
+    # 于是异步链上的时序恒为：root 结束 → pending=1 不收口；子 run 结束 →
+    # pending 仍是 1，还是不收口；``subagent_done`` 落地归零 —— 而到这一步为止
+    # 全仓没有任何人会再调收口（调用点只有 ``_finish`` 与三个崩溃写方）。
+    # 不补这一次，每棵异步委派树都要等清扫器 2 小时后强制收口，而那条路径还会
+    # 打一条「async child never materialised」的 WARNING —— 与事实正好相反。
+    #
+    # 传 child：它在树里（``root_run_id`` 指向真 root），而 ``parent_run_id``
+    # 未必是 root。收口自己会沿 ``root_run_id`` 解析，并靠 CAS 保证只扣一次。
+    if child_run_id:
+        try:
+            from app.services.ai.billing.tree_charge import settle_tree_if_closed
+
+            await settle_tree_if_closed(run_id=str(child_run_id))
+        except Exception as err:  # noqa: BLE001 — 计费绝不连坐这次已完成的委派
+            logger.warning(
+                f"[agent-worker] tree settle after subagent_done "
+                f"(child={child_run_id}) failed: {err}"
+            )
 
 
 def _resolve_child_run_id(

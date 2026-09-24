@@ -231,6 +231,10 @@ def test_no_step_in_this_module_dispatches_a_workflow():
     # 已 PREEMPT issue 上挂起的 workflow（``DBOS.cancel_workflow_async``，在
     # step 上下文里只是一次 sys 表写，不记为子 step），再清标记与锁——同样不
     # 派发任何 workflow。
+    #
+    # ``reap_stale_workforce_tasks_step``（框架加固 T5）登记于此：标失败 / 回 idle /
+    # ``subagent_done`` + 收口都是 ORM 写与 RPC；重排只把行改回 ``queued``，真正
+    # 派发由另一个 dispatch tick 在它自己的 workflow body 里做——不派发任何 workflow。
     assert {s.name for s in steps} == {
         "mark_heartbeat_lost_step",
         "reconcile_issue_execution_state_step",
@@ -239,6 +243,7 @@ def test_no_step_in_this_module_dispatches_a_workflow():
         "recompute_monthly_budgets_step",
         "force_settle_stale_pending_trees_step",
         "reap_preempted_input_waits_step",
+        "reap_stale_workforce_tasks_step",
     }
     for step in steps:
         called = {
