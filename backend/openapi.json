@@ -5264,6 +5264,396 @@
         "title": "AgentVersionListItem",
         "type": "object"
       },
+      "AiAnalyzeTriggerResponse": {
+        "description": "``POST /ai/analyze/resource/{resource_id}``; ``platform_id`` only on\nthe queued answer, not on \"already in progress\".",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "platform_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Id"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "resource_id"
+        ],
+        "title": "AiAnalyzeTriggerResponse",
+        "type": "object"
+      },
+      "AiBackfillEmbeddingsResponse": {
+        "description": "``POST /ai/analyze/backfill-embeddings``.\n\n``dispatched`` / ``in_flight`` are kept for readers of the pre-mig-499\nshape and are always ``[]`` / ``0`` now: nothing is dispatched, every\ncandidate is embedded in place. ``aborted_reason`` is null when every row\nwas attempted.",
+        "properties": {
+          "aborted_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aborted Reason"
+          },
+          "dispatched": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 0,
+            "title": "Dispatched",
+            "type": "array"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "in_flight": {
+            "const": 0,
+            "title": "In Flight",
+            "type": "integer"
+          },
+          "reembedded": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reembedded",
+            "type": "array"
+          },
+          "rehashed": {
+            "title": "Rehashed",
+            "type": "integer"
+          },
+          "remaining": {
+            "title": "Remaining",
+            "type": "integer"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/AiBackfillSkip"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "space": {
+            "$ref": "#/components/schemas/SpaceInfo"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "integer"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "total_missing": {
+            "title": "Total Missing",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "success",
+          "space",
+          "dispatched",
+          "in_flight",
+          "total_missing",
+          "stale",
+          "dry_run",
+          "reembedded",
+          "rehashed",
+          "skipped",
+          "remaining",
+          "aborted_reason"
+        ],
+        "title": "AiBackfillEmbeddingsResponse",
+        "type": "object"
+      },
+      "AiBackfillSkip": {
+        "description": "One batch row that did not land; ``resource_id`` is a string\n(Snowflake > 2^53), ``reason`` a stable code, never provider text.",
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_id",
+          "reason"
+        ],
+        "title": "AiBackfillSkip",
+        "type": "object"
+      },
+      "AiCapabilityHealthRow": {
+        "description": "One row of the capability board (``app/services/ai/ai_health.py``).\n\n``origin`` is absent on an agent-task row whose resolution crashed (the\n``error`` row of the first loop); the system rows' error row carries\n``\"\"``. The runtime quartet (``task_type`` … ``last_error``) is present\nonly on capabilities backed by a tracked workflow. The route uses\n``response_model_exclude_unset`` so absent stays absent.",
+        "properties": {
+          "agent_slug": {
+            "title": "Agent Slug",
+            "type": "string"
+          },
+          "assigned": {
+            "title": "Assigned",
+            "type": "boolean"
+          },
+          "capability": {
+            "title": "Capability",
+            "type": "string"
+          },
+          "hint": {
+            "title": "Hint",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "needs_vision": {
+            "title": "Needs Vision",
+            "type": "boolean"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "enum": [
+                  "platform",
+                  "governance",
+                  "byok",
+                  "env",
+                  ""
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "recent_failures": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recent Failures"
+          },
+          "recent_runs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recent Runs"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "no_key",
+              "no_model",
+              "not_vision",
+              "not_configured",
+              "probe_failing",
+              "key_test_failed",
+              "unknown_provider",
+              "runtime_failing",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Type"
+          }
+        },
+        "required": [
+          "capability",
+          "label",
+          "agent_slug",
+          "assigned",
+          "model",
+          "provider",
+          "needs_vision",
+          "status",
+          "hint"
+        ],
+        "title": "AiCapabilityHealthRow",
+        "type": "object"
+      },
+      "AiGovernanceResponse": {
+        "description": "``GET /ai/governance``: one ``user_allowed`` bool per governed module\n(``ALL_MODULES``), the Nous master switch, and per-module Nous flags.\n\nThe module fields must equal ``ALL_MODULES`` — pinned by\n``tests/api/test_ai_settings_wire.py`` so a new module cannot be dropped\nfrom the response by this model.",
+        "properties": {
+          "caption": {
+            "title": "Caption",
+            "type": "boolean"
+          },
+          "chat": {
+            "title": "Chat",
+            "type": "boolean"
+          },
+          "classification": {
+            "title": "Classification",
+            "type": "boolean"
+          },
+          "embedding": {
+            "title": "Embedding",
+            "type": "boolean"
+          },
+          "nous_enabled": {
+            "title": "Nous Enabled",
+            "type": "boolean"
+          },
+          "nous_modules": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Nous Modules",
+            "type": "object"
+          },
+          "summarization": {
+            "title": "Summarization",
+            "type": "boolean"
+          },
+          "topic_scorer": {
+            "title": "Topic Scorer",
+            "type": "boolean"
+          },
+          "transcription": {
+            "title": "Transcription",
+            "type": "boolean"
+          },
+          "translation": {
+            "title": "Translation",
+            "type": "boolean"
+          },
+          "visual_analysis": {
+            "title": "Visual Analysis",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "caption",
+          "chat",
+          "classification",
+          "embedding",
+          "summarization",
+          "topic_scorer",
+          "transcription",
+          "translation",
+          "visual_analysis",
+          "nous_enabled",
+          "nous_modules"
+        ],
+        "title": "AiGovernanceResponse",
+        "type": "object"
+      },
+      "AiHealthResponse": {
+        "description": "``GET /ai/health``.",
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/AiCapabilityHealthRow"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capabilities"
+        ],
+        "title": "AiHealthResponse",
+        "type": "object"
+      },
+      "AiLegacySummarizeTriggerResponse": {
+        "description": "``POST /ai/summarize/{platform_id}`` (legacy, platform-id keyed).",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "platform_id": {
+            "title": "Platform Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "platform_id"
+        ],
+        "title": "AiLegacySummarizeTriggerResponse",
+        "type": "object"
+      },
+      "AiLegacyTranscribeTriggerResponse": {
+        "description": "``POST /ai/transcribe/{platform_id}`` (legacy, platform-id keyed).",
+        "properties": {
+          "extracting_audio": {
+            "title": "Extracting Audio",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "platform_id": {
+            "title": "Platform Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "platform_id",
+          "extracting_audio"
+        ],
+        "title": "AiLegacyTranscribeTriggerResponse",
+        "type": "object"
+      },
       "AiLibraryUsageByDay": {
         "properties": {
           "cost_points": {
@@ -5686,6 +6076,316 @@
           "by_day"
         ],
         "title": "AiLibraryUsageSummary",
+        "type": "object"
+      },
+      "AiMemoryCardResponse": {
+        "description": "``PUT /ai/memory/card`` — the stripped, non-empty lines saved.",
+        "properties": {
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "saved": {
+            "title": "Saved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "saved",
+          "lines"
+        ],
+        "title": "AiMemoryCardResponse",
+        "type": "object"
+      },
+      "AiMemoryForgetResponse": {
+        "description": "``DELETE /ai/memory`` — number of observations deleted.",
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "AiMemoryForgetResponse",
+        "type": "object"
+      },
+      "AiMemoryObservationDeleteResponse": {
+        "description": "``DELETE /ai/memory/observations/{conclusion_id}``.",
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "AiMemoryObservationDeleteResponse",
+        "type": "object"
+      },
+      "AiMemoryPrefsResponse": {
+        "description": "``PUT /ai/memory/prefs`` — the effective switches after the write.",
+        "properties": {
+          "inject_enabled": {
+            "title": "Inject Enabled",
+            "type": "boolean"
+          },
+          "learn_enabled": {
+            "title": "Learn Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "learn_enabled",
+          "inject_enabled"
+        ],
+        "title": "AiMemoryPrefsResponse",
+        "type": "object"
+      },
+      "AiNousModelPublic": {
+        "description": "An enabled platform model as a user may see it (no key, host or\nupstream provider; ``is_local`` is the one bit derived from the latter).\n\n``id`` is the native BIGINT — a JSON number on the wire, as it always\nwas. ``pricing_value`` is ``Numeric``; ``float`` emits the same JSON\nnumber ``jsonable_encoder`` did. ``last_tested_at`` is already an ISO\nstring (the repository's ``_parity``).",
+        "properties": {
+          "actual_model": {
+            "title": "Actual Model",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_local": {
+            "title": "Is Local",
+            "type": "boolean"
+          },
+          "last_test_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Test Code"
+          },
+          "last_test_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ok",
+                  "fail",
+                  "idle",
+                  "not_probed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Test Status"
+          },
+          "last_tested_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Tested At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pricing_type": {
+            "enum": [
+              "per_hour",
+              "per_request",
+              "per_token"
+            ],
+            "title": "Pricing Type",
+            "type": "string"
+          },
+          "pricing_value": {
+            "title": "Pricing Value",
+            "type": "number"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "llm",
+              "embedding",
+              "tts",
+              "asr",
+              "image",
+              "video"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "display_name",
+          "actual_model",
+          "type",
+          "pricing_type",
+          "pricing_value",
+          "sort_order",
+          "last_test_status",
+          "last_tested_at",
+          "last_test_code",
+          "is_local"
+        ],
+        "title": "AiNousModelPublic",
+        "type": "object"
+      },
+      "AiNousModelsResponse": {
+        "description": "``GET /ai/nous-models``.",
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/AiNousModelPublic"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "AiNousModelsResponse",
+        "type": "object"
+      },
+      "AiProviderHealthReportResponse": {
+        "description": "``POST /ai/provider-health``.",
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "AiProviderHealthReportResponse",
+        "type": "object"
+      },
+      "AiSummarizeTriggerResponse": {
+        "description": "``POST /ai/summarize/resource/{resource_id}``.\n\n``platform_id`` is absent on exactly one branch: the \"already in\nprogress\" answer found by the dedup SELECT (the race-lost variant of the\nsame answer carries it).",
+        "properties": {
+          "already_summarized": {
+            "title": "Already Summarized",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "platform_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Id"
+          },
+          "points_charged": {
+            "title": "Points Charged",
+            "type": "integer"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "resource_id",
+          "points_charged",
+          "already_summarized"
+        ],
+        "title": "AiSummarizeTriggerResponse",
+        "type": "object"
+      },
+      "AiTranscribeTriggerResponse": {
+        "description": "``POST /ai/transcribe/resource/{resource_id}``.\n\n``transcription_pending_audio`` and ``already_transcribed`` are on every\n200 (a client never reads \"absent\" as \"no\"). ``extracting_audio`` only on\nthe queued answer; ``blocking_task_id`` only when an audio extraction that\nwill not transcribe holds the slot (null = it just finished, retry now).\n``points_charged`` is always 0: transcription is billed when it lands.",
+        "properties": {
+          "already_transcribed": {
+            "title": "Already Transcribed",
+            "type": "boolean"
+          },
+          "blocking_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocking Task Id"
+          },
+          "extracting_audio": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracting Audio"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "platform_id": {
+            "title": "Platform Id",
+            "type": "string"
+          },
+          "points_charged": {
+            "title": "Points Charged",
+            "type": "integer"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "transcription_pending_audio": {
+            "title": "Transcription Pending Audio",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message",
+          "resource_id",
+          "platform_id",
+          "points_charged",
+          "transcription_pending_audio",
+          "already_transcribed"
+        ],
+        "title": "AiTranscribeTriggerResponse",
         "type": "object"
       },
       "AiUsageDailyRow": {
@@ -22951,6 +23651,361 @@
         "title": "McpServerOut",
         "type": "object"
       },
+      "MediaBatchDispatchedResponse": {
+        "description": "``use_celery=true``: one parse workflow queued per URL.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "use_celery": {
+            "const": true,
+            "title": "Use Celery",
+            "type": "boolean"
+          },
+          "workflow_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Workflow Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "message",
+          "task_id",
+          "workflow_ids",
+          "total",
+          "use_celery"
+        ],
+        "title": "MediaBatchDispatchedResponse",
+        "type": "object"
+      },
+      "MediaBatchError": {
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "error"
+        ],
+        "title": "MediaBatchError",
+        "type": "object"
+      },
+      "MediaBatchFetchResponse": {
+        "description": "Inline batch: every URL parsed in the request.",
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/MediaBatchError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/MediaBatchResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "submitted": {
+            "title": "Submitted",
+            "type": "integer"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "submitted",
+          "failed",
+          "results",
+          "errors"
+        ],
+        "title": "MediaBatchFetchResponse",
+        "type": "object"
+      },
+      "MediaBatchParsedData": {
+        "description": "The parse summary of one submitted batch URL (douyin formatter).",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "comment_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Count"
+          },
+          "cover_urls": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Urls"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "favorite_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Favorite Count"
+          },
+          "image_urls": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Urls"
+          },
+          "like_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Like Count"
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type"
+          },
+          "platform_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Id"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "sec_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sec Uid"
+          },
+          "share_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Count"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "unique_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unique Id"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "valid_url": {
+            "title": "Valid Url",
+            "type": "string"
+          },
+          "video_download_urls": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Download Urls"
+          }
+        },
+        "required": [
+          "platform_id",
+          "title",
+          "description",
+          "author",
+          "media_type",
+          "video_download_urls",
+          "cover_urls",
+          "like_count",
+          "comment_count",
+          "share_count",
+          "favorite_count",
+          "duration",
+          "published_at",
+          "image_urls",
+          "sec_uid",
+          "unique_id",
+          "valid_url",
+          "user_id"
+        ],
+        "title": "MediaBatchParsedData",
+        "type": "object"
+      },
+      "MediaBatchResult": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MediaBatchParsedData"
+          },
+          "platform_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Id"
+          },
+          "status": {
+            "const": "submitted",
+            "title": "Status",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "platform_id",
+          "status",
+          "data"
+        ],
+        "title": "MediaBatchResult",
+        "type": "object"
+      },
       "MediaCapsIn": {
         "additionalProperties": false,
         "description": "Partial patch for capability_profile.capabilities.media (A1/A8).\n\nDeep-merged by the router, so a client toggling ``image`` alone keeps the\nstored ``max_calls_per_turn``. ``None`` means \"leave unchanged\".",
@@ -23014,6 +24069,1269 @@
           }
         },
         "title": "MediaCapsOut",
+        "type": "object"
+      },
+      "MediaCard": {
+        "description": "One library card: ``MediaRepository.CARD_SELECT`` columns plus the two\nper-user overlays ``resource_id`` and ``has_prompt`` (``_card_row``).",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "comment_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Count"
+          },
+          "cover_download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Download Path"
+          },
+          "cover_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Download Status"
+          },
+          "cover_urls": {
+            "title": "Cover Urls"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "datasize": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasize"
+          },
+          "datasize_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasize Bytes"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "download_duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Duration"
+          },
+          "download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Path"
+          },
+          "download_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Time"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "dynamic_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dynamic Cover Url"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "extract_audio_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extract Audio Path"
+          },
+          "favorite_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Favorite Count"
+          },
+          "has_prompt": {
+            "title": "Has Prompt",
+            "type": "boolean"
+          },
+          "hashtags": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hashtags"
+          },
+          "hls_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hls Path"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "image_download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Download Path"
+          },
+          "image_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Download Status"
+          },
+          "image_download_urls": {
+            "title": "Image Download Urls"
+          },
+          "keep_forever": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keep Forever"
+          },
+          "last_viewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Viewed At"
+          },
+          "like_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Like Count"
+          },
+          "media_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Format"
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type"
+          },
+          "music_download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music Download Path"
+          },
+          "music_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music Download Status"
+          },
+          "music_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music Name"
+          },
+          "music_play_urls": {
+            "title": "Music Play Urls"
+          },
+          "original_url": {
+            "title": "Original Url",
+            "type": "string"
+          },
+          "platform_id": {
+            "title": "Platform Id",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "integer"
+          },
+          "share_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Count"
+          },
+          "source_platform": {
+            "title": "Source Platform",
+            "type": "string"
+          },
+          "storage_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Size"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "video_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Download Status"
+          },
+          "video_download_urls": {
+            "title": "Video Download Urls"
+          },
+          "view_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "View Count"
+          }
+        },
+        "required": [
+          "id",
+          "platform_id",
+          "source_platform",
+          "title",
+          "author",
+          "description",
+          "original_url",
+          "cover_urls",
+          "dynamic_cover_url",
+          "cover_download_status",
+          "cover_download_path",
+          "like_count",
+          "comment_count",
+          "share_count",
+          "favorite_count",
+          "view_count",
+          "extract_audio_path",
+          "music_download_path",
+          "music_download_status",
+          "music_name",
+          "music_play_urls",
+          "video_download_status",
+          "video_download_urls",
+          "image_download_status",
+          "image_download_urls",
+          "image_download_path",
+          "hashtags",
+          "error_message",
+          "created_at",
+          "updated_at",
+          "published_at",
+          "last_viewed_at",
+          "media_type",
+          "media_format",
+          "duration",
+          "resolution",
+          "datasize",
+          "datasize_bytes",
+          "storage_size",
+          "keep_forever",
+          "hls_path",
+          "download_path",
+          "download_time",
+          "download_duration",
+          "resource_id",
+          "has_prompt"
+        ],
+        "title": "MediaCard",
+        "type": "object"
+      },
+      "MediaCardListResponse": {
+        "description": "``GET /media`` and ``POST /media/search``.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "videos": {
+            "items": {
+              "$ref": "#/components/schemas/MediaCard"
+            },
+            "title": "Videos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "videos"
+        ],
+        "title": "MediaCardListResponse",
+        "type": "object"
+      },
+      "MediaCleanupStaleResponse": {
+        "description": "``POST /media/cleanup-stale-downloads``.",
+        "properties": {
+          "cleaned": {
+            "title": "Cleaned",
+            "type": "integer"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cleaned"
+        ],
+        "title": "MediaCleanupStaleResponse",
+        "type": "object"
+      },
+      "MediaDeleteResponse": {
+        "description": "``DELETE /media/{platform_id}``.",
+        "properties": {
+          "files_deleted": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Files Deleted",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message",
+          "files_deleted"
+        ],
+        "title": "MediaDeleteResponse",
+        "type": "object"
+      },
+      "MediaDetail": {
+        "description": "``GET /media/{platform_id}``: the full row, plus the caller's\n``resource_id`` when they have one on this media (absent otherwise — the\nroute sets ``response_model_exclude_unset``).",
+        "properties": {
+          "ai_analyze_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Analyze Text"
+          },
+          "ai_extract_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Extract Text"
+          },
+          "ai_generated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Generated At"
+          },
+          "ai_rewrite_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Rewrite Text"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "canonical_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Url"
+          },
+          "comment_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Count"
+          },
+          "cover_download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Download Path"
+          },
+          "cover_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Download Status"
+          },
+          "cover_urls": {
+            "title": "Cover Urls"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "datasize": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasize"
+          },
+          "datasize_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasize Bytes"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "download_duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Duration"
+          },
+          "download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Path"
+          },
+          "download_retry_count": {
+            "title": "Download Retry Count",
+            "type": "integer"
+          },
+          "download_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Time"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "dynamic_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dynamic Cover Url"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "extract_audio_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extract Audio Path"
+          },
+          "extract_audio_status": {
+            "title": "Extract Audio Status",
+            "type": "string"
+          },
+          "favorite_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Favorite Count"
+          },
+          "hashtags": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hashtags"
+          },
+          "hls_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hls Path"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "image_download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Download Path"
+          },
+          "image_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Download Status"
+          },
+          "image_download_urls": {
+            "title": "Image Download Urls"
+          },
+          "keep_forever": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keep Forever"
+          },
+          "last_viewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Viewed At"
+          },
+          "like_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Like Count"
+          },
+          "media_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Format"
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "music_download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music Download Path"
+          },
+          "music_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music Download Status"
+          },
+          "music_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music Name"
+          },
+          "music_play_urls": {
+            "title": "Music Play Urls"
+          },
+          "original_url": {
+            "title": "Original Url",
+            "type": "string"
+          },
+          "platform_id": {
+            "title": "Platform Id",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "share_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Count"
+          },
+          "source_platform": {
+            "title": "Source Platform",
+            "type": "string"
+          },
+          "storage_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Size"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "video_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Download Status"
+          },
+          "video_download_urls": {
+            "title": "Video Download Urls"
+          },
+          "view_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "View Count"
+          }
+        },
+        "required": [
+          "id",
+          "platform_id",
+          "original_url",
+          "canonical_url",
+          "source_platform",
+          "extract_audio_status",
+          "download_retry_count",
+          "like_count",
+          "comment_count",
+          "share_count",
+          "favorite_count",
+          "duration",
+          "resolution",
+          "datasize",
+          "hashtags",
+          "published_at",
+          "author",
+          "title",
+          "media_type",
+          "description",
+          "video_download_urls",
+          "image_download_urls",
+          "music_name",
+          "video_download_status",
+          "music_download_status",
+          "download_duration",
+          "download_path",
+          "error_message",
+          "download_time",
+          "created_at",
+          "updated_at",
+          "cover_urls",
+          "dynamic_cover_url",
+          "cover_download_status",
+          "cover_download_path",
+          "ai_extract_text",
+          "ai_rewrite_text",
+          "ai_analyze_text",
+          "ai_generated_at",
+          "view_count",
+          "last_viewed_at",
+          "storage_size",
+          "keep_forever",
+          "datasize_bytes",
+          "hls_path",
+          "media_format",
+          "image_download_status",
+          "image_download_path",
+          "music_download_path",
+          "music_play_urls",
+          "extract_audio_path",
+          "metadata"
+        ],
+        "title": "MediaDetail",
+        "type": "object"
+      },
+      "MediaDetailResponse": {
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "video": {
+            "$ref": "#/components/schemas/MediaDetail"
+          }
+        },
+        "required": [
+          "video"
+        ],
+        "title": "MediaDetailResponse",
+        "type": "object"
+      },
+      "MediaExtractAudioResponse": {
+        "description": "``POST /media/{platform_id}/extract-audio``.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "platform_id": {
+            "title": "Platform Id",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "platform_id",
+          "task_id"
+        ],
+        "title": "MediaExtractAudioResponse",
+        "type": "object"
+      },
+      "MediaFetchDedupResponse": {
+        "description": "A parse of this URL is already running or just finished; no new task.",
+        "properties": {
+          "async": {
+            "const": true,
+            "title": "Async",
+            "type": "boolean"
+          },
+          "dedup_action": {
+            "enum": [
+              "subscribed",
+              "completed"
+            ],
+            "title": "Dedup Action",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message",
+          "async",
+          "dedup_action"
+        ],
+        "title": "MediaFetchDedupResponse",
+        "type": "object"
+      },
+      "MediaFetchOwnedResponse": {
+        "description": "The caller already has this URL in their library; nothing was queued.",
+        "properties": {
+          "async": {
+            "const": false,
+            "title": "Async",
+            "type": "boolean"
+          },
+          "dedup_action": {
+            "const": "already_owned",
+            "title": "Dedup Action",
+            "type": "string"
+          },
+          "media_id": {
+            "title": "Media Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message",
+          "async",
+          "dedup_action",
+          "resource_id",
+          "media_id"
+        ],
+        "title": "MediaFetchOwnedResponse",
         "type": "object"
       },
       "MediaFetchRequest": {
@@ -23099,6 +25417,209 @@
           "url"
         ],
         "title": "MediaFetchRequest",
+        "type": "object"
+      },
+      "MediaFetchSubmittedResponse": {
+        "description": "A parse workflow was queued; ``task_id`` is its task_tracking id.",
+        "properties": {
+          "async": {
+            "const": true,
+            "title": "Async",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "async",
+          "task_id"
+        ],
+        "title": "MediaFetchSubmittedResponse",
+        "type": "object"
+      },
+      "MediaLyricLine": {
+        "additionalProperties": true,
+        "description": "One lyric line (``soda_music.lyrics.parse_timed_lyrics``).\n\nThe one writer (``lyrics_payload_from_track``) stores all six keys, but the\nread side stays lenient — see :class:`MediaLyricToken`.",
+        "properties": {
+          "line_duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Duration Ms"
+          },
+          "line_end_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line End Ms"
+          },
+          "line_start_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Start Ms"
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MediaLyricToken"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokens"
+          }
+        },
+        "title": "MediaLyricLine",
+        "type": "object"
+      },
+      "MediaLyricToken": {
+        "additionalProperties": true,
+        "description": "One timed word of a lyric line (``soda_music.lyrics._parse_tokens``).\n\nEvery key is optional and unknown keys pass through: this is stored jsonb\nread back, and a hand-edited historical row must still read (same ruling\nas ``resources.lyrics_json``). The routes use ``response_model_exclude_unset``\nso a key the row lacks stays absent instead of coming back as ``null``.",
+        "properties": {
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "end_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Ms"
+          },
+          "flag": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flag"
+          },
+          "offset_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offset Ms"
+          },
+          "start_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Ms"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "title": "MediaLyricToken",
+        "type": "object"
+      },
+      "MediaLyricsResponse": {
+        "description": "``GET /media/{media_id}/lyrics`` and ``POST .../lyrics/fetch``.\n\nBoth empty (``{\"lrc\": \"\", \"lines\": []}``) when the track has no lyrics;\nnever null (``extract_lyrics`` normalises a stored null to the empty value).",
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/MediaLyricLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "lrc": {
+            "title": "Lrc",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lrc",
+          "lines"
+        ],
+        "title": "MediaLyricsResponse",
         "type": "object"
       },
       "MediaSearchRequest": {
@@ -23187,6 +25708,158 @@
         "title": "MediaSearchRequest",
         "type": "object"
       },
+      "MediaSlide": {
+        "description": "One slide of a carousel / image-text post.",
+        "properties": {
+          "media_type": {
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "image",
+              "video"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "media_type",
+          "url"
+        ],
+        "title": "MediaSlide",
+        "type": "object"
+      },
+      "MediaSlidesResponse": {
+        "description": "``GET /media/{media_id}/slides``.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "slides": {
+            "items": {
+              "$ref": "#/components/schemas/MediaSlide"
+            },
+            "title": "Slides",
+            "type": "array"
+          }
+        },
+        "required": [
+          "slides",
+          "count"
+        ],
+        "title": "MediaSlidesResponse",
+        "type": "object"
+      },
+      "MediaSodaDownloadResponse": {
+        "description": "``success`` is false when no track could be dispatched; ``flow_id`` is\nnull when the task flow row could not be created (best effort).",
+        "properties": {
+          "flow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flow Id"
+          },
+          "submitted": {
+            "title": "Submitted",
+            "type": "integer"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "success",
+          "flow_id",
+          "submitted",
+          "total"
+        ],
+        "title": "MediaSodaDownloadResponse",
+        "type": "object"
+      },
+      "MediaStatistics": {
+        "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_storage_bytes": {
+            "title": "Total Storage Bytes",
+            "type": "integer"
+          },
+          "unique_authors": {
+            "title": "Unique Authors",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "pending",
+          "completed",
+          "failed",
+          "skipped",
+          "total_storage_bytes",
+          "unique_authors"
+        ],
+        "title": "MediaStatistics",
+        "type": "object"
+      },
+      "MediaStatisticsResponse": {
+        "description": "``GET /media/statistics``.",
+        "properties": {
+          "statistics": {
+            "$ref": "#/components/schemas/MediaStatistics"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "statistics"
+        ],
+        "title": "MediaStatisticsResponse",
+        "type": "object"
+      },
       "MediaTypeFetchRequest": {
         "description": "Request body for subsequent per-type fetch (POST /videos/{platform_id}/fetch).",
         "properties": {
@@ -23204,6 +25877,182 @@
           "types"
         ],
         "title": "MediaTypeFetchRequest",
+        "type": "object"
+      },
+      "MediaTypeFetchResponse": {
+        "description": "``POST /media/{platform_id}/fetch``.",
+        "properties": {
+          "already_in_library": {
+            "title": "Already In Library",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "platform_id": {
+            "title": "Platform Id",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "types_skipped": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Types Skipped",
+            "type": "array"
+          },
+          "types_submitted": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Types Submitted",
+            "type": "array"
+          },
+          "types_subscribed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Types Subscribed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "message",
+          "already_in_library",
+          "platform_id",
+          "task_id",
+          "types_submitted",
+          "types_skipped",
+          "types_subscribed"
+        ],
+        "title": "MediaTypeFetchResponse",
+        "type": "object"
+      },
+      "MediaUserLog": {
+        "description": "One ``user_logs`` row (``_log_to_dict``: ISO-string timestamps).",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "aweme_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aweme Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "details": {
+            "title": "Details"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "action",
+          "message",
+          "status",
+          "aweme_id",
+          "details",
+          "created_at"
+        ],
+        "title": "MediaUserLog",
+        "type": "object"
+      },
+      "MediaUserLogsResponse": {
+        "description": "``GET /media/logs``: one page of the caller's action log.",
+        "properties": {
+          "logs": {
+            "items": {
+              "$ref": "#/components/schemas/MediaUserLog"
+            },
+            "title": "Logs",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "logs",
+          "total",
+          "page",
+          "page_size",
+          "total_pages"
+        ],
+        "title": "MediaUserLogsResponse",
         "type": "object"
       },
       "MemberAdd": {
@@ -26213,6 +29062,572 @@
         "title": "PanelSize",
         "type": "object"
       },
+      "ParsedMediaRow": {
+        "description": "One ``parsed_media`` row (``SELECT *`` shape).",
+        "properties": {
+          "ai_analyze_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Analyze Text"
+          },
+          "ai_extract_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Extract Text"
+          },
+          "ai_generated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Generated At"
+          },
+          "ai_rewrite_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Rewrite Text"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "canonical_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Url"
+          },
+          "comment_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Count"
+          },
+          "cover_download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Download Path"
+          },
+          "cover_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Download Status"
+          },
+          "cover_urls": {
+            "title": "Cover Urls"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "datasize": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasize"
+          },
+          "datasize_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasize Bytes"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "download_duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Duration"
+          },
+          "download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Path"
+          },
+          "download_retry_count": {
+            "title": "Download Retry Count",
+            "type": "integer"
+          },
+          "download_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Time"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "dynamic_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dynamic Cover Url"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "extract_audio_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extract Audio Path"
+          },
+          "extract_audio_status": {
+            "title": "Extract Audio Status",
+            "type": "string"
+          },
+          "favorite_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Favorite Count"
+          },
+          "hashtags": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hashtags"
+          },
+          "hls_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hls Path"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "image_download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Download Path"
+          },
+          "image_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Download Status"
+          },
+          "image_download_urls": {
+            "title": "Image Download Urls"
+          },
+          "keep_forever": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keep Forever"
+          },
+          "last_viewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Viewed At"
+          },
+          "like_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Like Count"
+          },
+          "media_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Format"
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "music_download_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music Download Path"
+          },
+          "music_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music Download Status"
+          },
+          "music_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music Name"
+          },
+          "music_play_urls": {
+            "title": "Music Play Urls"
+          },
+          "original_url": {
+            "title": "Original Url",
+            "type": "string"
+          },
+          "platform_id": {
+            "title": "Platform Id",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "share_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Count"
+          },
+          "source_platform": {
+            "title": "Source Platform",
+            "type": "string"
+          },
+          "storage_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Size"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "video_download_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Download Status"
+          },
+          "video_download_urls": {
+            "title": "Video Download Urls"
+          },
+          "view_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "View Count"
+          }
+        },
+        "required": [
+          "id",
+          "platform_id",
+          "original_url",
+          "canonical_url",
+          "source_platform",
+          "extract_audio_status",
+          "download_retry_count",
+          "like_count",
+          "comment_count",
+          "share_count",
+          "favorite_count",
+          "duration",
+          "resolution",
+          "datasize",
+          "hashtags",
+          "published_at",
+          "author",
+          "title",
+          "media_type",
+          "description",
+          "video_download_urls",
+          "image_download_urls",
+          "music_name",
+          "video_download_status",
+          "music_download_status",
+          "download_duration",
+          "download_path",
+          "error_message",
+          "download_time",
+          "created_at",
+          "updated_at",
+          "cover_urls",
+          "dynamic_cover_url",
+          "cover_download_status",
+          "cover_download_path",
+          "ai_extract_text",
+          "ai_rewrite_text",
+          "ai_analyze_text",
+          "ai_generated_at",
+          "view_count",
+          "last_viewed_at",
+          "storage_size",
+          "keep_forever",
+          "datasize_bytes",
+          "hls_path",
+          "media_format",
+          "image_download_status",
+          "image_download_path",
+          "music_download_path",
+          "music_play_urls",
+          "extract_audio_path",
+          "metadata"
+        ],
+        "title": "ParsedMediaRow",
+        "type": "object"
+      },
       "PauseAgentBody": {
         "properties": {
           "reason": {
@@ -26318,6 +29733,33 @@
           "items"
         ],
         "title": "PausedListResponse",
+        "type": "object"
+      },
+      "PendingDownloadsResponse": {
+        "description": "``GET /media/pending`` — the caller's media still waiting to download.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "videos": {
+            "items": {
+              "$ref": "#/components/schemas/ParsedMediaRow"
+            },
+            "title": "Videos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "videos"
+        ],
+        "title": "PendingDownloadsResponse",
         "type": "object"
       },
       "PendingSummaryOut": {
@@ -34559,6 +38001,37 @@
         "title": "RetryDownloadRequest",
         "type": "object"
       },
+      "RetryDownloadResponse": {
+        "description": "``POST /media/retry/{platform_id}``.\n\n``task_id`` is the ``task_tracking`` id of the new download, ``None`` when\nnothing was dispatched (every requested type was already running and the\nretry subscribed to it, or neither type was requested), or the literal\n``\"background\"`` when DBOS dispatch failed and the download fell back to a\nFastAPI background task.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "message",
+          "task_id"
+        ],
+        "title": "RetryDownloadResponse",
+        "type": "object"
+      },
       "RevertRequest": {
         "description": "``expected_latest`` 是乐观锁，不是可选的礼貌：两人同时回退同一个对象时，\n没有它后者会静默覆盖前者刚登记的那一版。",
         "properties": {
@@ -38901,6 +42374,51 @@
         "title": "SetReviewStatusRequest",
         "type": "object"
       },
+      "SettingsPlatformHeaders": {
+        "description": "``GET /settings/headers/{platform}``.\n\n``headers_text`` is ``\"\"`` when the caller has no row for the platform and\n``null`` when the row exists (a saved cookie) but headers were never set.",
+        "properties": {
+          "headers_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headers Text"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "headers_text"
+        ],
+        "title": "SettingsPlatformHeaders",
+        "type": "object"
+      },
+      "SettingsPlatformWriteResult": {
+        "description": "``{\"success\": true, \"platform\": ...}`` from the cookie/header writes.\n\n``success`` is always true on a 2xx: every failure is an HTTP error.",
+        "properties": {
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "platform"
+        ],
+        "title": "SettingsPlatformWriteResult",
+        "type": "object"
+      },
       "ShareAccessRequest": {
         "description": "Request body for accessing a share by code (password verification).",
         "properties": {
@@ -39472,94 +42990,6 @@
         "title": "SkillAgentRef",
         "type": "object"
       },
-      "SkillCreate": {
-        "description": "Request body for creating a skill.",
-        "properties": {
-          "category": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Category"
-          },
-          "content_md": {
-            "maxLength": 10000,
-            "minLength": 1,
-            "title": "Content Md",
-            "type": "string"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "icon": {
-            "default": "✨",
-            "maxLength": 20,
-            "title": "Icon",
-            "type": "string"
-          },
-          "is_public": {
-            "default": false,
-            "title": "Is Public",
-            "type": "boolean"
-          },
-          "name": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "output_format": {
-            "anyOf": [
-              {
-                "maxLength": 5000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output Format"
-          },
-          "project_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Project Id"
-          },
-          "trigger_keywords": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Trigger Keywords",
-            "type": "array"
-          }
-        },
-        "required": [
-          "name",
-          "content_md"
-        ],
-        "title": "SkillCreate",
-        "type": "object"
-      },
       "SkillFileOut": {
         "properties": {
           "binary_url": {
@@ -39929,135 +43359,6 @@
           "updated_at"
         ],
         "title": "SkillOut",
-        "type": "object"
-      },
-      "SkillUpdate": {
-        "description": "Request body for updating a skill.",
-        "properties": {
-          "category": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Category"
-          },
-          "content_md": {
-            "anyOf": [
-              {
-                "maxLength": 10000,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content Md"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "icon": {
-            "anyOf": [
-              {
-                "maxLength": 20,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Icon"
-          },
-          "is_public": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Public"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "output_format": {
-            "anyOf": [
-              {
-                "maxLength": 5000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output Format"
-          },
-          "project_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Project Id"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "pattern": "^(active|archived)$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status"
-          },
-          "trigger_keywords": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trigger Keywords"
-          }
-        },
-        "title": "SkillUpdate",
         "type": "object"
       },
       "SkillVersionDetail": {
@@ -65847,7 +69148,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiBackfillEmbeddingsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -65921,7 +69224,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiAnalyzeTriggerResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -65938,80 +69243,6 @@
           }
         },
         "summary": "Trigger Visual Analysis By Resource",
-        "tags": [
-          "AI",
-          "AI"
-        ]
-      }
-    },
-    "/api/v1/ai/analyze/{platform_id}": {
-      "post": {
-        "description": "Manually trigger visual analysis (L1: cover image) for a video.\n\nQueues L1 analysis via Celery. If a local video file exists,\nL2 analysis (cover + keyframes) is queued instead.",
-        "operationId": "trigger_visual_analysis_api_v1_ai_analyze__platform_id__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "platform_id",
-            "required": true,
-            "schema": {
-              "title": "Platform Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Trigger Visual Analysis",
         "tags": [
           "AI",
           "AI"
@@ -66060,7 +69291,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiGovernanceResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -66125,7 +69358,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiHealthResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -66206,7 +69441,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemoryForgetResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -66297,7 +69534,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemoryCardResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -66387,7 +69626,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemoryObservationDeleteResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -66462,7 +69703,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemoryPrefsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -66626,7 +69869,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiNousModelsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -66701,7 +69946,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiProviderHealthReportResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -66718,27 +69965,6 @@
           }
         },
         "summary": "Report Provider Health",
-        "tags": [
-          "AI",
-          "AI"
-        ]
-      }
-    },
-    "/api/v1/ai/providers": {
-      "get": {
-        "description": "List available AI provider keys.",
-        "operationId": "list_providers_api_v1_ai_providers_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List Providers",
         "tags": [
           "AI",
           "AI"
@@ -66948,7 +70174,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiSummarizeTriggerResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -66973,7 +70201,7 @@
     },
     "/api/v1/ai/summarize/{platform_id}": {
       "post": {
-        "description": "Manually trigger summary generation for a video (legacy, platform_id-based).\n\nRequires an existing transcript. If no transcript exists,\nqueues the full pipeline (extract -> transcribe -> summarize).",
+        "description": "Manually trigger summary generation for a video (legacy, platform_id-based).\n\nRequires an existing transcript. If no transcript exists,\nqueues the full pipeline (extract -> transcribe -> summarize).\n\nThe media and the caller's own resource are resolved BEFORE the points\ncharge: an unknown platform id (or one the caller holds no resource for)\nused to be charged first and then 404ed with nothing refunded.",
         "operationId": "trigger_summary_api_v1_ai_summarize__platform_id__post",
         "parameters": [
           {
@@ -67022,7 +70250,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiLegacySummarizeTriggerResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -67352,7 +70582,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiTranscribeTriggerResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -67426,7 +70658,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AiLegacyTranscribeTriggerResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -87186,7 +90420,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaCardListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -87263,7 +90499,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaCleanupStaleResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -87283,82 +90521,6 @@
         "tags": [
           "Media",
           "Video Management"
-        ]
-      }
-    },
-    "/api/v1/media/debug/raw-parse": {
-      "get": {
-        "description": "Debug endpoint: return raw aweme_detail JSON from the unified douyin\nchain (ABogus → DrissionPage). No DB writes, no downloads — just raw\nparsed data.",
-        "operationId": "debug_raw_parse_api_v1_media_debug_raw_parse_get",
-        "parameters": [
-          {
-            "description": "Share URL to parse",
-            "in": "query",
-            "name": "url",
-            "required": true,
-            "schema": {
-              "description": "Share URL to parse",
-              "title": "Url",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Debug Raw Parse",
-        "tags": [
-          "Media",
-          "Debug"
         ]
       }
     },
@@ -87412,11 +90574,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "video/mp4": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "The downloaded video as an attachment (Range supported)"
           },
           "422": {
             "content": {
@@ -87486,11 +90651,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "The cover image as an attachment"
           },
           "422": {
             "content": {
@@ -87560,11 +90728,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "Every slide of the post in one zip attachment"
           },
           "422": {
             "content": {
@@ -87634,11 +90805,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "audio/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "The extracted or downloaded audio as an attachment"
           },
           "422": {
             "content": {
@@ -87710,7 +90884,20 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MediaFetchOwnedResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaFetchDedupResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaFetchSubmittedResponse"
+                    }
+                  ],
+                  "title": "Response Fetch Video Api V1 Media Fetch Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -87785,7 +90972,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MediaBatchFetchResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaBatchDispatchedResponse"
+                    }
+                  ],
+                  "title": "Response Fetch Videos Batch Api V1 Media Fetch Batch Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -87963,7 +91160,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaUserLogsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88040,7 +91239,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PendingDownloadsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88127,7 +91328,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RetryDownloadResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88225,7 +91428,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaCardListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88378,9 +91583,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Download Soda Playlist Api V1 Media Soda Playlist Download Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/MediaSodaDownloadResponse"
                 }
               }
             },
@@ -88446,7 +91649,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaStatisticsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88528,11 +91733,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "audio/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "The background audio, served inline"
           },
           "422": {
             "content": {
@@ -88603,7 +91811,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaLyricsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88677,7 +91887,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaLyricsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88751,7 +91963,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaSlidesResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88842,11 +92056,26 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "One slide file, served inline"
           },
           "422": {
             "content": {
@@ -88929,7 +92158,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaDeleteResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -89001,7 +92232,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaDetailResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -89075,7 +92308,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaExtractAudioResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -89159,7 +92394,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MediaTypeFetchResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -109131,69 +112368,6 @@
       }
     },
     "/api/v1/settings": {
-      "delete": {
-        "description": "删除用户设置\n\n删除已认证用户的个人设置，重置为默认值。\n\n需要认证：Bearer Token 或 API Key",
-        "operationId": "delete_user_settings_api_v1_settings_delete",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete User Settings",
-        "tags": [
-          "用户设置",
-          "用户设置"
-        ]
-      },
       "get": {
         "description": "获取当前用户设置\n\n获取已认证用户的个人设置。如果用户尚未配置设置，则返回默认值。\n\n需要认证：Bearer Token 或 API Key",
         "operationId": "get_user_settings_api_v1_settings_get",
@@ -109404,7 +112578,7 @@
     },
     "/api/v1/settings/cookies/{platform}": {
       "delete": {
-        "description": "Delete cookie for a platform\n\nRequires authentication: Bearer Token or API Key",
+        "description": "Delete cookie for a platform\n\nCustom headers saved for the platform are kept.\n\nRequires authentication: Bearer Token or API Key",
         "operationId": "delete_cookie_api_v1_settings_cookies__platform__delete",
         "parameters": [
           {
@@ -109453,7 +112627,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsPlatformWriteResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -109535,7 +112711,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsPlatformWriteResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -109609,7 +112787,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsPlatformHeaders"
+                }
               }
             },
             "description": "Successful Response"
@@ -109691,7 +112871,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsPlatformWriteResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -110943,443 +114125,6 @@
         "summary": "Move Shot",
         "tags": [
           "Script Shots"
-        ]
-      }
-    },
-    "/api/v1/skills": {
-      "get": {
-        "description": "List skills: own team's + system presets + public. Returns summary (no content_md).",
-        "operationId": "list_skills_api_v1_skills_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "project_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Project Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "category",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Category"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Skills Api V1 Skills Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Skills",
-        "tags": [
-          "Skills"
-        ]
-      },
-      "post": {
-        "description": "Create a new skill (requires auth + team membership).",
-        "operationId": "create_skill_api_v1_skills_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SkillCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Skill Api V1 Skills Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Skill",
-        "tags": [
-          "Skills"
-        ]
-      }
-    },
-    "/api/v1/skills/categories": {
-      "get": {
-        "description": "List available skill categories.",
-        "operationId": "list_categories_api_v1_skills_categories_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Categories Api V1 Skills Categories Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List Categories",
-        "tags": [
-          "Skills"
-        ]
-      }
-    },
-    "/api/v1/skills/{skill_id}": {
-      "delete": {
-        "description": "Archive a skill (owner only, system presets protected).",
-        "operationId": "delete_skill_api_v1_skills__skill_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "skill_id",
-            "required": true,
-            "schema": {
-              "title": "Skill Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Skill Api V1 Skills  Skill Id  Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Skill",
-        "tags": [
-          "Skills"
-        ]
-      },
-      "get": {
-        "description": "Get full skill detail (includes content_md).",
-        "operationId": "get_skill_api_v1_skills__skill_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "skill_id",
-            "required": true,
-            "schema": {
-              "title": "Skill Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Skill Api V1 Skills  Skill Id  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Skill",
-        "tags": [
-          "Skills"
-        ]
-      },
-      "patch": {
-        "description": "Update a skill (owner only).",
-        "operationId": "update_skill_api_v1_skills__skill_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "skill_id",
-            "required": true,
-            "schema": {
-              "title": "Skill Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SkillUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Skill Api V1 Skills  Skill Id  Patch",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Skill",
-        "tags": [
-          "Skills"
         ]
       }
     },

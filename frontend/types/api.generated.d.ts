@@ -4410,29 +4410,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ai/analyze/{platform_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Trigger Visual Analysis
-         * @description Manually trigger visual analysis (L1: cover image) for a video.
-         *
-         *     Queues L1 analysis via Celery. If a local video file exists,
-         *     L2 analysis (cover + keyframes) is queued instead.
-         */
-        post: operations["trigger_visual_analysis_api_v1_ai_analyze__platform_id__post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/ai/governance": {
         parameters: {
             query?: never;
@@ -4639,26 +4616,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ai/providers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Providers
-         * @description List available AI provider keys.
-         */
-        get: operations["list_providers_api_v1_ai_providers_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/ai/settings": {
         parameters: {
             query?: never;
@@ -4722,6 +4679,10 @@ export interface paths {
          *
          *     Requires an existing transcript. If no transcript exists,
          *     queues the full pipeline (extract -> transcribe -> summarize).
+         *
+         *     The media and the caller's own resource are resolved BEFORE the points
+         *     charge: an unknown platform id (or one the caller holds no resource for)
+         *     used to be charged first and then 404ed with nothing refunded.
          */
         post: operations["trigger_summary_api_v1_ai_summarize__platform_id__post"];
         delete?: never;
@@ -9767,28 +9728,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/media/debug/raw-parse": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Debug Raw Parse
-         * @description Debug endpoint: return raw aweme_detail JSON from the unified douyin
-         *     chain (ABogus → DrissionPage). No DB writes, no downloads — just raw
-         *     parsed data.
-         */
-        get: operations["debug_raw_parse_api_v1_media_debug_raw_parse_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/media/download/{platform_id}": {
         parameters: {
             query?: never;
@@ -14713,15 +14652,7 @@ export interface paths {
          */
         put: operations["update_user_settings_api_v1_settings_put"];
         post?: never;
-        /**
-         * Delete User Settings
-         * @description 删除用户设置
-         *
-         *     删除已认证用户的个人设置，重置为默认值。
-         *
-         *     需要认证：Bearer Token 或 API Key
-         */
-        delete: operations["delete_user_settings_api_v1_settings_delete"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -14774,6 +14705,8 @@ export interface paths {
         /**
          * Delete Cookie
          * @description Delete cookie for a platform
+         *
+         *     Custom headers saved for the platform are kept.
          *
          *     Requires authentication: Bearer Token or API Key
          */
@@ -15064,78 +14997,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/v1/skills": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Skills
-         * @description List skills: own team's + system presets + public. Returns summary (no content_md).
-         */
-        get: operations["list_skills_api_v1_skills_get"];
-        put?: never;
-        /**
-         * Create Skill
-         * @description Create a new skill (requires auth + team membership).
-         */
-        post: operations["create_skill_api_v1_skills_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/skills/categories": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Categories
-         * @description List available skill categories.
-         */
-        get: operations["list_categories_api_v1_skills_categories_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/skills/{skill_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Skill
-         * @description Get full skill detail (includes content_md).
-         */
-        get: operations["get_skill_api_v1_skills__skill_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete Skill
-         * @description Archive a skill (owner only, system presets protected).
-         */
-        delete: operations["delete_skill_api_v1_skills__skill_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Skill
-         * @description Update a skill (owner only).
-         */
-        patch: operations["update_skill_api_v1_skills__skill_id__patch"];
         trace?: never;
     };
     "/api/v1/system/health": {
@@ -18768,6 +18629,175 @@ export interface components {
             /** Version Number */
             version_number: number;
         };
+        /**
+         * AiAnalyzeTriggerResponse
+         * @description ``POST /ai/analyze/resource/{resource_id}``; ``platform_id`` only on
+         *     the queued answer, not on "already in progress".
+         */
+        AiAnalyzeTriggerResponse: {
+            /** Message */
+            message: string;
+            /** Platform Id */
+            platform_id?: string | null;
+            /** Resource Id */
+            resource_id: string;
+        };
+        /**
+         * AiBackfillEmbeddingsResponse
+         * @description ``POST /ai/analyze/backfill-embeddings``.
+         *
+         *     ``dispatched`` / ``in_flight`` are kept for readers of the pre-mig-499
+         *     shape and are always ``[]`` / ``0`` now: nothing is dispatched, every
+         *     candidate is embedded in place. ``aborted_reason`` is null when every row
+         *     was attempted.
+         */
+        AiBackfillEmbeddingsResponse: {
+            /** Aborted Reason */
+            aborted_reason: string | null;
+            /** Dispatched */
+            dispatched: string[];
+            /** Dry Run */
+            dry_run: boolean;
+            /**
+             * In Flight
+             * @constant
+             */
+            in_flight: 0;
+            /** Reembedded */
+            reembedded: string[];
+            /** Rehashed */
+            rehashed: number;
+            /** Remaining */
+            remaining: number;
+            /** Skipped */
+            skipped: components["schemas"]["AiBackfillSkip"][];
+            space: components["schemas"]["SpaceInfo"];
+            /** Stale */
+            stale: number;
+            /** Success */
+            success: boolean;
+            /** Total Missing */
+            total_missing: number;
+        };
+        /**
+         * AiBackfillSkip
+         * @description One batch row that did not land; ``resource_id`` is a string
+         *     (Snowflake > 2^53), ``reason`` a stable code, never provider text.
+         */
+        AiBackfillSkip: {
+            /** Reason */
+            reason: string;
+            /** Resource Id */
+            resource_id: string;
+        };
+        /**
+         * AiCapabilityHealthRow
+         * @description One row of the capability board (``app/services/ai/ai_health.py``).
+         *
+         *     ``origin`` is absent on an agent-task row whose resolution crashed (the
+         *     ``error`` row of the first loop); the system rows' error row carries
+         *     ``""``. The runtime quartet (``task_type`` … ``last_error``) is present
+         *     only on capabilities backed by a tracked workflow. The route uses
+         *     ``response_model_exclude_unset`` so absent stays absent.
+         */
+        AiCapabilityHealthRow: {
+            /** Agent Slug */
+            agent_slug: string;
+            /** Assigned */
+            assigned: boolean;
+            /** Capability */
+            capability: string;
+            /** Hint */
+            hint: string;
+            /** Label */
+            label: string;
+            /** Last Error */
+            last_error?: string | null;
+            /** Model */
+            model: string;
+            /** Needs Vision */
+            needs_vision: boolean;
+            /** Origin */
+            origin?: ("platform" | "governance" | "byok" | "env" | "") | null;
+            /** Provider */
+            provider: string;
+            /** Recent Failures */
+            recent_failures?: number | null;
+            /** Recent Runs */
+            recent_runs?: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "no_key" | "no_model" | "not_vision" | "not_configured" | "probe_failing" | "key_test_failed" | "unknown_provider" | "runtime_failing" | "error";
+            /** Task Type */
+            task_type?: string | null;
+        };
+        /**
+         * AiGovernanceResponse
+         * @description ``GET /ai/governance``: one ``user_allowed`` bool per governed module
+         *     (``ALL_MODULES``), the Nous master switch, and per-module Nous flags.
+         *
+         *     The module fields must equal ``ALL_MODULES`` — pinned by
+         *     ``tests/api/test_ai_settings_wire.py`` so a new module cannot be dropped
+         *     from the response by this model.
+         */
+        AiGovernanceResponse: {
+            /** Caption */
+            caption: boolean;
+            /** Chat */
+            chat: boolean;
+            /** Classification */
+            classification: boolean;
+            /** Embedding */
+            embedding: boolean;
+            /** Nous Enabled */
+            nous_enabled: boolean;
+            /** Nous Modules */
+            nous_modules: {
+                [key: string]: boolean;
+            };
+            /** Summarization */
+            summarization: boolean;
+            /** Topic Scorer */
+            topic_scorer: boolean;
+            /** Transcription */
+            transcription: boolean;
+            /** Translation */
+            translation: boolean;
+            /** Visual Analysis */
+            visual_analysis: boolean;
+        };
+        /**
+         * AiHealthResponse
+         * @description ``GET /ai/health``.
+         */
+        AiHealthResponse: {
+            /** Capabilities */
+            capabilities: components["schemas"]["AiCapabilityHealthRow"][];
+        };
+        /**
+         * AiLegacySummarizeTriggerResponse
+         * @description ``POST /ai/summarize/{platform_id}`` (legacy, platform-id keyed).
+         */
+        AiLegacySummarizeTriggerResponse: {
+            /** Message */
+            message: string;
+            /** Platform Id */
+            platform_id: string;
+        };
+        /**
+         * AiLegacyTranscribeTriggerResponse
+         * @description ``POST /ai/transcribe/{platform_id}`` (legacy, platform-id keyed).
+         */
+        AiLegacyTranscribeTriggerResponse: {
+            /** Extracting Audio */
+            extracting_audio: boolean;
+            /** Message */
+            message: string;
+            /** Platform Id */
+            platform_id: string;
+        };
         /** AiLibraryUsageByDay */
         AiLibraryUsageByDay: {
             /** Cost Points */
@@ -18909,6 +18939,148 @@ export interface components {
             window_end: string;
             /** Window Start */
             window_start: string;
+        };
+        /**
+         * AiMemoryCardResponse
+         * @description ``PUT /ai/memory/card`` — the stripped, non-empty lines saved.
+         */
+        AiMemoryCardResponse: {
+            /** Lines */
+            lines: string[];
+            /** Saved */
+            saved: boolean;
+        };
+        /**
+         * AiMemoryForgetResponse
+         * @description ``DELETE /ai/memory`` — number of observations deleted.
+         */
+        AiMemoryForgetResponse: {
+            /** Deleted */
+            deleted: number;
+        };
+        /**
+         * AiMemoryObservationDeleteResponse
+         * @description ``DELETE /ai/memory/observations/{conclusion_id}``.
+         */
+        AiMemoryObservationDeleteResponse: {
+            /** Deleted */
+            deleted: string;
+        };
+        /**
+         * AiMemoryPrefsResponse
+         * @description ``PUT /ai/memory/prefs`` — the effective switches after the write.
+         */
+        AiMemoryPrefsResponse: {
+            /** Inject Enabled */
+            inject_enabled: boolean;
+            /** Learn Enabled */
+            learn_enabled: boolean;
+        };
+        /**
+         * AiNousModelPublic
+         * @description An enabled platform model as a user may see it (no key, host or
+         *     upstream provider; ``is_local`` is the one bit derived from the latter).
+         *
+         *     ``id`` is the native BIGINT — a JSON number on the wire, as it always
+         *     was. ``pricing_value`` is ``Numeric``; ``float`` emits the same JSON
+         *     number ``jsonable_encoder`` did. ``last_tested_at`` is already an ISO
+         *     string (the repository's ``_parity``).
+         */
+        AiNousModelPublic: {
+            /** Actual Model */
+            actual_model: string;
+            /** Display Name */
+            display_name: string;
+            /** Id */
+            id: number;
+            /** Is Local */
+            is_local: boolean;
+            /** Last Test Code */
+            last_test_code: string | null;
+            /** Last Test Status */
+            last_test_status: ("ok" | "fail" | "idle" | "not_probed") | null;
+            /** Last Tested At */
+            last_tested_at: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Pricing Type
+             * @enum {string}
+             */
+            pricing_type: "per_hour" | "per_request" | "per_token";
+            /** Pricing Value */
+            pricing_value: number;
+            /** Sort Order */
+            sort_order: number;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "llm" | "embedding" | "tts" | "asr" | "image" | "video";
+        };
+        /**
+         * AiNousModelsResponse
+         * @description ``GET /ai/nous-models``.
+         */
+        AiNousModelsResponse: {
+            /** Models */
+            models: components["schemas"]["AiNousModelPublic"][];
+        };
+        /**
+         * AiProviderHealthReportResponse
+         * @description ``POST /ai/provider-health``.
+         */
+        AiProviderHealthReportResponse: {
+            /** Ok */
+            ok: boolean;
+        };
+        /**
+         * AiSummarizeTriggerResponse
+         * @description ``POST /ai/summarize/resource/{resource_id}``.
+         *
+         *     ``platform_id`` is absent on exactly one branch: the "already in
+         *     progress" answer found by the dedup SELECT (the race-lost variant of the
+         *     same answer carries it).
+         */
+        AiSummarizeTriggerResponse: {
+            /** Already Summarized */
+            already_summarized: boolean;
+            /** Message */
+            message: string;
+            /** Platform Id */
+            platform_id?: string | null;
+            /** Points Charged */
+            points_charged: number;
+            /** Resource Id */
+            resource_id: string;
+        };
+        /**
+         * AiTranscribeTriggerResponse
+         * @description ``POST /ai/transcribe/resource/{resource_id}``.
+         *
+         *     ``transcription_pending_audio`` and ``already_transcribed`` are on every
+         *     200 (a client never reads "absent" as "no"). ``extracting_audio`` only on
+         *     the queued answer; ``blocking_task_id`` only when an audio extraction that
+         *     will not transcribe holds the slot (null = it just finished, retry now).
+         *     ``points_charged`` is always 0: transcription is billed when it lands.
+         */
+        AiTranscribeTriggerResponse: {
+            /** Already Transcribed */
+            already_transcribed: boolean;
+            /** Blocking Task Id */
+            blocking_task_id?: string | null;
+            /** Extracting Audio */
+            extracting_audio?: boolean | null;
+            /** Message */
+            message: string;
+            /** Platform Id */
+            platform_id: string;
+            /** Points Charged */
+            points_charged: number;
+            /** Resource Id */
+            resource_id: string;
+            /** Transcription Pending Audio */
+            transcription_pending_audio: boolean;
         };
         /** AiUsageDailyRow */
         AiUsageDailyRow: {
@@ -26217,6 +26389,113 @@ export interface components {
             url: string;
         };
         /**
+         * MediaBatchDispatchedResponse
+         * @description ``use_celery=true``: one parse workflow queued per URL.
+         */
+        MediaBatchDispatchedResponse: {
+            /** Message */
+            message: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Task Id */
+            task_id: string;
+            /** Total */
+            total: number;
+            /**
+             * Use Celery
+             * @constant
+             */
+            use_celery: true;
+            /** Workflow Ids */
+            workflow_ids: string[];
+        };
+        /** MediaBatchError */
+        MediaBatchError: {
+            /** Error */
+            error: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * MediaBatchFetchResponse
+         * @description Inline batch: every URL parsed in the request.
+         */
+        MediaBatchFetchResponse: {
+            /** Errors */
+            errors: components["schemas"]["MediaBatchError"][];
+            /** Failed */
+            failed: number;
+            /** Results */
+            results: components["schemas"]["MediaBatchResult"][];
+            /** Submitted */
+            submitted: number;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Total */
+            total: number;
+        };
+        /**
+         * MediaBatchParsedData
+         * @description The parse summary of one submitted batch URL (douyin formatter).
+         */
+        MediaBatchParsedData: {
+            /** Author */
+            author: string | null;
+            /** Comment Count */
+            comment_count: number | null;
+            /** Cover Urls */
+            cover_urls: unknown[] | null;
+            /** Description */
+            description: string | null;
+            /** Duration */
+            duration: string | null;
+            /** Favorite Count */
+            favorite_count: number | null;
+            /** Image Urls */
+            image_urls: unknown[] | null;
+            /** Like Count */
+            like_count: number | null;
+            /** Media Type */
+            media_type: string | null;
+            /** Platform Id */
+            platform_id: string | null;
+            /** Published At */
+            published_at: string | null;
+            /** Sec Uid */
+            sec_uid: string | null;
+            /** Share Count */
+            share_count: number | null;
+            /** Title */
+            title: string | null;
+            /** Unique Id */
+            unique_id: string | null;
+            /** User Id */
+            user_id: string;
+            /** Valid Url */
+            valid_url: string;
+            /** Video Download Urls */
+            video_download_urls: unknown[] | null;
+        };
+        /** MediaBatchResult */
+        MediaBatchResult: {
+            data: components["schemas"]["MediaBatchParsedData"];
+            /** Platform Id */
+            platform_id: string | null;
+            /**
+             * Status
+             * @constant
+             */
+            status: "submitted";
+            /** Url */
+            url: string;
+        };
+        /**
          * MediaCapsIn
          * @description Partial patch for capability_profile.capabilities.media (A1/A8).
          *
@@ -26251,6 +26530,340 @@ export interface components {
              * @default false
              */
             video: boolean;
+        };
+        /**
+         * MediaCard
+         * @description One library card: ``MediaRepository.CARD_SELECT`` columns plus the two
+         *     per-user overlays ``resource_id`` and ``has_prompt`` (``_card_row``).
+         */
+        MediaCard: {
+            /** Author */
+            author: string | null;
+            /** Comment Count */
+            comment_count: number | null;
+            /** Cover Download Path */
+            cover_download_path: string | null;
+            /** Cover Download Status */
+            cover_download_status: string | null;
+            /** Cover Urls */
+            cover_urls: unknown;
+            /** Created At */
+            created_at: string | null;
+            /** Datasize */
+            datasize: string | null;
+            /** Datasize Bytes */
+            datasize_bytes: number | null;
+            /** Description */
+            description: string | null;
+            /** Download Duration */
+            download_duration: number | null;
+            /** Download Path */
+            download_path: string | null;
+            /** Download Time */
+            download_time: string | null;
+            /** Duration */
+            duration: string | null;
+            /** Dynamic Cover Url */
+            dynamic_cover_url: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Extract Audio Path */
+            extract_audio_path: string | null;
+            /** Favorite Count */
+            favorite_count: number | null;
+            /** Has Prompt */
+            has_prompt: boolean;
+            /** Hashtags */
+            hashtags: string | null;
+            /** Hls Path */
+            hls_path: string | null;
+            /** Id */
+            id: number;
+            /** Image Download Path */
+            image_download_path: string | null;
+            /** Image Download Status */
+            image_download_status: string | null;
+            /** Image Download Urls */
+            image_download_urls: unknown;
+            /** Keep Forever */
+            keep_forever: boolean | null;
+            /** Last Viewed At */
+            last_viewed_at: string | null;
+            /** Like Count */
+            like_count: number | null;
+            /** Media Format */
+            media_format: string | null;
+            /** Media Type */
+            media_type: string | null;
+            /** Music Download Path */
+            music_download_path: string | null;
+            /** Music Download Status */
+            music_download_status: string | null;
+            /** Music Name */
+            music_name: string | null;
+            /** Music Play Urls */
+            music_play_urls: unknown;
+            /** Original Url */
+            original_url: string;
+            /** Platform Id */
+            platform_id: string;
+            /** Published At */
+            published_at: string | null;
+            /** Resolution */
+            resolution: string | null;
+            /** Resource Id */
+            resource_id: number;
+            /** Share Count */
+            share_count: number | null;
+            /** Source Platform */
+            source_platform: string;
+            /** Storage Size */
+            storage_size: number | null;
+            /** Title */
+            title: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Video Download Status */
+            video_download_status: string | null;
+            /** Video Download Urls */
+            video_download_urls: unknown;
+            /** View Count */
+            view_count: number | null;
+        };
+        /**
+         * MediaCardListResponse
+         * @description ``GET /media`` and ``POST /media/search``.
+         */
+        MediaCardListResponse: {
+            /** Count */
+            count: number;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Videos */
+            videos: components["schemas"]["MediaCard"][];
+        };
+        /**
+         * MediaCleanupStaleResponse
+         * @description ``POST /media/cleanup-stale-downloads``.
+         */
+        MediaCleanupStaleResponse: {
+            /** Cleaned */
+            cleaned: number;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * MediaDeleteResponse
+         * @description ``DELETE /media/{platform_id}``.
+         */
+        MediaDeleteResponse: {
+            /** Files Deleted */
+            files_deleted: string[];
+            /** Message */
+            message: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * MediaDetail
+         * @description ``GET /media/{platform_id}``: the full row, plus the caller's
+         *     ``resource_id`` when they have one on this media (absent otherwise — the
+         *     route sets ``response_model_exclude_unset``).
+         */
+        MediaDetail: {
+            /** Ai Analyze Text */
+            ai_analyze_text: string | null;
+            /** Ai Extract Text */
+            ai_extract_text: string | null;
+            /** Ai Generated At */
+            ai_generated_at: string | null;
+            /** Ai Rewrite Text */
+            ai_rewrite_text: string | null;
+            /** Author */
+            author: string | null;
+            /** Canonical Url */
+            canonical_url: string | null;
+            /** Comment Count */
+            comment_count: number | null;
+            /** Cover Download Path */
+            cover_download_path: string | null;
+            /** Cover Download Status */
+            cover_download_status: string | null;
+            /** Cover Urls */
+            cover_urls: unknown;
+            /** Created At */
+            created_at: string | null;
+            /** Datasize */
+            datasize: string | null;
+            /** Datasize Bytes */
+            datasize_bytes: number | null;
+            /** Description */
+            description: string | null;
+            /** Download Duration */
+            download_duration: number | null;
+            /** Download Path */
+            download_path: string | null;
+            /** Download Retry Count */
+            download_retry_count: number;
+            /** Download Time */
+            download_time: string | null;
+            /** Duration */
+            duration: string | null;
+            /** Dynamic Cover Url */
+            dynamic_cover_url: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Extract Audio Path */
+            extract_audio_path: string | null;
+            /** Extract Audio Status */
+            extract_audio_status: string;
+            /** Favorite Count */
+            favorite_count: number | null;
+            /** Hashtags */
+            hashtags: string | null;
+            /** Hls Path */
+            hls_path: string | null;
+            /** Id */
+            id: number;
+            /** Image Download Path */
+            image_download_path: string | null;
+            /** Image Download Status */
+            image_download_status: string | null;
+            /** Image Download Urls */
+            image_download_urls: unknown;
+            /** Keep Forever */
+            keep_forever: boolean | null;
+            /** Last Viewed At */
+            last_viewed_at: string | null;
+            /** Like Count */
+            like_count: number | null;
+            /** Media Format */
+            media_format: string | null;
+            /** Media Type */
+            media_type: string | null;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            } | null;
+            /** Music Download Path */
+            music_download_path: string | null;
+            /** Music Download Status */
+            music_download_status: string | null;
+            /** Music Name */
+            music_name: string | null;
+            /** Music Play Urls */
+            music_play_urls: unknown;
+            /** Original Url */
+            original_url: string;
+            /** Platform Id */
+            platform_id: string;
+            /** Published At */
+            published_at: string | null;
+            /** Resolution */
+            resolution: string | null;
+            /** Resource Id */
+            resource_id?: number | null;
+            /** Share Count */
+            share_count: number | null;
+            /** Source Platform */
+            source_platform: string;
+            /** Storage Size */
+            storage_size: number | null;
+            /** Title */
+            title: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Video Download Status */
+            video_download_status: string | null;
+            /** Video Download Urls */
+            video_download_urls: unknown;
+            /** View Count */
+            view_count: number | null;
+        };
+        /** MediaDetailResponse */
+        MediaDetailResponse: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            video: components["schemas"]["MediaDetail"];
+        };
+        /**
+         * MediaExtractAudioResponse
+         * @description ``POST /media/{platform_id}/extract-audio``.
+         */
+        MediaExtractAudioResponse: {
+            /** Message */
+            message: string;
+            /** Platform Id */
+            platform_id: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Task Id */
+            task_id: string;
+        };
+        /**
+         * MediaFetchDedupResponse
+         * @description A parse of this URL is already running or just finished; no new task.
+         */
+        MediaFetchDedupResponse: {
+            /**
+             * Async
+             * @constant
+             */
+            async: true;
+            /**
+             * Dedup Action
+             * @enum {string}
+             */
+            dedup_action: "subscribed" | "completed";
+            /** Message */
+            message: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * MediaFetchOwnedResponse
+         * @description The caller already has this URL in their library; nothing was queued.
+         */
+        MediaFetchOwnedResponse: {
+            /**
+             * Async
+             * @constant
+             */
+            async: false;
+            /**
+             * Dedup Action
+             * @constant
+             */
+            dedup_action: "already_owned";
+            /** Media Id */
+            media_id: string;
+            /** Message */
+            message: string;
+            /** Resource Id */
+            resource_id: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
         };
         /**
          * MediaFetchRequest
@@ -26297,6 +26910,87 @@ export interface components {
             video_bool: boolean;
         };
         /**
+         * MediaFetchSubmittedResponse
+         * @description A parse workflow was queued; ``task_id`` is its task_tracking id.
+         */
+        MediaFetchSubmittedResponse: {
+            /**
+             * Async
+             * @constant
+             */
+            async: true;
+            /** Message */
+            message: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Task Id */
+            task_id: string;
+        };
+        /**
+         * MediaLyricLine
+         * @description One lyric line (``soda_music.lyrics.parse_timed_lyrics``).
+         *
+         *     The one writer (``lyrics_payload_from_track``) stores all six keys, but the
+         *     read side stays lenient — see :class:`MediaLyricToken`.
+         */
+        MediaLyricLine: {
+            /** Line Duration Ms */
+            line_duration_ms?: number | null;
+            /** Line End Ms */
+            line_end_ms?: number | null;
+            /** Line Start Ms */
+            line_start_ms?: number | null;
+            /** Raw */
+            raw?: string | null;
+            /** Text */
+            text?: string | null;
+            /** Tokens */
+            tokens?: components["schemas"]["MediaLyricToken"][] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * MediaLyricToken
+         * @description One timed word of a lyric line (``soda_music.lyrics._parse_tokens``).
+         *
+         *     Every key is optional and unknown keys pass through: this is stored jsonb
+         *     read back, and a hand-edited historical row must still read (same ruling
+         *     as ``resources.lyrics_json``). The routes use ``response_model_exclude_unset``
+         *     so a key the row lacks stays absent instead of coming back as ``null``.
+         */
+        MediaLyricToken: {
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** End Ms */
+            end_ms?: number | null;
+            /** Flag */
+            flag?: number | null;
+            /** Offset Ms */
+            offset_ms?: number | null;
+            /** Start Ms */
+            start_ms?: number | null;
+            /** Text */
+            text?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * MediaLyricsResponse
+         * @description ``GET /media/{media_id}/lyrics`` and ``POST .../lyrics/fetch``.
+         *
+         *     Both empty (``{"lrc": "", "lines": []}``) when the track has no lyrics;
+         *     never null (``extract_lyrics`` normalises a stored null to the empty value).
+         */
+        MediaLyricsResponse: {
+            /** Lines */
+            lines: components["schemas"]["MediaLyricLine"][];
+            /** Lrc */
+            lrc: string;
+        };
+        /**
          * MediaSearchRequest
          * @description Video search request
          */
@@ -26317,6 +27011,77 @@ export interface components {
             status?: string | null;
         };
         /**
+         * MediaSlide
+         * @description One slide of a carousel / image-text post.
+         */
+        MediaSlide: {
+            /** Media Type */
+            media_type: string;
+            /** Name */
+            name: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "image" | "video";
+            /** Url */
+            url: string;
+        };
+        /**
+         * MediaSlidesResponse
+         * @description ``GET /media/{media_id}/slides``.
+         */
+        MediaSlidesResponse: {
+            /** Count */
+            count: number;
+            /** Slides */
+            slides: components["schemas"]["MediaSlide"][];
+        };
+        /**
+         * MediaSodaDownloadResponse
+         * @description ``success`` is false when no track could be dispatched; ``flow_id`` is
+         *     null when the task flow row could not be created (best effort).
+         */
+        MediaSodaDownloadResponse: {
+            /** Flow Id */
+            flow_id: string | null;
+            /** Submitted */
+            submitted: number;
+            /** Success */
+            success: boolean;
+            /** Total */
+            total: number;
+        };
+        /** MediaStatistics */
+        MediaStatistics: {
+            /** Completed */
+            completed: number;
+            /** Failed */
+            failed: number;
+            /** Pending */
+            pending: number;
+            /** Skipped */
+            skipped: number;
+            /** Total */
+            total: number;
+            /** Total Storage Bytes */
+            total_storage_bytes: number;
+            /** Unique Authors */
+            unique_authors: number;
+        };
+        /**
+         * MediaStatisticsResponse
+         * @description ``GET /media/statistics``.
+         */
+        MediaStatisticsResponse: {
+            statistics: components["schemas"]["MediaStatistics"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
          * MediaTypeFetchRequest
          * @description Request body for subsequent per-type fetch (POST /videos/{platform_id}/fetch).
          */
@@ -26326,6 +27091,74 @@ export interface components {
              * @description Media types to fetch: 'video', 'cover', 'image'
              */
             types: string[];
+        };
+        /**
+         * MediaTypeFetchResponse
+         * @description ``POST /media/{platform_id}/fetch``.
+         */
+        MediaTypeFetchResponse: {
+            /** Already In Library */
+            already_in_library: boolean;
+            /** Message */
+            message: string;
+            /** Platform Id */
+            platform_id: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Task Id */
+            task_id: string | null;
+            /** Types Skipped */
+            types_skipped: string[];
+            /** Types Submitted */
+            types_submitted: string[];
+            /** Types Subscribed */
+            types_subscribed: string[];
+        };
+        /**
+         * MediaUserLog
+         * @description One ``user_logs`` row (``_log_to_dict``: ISO-string timestamps).
+         */
+        MediaUserLog: {
+            /** Action */
+            action: string;
+            /** Aweme Id */
+            aweme_id: string | null;
+            /** Created At */
+            created_at: string | null;
+            /** Details */
+            details: unknown;
+            /** Id */
+            id: number;
+            /** Message */
+            message: string;
+            /** Status */
+            status: string | null;
+            /** User Id */
+            user_id: string;
+        };
+        /**
+         * MediaUserLogsResponse
+         * @description ``GET /media/logs``: one page of the caller's action log.
+         */
+        MediaUserLogsResponse: {
+            /** Logs */
+            logs: components["schemas"]["MediaUserLog"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Total */
+            total: number;
+            /** Total Pages */
+            total_pages: number;
         };
         /** MemberAdd */
         MemberAdd: {
@@ -27473,6 +28306,118 @@ export interface components {
              */
             width: number;
         };
+        /**
+         * ParsedMediaRow
+         * @description One ``parsed_media`` row (``SELECT *`` shape).
+         */
+        ParsedMediaRow: {
+            /** Ai Analyze Text */
+            ai_analyze_text: string | null;
+            /** Ai Extract Text */
+            ai_extract_text: string | null;
+            /** Ai Generated At */
+            ai_generated_at: string | null;
+            /** Ai Rewrite Text */
+            ai_rewrite_text: string | null;
+            /** Author */
+            author: string | null;
+            /** Canonical Url */
+            canonical_url: string | null;
+            /** Comment Count */
+            comment_count: number | null;
+            /** Cover Download Path */
+            cover_download_path: string | null;
+            /** Cover Download Status */
+            cover_download_status: string | null;
+            /** Cover Urls */
+            cover_urls: unknown;
+            /** Created At */
+            created_at: string | null;
+            /** Datasize */
+            datasize: string | null;
+            /** Datasize Bytes */
+            datasize_bytes: number | null;
+            /** Description */
+            description: string | null;
+            /** Download Duration */
+            download_duration: number | null;
+            /** Download Path */
+            download_path: string | null;
+            /** Download Retry Count */
+            download_retry_count: number;
+            /** Download Time */
+            download_time: string | null;
+            /** Duration */
+            duration: string | null;
+            /** Dynamic Cover Url */
+            dynamic_cover_url: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Extract Audio Path */
+            extract_audio_path: string | null;
+            /** Extract Audio Status */
+            extract_audio_status: string;
+            /** Favorite Count */
+            favorite_count: number | null;
+            /** Hashtags */
+            hashtags: string | null;
+            /** Hls Path */
+            hls_path: string | null;
+            /** Id */
+            id: number;
+            /** Image Download Path */
+            image_download_path: string | null;
+            /** Image Download Status */
+            image_download_status: string | null;
+            /** Image Download Urls */
+            image_download_urls: unknown;
+            /** Keep Forever */
+            keep_forever: boolean | null;
+            /** Last Viewed At */
+            last_viewed_at: string | null;
+            /** Like Count */
+            like_count: number | null;
+            /** Media Format */
+            media_format: string | null;
+            /** Media Type */
+            media_type: string | null;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            } | null;
+            /** Music Download Path */
+            music_download_path: string | null;
+            /** Music Download Status */
+            music_download_status: string | null;
+            /** Music Name */
+            music_name: string | null;
+            /** Music Play Urls */
+            music_play_urls: unknown;
+            /** Original Url */
+            original_url: string;
+            /** Platform Id */
+            platform_id: string;
+            /** Published At */
+            published_at: string | null;
+            /** Resolution */
+            resolution: string | null;
+            /** Share Count */
+            share_count: number | null;
+            /** Source Platform */
+            source_platform: string;
+            /** Storage Size */
+            storage_size: number | null;
+            /** Title */
+            title: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Video Download Status */
+            video_download_status: string | null;
+            /** Video Download Urls */
+            video_download_urls: unknown;
+            /** View Count */
+            view_count: number | null;
+        };
         /** PauseAgentBody */
         PauseAgentBody: {
             /** Reason */
@@ -27511,6 +28456,21 @@ export interface components {
             has_more: boolean;
             /** Items */
             items: components["schemas"]["PausedIssueItem"][];
+        };
+        /**
+         * PendingDownloadsResponse
+         * @description ``GET /media/pending`` — the caller's media still waiting to download.
+         */
+        PendingDownloadsResponse: {
+            /** Count */
+            count: number;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Videos */
+            videos: components["schemas"]["ParsedMediaRow"][];
         };
         /**
          * PendingSummaryOut
@@ -30369,6 +31329,27 @@ export interface components {
             video_bool: boolean;
         };
         /**
+         * RetryDownloadResponse
+         * @description ``POST /media/retry/{platform_id}``.
+         *
+         *     ``task_id`` is the ``task_tracking`` id of the new download, ``None`` when
+         *     nothing was dispatched (every requested type was already running and the
+         *     retry subscribed to it, or neither type was requested), or the literal
+         *     ``"background"`` when DBOS dispatch failed and the download fell back to a
+         *     FastAPI background task.
+         */
+        RetryDownloadResponse: {
+            /** Message */
+            message: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Task Id */
+            task_id: string | null;
+        };
+        /**
          * RevertRequest
          * @description ``expected_latest`` 是乐观锁，不是可选的礼貌：两人同时回退同一个对象时，
          *     没有它后者会静默覆盖前者刚登记的那一版。
@@ -31917,6 +32898,31 @@ export interface components {
             version_id?: string | null;
         };
         /**
+         * SettingsPlatformHeaders
+         * @description ``GET /settings/headers/{platform}``.
+         *
+         *     ``headers_text`` is ``""`` when the caller has no row for the platform and
+         *     ``null`` when the row exists (a saved cookie) but headers were never set.
+         */
+        SettingsPlatformHeaders: {
+            /** Headers Text */
+            headers_text: string | null;
+            /** Platform */
+            platform: string;
+        };
+        /**
+         * SettingsPlatformWriteResult
+         * @description ``{"success": true, "platform": ...}`` from the cookie/header writes.
+         *
+         *     ``success`` is always true on a 2xx: every failure is an HTTP error.
+         */
+        SettingsPlatformWriteResult: {
+            /** Platform */
+            platform: string;
+            /** Success */
+            success: boolean;
+        };
+        /**
          * ShareAccessRequest
          * @description Request body for accessing a share by code (password verification).
          */
@@ -32149,36 +33155,6 @@ export interface components {
             /** Slug */
             slug: string;
         };
-        /**
-         * SkillCreate
-         * @description Request body for creating a skill.
-         */
-        SkillCreate: {
-            /** Category */
-            category?: string | null;
-            /** Content Md */
-            content_md: string;
-            /** Description */
-            description?: string | null;
-            /**
-             * Icon
-             * @default ✨
-             */
-            icon: string;
-            /**
-             * Is Public
-             * @default false
-             */
-            is_public: boolean;
-            /** Name */
-            name: string;
-            /** Output Format */
-            output_format?: string | null;
-            /** Project Id */
-            project_id?: string | null;
-            /** Trigger Keywords */
-            trigger_keywords?: string[];
-        };
         /** SkillFileOut */
         SkillFileOut: {
             /** Binary Url */
@@ -32298,32 +33274,6 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
-        };
-        /**
-         * SkillUpdate
-         * @description Request body for updating a skill.
-         */
-        SkillUpdate: {
-            /** Category */
-            category?: string | null;
-            /** Content Md */
-            content_md?: string | null;
-            /** Description */
-            description?: string | null;
-            /** Icon */
-            icon?: string | null;
-            /** Is Public */
-            is_public?: boolean | null;
-            /** Name */
-            name?: string | null;
-            /** Output Format */
-            output_format?: string | null;
-            /** Project Id */
-            project_id?: string | null;
-            /** Status */
-            status?: string | null;
-            /** Trigger Keywords */
-            trigger_keywords?: string[] | null;
         };
         /**
          * SkillVersionDetail
@@ -43046,7 +43996,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiBackfillEmbeddingsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43080,41 +44030,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    trigger_visual_analysis_api_v1_ai_analyze__platform_id__post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                platform_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiAnalyzeTriggerResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43146,7 +44062,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiGovernanceResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43178,7 +44094,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiHealthResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43212,7 +44128,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiMemoryForgetResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43250,7 +44166,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiMemoryCardResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43286,7 +44202,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiMemoryObservationDeleteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43322,7 +44238,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiMemoryPrefsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43390,7 +44306,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiNousModelsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43426,7 +44342,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiProviderHealthReportResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43436,26 +44352,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_providers_api_v1_ai_providers_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
         };
@@ -43550,7 +44446,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiSummarizeTriggerResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43584,7 +44480,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiLegacySummarizeTriggerResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43728,7 +44624,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiTranscribeTriggerResponse"];
                 };
             };
             /** @description Validation Error */
@@ -43762,7 +44658,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AiLegacyTranscribeTriggerResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53439,7 +54335,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaCardListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53473,42 +54369,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    debug_raw_parse_api_v1_media_debug_raw_parse_get: {
-        parameters: {
-            query: {
-                /** @description Share URL to parse */
-                url: string;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaCleanupStaleResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53536,13 +54397,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The downloaded video as an attachment (Range supported) */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "video/mp4": string;
                 };
             };
             /** @description Validation Error */
@@ -53570,13 +54431,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The cover image as an attachment */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "image/jpeg": string;
                 };
             };
             /** @description Validation Error */
@@ -53604,13 +54465,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Every slide of the post in one zip attachment */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/zip": string;
                 };
             };
             /** @description Validation Error */
@@ -53638,13 +54499,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The extracted or downloaded audio as an attachment */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "audio/*": string;
                 };
             };
             /** @description Validation Error */
@@ -53680,7 +54541,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaFetchOwnedResponse"] | components["schemas"]["MediaFetchDedupResponse"] | components["schemas"]["MediaFetchSubmittedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53716,7 +54577,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaBatchFetchResponse"] | components["schemas"]["MediaBatchDispatchedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53761,7 +54622,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaUserLogsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53795,7 +54656,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["PendingDownloadsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53833,7 +54694,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["RetryDownloadResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53872,7 +54733,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaCardListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53944,9 +54805,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MediaSodaDownloadResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53978,7 +54837,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaStatisticsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54008,13 +54867,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The background audio, served inline */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "audio/*": string;
                 };
             };
             /** @description Validation Error */
@@ -54048,7 +54907,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaLyricsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54082,7 +54941,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaLyricsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54116,7 +54975,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaSlidesResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54147,13 +55006,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description One slide file, served inline */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/octet-stream": string;
+                    "image/*": string;
+                    "video/*": string;
                 };
             };
             /** @description Validation Error */
@@ -54187,7 +55048,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54224,7 +55085,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaDeleteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54258,7 +55119,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaExtractAudioResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54296,7 +55157,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MediaTypeFetchResponse"];
                 };
             };
             /** @description Validation Error */
@@ -62885,38 +63746,6 @@ export interface operations {
             };
         };
     };
-    delete_user_settings_api_v1_settings_delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_cookies_api_v1_settings_cookies_get: {
         parameters: {
             query?: never;
@@ -62973,7 +63802,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SettingsPlatformWriteResult"];
                 };
             };
             /** @description Validation Error */
@@ -63007,7 +63836,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SettingsPlatformWriteResult"];
                 };
             };
             /** @description Validation Error */
@@ -63041,7 +63870,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SettingsPlatformHeaders"];
                 };
             };
             /** @description Validation Error */
@@ -63079,7 +63908,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SettingsPlatformWriteResult"];
                 };
             };
             /** @description Validation Error */
@@ -63621,215 +64450,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ShotMoveRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_skills_api_v1_skills_get: {
-        parameters: {
-            query?: {
-                project_id?: string | null;
-                category?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_skill_api_v1_skills_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SkillCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_categories_api_v1_skills_categories_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    get_skill_api_v1_skills__skill_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                skill_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_skill_api_v1_skills__skill_id__delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                skill_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_skill_api_v1_skills__skill_id__patch: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                skill_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SkillUpdate"];
             };
         };
         responses: {

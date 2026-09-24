@@ -323,3 +323,94 @@ export type UsageGroupBy = UsageDailySummary['group_by'];
 export type AILibraryUsageSummary = Schemas['AiLibraryUsageSummary'];
 export type ChatAttachmentUpload = Schemas['ChatAttachmentUpload'];
 // —— end AI Library ——
+
+// ── P5 settings / legacy skills ──
+// `/api/v1/settings/*`. The legacy `/api/v1/skills` CRUD was removed in P5
+// (no caller); skills live under `/ai-library/skills` (see the AI Library block).
+export type UserSettingsResponse = Schemas['UserSettingsResponse'];
+/** Presence and validity only — cookie content never comes back. */
+export type CookieStatus = Schemas['CookieStatusItem'];
+export type CookieListResponse = Schemas['CookieListResponse'];
+/** `headers_text` is `""` with no row for the platform and `null` when the row
+ * holds a cookie but headers were never saved. */
+export type PlatformHeaders = Schemas['SettingsPlatformHeaders'];
+export type SettingsPlatformWriteResult = Schemas['SettingsPlatformWriteResult'];
+// —— end P5 settings ——
+
+// ── P5 ai ──
+// `/api/v1/ai/*` triggers, capability board, governance, platform models and
+// `/api/v1/ai/memory` writes.
+/** `POST /ai/transcribe/resource/{id}`. `extracting_audio` only on the queued
+ * answer, `blocking_task_id` only when an audio-only extraction holds the
+ * slot; both are absent (not null) on every other branch. */
+export type TranscribeTriggerResponse = Schemas['AiTranscribeTriggerResponse'];
+/** `POST /ai/summarize/resource/{id}`. `platform_id` is absent on the
+ * "already in progress" answer from the dedup SELECT. */
+export type SummarizeTriggerResponse = Schemas['AiSummarizeTriggerResponse'];
+/** `POST /ai/analyze/resource/{id}`. `platform_id` only when queued. */
+export type AnalyzeTriggerResponse = Schemas['AiAnalyzeTriggerResponse'];
+export type LegacyTranscribeTriggerResponse = Schemas['AiLegacyTranscribeTriggerResponse'];
+export type LegacySummarizeTriggerResponse = Schemas['AiLegacySummarizeTriggerResponse'];
+/** `POST /ai/analyze/backfill-embeddings`. Resource ids and `space.id` are
+ * strings (Snowflake > 2^53). `dispatched` / `in_flight` are always `[]` / `0`
+ * since mig 499 (kept for old readers). */
+export type BackfillResult = Schemas['AiBackfillEmbeddingsResponse'];
+export type CapabilityHealth = Schemas['AiCapabilityHealthRow'];
+/** `GET /ai/governance`: one bool per governed module + the Nous switches. */
+export type AIGovernanceFlags = Schemas['AiGovernanceResponse'];
+/** `GET /ai/nous-models` row. `id` is a BIGINT sent as a JSON number. No
+ * key, host or upstream provider — `is_local` is the one derived bit. */
+export type NousModelPublic = Schemas['AiNousModelPublic'];
+export type MemoryPrefsResult = Schemas['AiMemoryPrefsResponse'];
+export type MemoryCardResult = Schemas['AiMemoryCardResponse'];
+export type MemoryForgetResult = Schemas['AiMemoryForgetResponse'];
+// —— end P5 ai ——
+
+// ── P5 media (B) ──
+// `/api/v1/media/pending`, `/media/retry/{platform_id}`, and the slides /
+// lyrics JSON routes. The file routes (`/media/download/*`, `/slides/{file}`,
+// `/audio`) return bytes and have no alias.
+/** One `parsed_media` row, `SELECT *` shape. `id` is a BIGINT sent as a JSON
+ * number; timestamps are `isoformat()` strings (`+00:00`, not `Z`). */
+export type ParsedMediaRow = Schemas['ParsedMediaRow'];
+export type PendingDownloadsResponse = Schemas['PendingDownloadsResponse'];
+/** `task_id` is null when nothing was dispatched (already running → the retry
+ * subscribed), or `"background"` when DBOS dispatch fell back. */
+export type RetryDownloadResponse = Schemas['RetryDownloadResponse'];
+export type MediaSlide = Schemas['MediaSlide'];
+export type MediaSlidesResponse = Schemas['MediaSlidesResponse'];
+/** `GET /media/{id}/lyrics` and `POST .../lyrics/fetch`; empty lyrics are
+ * `{ lrc: "", lines: [] }`, never null. */
+export type MediaLyrics = Schemas['MediaLyricsResponse'];
+export type MediaLyricLine = Schemas['MediaLyricLine'];
+// —— end P5 media (B) ——
+
+// ── P5 media (A) ──
+// `/api/v1/media` CRUD (list, detail, delete, search, statistics, logs,
+// cleanup), `/media/fetch`, `/media/fetch/batch`, `/media/{platform_id}/fetch`,
+// `/media/{platform_id}/extract-audio`, `/media/soda/playlist/download`.
+/** Library card: `parsed_media` card columns + the caller's `resource_id` /
+ * `has_prompt`. Ids are JSON numbers; timestamps `isoformat()` strings. */
+export type MediaCard = Schemas['MediaCard'];
+export type MediaCardList = Schemas['MediaCardListResponse'];
+/** `GET /media/{platform_id}`; `video.resource_id` only when the caller owns one. */
+export type MediaDetailResult = Schemas['MediaDetailResponse'];
+export type MediaDeleteResult = Schemas['MediaDeleteResponse'];
+export type MediaStatistics = Schemas['MediaStatistics'];
+/** One `user_logs` row. `id` is a JSON number; the video id key is `aweme_id`. */
+export type MediaUserLog = Schemas['MediaUserLog'];
+export type MediaUserLogsPage = Schemas['MediaUserLogsResponse'];
+/** `POST /media/fetch` answers with exactly one of these three shapes. */
+export type MediaFetchOwned = Schemas['MediaFetchOwnedResponse'];
+export type MediaFetchDedup = Schemas['MediaFetchDedupResponse'];
+export type MediaFetchSubmitted = Schemas['MediaFetchSubmittedResponse'];
+export type MediaFetchResult = MediaFetchOwned | MediaFetchDedup | MediaFetchSubmitted;
+/** `POST /media/fetch/batch`: the inline shape, or — only with
+ * `use_celery: true` — the queued shape. */
+export type MediaBatchFetchResult = Schemas['MediaBatchFetchResponse'];
+export type MediaBatchDispatched = Schemas['MediaBatchDispatchedResponse'];
+export type MediaTypeFetchResult = Schemas['MediaTypeFetchResponse'];
+export type MediaExtractAudioResult = Schemas['MediaExtractAudioResponse'];
+/** `success` is false when no track could be dispatched; `flow_id` may be null. */
+export type MediaSodaDownloadResult = Schemas['MediaSodaDownloadResponse'];
+// —— end P5 media (A) ——
