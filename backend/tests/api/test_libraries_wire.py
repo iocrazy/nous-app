@@ -231,3 +231,75 @@ async def test_missing_library_is_typed_404(client, _wiring) -> None:
 @pytest.mark.asyncio
 async def test_non_numeric_library_id_is_typed_404_not_500(client) -> None:
     _assert_typed_404(await client.get("/api/v1/libraries/abc"))
+
+
+# --------------------------------------------------------------------------- #
+# Wire parity (P7): each body equals ``jsonable_encoder`` of the dict the
+# handler built before the routes declared a response model.
+# --------------------------------------------------------------------------- #
+
+
+def _dirty_library() -> Dict[str, Any]:
+    """Every nullable column NULL (legacy rows)."""
+    return _library(
+        icon=None, color=None, sort_order=None, created_at=None, updated_at=None
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_wire(client, _wiring) -> None:
+    _wiring.rows = [_library(), _dirty_library()]
+    resp = await client.get("/api/v1/libraries", params={"scope_id": TEAM})
+    assert_wire_unchanged(resp, {"success": True, "data": _wiring.rows})
+    assert resp.json()["data"][0]["id"] == LIB_ID  # a JSON number, as before
+
+
+@pytest.mark.asyncio
+async def test_create_wire(client, _wiring) -> None:
+    resp = await client.post(
+        "/api/v1/libraries", json={"name": "Mine", "scope_id": TEAM}
+    )
+    assert_wire_unchanged(
+        resp, {"success": True, "data": {**_library(), "name": "Mine"}}
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_wire_dirty_row(client, _wiring) -> None:
+    _wiring.row = _dirty_library()
+    resp = await client.get(f"/api/v1/libraries/{LIB_ID}")
+    assert_wire_unchanged(resp, {"success": True, "data": _wiring.row})
+
+
+@pytest.mark.asyncio
+async def test_patch_wire(client, _wiring) -> None:
+    resp = await client.patch(f"/api/v1/libraries/{LIB_ID}", json={"name": "New"})
+    assert_wire_unchanged(
+        resp, {"success": True, "data": {**_library(), "name": "New"}}
+    )
+
+
+@pytest.mark.asyncio
+async def test_patch_empty_body_returns_row_unchanged(client, _wiring) -> None:
+    resp = await client.patch(f"/api/v1/libraries/{LIB_ID}", json={})
+    assert_wire_unchanged(resp, {"success": True, "data": _library()})
+    assert _wiring.writes == []
+
+
+@pytest.mark.asyncio
+async def test_patch_row_gone_after_guard_is_typed_404(
+    client, _wiring, monkeypatch
+) -> None:
+    async def _gone(library_id, data):
+        return {}
+
+    monkeypatch.setattr(_wiring, "update", _gone)
+    _assert_typed_404(
+        await client.patch(f"/api/v1/libraries/{LIB_ID}", json={"name": "x"})
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_wire(client) -> None:
+    resp = await client.delete(f"/api/v1/libraries/{LIB_ID}")
+    assert_wire_unchanged(resp, {"success": True, "message": "Library deleted"})

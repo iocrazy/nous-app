@@ -10,15 +10,22 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from app.api.library_access import library_not_found, require_library_access, team_role
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.core.workflow_roles import WRITE_ROLES
-from app.schemas.libraries import LibraryCreate, LibraryUpdate
+from app.schemas.libraries import (
+    LibraryCreate,
+    LibraryDeleteResponse,
+    LibraryListResponse,
+    LibraryResponse,
+    LibraryUpdate,
+)
 from app.services.library.libraries_service import LibrariesService
 
 router = APIRouter(prefix="/libraries")
 
 
-@router.get("")
+@router.get("", response_model=LibraryListResponse)
 async def list_libraries(
     auth: AuthDep,
     scope_id: str = Query(..., description="Team ID"),
@@ -35,7 +42,7 @@ async def list_libraries(
         raise HTTPException(status_code=500, detail="Failed to list libraries")
 
 
-@router.post("")
+@router.post("", response_model=LibraryResponse)
 async def create_library(data: LibraryCreate, auth: AuthDep):
     """Create a new team library."""
     role = await team_role(data.scope_id, auth.user_id)
@@ -52,7 +59,9 @@ async def create_library(data: LibraryCreate, auth: AuthDep):
             icon=data.icon,
             color=data.color,
         )
-        return {"success": True, "data": library}
+        return {"success": True, "data": require_row(library)}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to create library: {e}")
         raise HTTPException(status_code=500, detail="Failed to create library")
@@ -67,7 +76,7 @@ async def _load(svc: LibrariesService, library_id: str) -> dict | None:
     return await svc.get_library(library_id)
 
 
-@router.get("/{library_id}")
+@router.get("/{library_id}", response_model=LibraryResponse)
 async def get_library(library_id: str, auth: AuthDep):
     """Get a single library by ID."""
     try:
@@ -82,7 +91,7 @@ async def get_library(library_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to get library")
 
 
-@router.patch("/{library_id}")
+@router.patch("/{library_id}", response_model=LibraryResponse)
 async def update_library(library_id: str, data: LibraryUpdate, auth: AuthDep):
     """Update a library."""
     try:
@@ -95,7 +104,8 @@ async def update_library(library_id: str, data: LibraryUpdate, auth: AuthDep):
             return {"success": True, "data": library}
 
         result = await svc.update_library(library_id, update_data)
-        return {"success": True, "data": result}
+        # {} = the row went away between the guard and the write.
+        return {"success": True, "data": require_row(result)}
     except HTTPException:
         raise
     except Exception as e:
@@ -103,7 +113,7 @@ async def update_library(library_id: str, data: LibraryUpdate, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to update library")
 
 
-@router.delete("/{library_id}")
+@router.delete("/{library_id}", response_model=LibraryDeleteResponse)
 async def delete_library(library_id: str, auth: AuthDep):
     """Delete a library and all its contents."""
     try:
