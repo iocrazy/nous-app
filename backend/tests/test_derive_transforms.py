@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from io import BytesIO
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from PIL import Image
@@ -16,7 +15,6 @@ from app.services.canvas.grid_derive_service import (
 )
 from app.services.canvas.image_crop import CropRegion
 from app.services.canvas.image_outpaint import Padding
-from app.services.canvas.nous_center_runner import NousCenterNotConfigured
 from app.services.canvas.outpaint_derive_service import (
     OutpaintDeriveError,
     extend_image,
@@ -86,54 +84,3 @@ async def test_extend_image_rejects_zero_padding_with_400() -> None:
             _png(), "image/png", Padding(left=0.0, top=0.0, right=0.0, bottom=0.0)
         )
     assert caught.value.status_code == 400
-
-
-async def test_extend_image_ai_mode_falls_back_when_nous_unconfigured() -> None:
-    with patch(
-        "app.services.canvas.outpaint_derive_service.run_outpaint_via_nous",
-        new=AsyncMock(side_effect=NousCenterNotConfigured("off")),
-    ) as nous:
-        out = await extend_image(
-            _png(100, 50),
-            "image/png",
-            Padding(left=0.5, top=0.0, right=0.5, bottom=0.0),
-            prompt="a windswept meadow",
-            mode="ai",
-            label="gen:5",
-        )
-    nous.assert_awaited_once()
-    assert _size(out) == (200, 50)
-
-
-async def test_extend_image_ai_mode_uses_nous_bytes_when_available() -> None:
-    ai_bytes = _png(7, 7)
-    with patch(
-        "app.services.canvas.outpaint_derive_service.run_outpaint_via_nous",
-        new=AsyncMock(return_value=ai_bytes),
-    ) as nous:
-        out = await extend_image(
-            _png(100, 50),
-            "image/png",
-            Padding(left=0.5, top=0.0, right=0.5, bottom=0.0),
-            prompt="a windswept meadow",
-            mode="ai",
-            label="gen:5",
-        )
-    assert out == ai_bytes
-    assert nous.await_args.kwargs["prompt"] == "a windswept meadow"
-
-
-async def test_extend_image_deterministic_mode_never_calls_nous() -> None:
-    with patch(
-        "app.services.canvas.outpaint_derive_service.run_outpaint_via_nous",
-        new=AsyncMock(),
-    ) as nous:
-        out = await extend_image(
-            _png(100, 50),
-            "image/png",
-            Padding(left=0.5, top=0.0, right=0.5, bottom=0.0),
-            prompt="ignored",
-            mode="deterministic",
-        )
-    nous.assert_not_awaited()
-    assert _size(out) == (200, 50)

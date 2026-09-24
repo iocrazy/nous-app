@@ -133,6 +133,26 @@ async def test_outpaint_registers_extended_image_with_prompt(
     assert reg["origin"].params["mode"] == "deterministic"
 
 
+async def test_outpaint_ai_mode_without_any_config_still_extends_deterministically(
+    wire: dict[str, Any],
+) -> None:
+    # The legacy nous-center AI fill was retired (2026-09-24). A client still
+    # asking for mode="ai" with a prompt must get the blur-filled image — the
+    # same bytes production always produced, since the bridge was never set up.
+    out = await cds.derive_canvas_outpaint(
+        canvas_id=1,
+        user_id="u1",
+        source_url="/api/v1/generated-media/5/cover",
+        padding=Padding(left=0.5, top=0.0, right=0.5, bottom=0.0),
+        prompt="a windswept meadow",
+        mode="ai",
+    )
+    assert out.url == "/api/v1/generated-media/901/cover"
+    [reg] = wire["registered"]
+    assert reg["size"] == (20, 8)
+    assert reg["origin"].prompt == "a windswept meadow"
+
+
 async def test_source_refusal_propagates_before_any_registration(
     wire: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:

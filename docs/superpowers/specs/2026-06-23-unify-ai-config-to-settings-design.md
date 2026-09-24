@@ -1,5 +1,7 @@
 # Unify ALL AI Config to Settings (Zero env/file) — Design
 
+> **2026-09-24 更新**：下文的「nous-center runner」与「canvas derive slugs」两行所指的 nous-center 工作流桥（`NOUS_CENTER_*` / `NOUS_CENTER_OUTPAINT_SLUG`、`/workflows` `/runs` 协议）已于 2026-09-24 下线，代码已删除，`nous_center` / `canvas_workflows` 平台配置不再需要。接 nous-engine 走 `/v1/images/generations`，见 [`docs/runbook/nous-engine-image-bridge.md`](../../runbook/nous-engine-image-bridge.md)。
+
 **Goal:** Every AI-using capability resolves its provider / model / key / base_url from **`system_settings` (DB)** — never from env vars, `config.py` defaults, `config.yml`, or hardcoded constants. Exactly **two config surfaces**: **Admin** (governance lock + platform config + nous control) and **User** (per-module BYOK / model selection).
 
 **Approved scope (2026-06-23):**

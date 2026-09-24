@@ -7,7 +7,7 @@
  *   Cascade Run        — execute every prompt in topo order
  *
  * Run uses the mock runner from `./runner` — the real provider adapter
- * (Jimeng CLI / nous-center) lands in the next slice; the lifecycle
+ * (Jimeng CLI) lands in the next slice; the lifecycle
  * UX is fully wired here so the swap is mechanical.
  *
  * New nodes drop at the visual centre of the surface (screenToWorld

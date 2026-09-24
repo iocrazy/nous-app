@@ -13,7 +13,6 @@ default that names a model the catalog doesn't have.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -41,7 +40,7 @@ def _enabled_llm_row() -> dict:
 
 def _make_service() -> CanvasRunService:
     # Real _get_adapter / resolve — NOT mocked. Only settings is a stub.
-    return CanvasRunService(settings=SimpleNamespace())
+    return CanvasRunService()
 
 
 def _repo(*, name_hit: dict | None, enabled_llm: list[dict]) -> MagicMock:

@@ -35,10 +35,14 @@ from loguru import logger
 
 from app.schemas.canvas_run import CanvasPromptRunResult
 
-# nous-routed runs are always workflow nodes (comfy/image/video) that can run
-# minutes — well past the default chat-style NOUS_CENTER_MAX_WAIT_S. Lift the
-# poll ceiling for this path; override via NOUS_CENTER_MAX_WAIT_S_WORKFLOW.
-DEFAULT_WORKFLOW_MAX_WAIT_S = 600.0
+# ``nous/<workflow>`` slugs used to route to the legacy nous-center workflow
+# bridge. That bridge was retired on 2026-09-24 (never configured in
+# production); an old canvas node still carrying such a slug gets a typed
+# in-band failure instead of being misread as a model id.
+RETIRED_NOUS_PREFIX = "nous/"
+RETIRED_NOUS_ERROR = (
+    "nous-center workflows were retired; pick a text model from the catalog"
+)
 SYSTEM_MESSAGE = (
     "You are a smart-canvas prompt runner. The user gave you a single "
     "creative prompt; reply with the rendered content directly, no "
@@ -226,18 +230,6 @@ def _extract_video_gen_params(node: Optional[Mapping[str, Any]]) -> dict:
 class CanvasRunService:
     """Single entrypoint: ``await svc.run_prompt(...)`` returns a result."""
 
-    def __init__(self, settings: Any = None) -> None:
-        # Defer the real settings import — keeps unit tests cheap.
-        self._settings = settings
-
-    async def _get_settings(self) -> Any:
-        if self._settings is not None:
-            return self._settings
-        from app.core.config import get_settings  # local import
-
-        self._settings = get_settings()
-        return self._settings
-
     async def _get_adapter(self, model: str):
         # DB-only credential resolution (铁律 2026-07-07): platform
         # ``nous_models`` catalog → ProviderNotConfiguredError. No env.
@@ -284,14 +276,11 @@ class CanvasRunService:
     ) -> CanvasPromptRunResult:
         body = (body or "").strip()
 
-        # Route to nous-center for workflow-style providers FIRST. Many
-        # ComfyUI/nous workflows (comfy/image/video nodes) need no text prompt,
-        # so the empty-body guard must NOT apply to this path — a node with a
-        # valid workflow_slug but empty prompt is legitimate.
-        if provider_slug and provider_slug.startswith("nous/"):
-            return await self._run_via_nous(provider_slug, body, agent_id)
+        # Retired nous-center slugs fail loudly rather than being parsed as a
+        # bare model id (which would surface as a confusing adapter error).
+        if provider_slug and provider_slug.startswith(RETIRED_NOUS_PREFIX):
+            return CanvasPromptRunResult(ok=False, text="", error=RETIRED_NOUS_ERROR)
 
-        # Non-nous (text-adapter / llm) path requires a prompt body.
         if not body:
             return CanvasPromptRunResult(
                 ok=False, text="", error="prompt body is empty"
@@ -334,56 +323,6 @@ class CanvasRunService:
         if not isinstance(content, str):
             return ""
         return content
-
-    # ------------------------------------------------------------------
-    # nous-center workflow routing
-    # ------------------------------------------------------------------
-
-    async def _run_via_nous(
-        self,
-        provider_slug: str,
-        body: str,
-        agent_id: Optional[str],
-    ) -> CanvasPromptRunResult:
-        """provider_slug shape: ``nous/<workflow_slug>``. Calls nous-center,
-        polls for completion, returns the workflow's text output (or a
-        JSON encoding when the workflow output is non-textual)."""
-        from app.services.canvas.nous_center_runner import (
-            NousCenterNotConfigured,
-            run_nous_workflow,
-        )
-
-        _, _, workflow_slug = provider_slug.partition("/")
-        if not workflow_slug:
-            return CanvasPromptRunResult(
-                ok=False, text="", error="nous provider_slug missing workflow"
-            )
-
-        try:
-            settings = await self._get_settings()
-            raw_ceiling = getattr(settings, "NOUS_CENTER_MAX_WAIT_S_WORKFLOW", None)
-            try:
-                workflow_ceiling = (
-                    float(raw_ceiling)
-                    if raw_ceiling is not None
-                    else DEFAULT_WORKFLOW_MAX_WAIT_S
-                )
-            except (TypeError, ValueError):
-                workflow_ceiling = DEFAULT_WORKFLOW_MAX_WAIT_S
-            return await run_nous_workflow(
-                settings=settings,
-                workflow_slug=workflow_slug,
-                prompt=body,
-                agent_id=agent_id,
-                max_wait_s_override=workflow_ceiling,
-            )
-        except NousCenterNotConfigured as exc:
-            return CanvasPromptRunResult(ok=False, text="", error=str(exc))
-        except Exception as exc:
-            logger.exception("nous-center workflow {} failed", workflow_slug)
-            return CanvasPromptRunResult(
-                ok=False, text="", error=f"nous-center call failed: {exc}"
-            )
 
     @staticmethod
     def _minimal_composed(*, model: str, system_message: str):

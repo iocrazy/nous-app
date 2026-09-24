@@ -53,7 +53,6 @@ import {
 import { aiLibraryService } from '../services/aiLibraryService';
 import { HotwordChipInput } from './settings/HotwordChipInput';
 import { ApprovalsPanel } from './ApprovalsPanel';
-import { NousCenterVerifyPanel } from '../features/canvas-core/smart/NousCenterVerifyPanel';
 import { AIHealthBoard } from './AIHealthBoard';
 import { UiSelect } from './ui';
 
@@ -1873,10 +1872,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
       </section>
 
       {/* Memory panels moved to the Memory settings tab (2026-08-26). */}
-
-
-      {/* Canvas + AI Phase 2 closer: nous-center protocol probe */}
-      <NousCenterVerifyPanel />
     </div>
   );
 };

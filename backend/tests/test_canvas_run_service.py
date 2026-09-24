@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, patch
 
@@ -38,7 +37,7 @@ class FakeAdapter:
 
 
 def make_service(adapter: FakeAdapter) -> CanvasRunService:
-    svc = CanvasRunService(settings=SimpleNamespace())
+    svc = CanvasRunService()
     svc._get_adapter = AsyncMock(return_value=adapter)  # type: ignore[assignment]
     return svc
 
@@ -150,142 +149,18 @@ class TestRunPrompt:
         assert "Acting under agent abc-123" in composed.system_message
 
 
-class TestNousProviderRouting:
+class TestRetiredNousSlug:
+    """The nous-center workflow bridge was retired on 2026-09-24. Old canvas
+    nodes may still carry a ``nous/<workflow>`` slug; it must fail in-band
+    with a typed message, never reach the text adapter as a bogus model id."""
+
     @pytest.mark.asyncio
-    async def test_nous_slash_workflow_routes_via_nous_runner(self, monkeypatch):
-        captured = {}
-
-        async def fake_run_nous_workflow(
-            *, settings, workflow_slug, prompt, agent_id=None, **_
-        ):
-            captured["workflow_slug"] = workflow_slug
-            captured["prompt"] = prompt
-            captured["agent_id"] = agent_id
-            from app.schemas.canvas_run import CanvasPromptRunResult
-
-            return CanvasPromptRunResult(ok=True, text="from nous", error=None)
-
-        monkeypatch.setattr(
-            "app.services.canvas.nous_center_runner.run_nous_workflow",
-            fake_run_nous_workflow,
-        )
-
+    @pytest.mark.parametrize("slug", ["nous/storyboard", "nous/"])
+    async def test_nous_slug_fails_in_band_without_calling_adapter(self, slug):
         adapter = FakeAdapter()
         svc = make_service(adapter)
-        result = await svc.run_prompt(
-            body="story please",
-            provider_slug="nous/storyboard",
-        )
-        assert result.ok is True
-        assert result.text == "from nous"
-        assert captured["workflow_slug"] == "storyboard"
-        assert captured["prompt"] == "story please"
-        # And the LLM adapter was NOT used.
-        assert adapter.calls == []
-
-    @pytest.mark.asyncio
-    async def test_nous_path_raises_deadline_for_slow_workflows(self, monkeypatch):
-        # Everything routed to nous is a workflow node (comfy/image/video) that
-        # can run minutes — the nous path must lift the poll ceiling well above
-        # the default chat deadline (Phase 5a Lane C).
-        captured = {}
-
-        async def fake_run_nous_workflow(
-            *,
-            settings,
-            workflow_slug,
-            prompt,
-            agent_id=None,
-            max_wait_s_override=None,
-            **_,
-        ):
-            captured["max_wait_s_override"] = max_wait_s_override
-            from app.schemas.canvas_run import CanvasPromptRunResult
-
-            return CanvasPromptRunResult(ok=True, text="ok", error=None)
-
-        monkeypatch.setattr(
-            "app.services.canvas.nous_center_runner.run_nous_workflow",
-            fake_run_nous_workflow,
-        )
-        svc = make_service(FakeAdapter())
-        await svc.run_prompt(body="x", provider_slug="nous/comfy-render")
-        assert captured["max_wait_s_override"] is not None
-        assert captured["max_wait_s_override"] >= 300.0
-
-    @pytest.mark.asyncio
-    async def test_nous_workflow_ceiling_setting_overrides_default(self, monkeypatch):
-        captured = {}
-
-        async def fake_run_nous_workflow(*, max_wait_s_override=None, **_):
-            captured["override"] = max_wait_s_override
-            from app.schemas.canvas_run import CanvasPromptRunResult
-
-            return CanvasPromptRunResult(ok=True, text="ok", error=None)
-
-        monkeypatch.setattr(
-            "app.services.canvas.nous_center_runner.run_nous_workflow",
-            fake_run_nous_workflow,
-        )
-        svc = CanvasRunService(
-            settings=SimpleNamespace(NOUS_CENTER_MAX_WAIT_S_WORKFLOW=900.0)
-        )
-        svc._get_adapter = AsyncMock(return_value=FakeAdapter())  # type: ignore[assignment]
-        await svc.run_prompt(body="x", provider_slug="nous/comfy-render")
-        assert captured["override"] == 900.0
-
-    @pytest.mark.asyncio
-    async def test_nous_empty_body_still_runs_workflow(self, monkeypatch):
-        # Some ComfyUI/nous workflows need no text prompt — a nous/ dispatch
-        # with an empty body must still reach run_nous_workflow (the empty-body
-        # guard applies only to the non-nous text-adapter path).
-        captured = {}
-
-        async def fake_run_nous_workflow(
-            *, settings, workflow_slug, prompt, agent_id=None, **_
-        ):
-            captured["workflow_slug"] = workflow_slug
-            captured["prompt"] = prompt
-            from app.schemas.canvas_run import CanvasPromptRunResult
-
-            return CanvasPromptRunResult(ok=True, text="rendered", error=None)
-
-        monkeypatch.setattr(
-            "app.services.canvas.nous_center_runner.run_nous_workflow",
-            fake_run_nous_workflow,
-        )
-
-        adapter = FakeAdapter()
-        svc = make_service(adapter)
-        result = await svc.run_prompt(body="   ", provider_slug="nous/comfy-render")
-        assert result.ok is True
-        assert result.text == "rendered"
-        assert captured["workflow_slug"] == "comfy-render"
-        assert captured["prompt"] == ""
-        # The bare LLM adapter was NOT used.
-        assert adapter.calls == []
-
-    @pytest.mark.asyncio
-    async def test_nous_slash_missing_workflow_returns_error(self):
-        adapter = FakeAdapter()
-        svc = make_service(adapter)
-        result = await svc.run_prompt(body="x", provider_slug="nous/")
+        result = await svc.run_prompt(body="story please", provider_slug=slug)
         assert result.ok is False
-        assert "missing workflow" in (result.error or "")
-
-    @pytest.mark.asyncio
-    async def test_nous_unconfigured_falls_through_as_in_band_error(self, monkeypatch):
-        from app.services.canvas.nous_center_runner import NousCenterNotConfigured
-
-        async def raises(**_kwargs):
-            raise NousCenterNotConfigured("not configured")
-
-        monkeypatch.setattr(
-            "app.services.canvas.nous_center_runner.run_nous_workflow", raises
-        )
-
-        adapter = FakeAdapter()
-        svc = make_service(adapter)
-        result = await svc.run_prompt(body="x", provider_slug="nous/anything")
-        assert result.ok is False
-        assert "not configured" in (result.error or "")
+        assert result.text == ""
+        assert "retired" in (result.error or "")
+        assert adapter.calls == []

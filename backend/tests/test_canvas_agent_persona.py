@@ -7,7 +7,6 @@ run_prompt path — only the repo lookup and the adapter are stubbed.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -34,7 +33,7 @@ class FakeAdapter:
 
 
 def _service(adapter: FakeAdapter) -> CanvasRunService:
-    svc = CanvasRunService(settings=SimpleNamespace())
+    svc = CanvasRunService()
     svc._get_adapter = AsyncMock(return_value=adapter)  # type: ignore[assignment]
     svc._default_text_model = AsyncMock(return_value="mediahub-doubao-llm")  # type: ignore[assignment]
     return svc

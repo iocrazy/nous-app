@@ -31,9 +31,8 @@ vi.mock('../../../../hooks/useResourceSearch', () => ({
 }));
 // Resolve against the REAL shipped English copy rather than a hand-written
 // table, so a missing/renamed key surfaces here as a failing assertion instead
-// of a raw `canvas.ignoredKnobs` reaching users (the NousCenterVerifyPanel
-// pattern). `t` is created once so it stays referentially stable across
-// renders, exactly like the real hook.
+// of a raw `canvas.ignoredKnobs` reaching users. `t` is created once so it
+// stays referentially stable across renders, exactly like the real hook.
 vi.mock('react-i18next', () => {
   const t = (
     key: string,
