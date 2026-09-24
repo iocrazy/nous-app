@@ -32,12 +32,10 @@ TEAM = 555
 def _repo() -> AsyncMock:
     repo = AsyncMock()
     repo.is_member.return_value = True
-    repo.get_conversation.return_value = {
-        "id": 1,
+    repo.conversation_scope_and_type.return_value = {
         "scope_id": 99,
         "type": "group",
-        "history_mode": "shared",
-        "last_seq": 0,
+        "archived_at": None,
     }
     repo.add_agent_member.return_value = None
     return repo

@@ -58,6 +58,9 @@ async def _agent_usable_by(agent: dict[str, Any], user_id: str) -> bool:
 
 
 class ConversationService:
+    # Conversations that are a fixed pair: nobody (user or agent) joins them.
+    _FIXED_PAIR_TYPES = frozenset({"direct_agent", "dm"})
+
     def __init__(self, repo: Optional[ConversationRepository] = None) -> None:
         self._repo = repo or get_conversation_repository()
 
@@ -96,9 +99,12 @@ class ConversationService:
         # per-pair consolidation joins conversation_members, so a second
         # user row fans out its message counts (P3 Task-2 review ledger).
         # A user dm is likewise a fixed pair — invite is a group concept.
-        if info is not None and info.get("type") in ("direct_agent", "dm"):
+        if info is None or info.get("archived_at") is not None:
+            # Dissolved groups keep their member rows; they take no one new.
+            raise ValueError(f"conversation {conversation_id} not found")
+        if info.get("type") in self._FIXED_PAIR_TYPES:
             raise PermissionError("cannot add members to this conversation type")
-        scope_id = info.get("scope_id") if info is not None else None
+        scope_id = info.get("scope_id")
         if scope_id is not None:
             for target in user_ids:
                 if not await self._repo.is_team_member(
@@ -204,11 +210,15 @@ class ConversationService:
     ) -> dict[str, Any]:
         """PERM-08: caller must be a conversation member; agent must be chat-enabled."""
         await self._require_member(conversation_id, user_id)
-        conversation = await self._repo.get_conversation(
+        conversation = await self._repo.conversation_scope_and_type(
             conversation_id=conversation_id
         )
-        if conversation is None:
+        if conversation is None or conversation.get("archived_at") is not None:
             raise ValueError(f"conversation {conversation_id} not found")
+        # Same fixed-pair rule as add_members: a 1:1 AI thread is one human +
+        # one agent, and a user dm has no group settings to add agents from.
+        if conversation.get("type") in self._FIXED_PAIR_TYPES:
+            raise PermissionError("cannot add agents to this conversation type")
         ar = get_agent_repository()
         agent = await ar.get_by_slug(agent_slug)
         # An agent the caller cannot see is answered exactly like a missing
