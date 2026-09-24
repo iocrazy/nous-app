@@ -326,7 +326,9 @@ async def connect_account(body: ConnectAccountRequest, user: CurrentUserDep):
 async def oauth_callback(platform: str, code: str = "", state: str = ""):
     front = settings.FRONTEND_URL.rstrip("/")
     st = await _pop_oauth_state(state) if state else None
-    if not st or not code:
+    # The state was issued for one platform (``connect_account``); a callback
+    # on another platform's path must not spend it there.
+    if not st or not code or st.get("platform") != platform:
         return RedirectResponse(f"{front}/distribution/accounts?error=oauth_state")
     try:
         creds = await get_douyin_credentials()
