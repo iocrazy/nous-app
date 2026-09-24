@@ -12,7 +12,10 @@
 import { apiFetch, ApiError } from '../../../services/apiClient';
 import type {
   CanvasGenerationCapability,
+  CanvasGenerationDispatch,
+  CanvasGenerationTask,
   CanvasModelOption,
+  CanvasTimelineDispatch,
   Envelope,
 } from '../../../types/api';
 import { isPlatformModelAvailable } from '../../../utils/platformModel';
@@ -33,33 +36,42 @@ export interface GenerationDispatchRequest {
   source_url?: string | null;
 }
 
-export interface GenerationTask {
-  phase: string;
-  status?: string;
-  error_msg?: string | null;
-  metadata?: {
-    result_url?: string;
-    generated_media_id?: number;
-    media_kind?: string;
-    /** Knobs the request asked for that this provider cannot honour (P2).
-     *  Always written by the workflow, `[]` meaning "nothing dropped" — an
-     *  ABSENT key means an older task row, not a clean run. */
-    dropped_knobs?: string[];
-    /** References the run could not resolve, each with a reason code (P4
-     *  asset library). Same contract as `dropped_knobs`: always written,
-     *  `[]` meaning "every reference was used", an ABSENT key meaning an
-     *  older task row. Reported SEPARATELY from `dropped_knobs` because a
-     *  run can drop a knob, a reference, or both. */
-    dropped_refs?: Array<{ url: string; reason: string }>;
-    /** Written by the workflow when a failure brought an explanation for
-     *  the user (2026-09-05): `detail` is the model's own words for a
-     *  content refusal — why, and the rewrite it offers. Chinese-safe here
-     *  (jsonb) where `error_msg` is not. Empty `detail` = the provider
-     *  could not say (e.g. a 0.4.0 daemon). */
-    failure?: { code?: string; detail?: string };
-    [k: string]: unknown;
-  };
+/** The keys the generation workflows write into `task_tracking.metadata`.
+ *  The backend declares that column as open jsonb (`CanvasGenerationTask`),
+ *  so this is the one place the known keys are named; every key stays
+ *  optional because an older row may predate it. */
+export interface GenerationTaskMetadata {
+  result_url?: string;
+  /** A JSON number from a fresh registration, a string when the daemon had
+   *  already registered the file (the `existing_gen_id` branch). Stringify
+   *  at use. */
+  generated_media_id?: number | string;
+  media_kind?: string;
+  /** Knobs the request asked for that this provider cannot honour (P2).
+   *  Always written by the workflow, `[]` meaning "nothing dropped" — an
+   *  ABSENT key means an older task row, not a clean run. */
+  dropped_knobs?: string[];
+  /** References the run could not resolve, each with a reason code (P4
+   *  asset library). Same contract as `dropped_knobs`: always written,
+   *  `[]` meaning "every reference was used", an ABSENT key meaning an
+   *  older task row. Reported SEPARATELY from `dropped_knobs` because a
+   *  run can drop a knob, a reference, or both. */
+  dropped_refs?: Array<{ url: string; reason: string }>;
+  /** Written by the workflow when a failure brought an explanation for
+   *  the user (2026-09-05): `detail` is the model's own words for a
+   *  content refusal — why, and the rewrite it offers. Chinese-safe here
+   *  (jsonb) where `error_msg` is not. Empty `detail` = the provider
+   *  could not say (e.g. a 0.4.0 daemon). */
+  failure?: { code?: string; detail?: string };
+  [k: string]: unknown;
 }
+
+/** `GET /canvases/generations/{task_id}` payload with its open `metadata`
+ *  narrowed to the keys above. `phase` is null until the engine picks the
+ *  task up; `metadata` is null on a row nothing has decorated yet. */
+export type GenerationTask = Omit<CanvasGenerationTask, 'metadata'> & {
+  metadata: GenerationTaskMetadata | null;
+};
 
 const TERMINAL_PHASES = new Set(['completed', 'failed', 'cancelled', 'lost']);
 /** Infinite polls image tasks every 2s for up to 30min — same envelope. */
@@ -136,7 +148,7 @@ export async function dispatchGenerations(
       ...(req.source_url ? { source_url: req.source_url } : {}),
     },
   });
-  const body = (await response.json()) as { success: boolean; task_ids?: string[] };
+  const body = (await response.json()) as Partial<CanvasGenerationDispatch>;
   if (!body.success || !Array.isArray(body.task_ids)) {
     throw new ApiError('generation dispatch response missing task_ids', 500);
   }
@@ -145,7 +157,7 @@ export async function dispatchGenerations(
 
 export async function getGeneration(taskId: string): Promise<GenerationTask> {
   const response = await apiFetch(`/api/v1/canvases/generations/${taskId}`);
-  const body = (await response.json()) as { success: boolean; data?: GenerationTask };
+  const body = (await response.json()) as Partial<Envelope<GenerationTask>>;
   if (!body.success || !body.data) {
     throw new ApiError('generation task response missing data', 500);
   }
@@ -236,7 +248,7 @@ export async function dispatchTimelineRun(
     method: 'POST',
     json: req,
   });
-  const body = (await response.json()) as { data?: { task_id?: string } };
+  const body = (await response.json()) as Partial<Envelope<CanvasTimelineDispatch>>;
   const taskId = body.data?.task_id;
   if (!taskId) throw new Error('timeline dispatch returned no task id');
   return taskId;

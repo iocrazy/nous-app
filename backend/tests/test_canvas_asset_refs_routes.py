@@ -3,10 +3,11 @@
   GET /canvases/{canvas_id}/asset-refs   — canvases_router, canvas READ gate
   GET /assets/{asset_id}/canvas-refs     — assets_router, scope gate + Envelope
 
-The gate half is what these pin. The sibling ``GET /canvases/{id}/assets``
-shipped with the WRITE guard behind a docstring that said "read" and locked
-viewers out of a pure read for months (fixed 2026-08-12) — so "which guard did
-this route actually call" is asserted directly, not inferred from a 200.
+The gate half is what these pin. The former sibling
+``GET /canvases/{id}/assets`` (removed 2026-09-24) shipped with the WRITE
+guard behind a docstring that said "read" and locked viewers out of a pure
+read for months (fixed 2026-08-12) — so "which guard did this route actually
+call" is asserted directly, not inferred from a 200.
 """
 
 from __future__ import annotations

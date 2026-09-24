@@ -26,6 +26,8 @@ from app.schemas.canvas_material_derive_schema import (
     CanvasGridDeriveRequest,
     CanvasOutpaintDeriveRequest,
 )
+from app.schemas.canvas_task_responses import CanvasDeriveResult
+from app.schemas.envelope import Envelope
 from app.services.canvas import canvas_derive_service as derive
 from app.services.canvas.derive_persistence import DeriveError
 from app.services.canvas.image_crop import CropRegion
@@ -80,7 +82,9 @@ async def _run(
             ) from exc
 
 
-@router.post("/canvases/{canvas_id}/derive-crop")
+@router.post(
+    "/canvases/{canvas_id}/derive-crop", response_model=Envelope[CanvasDeriveResult]
+)
 async def derive_crop_endpoint(
     body: CanvasCropDeriveRequest,
     auth: AuthDep,
@@ -104,7 +108,9 @@ async def derive_crop_endpoint(
     return await _run(canvas_id, auth, "crop", work)
 
 
-@router.post("/canvases/{canvas_id}/derive-grid")
+@router.post(
+    "/canvases/{canvas_id}/derive-grid", response_model=Envelope[CanvasDeriveResult]
+)
 async def derive_grid_endpoint(
     body: CanvasGridDeriveRequest,
     auth: AuthDep,
@@ -123,7 +129,9 @@ async def derive_grid_endpoint(
     return await _run(canvas_id, auth, "grid", work)
 
 
-@router.post("/canvases/{canvas_id}/derive-outpaint")
+@router.post(
+    "/canvases/{canvas_id}/derive-outpaint", response_model=Envelope[CanvasDeriveResult]
+)
 async def derive_outpaint_endpoint(
     body: CanvasOutpaintDeriveRequest,
     auth: AuthDep,

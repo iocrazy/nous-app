@@ -10,9 +10,7 @@ summary builders and ref queries ``str()`` / ``CAST(... AS TEXT)`` the rest.
 That differs from scenes/shots (JSON numbers) on purpose — do not "unify" it.
 
 Timestamps: the canvas repository's ``_serialize`` already ran
-``isoformat()``, so those fields are ``str``. The two ref queries in
-``canvas_refs_repository`` hand back native datetimes, declared
-:data:`WireDatetime` so they keep ``+00:00`` rather than Pydantic's ``Z``.
+``isoformat()``, so those fields are ``str``.
 
 ``CanvasResponse`` in :mod:`app.schemas.canvas` is NOT the success body: it
 types its timestamps as ``datetime`` (so it re-serializes them) and has no
@@ -29,7 +27,6 @@ from pydantic import BaseModel, Field
 
 from app.schemas.canvas import CanvasKind
 from app.schemas.envelope import Envelope
-from app.schemas.wire import WireDatetime
 
 # ``canvas_resource_refs_role_check`` (mig 290).
 CanvasRefRole = Literal["reference", "output"]
@@ -143,38 +140,6 @@ class CanvasAssetRef(BaseModel):
 
 class CanvasAssetRefsEnvelope(Envelope[List[CanvasAssetRef]]):
     count: int
-
-
-class CanvasReferencedResource(BaseModel):
-    """A library resource a canvas references (one row per resource).
-
-    ``role`` / ``node_id`` describe the most recent ref to it.
-    """
-
-    id: str
-    filename: str
-    file_type: Optional[str]
-    mime_type: Optional[str]
-    thumbnail_path: Optional[str]
-    cover_image_path: Optional[str]
-    created_at: WireDatetime
-    role: CanvasRefRole
-    node_id: str
-
-
-class ProjectAssetsTreeCanvas(BaseModel):
-    canvas_id: str
-    canvas_name: str
-    kind: CanvasKind
-    asset_count: int
-
-
-class ProjectAssetsTreeProject(BaseModel):
-    """A visible project and its non-blank canvases (possibly none)."""
-
-    project_id: str
-    name: str
-    canvases: List[ProjectAssetsTreeCanvas]
 
 
 class ResourceCanvasRef(BaseModel):

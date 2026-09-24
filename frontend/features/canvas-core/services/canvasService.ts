@@ -13,6 +13,8 @@ import type { GridLines } from '../editor/gridMath';
 import type { OutpaintPadding } from '../editor/outpaintMath';
 import type { CropRegion } from '../editor/types';
 import type {
+  CanvasDerivedImage,
+  CanvasDeriveResult,
   ProjectTrashedCanvas,
   TeamCanvasProject,
   TeamTrashedCanvas,
@@ -157,17 +159,9 @@ function pickCurrent(node: unknown): Canvas | null {
 // Canvas derive — any image the canvas shows (2026-09-10)
 // ============================================================
 
-/** One image a canvas derive produced: a durable generated-media item. */
-export interface CanvasDerivedImage {
-  /** generated_media id (snowflake, string on the wire). */
-  id: string;
-  /** Always `/api/v1/generated-media/{id}/cover`. */
-  url: string;
-  kind: 'image';
-  /** 0-based tile position for a grid derive; null otherwise. */
-  row: number | null;
-  col: number | null;
-}
+/** One image a canvas derive produced: a durable generated-media item
+ *  (`id` a Snowflake string; `row`/`col` set only for a grid tile). */
+export type { CanvasDerivedImage } from '../../../types/api';
 
 export interface CanvasDeriveOptions {
   /** The node the edit was made from — provenance on the registered row. */
@@ -196,7 +190,7 @@ async function postCanvasDerive(
     method: 'POST',
     json: payload,
   });
-  const data = await readEnvelope<{ images?: CanvasDerivedImage[] }>(response);
+  const data = await readEnvelope<Partial<CanvasDeriveResult>>(response);
   if (!Array.isArray(data.images) || data.images.length === 0) {
     throw new ApiError(`canvas derive-${op} returned no images`, response.status);
   }

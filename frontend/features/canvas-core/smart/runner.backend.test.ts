@@ -13,6 +13,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The route's real `data` (`CanvasPromptRunResponse`): `result` is never
+ *  forwarded (always null) and `response_kind` is always present. */
+function runReply(data: { ok: boolean; text: string; error: string | null }) {
+  return { ...data, result: null, response_kind: 'canvas_prompt_run' };
+}
+
 function envelope(data: unknown, status = 200): Response {
   return new Response(JSON.stringify({ success: true, data }), {
     status,
@@ -23,7 +29,7 @@ function envelope(data: unknown, status = 200): Response {
 describe('createBackendRunner', () => {
   it('POSTs the expected body to /api/v1/canvases/runs/prompts', async () => {
     fetchMock.mockResolvedValueOnce(
-      envelope({ ok: true, text: 'hi from backend', error: null }),
+      envelope(runReply({ ok: true, text: 'hi from backend', error: null })),
     );
     const runner = createBackendRunner({ canvasId: '4242' });
     await runner({
@@ -46,7 +52,7 @@ describe('createBackendRunner', () => {
 
   it('returns { ok: true, text } on a 200 envelope', async () => {
     fetchMock.mockResolvedValueOnce(
-      envelope({ ok: true, text: 'rendered', error: null }),
+      envelope(runReply({ ok: true, text: 'rendered', error: null })),
     );
     const runner = createBackendRunner({ canvasId: '4242' });
     const result = await runner({
@@ -60,7 +66,7 @@ describe('createBackendRunner', () => {
 
   it('surfaces backend in-band failure as { ok: false, error }', async () => {
     fetchMock.mockResolvedValueOnce(
-      envelope({ ok: false, text: '', error: 'rate limited' }),
+      envelope(runReply({ ok: false, text: '', error: 'rate limited' })),
     );
     const runner = createBackendRunner({ canvasId: '4242' });
     const result = await runner({
@@ -125,7 +131,7 @@ describe('createBackendRunner', () => {
 
   it('sends provider_slug=null when an empty string was supplied', async () => {
     fetchMock.mockResolvedValueOnce(
-      envelope({ ok: true, text: '', error: null }),
+      envelope(runReply({ ok: true, text: '', error: null })),
     );
     const runner = createBackendRunner({ canvasId: '4242' });
     await runner({ promptId: 'p1', body: 'x', provider_slug: '', agent_id: null });

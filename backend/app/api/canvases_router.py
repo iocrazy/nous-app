@@ -18,6 +18,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi.responses import Response
 from loguru import logger
 
 from app.core.deps import AuthDep
@@ -56,7 +57,13 @@ from app.schemas.canvas_run import (
     CanvasPromptRunRequest,
     CanvasPromptRunResponse,
 )
+from app.schemas.canvas_task_responses import (
+    CanvasGenerationDispatch,
+    CanvasGenerationTask,
+    CanvasTimelineDispatch,
+)
 from app.schemas.envelope import Envelope
+from app.schemas.wire import binary_response
 from app.services.canvas import CanvasConflict, CanvasService
 from app.services.canvas.canvas_run_service import CanvasRunService
 from app.services.infra.unified_task_manager import get_task_manager
@@ -140,8 +147,12 @@ async def _gate_canvas_read(canvas_id: str, auth: AuthDep) -> str:
 # ============================================================
 
 
-@router.post("/canvases/assets/zip")
-async def download_canvas_assets_zip(body: CanvasZipRequest, auth: AuthDep):
+@router.post(
+    "/canvases/assets/zip",
+    response_class=Response,
+    responses=binary_response("The packed archive.", "application/zip"),
+)
+async def download_canvas_assets_zip(body: CanvasZipRequest, auth: AuthDep) -> Response:
     """Bundle several generated-media results into one archive (P2-7).
 
     Only whitelisted ``/api/v1/generated-media/{id}/(file|stream|cover)``
@@ -152,8 +163,6 @@ async def download_canvas_assets_zip(body: CanvasZipRequest, auth: AuthDep):
     """
     import io
     import zipfile
-
-    from fastapi.responses import Response
 
     from app.repositories.generated_media_repository import GeneratedMediaRepository
     from app.services.canvas.zip_assets import (
@@ -358,7 +367,9 @@ async def list_text_models(auth: AuthDep) -> dict:
     return {"success": True, "data": data}
 
 
-@router.get("/canvases/generations/{task_id}")
+@router.get(
+    "/canvases/generations/{task_id}", response_model=Envelope[CanvasGenerationTask]
+)
 async def get_canvas_generation(task_id: str, auth: AuthDep) -> dict:
     """Poll one generation task. Reads task_tracking (the UI's single source
     of truth — route C); the durable result lands in metadata.result_url."""
@@ -390,7 +401,7 @@ async def get_canvas_generation(task_id: str, auth: AuthDep) -> dict:
     return {"success": True, "data": dict(row)}
 
 
-@router.delete("/canvases/generations/{task_id}")
+@router.delete("/canvases/generations/{task_id}", response_model=CanvasAck)
 async def cancel_canvas_generation(task_id: str, auth: AuthDep) -> dict:
     """Really cancel one generation task (P1-1). Stop used to only abandon the
     frontend poll while the DBOS task kept burning provider quota; here we ask
@@ -636,9 +647,9 @@ async def canvas_asset_refs(
     parsing the node graph itself.
 
     ``_gate_canvas_read``, not the write gate: this is a pure read, and the
-    sibling ``GET /canvases/{id}/assets`` was shipped with the WRITE guard by
-    mistake for months (fixed 2026-08-12), locking viewers out of a read they
-    were entitled to. Same envelope shape as that sibling.
+    former sibling ``GET /canvases/{id}/assets`` (removed 2026-09-24, no
+    callers) was shipped with the WRITE guard by mistake for months (fixed
+    2026-08-12), locking viewers out of a read they were entitled to.
     """
     await _gate_canvas_read(canvas_id, auth)
     items = await CanvasAssetRefsRepository().list_for_canvas(canvas_id)
@@ -819,7 +830,10 @@ async def create_project_canvas(
     return {"success": True, "data": _to_response(row)}
 
 
-@router.post("/canvases/{canvas_id}/timeline-runs")
+@router.post(
+    "/canvases/{canvas_id}/timeline-runs",
+    response_model=Envelope[CanvasTimelineDispatch],
+)
 async def dispatch_timeline_run(
     auth: AuthDep,
     payload: CanvasTimelineRequest,
@@ -867,7 +881,9 @@ async def dispatch_timeline_run(
     return {"success": True, "data": {"task_id": wf_id}}
 
 
-@router.post("/canvases/{canvas_id}/generations")
+@router.post(
+    "/canvases/{canvas_id}/generations", response_model=CanvasGenerationDispatch
+)
 async def dispatch_canvas_generations(
     auth: AuthDep,
     payload: CanvasGenerationRequest,
@@ -948,7 +964,7 @@ async def dispatch_canvas_generations(
 # ============================================================
 
 
-@router.post("/canvases/runs/prompts")
+@router.post("/canvases/runs/prompts", response_model=Envelope[CanvasPromptRunResponse])
 async def run_canvas_prompt(
     auth: AuthDep,
     payload: CanvasPromptRunRequest,
