@@ -664,3 +664,64 @@ async def test_missing_workflow_id_is_refused_not_coerced():
     )
     # It never reached the claim — an unowned claim is what we are preventing.
     workforce.claim_task.assert_not_awaited()
+
+
+# ─── mig 501: a soft-deleted agent's queued work fails typed ─────────
+
+
+def _deleted_agent_setup(task: dict[str, Any], agent_id: UUID):
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.claim_task = AsyncMock(
+        return_value={**task, "lifecycle_status": "assigned"}
+    )
+    workforce.update_task_status = AsyncMock(return_value=True)
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(
+        return_value={
+            **_persistent_agent(agent_id=agent_id),
+            "deleted_at": "2026-09-23T00:00:00+00:00",
+        }
+    )
+    return workforce, agent_repo
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [None, "subagent"])
+async def test_refuses_a_soft_deleted_agent_on_both_branches(kind):
+    """The tombstone is still persistent=true and get_by_id still returns it
+    (history face), so without this gate queued inbox work — which the old
+    hard delete CASCADEd away — would run as a deleted agent. The sub-agent
+    branch sits BEFORE the persistent gate and must be covered too."""
+    agent_id = uuid4()
+    task = _task(agent_id=agent_id)
+    if kind:
+        task["payload"]["kind"] = kind
+    workforce, agent_repo = _deleted_agent_setup(task, agent_id)
+    subagent = AsyncMock()
+
+    with (
+        patch(
+            "app.services.workforce.agent_worker.get_agent_workforce_repository",
+            return_value=workforce,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.get_agent_repository",
+            return_value=agent_repo,
+        ),
+        patch("app.services.workforce.agent_worker._run_subagent_task", subagent),
+        # The sub-agent branch reads deletion through its own lookup: its tests
+        # use agent_repo.get_by_id as a trip wire for "persistent gate reached".
+        patch(
+            "app.services.workforce.agent_worker.is_agent_soft_deleted",
+            AsyncMock(return_value=True),
+        ),
+    ):
+        result = await run_one_task(task)
+
+    assert result["status"] == "failed"
+    kw = workforce.update_task_status.await_args.kwargs
+    assert kw["lifecycle_status"] == "failed"
+    assert kw["error_code"] == "agent_deleted"
+    subagent.assert_not_awaited()

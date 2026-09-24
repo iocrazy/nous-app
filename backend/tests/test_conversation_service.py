@@ -830,3 +830,46 @@ async def test_add_members_ok_on_group_conversation():
     n = await svc.add_members(conversation_id=1, user_id="owner", user_ids=["u2"])
     assert n == 1
     repo.add_members.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# mig 501 — a soft-deleted member agent cannot be summoned
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_summons_skips_soft_deleted_member_agent():
+    """conversation_members survives a soft delete, so the summon candidate set
+    must drop the tombstone — otherwise gate1's slug lookup either no-ops or,
+    once the slug is reused, answers as a DIFFERENT agent in this room."""
+    live = {"id": "a-live", "slug": "live-agent"}
+    tomb = {"id": "a-gone", "slug": "gone-agent", "deleted_at": "2026-09-23"}
+    agents = {live["id"]: live, tomb["id"]: tomb}
+
+    repo = _make_repo()
+    repo.list_conversation_agent_ids.return_value = [tomb["id"], live["id"]]
+    fake_agent_repo = AsyncMock()
+    fake_agent_repo.get_by_id.side_effect = lambda aid: agents[aid]
+    mentions = MagicMock(return_value=[])
+
+    with (
+        patch(
+            "app.services.conversation_service.get_agent_repository",
+            return_value=fake_agent_repo,
+        ),
+        patch(
+            "app.services.conversation_service.agent_chat_caps",
+            return_value=_make_enabled_caps(),
+        ),
+        patch("app.services.conversation_service.extract_agent_mentions", mentions),
+    ):
+        from app.services.conversation_service import ConversationService
+
+        await ConversationService(repo).dispatch_summons(
+            conversation_id=1,
+            summoner_user_id="u1",
+            message={"body": {"text": "@gone-agent hi"}, "from_agent_id": None},
+        )
+
+    candidates = mentions.call_args.args[1]
+    assert candidates == {"live-agent"}

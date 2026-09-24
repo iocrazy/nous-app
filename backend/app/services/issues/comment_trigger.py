@@ -67,6 +67,9 @@ class CommentTriggerVerdict:
     will_wake: bool
     agent_id: Optional[str]
     is_note: bool = False
+    # mig 501: the assignee was soft-deleted. Nothing can wake it, and the send
+    # path refuses (409 agent_deleted) rather than losing the comment.
+    agent_deleted: bool = False
 
 
 def compute_comment_trigger(
@@ -110,3 +113,16 @@ def apply_suppression(
     if verdict.agent_id in {str(a) for a in suppress_agent_ids}:
         return replace(verdict, will_wake=False)
     return verdict
+
+
+def apply_agent_deleted(
+    verdict: CommentTriggerVerdict, *, deleted: bool
+) -> CommentTriggerVerdict:
+    """Mark a verdict whose assignee was soft-deleted (mig 501).
+
+    Pure, like the rest of this module: the caller looks the agent up. A deleted
+    assignee never wakes; ``agent_id`` stays so the chip can say who is gone.
+    """
+    if not deleted or verdict.agent_id is None:
+        return verdict
+    return replace(verdict, will_wake=False, agent_deleted=True)

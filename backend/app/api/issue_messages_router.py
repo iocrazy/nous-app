@@ -47,6 +47,7 @@ from loguru import logger
 
 from app.agent_framework import input_gate
 from app.core.deps import AuthDep
+from app.repositories.agent_references import is_agent_soft_deleted
 from app.repositories.issue_repository import (  # noqa: F401 — tests patch get_by_id via this module path
     issue_repository,
 )
@@ -66,6 +67,8 @@ from app.services.ai.chat.output_ref_resolver import (
     resolve_output_refs,
 )
 from app.services.issues.comment_trigger import (
+    CommentTriggerVerdict,
+    apply_agent_deleted,
     apply_suppression,
     compute_comment_trigger,
 )
@@ -445,12 +448,26 @@ async def comment_trigger_preview(
     path won't do.
     """
     issue_row = await _assert_issue_visible(issue_id, auth)
-    verdict = compute_comment_trigger(issue_row, payload.body)
+    verdict = await _with_deleted_assignee(
+        compute_comment_trigger(issue_row, payload.body)
+    )
     return CommentTriggerPreview(
         will_wake=verdict.will_wake,
         agent_id=verdict.agent_id,
         is_note=verdict.is_note,
+        agent_deleted=verdict.agent_deleted,
     )
+
+
+async def _with_deleted_assignee(
+    verdict: CommentTriggerVerdict,
+) -> CommentTriggerVerdict:
+    """Fold "the assignee was soft-deleted" (mig 501) into the verdict. One
+    lookup, shared by the preview and the send path so they cannot disagree."""
+    if verdict.agent_id is None:
+        return verdict
+    deleted = await is_agent_soft_deleted(verdict.agent_id)
+    return apply_agent_deleted(verdict, deleted=deleted)
 
 
 async def _insert_legacy_comment(
@@ -640,6 +657,23 @@ async def post_issue_message(
     verdict = apply_suppression(
         compute_comment_trigger(issue_row, payload.body), payload.suppress_agent_ids
     )
+    verdict = await _with_deleted_assignee(verdict)
+
+    # ── Deleted assignee (mig 501) ────────────────────────────────────────
+    # Done / cancelled / hidden issues keep pointing at a soft-deleted agent.
+    # Waking it would fail inside the turn BEFORE the comment is written, and
+    # a note would need a session the deleted agent cannot get — either way
+    # the comment would be lost. Refuse synchronously; the client keeps the
+    # draft.
+    if verdict.agent_deleted:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "agent_deleted",
+                "message": "Reassign this issue to another agent first",
+                "agent_id": verdict.agent_id,
+            },
+        )
 
     # ── Legacy path (nothing to wake) ─────────────────────────────────────
     if verdict.agent_id is None:

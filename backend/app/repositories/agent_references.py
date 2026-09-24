@@ -42,6 +42,7 @@ from app.models import (
     WorkflowTemplateNodeMembers,
     WorkflowTemplateNodes,
 )
+from app.repositories.agent_repository import get_agent_repository
 
 TERMINAL_ISSUE_STATUSES = ("done", "cancelled")
 FINISHED_STAGE_STATUSES = ("done", "skipped")
@@ -129,3 +130,19 @@ async def count_live_agent_references(agent_id: UUID) -> AgentLiveReferences:
         logger.error(f"[agent_references] count failed for agent {agent_id}: {exc}")
         raise
     return AgentLiveReferences(**counts)
+
+
+async def is_agent_soft_deleted(agent_id: object) -> bool:
+    """True iff ``agent_id`` names a soft-deleted agent (mig 501).
+
+    For callers that hold an agent id from routing (an issue's assignee, a
+    queued task) and must refuse to use a deleted agent. A missing row or a
+    failed read is ``False`` — those callers already handle "not found" their
+    own way, and this check must not invent a second meaning for it.
+    """
+    try:
+        row = await get_agent_repository().get_by_id(UUID(str(agent_id)))
+    except ValueError:
+        logger.warning(f"[agent_references] not an agent uuid: {agent_id!r}")
+        return False
+    return isinstance(row, dict) and bool(row.get("deleted_at"))

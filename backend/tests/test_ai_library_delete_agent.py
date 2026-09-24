@@ -184,3 +184,24 @@ def test_preset_refused_before_reference_count(client: TestClient, fake_auth) ->
     repo = _repo(_agent(is_system_preset=True))
     resp = _do_delete(client, fake_auth, repo, refs=_refs(issues=5))
     assert resp.status_code == 403
+
+
+def test_reference_count_failure_is_500_and_deletes_nothing(fake_auth) -> None:
+    """A guard that cannot count must not read as "no references". Pinned so a
+    future ``except`` around the counter cannot quietly let deletes through."""
+    from app.core.exceptions import register_exception_handlers
+
+    app = _app_with_router()
+    register_exception_handlers(app)
+    _install_auth_override(app, fake_auth)
+    repo = _repo(_agent())
+    counter = AsyncMock(side_effect=RuntimeError("db down"))
+    with (
+        patch("app.api.ai_library_router._repos", return_value=(repo, AsyncMock())),
+        patch("app.api.ai_library_router.count_live_agent_references", counter),
+    ):
+        resp = TestClient(app, raise_server_exceptions=False).delete(
+            "/api/v1/ai-library/agents/test-analyze"
+        )
+    assert resp.status_code == 500
+    repo.delete_agent.assert_not_awaited()
