@@ -59,7 +59,11 @@ export function hitLayerLabel(layer: HitLayer, t: Translate): string {
  * fills the page and the response is otherwise identical, so the outcome is
  * the only honest signal.
  */
-function dotClass(layer: HitLayer, built: boolean, vectorLeg?: VectorLegOutcome | null): string {
+export function legDotClass(
+  layer: HitLayer,
+  built: boolean,
+  vectorLeg?: VectorLegOutcome | null,
+): string {
   if (layer === 'semantic' && vectorLeg) {
     if (vectorLeg === 'ok') return 'bg-ok';
     if (vectorLeg.startsWith('skipped_')) return 'bg-warn';
@@ -202,7 +206,7 @@ export const SearchLegsChips: React.FC<SearchLegsChipsProps> = ({
               <span
                 data-testid={`leg-dot-${l}`}
                 aria-hidden="true"
-                className={`inline-block w-1.5 h-1.5 rounded-full ${dotClass(l, built, vectorLeg)}`}
+                className={`inline-block w-1.5 h-1.5 rounded-full ${legDotClass(l, built, vectorLeg)}`}
               />
               <span className={built ? 'text-content' : 'text-content-3'}>
                 {built ? `${hitLayerLabel(l, tr)} ${count}` : hitLayerLabel(l, tr)}

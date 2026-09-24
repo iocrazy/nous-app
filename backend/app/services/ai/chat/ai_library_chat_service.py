@@ -1331,6 +1331,18 @@ class AILibraryChatService:
             update={"tools": list(composed.tools or []) + [ask_user_spec()]}
         )
 
+        # PR 5: LibrarySearch on BOTH roads too — search the caller's own
+        # library (same owner binding as ResourceFetch: user_id, no team).
+        from app.services.ai.tools.library_search_tool import (
+            library_search_spec,
+            make_library_search_handler,
+        )
+
+        composed = composed.model_copy(
+            update={"tools": list(composed.tools or []) + [library_search_spec()]}
+        )
+        runner.library_search_handler = make_library_search_handler(str(user_id))
+
         # Prepend ref warnings to the user content so the agent sees them.
         effective_content = content
         if ref_warnings:
@@ -1660,6 +1672,8 @@ class AILibraryChatService:
                     # Spec-2: drop the per-turn FinishIssue handler so a later
                     # non-issue turn on the same runner can't accept it.
                     runner.finish_issue_handler = None
+                    # PR 5: the search handler is bound to this caller.
+                    runner.library_search_handler = None
 
                 run_id = recorder.run_id
                 # Pull usage off the recorder — that's the single source

@@ -25,6 +25,8 @@ def test_defaults_cover_every_built_in_tool_family():
     # validate + file + dispatch runs here.
     assert tt.resolve_timeout("GenerateVideo") == 60
     assert tt.resolve_timeout("Delegate") == 900
+    # hybrid search: embed call (HYBRID_EMBED_TIMEOUT_S = 5) + two RPCs.
+    assert tt.resolve_timeout("LibrarySearch") == 30
     assert tt.resolve_timeout("SomethingNew") == 60
 
 

@@ -28,7 +28,20 @@ from app.repositories.skill_repository import SkillRepository
 
 SCRIPT_EXTS = {".py", ".sh", ".js", ".ts"}
 TEXT_ASSET_EXTS = {".json", ".yaml", ".yml", ".txt"}
-SCRIPT_AI_SKILL_SLUGS = ["script-outline", "script-expand", "script-branch"]
+# Agent slug -> the skills bound to it, in sort order. System-preset bindings
+# are not customizable through the API (403), so this table is their only
+# source and each run overwrites them wholesale (update_skill_bindings).
+# tests/test_seed_loader.py pins every slug here to a seed on disk.
+AGENT_SKILL_SLUGS: dict[str, list[str]] = {
+    "script_ai": [
+        "script-outline",
+        "script-expand",
+        "script-branch",
+        "library-search",
+    ],
+    "coordinator": ["library-search"],
+    "storyboard": ["library-search"],
+}
 
 # Roster grouping for the AI Library gallery (mig 400, spec 2026-08-02 §B1).
 # Keys are seed DIRECTORY names — note the mixed hyphen/underscore style is
@@ -150,7 +163,7 @@ class SeedLoader:
         errors: list[dict[str, Any]] = []
         agents_loaded = await self._load_agents(errors)
         skills_loaded = await self._load_skills(errors)
-        bindings_set = await self._bind_script_ai_skills(errors)
+        bindings_set = await self._bind_agent_skills(errors)
         return {
             "agents": agents_loaded,
             "skills": skills_loaded,
@@ -476,23 +489,40 @@ class SeedLoader:
 
     # ---------- bindings ----------
 
-    async def _bind_script_ai_skills(self, errors: list[dict[str, Any]]) -> int:
+    async def _bind_agent_skills(self, errors: list[dict[str, Any]]) -> int:
+        """Bind every agent in AGENT_SKILL_SLUGS; return total bindings set.
+        One agent failing is recorded and does not stop the others."""
+        total = 0
+        for agent_slug, skill_slugs in AGENT_SKILL_SLUGS.items():
+            total += await self._bind_one_agent(agent_slug, skill_slugs, errors)
+        return total
+
+    async def _bind_one_agent(
+        self,
+        agent_slug: str,
+        skill_slugs: list[str],
+        errors: list[dict[str, Any]],
+    ) -> int:
         try:
-            agent = await self.agent_repo.get_by_slug("script_ai")
+            agent = await self.agent_repo.get_by_slug(agent_slug)
             if not agent:
-                logger.info("seed_loader: script_ai agent not found, skipping bindings")
+                logger.info(
+                    f"seed_loader: {agent_slug} agent not found, skipping bindings"
+                )
                 return 0
             skill_ids: list[int] = []
-            for slug in SCRIPT_AI_SKILL_SLUGS:
+            for slug in skill_slugs:
                 sk = await self.skill_repo.get_by_slug(slug)
                 if sk:
                     skill_ids.append(int(sk["id"]))
             await self.agent_repo.update_skill_bindings(UUID(agent["id"]), skill_ids)
-            logger.info(f"seed_loader: bound {len(skill_ids)} skills to script_ai")
+            logger.info(f"seed_loader: bound {len(skill_ids)} skills to {agent_slug}")
             return len(skill_ids)
         # Broad catch intentional: one bad seed must not abort the batch.
         except Exception as e:
-            err = {"scope": "binding", "slug": "script_ai", "error": _format_error(e)}
+            err = {"scope": "binding", "slug": agent_slug, "error": _format_error(e)}
             errors.append(err)
-            logger.exception(f"seed_loader: script_ai binding failed: {err['error']}")
+            logger.exception(
+                f"seed_loader: {agent_slug} binding failed: {err['error']}"
+            )
             return 0

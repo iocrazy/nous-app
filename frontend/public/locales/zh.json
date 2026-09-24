@@ -4074,6 +4074,13 @@
       "run": "运行",
       "noRuns": "这个会话还没有 agent 运行",
       "noTrajectory": "这次运行没有记录到步骤"
+    },
+    "librarySearch": {
+      "title": "资源库搜索",
+      "noMatches": "资源库里没有匹配项",
+      "untitled": "未命名",
+      "notInLibrary": "未关联到资源库条目",
+      "vectorLegDegraded": "仅关键词匹配 · 语义搜索 {{outcome}}"
     }
   },
   "mcp": {
