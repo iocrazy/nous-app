@@ -73,7 +73,9 @@ save_transcript / save_summary reproduce the legacy
 ``.upsert(row, on_conflict="resource_id")`` (each table has a UNIQUE(resource_id)
 constraint) with ``pg_insert(...).on_conflict_do_update(
 index_elements=[resource_id], set_=…)`` — insert on first write, update every
-non-key column on conflict.
+non-key column on conflict, and move ``created_at`` to now() (the tables have
+no ``updated_at``; the vector backfill reads ``created_at`` as the last write
+time to spot a regenerated transcript / summary).
 """
 
 from __future__ import annotations
@@ -83,7 +85,7 @@ import uuid as _uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -140,6 +142,9 @@ class AIRepository:
             values["resource_id"] = int(resource_id)
             stmt = pg_insert(ResourceTranscripts).values(**values)
             update_cols = {k: stmt.excluded[k] for k in values if k != "resource_id"}
+            # No updated_at column: created_at is the last write time, which
+            # the vector backfill reads to spot a re-run (stale_source).
+            update_cols["created_at"] = func.now()
             stmt = stmt.on_conflict_do_update(
                 index_elements=[ResourceTranscripts.resource_id],
                 set_=update_cols,
@@ -190,6 +195,9 @@ class AIRepository:
             values["resource_id"] = int(resource_id)
             stmt = pg_insert(ResourceSummaries).values(**values)
             update_cols = {k: stmt.excluded[k] for k in values if k != "resource_id"}
+            # No updated_at column: created_at is the last write time, which
+            # the vector backfill reads to spot a re-run (stale_source).
+            update_cols["created_at"] = func.now()
             stmt = stmt.on_conflict_do_update(
                 index_elements=[ResourceSummaries.resource_id],
                 set_=update_cols,

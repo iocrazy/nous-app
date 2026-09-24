@@ -11,14 +11,14 @@ title still gets a vector, and the backfill embeds everything in place.
 The document side is always the RAW text. The asymmetric-retrieval instruction
 (``search_service.QUERY_INSTRUCTION``) goes on queries only.
 
-``source_hash`` covers :data:`DOC_VERSION` + the text. Today it only takes
-effect in two places: ``analyze_l1`` re-running (the upsert overwrites the
-row) and idempotence within one backfill request (an unchanged row is
-skipped without paying for an embedding call). The backfill selects only
-resources with NO row in the space, so bumping :data:`DOC_VERSION` or a
-changed input does NOT by itself re-embed existing rows yet — "stale hash
-triggers re-embed" is deferred (spec 2026-09-16-video-vector-layers-design
-§9).
+``source_hash`` is ``"<DOC_VERSION>:<sha1>"`` — the version prefix is in
+clear so the backfill listing
+(``ResourceEmbeddingsRepository.pending_for_user``) can select rows written
+by an older document version with a plain ``NOT LIKE '<version>:%'``.
+Bumping :data:`DOC_VERSION` therefore marks every existing row stale, and the
+next backfill re-embeds them. A row whose summary / transcript arrived after
+its vector is picked up the same way (``stale_source``). Hashes written
+before this format (bare sha1) count as stale once and get re-embedded.
 """
 
 from __future__ import annotations
@@ -94,8 +94,8 @@ def compose_semantic_document(
         lines.append(f"Transcript: {transcript[:TRANSCRIPT_EXCERPT_CHARS]}")
     lines.extend(_analysis_lines(analysis))
     text = "\n".join(lines)[:DOC_MAX_CHARS]
-    source_hash = hashlib.sha1(f"{DOC_VERSION}\n{text}".encode()).hexdigest()
-    return text, source_hash
+    digest = hashlib.sha1(f"{DOC_VERSION}\n{text}".encode()).hexdigest()
+    return text, f"{DOC_VERSION}:{digest}"
 
 
 # ---------------------------------------------------------------------------

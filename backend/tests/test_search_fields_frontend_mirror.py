@@ -31,7 +31,12 @@ from typing import List, get_args
 
 import pytest
 
-from app.schemas.search import DEFAULT_SEARCH_FIELDS, SearchField
+from app.schemas.search import (
+    DEFAULT_SEARCH_FIELDS,
+    HitLayer,
+    SearchField,
+    SearchResultItem,
+)
 
 # tests/<this file> → backend → repo root
 MIRROR = (
@@ -152,3 +157,14 @@ def test_the_parser_survives_the_type_annotation_brackets():
     """
     mutated = "export const ALL_SEARCH_FIELDS: SearchField[] = ['title', 'notes'];"
     assert _string_array(mutated, "ALL_SEARCH_FIELDS") == ["title", "notes"]
+
+
+def test_hit_layer_matches_the_frontend_union(mirror_source):
+    """``SearchResultItem.layer`` says which leg produced a hit; the frontend
+    keys its hit badges (``Record<HitLayer, ...>``) on the same vocabulary.
+    A layer only one side knows renders a badge-less card or 500s the
+    response model."""
+    ts = _union_members(mirror_source, "HitLayer")
+    assert len(ts) == len(set(ts)), f"duplicate entries in the mirror: {ts}"
+    assert set(ts) == set(get_args(HitLayer))
+    assert SearchResultItem.model_fields["layer"].annotation is HitLayer

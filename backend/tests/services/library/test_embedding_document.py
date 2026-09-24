@@ -115,7 +115,11 @@ def test_hash_is_versioned_and_stable():
     )
     text, h = compose_semantic_document(**kwargs)
     assert h == compose_semantic_document(**kwargs)[1]
-    assert h == hashlib.sha1(f"{DOC_VERSION}\n{text}".encode()).hexdigest()
+    digest = hashlib.sha1(f"{DOC_VERSION}\n{text}".encode()).hexdigest()
+    # "<version>:<sha1>": the backfill listing selects rows whose hash does
+    # not start with the current version prefix (a bumped DOC_VERSION).
+    assert h == f"{DOC_VERSION}:{digest}"
+    assert h.startswith(f"{DOC_VERSION}:")
 
 
 def test_blank_fields_are_skipped():

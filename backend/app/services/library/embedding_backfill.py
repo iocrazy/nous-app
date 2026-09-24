@@ -2,8 +2,10 @@
 
 Why this exists: ``analyze_l1`` ran for months with the embedder unconfigured
 and swallowed the ``None``, so most downloads have no vector. Candidates come
-from :meth:`ResourceEmbeddingsRepository.missing_for_user` (the caller's
-resources with no row in the current space + layer).
+from :meth:`ResourceEmbeddingsRepository.pending_for_user`: the caller's
+resources with no row in the current space + layer, or with a stale one
+(written by another ``DOC_VERSION``, or older than the resource's summary /
+transcript).
 
 Every candidate is embedded IN PLACE: one embedding call, no VLM. Before PR 2
 the document was made of the VLM analysis fields, so a resource without an
@@ -30,6 +32,11 @@ from app.services.library.embedding_document import (
     load_semantic_inputs,
 )
 
+#: ``embed_candidate`` outcome for a row whose vector was current but whose
+#: hash predated the ``"<version>:<sha1>"`` format: the label was rewritten,
+#: no embedding call was made.
+REHASHED = "rehashed"
+
 
 class _Embedder(Protocol):
     async def try_embed(
@@ -51,6 +58,18 @@ class _EmbeddingsRepo(Protocol):
         source_text: str | None,
     ) -> None: ...
 
+    async def touch(self, resource_id: int, layer: str, space_id: int) -> None: ...
+
+    async def rewrite_hash(
+        self,
+        resource_id: int,
+        layer: str,
+        space_id: int,
+        *,
+        old_hash: str,
+        new_hash: str,
+    ) -> None: ...
+
 
 async def embed_candidate(
     row: BackfillRow,
@@ -68,7 +87,9 @@ async def embed_candidate(
 
     Returns ``(True, None)`` when the row now holds a current vector (written
     now, or already there with the same ``source_hash`` — no call, no spend),
-    else ``(False, reason)``: ``"empty_text"``, ``"store_missing"`` (migration
+    ``(True, REHASHED)`` when the stored vector already embedded this exact
+    document under a legacy bare-sha1 hash (the hash was relabelled, no
+    call), else ``(False, reason)``: ``"empty_text"``, ``"store_missing"`` (migration
     499 not applied), or the embedder's ``try_embed`` reason (classify it with
     ``classify_embed_reason`` before it reaches a user)."""
     inputs = await load_semantic_inputs(
@@ -81,13 +102,29 @@ async def embed_candidate(
     if not text:
         return False, "empty_text"
     try:
-        # Only reachable for rows that got a vector after missing_for_user
-        # listed them (a concurrent analyze_l1, a repeated row): the listing
-        # itself excludes resources that already have one, so a changed hash
-        # on an existing row is not picked up here yet (spec §9).
+        # The same hash means the stored vector already embeds this exact
+        # document (a concurrent analyze_l1, or a stale_source row whose new
+        # summary / transcript did not change the text): no call, no spend.
         existing = await repo.get(row.resource_id, SEMANTIC_LAYER, space_id)
         if existing is not None and existing.get("source_hash") == source_hash:
+            if row.reason == "stale_source":
+                # Move updated_at past the newer summary / transcript, or the
+                # listing picks this row again on every run.
+                await repo.touch(row.resource_id, SEMANTIC_LAYER, space_id)
             return True, None
+        # Written before the "<version>:<sha1>" format: the bare digest of the
+        # same versioned text means the vector is current, only the label is
+        # old. Relabel it instead of paying to embed identical text again.
+        bare_digest = source_hash.split(":", 1)[1]
+        if existing is not None and existing.get("source_hash") == bare_digest:
+            await repo.rewrite_hash(
+                row.resource_id,
+                SEMANTIC_LAYER,
+                space_id,
+                old_hash=bare_digest,
+                new_hash=source_hash,
+            )
+            return True, REHASHED
         vector, reason = await embedder.try_embed(text)
         if vector is None:
             return False, reason or "provider_error: empty result"

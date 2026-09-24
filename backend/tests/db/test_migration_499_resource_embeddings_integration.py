@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 import random
 import uuid
+from datetime import timedelta
 
 import pytest
 
@@ -42,6 +43,7 @@ _skip = pytest.mark.skipif(
 
 _RPC = "public.match_resource_embeddings(halfvec,bigint,text,double precision,integer,uuid)"
 _DIM = 2048
+_HOUR = timedelta(hours=1)
 
 
 def _unit(i: int) -> list[float]:
@@ -429,11 +431,11 @@ async def test_repository_roundtrip(orm_dsn, pg, fx):
             layer="semantic",
             space_id=fx["s1"],
             embedding=_unit(1),
-            source_hash="h2",
+            source_hash="v:h2",
             source_text="second",
         )
         got = await repo.get(fx["r1"], "semantic", fx["s1"])
-        assert got["source_hash"] == "h2" and got["source_text"] == "second"
+        assert got["source_hash"] == "v:h2" and got["source_text"] == "second"
         assert got["embedding"] == _unit(1)
         assert got["created_at"] == first["created_at"]
         assert got["updated_at"] >= first["updated_at"]
@@ -462,15 +464,230 @@ async def test_repository_roundtrip(orm_dsn, pg, fx):
             2,
         )
 
-        missing, total = await repo.missing_for_user(
-            user_id=user, space_id=fx["s1"], layer="semantic", limit=10
+        missing, total = await repo.pending_for_user(
+            user_id=user,
+            space_id=fx["s1"],
+            layer="semantic",
+            limit=10,
+            doc_version="v",  # r1's hash is current: only r2 is pending
         )
     assert total == 1
     assert [m.resource_id for m in missing] == [fx["r2"]]
     assert isinstance(missing[0], BackfillRow)
     assert missing[0].title == "Second Clip" and missing[0].has_analysis is False
+    assert missing[0].reason == "missing"
 
     rows = await pg.fetchval(
         "SELECT count(*) FROM resource_embeddings WHERE resource_id = $1", fx["r1"]
     )
     assert rows == 1, "ON CONFLICT did not find the PK — appended instead"
+
+
+# ── pending_for_user: stale rows (re-embed on a changed document) ─────────
+
+
+async def _insert_vector(pg, rid: int, space_id: int, source_hash: str, age):
+    await pg.execute(
+        "INSERT INTO resource_embeddings (resource_id, layer, space_id, "
+        "embedding, source_hash, created_at, updated_at) VALUES ($1, 'semantic', "
+        "$2, CAST($3 AS halfvec), $4, now() - CAST($5 AS interval), now() - CAST($5 AS interval))",
+        rid,
+        space_id,
+        _lit(_unit(0)),
+        source_hash,
+        age,
+    )
+
+
+@_skip
+async def test_pending_selects_an_old_version_hash_as_stale_version(orm_dsn, pg, fx):
+    """A hash written by another DOC_VERSION (or the pre-prefix bare sha1)
+    is stale; missing rows still come first. The ``_`` in the version is a
+    LIKE wildcard unless escaped: "semanticXv2:" must NOT count as current."""
+    from app.db.scope import Scope, request_scope
+    from app.repositories.resource_embeddings_repository import (
+        ResourceEmbeddingsRepository,
+    )
+
+    r3 = await _mk_resource(pg, fx["user"], "Third Clip")
+    try:
+        await _insert_vector(pg, fx["r1"], fx["s1"], "da39a3ee5e6b4b0d", _HOUR)
+        await _insert_vector(pg, r3, fx["s1"], "semanticXv2:abc", _HOUR)
+        repo = ResourceEmbeddingsRepository()
+        user = str(fx["user"])
+        async with request_scope(Scope(user_id=user)):
+            rows, total = await repo.pending_for_user(
+                user_id=user,
+                space_id=fx["s1"],
+                layer="semantic",
+                limit=10,
+                doc_version="semantic_v2",
+            )
+            stale = await repo.stale_count(
+                user_id=user,
+                space_id=fx["s1"],
+                layer="semantic",
+                doc_version="semantic_v2",
+            )
+            await pg.execute(
+                "UPDATE resource_embeddings SET source_hash = 'semantic_v2:abc' "
+                "WHERE resource_id = ANY($1::bigint[])",
+                [fx["r1"], r3],
+            )
+            _, total_after = await repo.pending_for_user(
+                user_id=user,
+                space_id=fx["s1"],
+                layer="semantic",
+                limit=10,
+                doc_version="semantic_v2",
+            )
+        assert total == 3 and stale == 2
+        assert rows[0].resource_id == fx["r2"] and rows[0].reason == "missing"
+        assert {(r.resource_id, r.reason) for r in rows[1:]} == {
+            (fx["r1"], "stale_version"),
+            (r3, "stale_version"),
+        }
+        assert total_after == 1, "current-version hashes are not pending"
+    finally:
+        media = await pg.fetchval("SELECT media_id FROM resources WHERE id = $1", r3)
+        await pg.execute("DELETE FROM resources WHERE id = $1", r3)
+        await pg.execute("DELETE FROM parsed_media WHERE id = $1", media)
+
+
+@_skip
+async def test_pending_selects_a_later_summary_as_stale_source(orm_dsn, pg, fx):
+    """A summary created after the vector means the document changed: the
+    row is ``stale_source`` until it is re-embedded or touched."""
+    from app.db.scope import Scope, request_scope
+    from app.repositories.resource_embeddings_repository import (
+        ResourceEmbeddingsRepository,
+    )
+
+    await _insert_vector(pg, fx["r1"], fx["s1"], "semantic_v2:abc", _HOUR)
+    await _insert_vector(pg, fx["r2"], fx["s1"], "semantic_v2:def", _HOUR)
+    # An OLDER summary on r2 must not make it stale.
+    await pg.execute(
+        "INSERT INTO resource_summaries (resource_id, summary_text, created_at) "
+        "VALUES ($1, 'new summary', now()), ($2, 'old summary', "
+        "now() - interval '2 hours')",
+        fx["r1"],
+        fx["r2"],
+    )
+    repo = ResourceEmbeddingsRepository()
+    user = str(fx["user"])
+    async with request_scope(Scope(user_id=user)):
+        rows, total = await repo.pending_for_user(
+            user_id=user,
+            space_id=fx["s1"],
+            layer="semantic",
+            limit=10,
+            doc_version="semantic_v2",
+        )
+        stale = await repo.stale_count(
+            user_id=user,
+            space_id=fx["s1"],
+            layer="semantic",
+            doc_version="semantic_v2",
+        )
+        await repo.touch(fx["r1"], "semantic", fx["s1"])
+        _, total_after = await repo.pending_for_user(
+            user_id=user,
+            space_id=fx["s1"],
+            layer="semantic",
+            limit=10,
+            doc_version="semantic_v2",
+        )
+    assert total == 1 and stale == 1
+    assert [(r.resource_id, r.reason) for r in rows] == [(fx["r1"], "stale_source")]
+    assert total_after == 0, "touch moved updated_at past the summary"
+
+
+class _NoSource:
+    """analysis / tags / ai repos with nothing to add: the document is the
+    title alone, read from the real parsed_media row."""
+
+    async def get_analysis(self, resource_id, analysis_level=None):
+        return None
+
+    async def get_resource_tags(self, resource_id):
+        return []
+
+    async def get_summary(self, resource_id):
+        return None
+
+    async def get_transcript(self, resource_id):
+        return None
+
+
+class _MustNotEmbed:
+    def __init__(self):
+        self.calls = 0
+
+    async def try_embed(self, text):
+        self.calls += 1
+        raise AssertionError("a legacy hash of the same text must not be re-embedded")
+
+
+@_skip
+async def test_legacy_bare_hash_of_the_same_text_is_rehashed_without_embedding(
+    orm_dsn, pg, fx
+):
+    """Rows written before the "<version>:<sha1>" format hold the bare sha1
+    of the same versioned text. They are listed as stale_version, but the
+    vector is current: relabel the hash, never pay for the call."""
+    from app.db.scope import Scope, request_scope
+    from app.repositories.resource_embeddings_repository import (
+        ResourceEmbeddingsRepository,
+    )
+    from app.services.library.embedding_backfill import REHASHED, embed_candidate
+    from app.services.library.embedding_document import (
+        DOC_VERSION,
+        compose_semantic_document,
+    )
+
+    _, prefixed = compose_semantic_document(
+        title="First Clip",
+        description="",
+        tags=[],
+        summary_text=None,
+        transcript_text=None,
+        analysis=None,
+    )
+    bare = prefixed.split(":", 1)[1]
+    await _insert_vector(pg, fx["r1"], fx["s1"], bare, _HOUR)
+    repo = ResourceEmbeddingsRepository()
+    user = str(fx["user"])
+    embedder = _MustNotEmbed()
+    src = _NoSource()
+    async with request_scope(Scope(user_id=user)):
+        rows, _ = await repo.pending_for_user(
+            user_id=user,
+            space_id=fx["s1"],
+            layer="semantic",
+            limit=10,
+            doc_version=DOC_VERSION,
+        )
+        row = next(r for r in rows if r.resource_id == fx["r1"])
+        assert row.reason == "stale_version"
+        got = await embed_candidate(
+            row,
+            embedder=embedder,
+            space_id=fx["s1"],
+            repo=repo,
+            analysis_repo=src,
+            tags_repo=src,
+            ai_repo=src,
+        )
+        after = await repo.get(fx["r1"], "semantic", fx["s1"])
+        rows_after, _ = await repo.pending_for_user(
+            user_id=user,
+            space_id=fx["s1"],
+            layer="semantic",
+            limit=10,
+            doc_version=DOC_VERSION,
+        )
+    assert got == (True, REHASHED)
+    assert embedder.calls == 0
+    assert after["source_hash"] == prefixed
+    assert after["embedding"] == _unit(0), "the vector itself is untouched"
+    assert fx["r1"] not in [r.resource_id for r in rows_after]
