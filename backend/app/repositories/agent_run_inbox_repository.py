@@ -115,10 +115,23 @@ def pending_issue_targets_stmt(limit: int):
     It belongs here rather than in ``_busy_reason``: this exclusion is the
     BACKSTOP declining to race the primary, not a general statement that a
     locked issue is busy — the reply path takes that same lock for itself.
+
+    A PAUSED issue is excluded too (FH2 T1). ``deliver_or_dispatch`` answers
+    ``inbox/already_enqueued`` for it (paused is one of its busy signals), and
+    ``expire_stale_stmt(skip_paused_issues=True)`` deliberately never expires
+    its items, so without this the scan re-read the same items every minute
+    for as long as the pause lasted (prod issue 347469360799030, paused since
+    2026-09-08). Nothing is lost by skipping them: resume either starts a
+    fresh workflow whose in-turn drain and InboxClaimHook take the items, or
+    clears the flag for the locked workflow that drains them itself — and a
+    cleared ``paused_at`` puts the issue back in this scan on the next tick.
+    ``_busy_reason`` keeps treating paused as busy: the comment and wake-up
+    paths still need paused ⇒ inbox. Only the backstop's scan narrows.
     """
     from app.models import Issues
 
     locked_issue_ids = select(Issues.id).where(Issues.execution_locked_at.isnot(None))
+    paused_issue_ids = select(Issues.id).where(Issues.paused_at.isnot(None))
     return (
         select(
             AgentRunInbox.target_id,
@@ -128,6 +141,7 @@ def pending_issue_targets_stmt(limit: int):
         .where(AgentRunInbox.target_kind == "issue")
         .where(*_pending())
         .where(AgentRunInbox.target_id.notin_(locked_issue_ids))
+        .where(AgentRunInbox.target_id.notin_(paused_issue_ids))
         .group_by(AgentRunInbox.target_id)
         .order_by(func.min(AgentRunInbox.created_at))
         .limit(int(limit))

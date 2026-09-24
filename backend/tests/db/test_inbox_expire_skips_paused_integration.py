@@ -212,3 +212,48 @@ async def test_the_drain_scan_skips_an_issue_whose_turn_lock_is_held(orm_dsn, pg
             "DELETE FROM issues WHERE id = ANY($1::bigint[])", [locked, idle]
         )
         await pg.execute("DELETE FROM auth.users WHERE id = $1", user_id)
+
+
+@_skip
+async def test_the_drain_scan_skips_a_paused_issue(orm_dsn, pg):
+    """FH2 T1, against real Postgres: a paused issue is dropped from the scan
+    while an idle one next to it is still drained, and the paused one comes
+    back the moment ``paused_at`` is cleared (resume's own path)."""
+    from app.repositories.agent_run_inbox_repository import (
+        get_agent_run_inbox_repository,
+    )
+
+    user_id = uuid.uuid4()
+    await pg.execute("INSERT INTO auth.users (id) VALUES ($1)", user_id)
+    paused = await _issue(pg, user_id, paused=True)
+    idle = await _issue(pg, user_id, paused=False)
+    fresh = dt.timedelta(minutes=1)
+    ids = {
+        "paused": await _item(pg, target_kind="issue", target_id=paused, age=fresh),
+        "idle": await _item(pg, target_kind="issue", target_id=idle, age=fresh),
+    }
+    repo = get_agent_run_inbox_repository()
+    try:
+        targets = {
+            int(t["target_id"]) for t in await repo.pending_issue_targets(limit=1000)
+        }
+        assert idle in targets, "an idle issue with a stranded item must be drained"
+        assert paused not in targets, "a paused issue must not be rescanned forever"
+
+        # Positive control, as above: same row, flag cleared, now drainable.
+        async with pg.transaction():
+            await pg.execute("SET LOCAL session_replication_role = replica")
+            await pg.execute("UPDATE issues SET paused_at = NULL WHERE id = $1", paused)
+        after = {
+            int(t["target_id"]) for t in await repo.pending_issue_targets(limit=1000)
+        }
+        assert paused in after
+    finally:
+        await pg.execute(
+            "DELETE FROM agent_run_inbox WHERE id = ANY($1::bigint[])",
+            list(ids.values()),
+        )
+        await pg.execute(
+            "DELETE FROM issues WHERE id = ANY($1::bigint[])", [paused, idle]
+        )
+        await pg.execute("DELETE FROM auth.users WHERE id = $1", user_id)
