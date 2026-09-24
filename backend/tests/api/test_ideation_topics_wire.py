@@ -84,9 +84,6 @@ class _Repo:
         self.calls.append("team_of")
         return TEAM if self.row else None
 
-    async def get_topic(self, topic_id, team_id):
-        return self.row
-
     async def update_topic(self, topic_id, team_id, **kwargs):
         self.calls.append("update")
         return self.row
@@ -146,9 +143,9 @@ async def test_create_wire(client, _wiring) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_wire_blank_topic(client, _wiring) -> None:
+async def test_patch_wire_blank_topic(client, _wiring) -> None:
     _wiring.row = _blank_topic()
-    resp = await client.get(f"{URL}/{TOPIC_ID}")
+    resp = await client.patch(f"{URL}/{TOPIC_ID}", json={"title": "Renamed"})
     assert_wire_unchanged(resp, {"success": True, "data": _wiring.row})
 
 
@@ -167,11 +164,12 @@ async def test_delete_wire(client) -> None:
 @pytest.mark.asyncio
 async def test_missing_topic_is_typed_404(client, _wiring) -> None:
     _wiring.row = None
-    _assert_typed_404(await client.get(f"{URL}/{TOPIC_ID}"))
+    _assert_typed_404(await client.patch(f"{URL}/{TOPIC_ID}", json={"title": "x"}))
+    _assert_typed_404(await client.delete(f"{URL}/{TOPIC_ID}"))
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("method", ["GET", "PATCH", "DELETE"])
+@pytest.mark.parametrize("method", ["PATCH", "DELETE"])
 async def test_non_numeric_topic_id_is_typed_404_not_500(
     client, _wiring, method
 ) -> None:
@@ -186,3 +184,10 @@ async def test_non_numeric_team_id_is_403_not_500(client, _wiring) -> None:
     resp = await client.post(URL, params={"team_id": "abc"}, json={"title": "x"})
     assert resp.status_code == 403
     assert _wiring.calls == []
+
+
+@pytest.mark.asyncio
+async def test_single_topic_read_route_is_gone(client) -> None:
+    """``GET /ideation/topics/{id}`` had no caller in frontend / admin / browser /
+    scripts / nous-core and no API-key scope (P7); the board reads the list."""
+    assert (await client.get(f"{URL}/{TOPIC_ID}")).status_code == 405

@@ -130,16 +130,6 @@ async def _resolve_topic_role(topic_id: str, user_id: str):
     return team_id, role
 
 
-@router.get("/{topic_id}", response_model=IdeationTopicResponse)
-async def get_topic(topic_id: str, auth: AuthDep):
-    team_id, _role = await _resolve_topic_role(topic_id, auth.user_id)
-    repo = get_topics_repository()
-    topic = await repo.get_topic(topic_id, team_id)
-    if topic is None:
-        raise _topic_not_found()
-    return {"success": True, "data": topic}
-
-
 @router.patch("/{topic_id}", response_model=IdeationTopicResponse)
 async def update_topic(topic_id: str, data: TopicUpdate, auth: AuthDep):
     team_id, role = await _resolve_topic_role(topic_id, auth.user_id)
