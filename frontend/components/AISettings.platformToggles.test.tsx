@@ -182,7 +182,7 @@ describe('AISettings — platform card master + per-model toggles', () => {
 
     // Opt the ASR model out, then save.
     fireEvent.click(modelToggle('MOSS ASR'));
-    fireEvent.click(screen.getByText('Save Settings'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
 
     await waitFor(() => {
       expect(saveAISettings).toHaveBeenCalledTimes(1);
@@ -210,7 +210,7 @@ describe('AISettings — platform card master + per-model toggles', () => {
     const header = screen.getByText('Nous (Platform)').closest('.flex.items-center.gap-4');
     const masterToggle = within(header as HTMLElement).getByRole('button');
     fireEvent.click(masterToggle);
-    fireEvent.click(screen.getByText('Save Settings'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
 
     await waitFor(() => {
       expect(saveAISettings).toHaveBeenCalledTimes(1);
