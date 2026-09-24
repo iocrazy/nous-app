@@ -143,6 +143,12 @@ class RunRecorder:
     # ``RunRecorder.__new__(...)`` 造桩的测试才读得到 None；换成
     # ``field(default_factory=...)`` 就没有类属性，那些测试会整片 AttributeError。
     parent_run_id: Optional[str] = None
+    # ``<dbos workflow_id>:<step_id>`` of the issue turn step that opened this
+    # run (fh2 T3). Stamped into ``metadata_json.dbos_step_key``; a second row
+    # with the same key is a recovery re-execution and gets linked to the first
+    # (``recovered_from`` / ``superseded_by``, see ``step_recovery``). Simple
+    # default for the same ``RunRecorder.__new__`` reason as the field above.
+    dbos_step_key: Optional[str] = None
 
     # Internal state (populated by start / methods; not caller-facing)
     # str form of agent_runs.id (BIGINT Snowflake since mig 232). Not a UUID.
@@ -181,7 +187,40 @@ class RunRecorder:
         raise here."""
         await self._pre_flight_check_paused()
         await self._snapshot_price()
+        prior_run_id = await self._link_recovered_step()
         await self._insert_row()
+        if prior_run_id is not None and self.run_id is not None:
+            from app.services.ai.runner import step_recovery
+
+            await step_recovery.stamp_superseded(prior_run_id, self.run_id)
+
+    async def _link_recovered_step(self) -> Optional[int]:
+        """Stamp the step key into the row-to-be and, when an earlier row has
+        the same key, point at it. Returns that row's id (or None). A failed
+        lookup only costs the link — never the run."""
+        if not self.dbos_step_key:
+            return None
+        from app.services.ai.runner import step_recovery
+
+        stamped = {**(self.metadata or {}), "dbos_step_key": self.dbos_step_key}
+        try:
+            prior = await step_recovery.find_prior_run(
+                self.dbos_step_key, issue_id=self.issue_id, user_id=self.user_id
+            )
+        except Exception as exc:  # noqa: BLE001 — the link is decoration
+            logger.error(
+                f"[RunRecorder] recovery lookup for step {self.dbos_step_key} "
+                f"failed: {exc!r}; opening the run unlinked"
+            )
+            prior = None
+        if prior is not None:
+            stamped["recovered_from"] = str(prior["id"])
+            logger.warning(
+                f"[RunRecorder] step {self.dbos_step_key} re-executed: previous "
+                f"run {prior['id']} ({prior.get('status')}) is superseded"
+            )
+        self.metadata = stamped
+        return int(prior["id"]) if prior is not None else None
 
     async def __aenter__(self) -> "RunRecorder":
         try:
@@ -216,6 +255,10 @@ class RunRecorder:
         # live runs). Only armed when the insert succeeded (run_id set).
         if self.run_id is not None:
             self._start_background_heartbeat()
+            # Only a run whose row exists can be closed on worker shutdown.
+            from app.services.ai.runner import live_runs
+
+            live_runs.register(self)
         return self
 
     def _start_background_heartbeat(self) -> None:
@@ -239,16 +282,30 @@ class RunRecorder:
         except Exception:  # noqa: BLE001 — a heartbeat blip must not crash the run
             logger.warning("[RunRecorder] background heartbeat stopped", exc_info=True)
 
+    async def stop_heartbeat(self) -> None:
+        """Cancel the background heartbeat and wait for it. Idempotent; also
+        called by ``live_runs.interrupt_inflight_runs`` on worker shutdown."""
+        task, self._heartbeat_task = self._heartbeat_task, None
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+
     async def __aexit__(self, exc_type, exc, tb) -> bool:
+        from app.services.ai.runner import live_runs
+
+        try:
+            return await self._exit(exc_type, exc)
+        finally:
+            live_runs.unregister(self)
+
+    async def _exit(self, exc_type, exc) -> bool:
         # Stop the background heartbeat first so it can't race _finish (which
         # flips status away from 'running').
-        if self._heartbeat_task is not None:
-            self._heartbeat_task.cancel()
-            try:
-                await self._heartbeat_task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
-            self._heartbeat_task = None
+        await self.stop_heartbeat()
 
         if self.run_id is None:
             # Start failed; nothing to finalize.

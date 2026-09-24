@@ -1,7 +1,7 @@
 """Shutdown chain — drains everything in the correct order.
 
 Order matters: cancel background tasks → stop heartbeats / pushers /
-listeners → drain DBOS workers → tear down boundary clients (SsrfProxy,
+listeners → close in-flight agent runs → drain DBOS workers → tear down boundary clients (SsrfProxy,
 DrissionPage) → close transport pools (Redis, asyncpg).
 """
 
@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from loguru import logger
 
 from app.core.redis import close_async_redis
+from app.services.ai.runner.live_runs import interrupt_inflight_runs
 from app.services.media.parsers.douyin_parse.drissionpage_parser import (
     DrissionPageParser,
 )
@@ -32,6 +33,12 @@ async def shutdown_all(app: FastAPI) -> None:
     await stop_bounds_heartbeat(app)
     await stop_lifecycle_bus()
     await stop_prometheus_pusher(app)
+
+    # Close the agent runs still in flight BEFORE DBOS goes: ``shutdown_dbos``
+    # abandons running workflows without waiting, so their turns never reach
+    # ``RunRecorder._finish`` and the rows would sit ``running`` until the
+    # sweeper (2 min). Bounded and never raises (fh2 T3, see live_runs).
+    await interrupt_inflight_runs()
 
     # Drain DBOS workers first so in-flight workflows checkpoint cleanly.
     await shutdown_dbos()

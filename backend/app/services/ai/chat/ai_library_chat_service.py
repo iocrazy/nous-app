@@ -55,6 +55,10 @@ from app.services.ai.chat.resource_ref_resolver import (
     fetch_resource_meta,
     resolve_resource_refs,
 )
+from app.services.ai.chat.step_replay import (
+    split_replayed_turn,
+    user_message_metadata,
+)
 from app.services.ai.permissions.high_risk_caps import (
     high_risk_caps,
     media_kill_switch_engaged,
@@ -629,6 +633,7 @@ class AILibraryChatService:
         message_source: Optional[dict] = None,
         run_started_callback: Optional[Callable[[str], Awaitable[None]]] = None,
         pre_turn_gate: Optional[Callable[[], Awaitable[None]]] = None,
+        dbos_step_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Per-user concurrency gate around the turn. Both chat (.chat) and
         issue (run_issue_reply_step) funnel through here, so one gate caps a
@@ -655,7 +660,13 @@ class AILibraryChatService:
         wait can be long (production R4: ~54 s behind other turns), so a check
         the caller made before calling here can be stale by the time the turn
         would start. The gate aborts the turn by raising; the exception
-        propagates to the caller untouched, with the slot released."""
+        propagates to the caller untouched, with the slot released.
+
+        ``dbos_step_key`` (fh2 T3) is the issue turn step's
+        ``<workflow_id>:<step_id>``. It is stamped on the user message and the
+        run row; when DBOS recovery re-executes the step, the turn reuses the
+        user message already written (see ``step_replay``) and RunRecorder
+        links the new run to the old one (``step_recovery``)."""
         from app.services.ai.chat.agent_concurrency import user_slot
 
         async with user_slot(str(user_id)):
@@ -677,6 +688,7 @@ class AILibraryChatService:
                 issue_id=issue_id,
                 message_source=message_source,
                 run_started_callback=run_started_callback,
+                dbos_step_key=dbos_step_key,
             )
 
     async def _run_session_turn_inner(
@@ -697,6 +709,7 @@ class AILibraryChatService:
         issue_id: Optional[int] = None,
         message_source: Optional[dict] = None,
         run_started_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+        dbos_step_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute a single turn against a session.
 
@@ -736,6 +749,9 @@ class AILibraryChatService:
         # Newest window: a conversation past 200 messages must feed the model
         # its most recent context, not its first 200 messages.
         history = await self.get_messages(session_id, user_id=user_id, newest=True)
+        # fh2 T3: a recovery re-execution finds its own user message already
+        # written; reuse it and cut history before it (step_replay docstring).
+        replayed_user_msg, history = split_replayed_turn(history, dbos_step_key)
 
         # Normalize attachments to dicts up front so both the persisted
         # user message (display metadata) and the S4/G2 resolution below
@@ -769,17 +785,24 @@ class AILibraryChatService:
             else None
         )
 
-        user_msg = await self._store.append_user_message(
-            session_id=session_id,
-            user_id=str(user_id),
-            content=content,
-            attachments=ConversationsAiStore.display_attachments(_att_dicts),
-            # Task 7a defect 6: provenance belongs ON this message. It is the
-            # only copy the thread endpoint reads, and this is the only place
-            # the message is written — the delivery path deliberately no
-            # longer appends one of its own.
-            metadata={"source": message_source} if message_source else None,
-        )
+        if replayed_user_msg is not None:
+            logger.warning(
+                f"[chat] step {dbos_step_key} re-executed: reusing user message "
+                f"{replayed_user_msg.get('id')} instead of appending it again"
+            )
+            user_msg = replayed_user_msg
+        else:
+            user_msg = await self._store.append_user_message(
+                session_id=session_id,
+                user_id=str(user_id),
+                content=content,
+                attachments=ConversationsAiStore.display_attachments(_att_dicts),
+                # Task 7a defect 6: provenance belongs ON this message. It is
+                # the only copy the thread endpoint reads, and this is the only
+                # place the message is written — the delivery path deliberately
+                # no longer appends one of its own. fh2 T3 adds the step key.
+                metadata=user_message_metadata(message_source, dbos_step_key),
+            )
         if chat_answer is not None:
             await self._commit_chat_answer(chat_answer)
 
@@ -1550,6 +1573,8 @@ class AILibraryChatService:
                 # phase 2b-1 §2.3: a forked run points back at its origin
                 fork_of_run_id=int(fork_of[0]) if fork_of else None,
                 fork_at_seq=int(fork_of[1]) if fork_of else None,
+                # fh2 T3: recovery link (metadata_json.dbos_step_key et al.)
+                dbos_step_key=dbos_step_key,
             ) as recorder:
                 # 3c §4.1: hand the run id over the moment the row exists —
                 # before compose, before the model, before the first token.

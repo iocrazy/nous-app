@@ -34,6 +34,10 @@ from app.services.issues.issue_status_read import (
     PREEMPT_STATUSES,
     read_issue_status,
 )
+from app.services.issues.turn_recovery import (
+    current_dbos_step_key,
+    enforce_recovery_limit,
+)
 
 
 def _build_user_message(issue: dict[str, Any], brief: str | None = None) -> str:
@@ -201,6 +205,13 @@ async def run_issue_agent(
     _ = agent_id  # session already binds the agent; kept for caller compat
 
     iid = int(issue["id"])
+    # fh2 T3: this step's identity across DBOS recovery re-executions. Counted
+    # first (a turn re-executed too often stops here, before any spend), then
+    # threaded to the turn so it links the new run to the old one and does not
+    # append the task text twice. None outside DBOS → today's behaviour.
+    step_key = current_dbos_step_key()
+    if step_key is not None:
+        await enforce_recovery_limit(iid, step_key)
     session_id = await get_or_create_issue_session(iid)
     if not session_id:
         raise RuntimeError(f"issue {issue['id']} has no assignable agent session")
@@ -266,6 +277,9 @@ async def run_issue_agent(
                 fork_steer=steer_text is not None,
                 issue_id=iid,
                 pre_turn_gate=issue_status_gate(iid),
+                # Only when there is a key: fakes that pin run_session_turn's
+                # exact kwarg set keep working on the ordinary path.
+                **({"dbos_step_key": step_key} if step_key else {}),
             )
         except IssuePreemptedBeforeTurn as stop:
             # No run, no user message, no spend. The ``finally`` below still

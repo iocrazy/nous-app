@@ -43,6 +43,56 @@ from app.models import AgentRuns
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 from app.services.ai.runner.turn_end import TurnEndReason
 
+WORKER_SHUTDOWN_ERROR_CODE = "worker_shutdown"
+
+# 崩溃类终态 UPDATE 的 RETURNING 列：id 给调用方补 turn_end，其余维度给小时表
+# 那一行（3c 终审 I4）。sweeper 与 worker 停机两条写方共用。
+_CRASH_RETURNING = (
+    AgentRuns.id,
+    AgentRuns.team_id,
+    AgentRuns.project_id,
+    AgentRuns.agent_id,
+    AgentRuns.model,
+    AgentRuns.trigger,
+    AgentRuns.attribution,
+)
+
+
+def worker_shutdown_stmt(run_ids: List[int]):
+    """fh2 T3: the terminal UPDATE for runs still in flight when the worker is
+    stopped. Same status and column word as the sweeper (``heartbeat_lost``,
+    ruling 8: no new status, no migration); ``error_code`` tells the two apart.
+    ``status='running'`` guard: a run that closed itself first is left alone."""
+    return (
+        update(AgentRuns)
+        .where(AgentRuns.id.in_([int(r) for r in run_ids]))
+        .where(AgentRuns.status == "running")
+        .values(
+            status="heartbeat_lost",
+            ended_at=datetime.now(timezone.utc),
+            error_code=WORKER_SHUTDOWN_ERROR_CODE,
+            error_message="Worker shut down while the turn was running",
+            turn_end_reason=TurnEndReason.HEARTBEAT_LOST.value,
+        )
+        .returning(*_CRASH_RETURNING)
+    )
+
+
+async def _after_crash_flip(rows) -> list[int]:
+    """被崩溃类写方翻掉的 run 永远不会再经过 ``RunRecorder._finish``，所以检索投影
+    与 ``ai_usage_hourly`` 的那一行都只能由这里跟上（3c Task 13 评审 Important 1 /
+    终审 I4）。在 ``write_scope()`` 之外：投影读回的必须是刚提交的那份 status，而这
+    两件事失败都绝不该把已经翻成功的 id 吞掉——调用方拿这些 id 去补 ``turn_end``。"""
+    from app.services.liveness.crash_rollup import record_crash_terminal_runs
+    from app.services.search.projection import project_run_id_best_effort
+
+    swept = [int(r.id) for r in rows]
+    for run_id in swept:
+        await project_run_id_best_effort(run_id)
+    await record_crash_terminal_runs(rows)
+    return swept
+
+
 # agent_runs DB-column-name → mapped-attribute-name. Built once from the mapper.
 # For agent_runs every name == key (no reserved-name remap), but we resolve via
 # this map anyway for parity with the sibling repos and to stay correct if a
@@ -1424,34 +1474,27 @@ class AgentRunsRepository(AsyncpgRepository):
                     )
                     # 维度随行返回：小时表那一行要 team / project / agent /
                     # model / trigger，全在这张表上（3c 终审 I4）。
-                    .returning(
-                        AgentRuns.id,
-                        AgentRuns.team_id,
-                        AgentRuns.project_id,
-                        AgentRuns.agent_id,
-                        AgentRuns.model,
-                        AgentRuns.trigger,
-                        AgentRuns.attribution,
-                    )
+                    .returning(*_CRASH_RETURNING)
                 )
                 rows = result.fetchall()
         except Exception as e:
             logger.error(f"Failed to mark heartbeat_lost: {e}")
             return []
+        return await _after_crash_flip(rows)
 
-        # 被扫掉的 run 永远不会再经过 ``RunRecorder._finish``，所以检索投影与
-        # ``ai_usage_hourly`` 的那一行都只能由这里跟上（3c Task 13 评审
-        # Important 1 / 终审 I4）。在 ``write_scope()`` 之外：投影读回的必须是
-        # 刚提交的那份 status，而这两件事失败都绝不该把已经扫成功的 id 吞掉——
-        # 调用方拿这些 id 去补 ``turn_end`` 事件。
-        from app.services.liveness.crash_rollup import record_crash_terminal_runs
-        from app.services.search.projection import project_run_id_best_effort
-
-        swept = [int(r.id) for r in rows]
-        for run_id in swept:
-            await project_run_id_best_effort(run_id)
-        await record_crash_terminal_runs(rows)
-        return swept
+    async def mark_worker_shutdown_ids(self, run_ids: List[int]) -> list[int]:
+        """fh2 T3: close the given in-flight runs on worker shutdown (see
+        ``worker_shutdown_stmt``). Returns the ids the UPDATE took; ``[]`` on
+        error (logged — shutdown must proceed, the sweeper is the backstop)."""
+        if not run_ids:
+            return []
+        try:
+            async with write_scope() as session:
+                rows = (await session.execute(worker_shutdown_stmt(run_ids))).fetchall()
+        except Exception as e:
+            logger.error(f"Failed to mark worker_shutdown runs {run_ids}: {e}")
+            return []
+        return await _after_crash_flip(rows)
 
     # ------------------------------------------------------------------
     # Aggregate
