@@ -372,8 +372,10 @@ async def test_claim_task_readmits_the_same_workflow_after_a_replay(repo, monkey
     Without this arm the recovery path is a dead end: the worker dies between
     claim and completion, the row sits at 'assigned', the replay's CAS sees a
     phase that is no longer 'queued', returns None, and the workflow records
-    SUCCESS/skipped. Nothing requeues it — ``force_terminate`` has no caller in
-    ``app/`` — so the task is stranded on every surface at once. Ownership is
+    SUCCESS/skipped. The only backstop is the stale-task reaper
+    (``services/workforce/stale_tasks.py``), ten minutes later and only once
+    DBOS has let go of the workflow — so without this arm a routine crash
+    replay becomes a failed task. Ownership is
     keyed on the workflow id, so a DIFFERENT worker still cannot steal it."""
     task_id = str(uuid4())
     wf = f"workforce-{task_id}-1"

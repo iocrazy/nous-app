@@ -415,7 +415,9 @@ class SubAgentTaskService:
             "summary": f"{ok}/{len(results)} sub-agents dispatched",
         }
 
-    async def _spawn(self, args: dict[str, Any]) -> dict[str, Any]:
+    async def _spawn(
+        self, args: dict[str, Any], *, task_id: Optional[str] = None
+    ) -> dict[str, Any]:
         """Inner dispatch (the body of what was originally ``spawn``).
 
         ``args`` schema:
@@ -425,6 +427,12 @@ class SubAgentTaskService:
             description (str, optional)   — short label, currently
                                             surfaced in run metadata
                                             but not in the LLM call
+
+        ``task_id`` is the workforce task a BACKGROUND child runs under; it
+        lands on ``agent_runs.task_id`` so the stale-task reaper can tell a
+        child that already ran (and spent) from one that never started. It is
+        keyword-only and never read from ``args``: ``args`` is model-supplied,
+        and a model must not be able to tag its run with someone else's task.
 
         Returns an envelope dict with ENVELOPE_KEYS. Errors are
         returned as ``{"status": "failed", "error": ...}`` rather than
@@ -622,6 +630,7 @@ class SubAgentTaskService:
                 trigger="subagent_task",
                 session_id=self.session_id,
                 team_id=child_team_id,
+                task_id=task_id,
                 issue_id=self.issue_id,
                 **dispatch_scope.as_recorder_kwargs(),
                 model=model or None,
@@ -778,7 +787,9 @@ class SubAgentTaskService:
 
     # ── background (await=false) ──────────────────────────────────────
 
-    async def run_background_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def run_background_task(
+        self, payload: dict[str, Any], *, task_id: Optional[str] = None
+    ) -> dict[str, Any]:
         """The worker's entry point. Deliberately the SAME ``_spawn`` the
         synchronous form runs — a background child that behaved differently
         from a foreground one would be a second implementation to keep in
@@ -791,7 +802,8 @@ class SubAgentTaskService:
                 "description": payload.get("description") or "",
                 "child_run_id": payload.get("child_run_id"),
                 "await": True,
-            }
+            },
+            task_id=task_id,
         )
 
     def _reply_target(self) -> Optional[tuple[str, int]]:
