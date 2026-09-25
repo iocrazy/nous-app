@@ -90,10 +90,11 @@ describe('PromptNodeView text-model dropdown (P0-1)', () => {
     const options = Array.from(select.options).map((o) => ({ value: o.value, label: o.textContent }));
     expect(options).toEqual([
       { value: '', label: 'Catalog default' },
-      // Labelled like the admin AI Models card; the value stays the row name.
-      { value: 'mediahub-doubao-llm', label: 'doubao-seed-1-6-250615 · Doubao LLM' },
-      { value: 'mediahub-deepseek', label: 'deepseek-v4-pro · DeepSeek' },
-      { value: 'nous-qwen3-8-27b', label: 'qwen3-8-27b · Qwen3 27B' },
+      // Labelled exactly like the admin AI Models card (actual_model, no
+      // display_name); the value stays the row name.
+      { value: 'mediahub-doubao-llm', label: 'doubao-seed-1-6-250615' },
+      { value: 'mediahub-deepseek', label: 'deepseek-v4-pro' },
+      { value: 'nous-qwen3-8-27b', label: 'qwen3-8-27b' },
     ]);
     // The retired hardcoded values must be gone.
     const values = options.map((o) => o.value);

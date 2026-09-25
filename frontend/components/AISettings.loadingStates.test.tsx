@@ -110,11 +110,12 @@ describe('AISettings task-assignment loading states', () => {
     expect((await screen.findAllByText('nous:mediahub-moss-asr')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Volcengine bigasr')).toBeNull();
 
-    // Platform models arrive → picker swaps to the real option label. (Post-
+    // Platform models arrive → picker swaps to the real option label, named by
+    // the admin identifier (row name here: no actual_model). (Post-
     // resolve, "Volcengine bigasr" is a legitimate *available* option in the
     // list — the point is it was never shown as the selected value.)
     resolveNousModels([MOSS_MODEL]);
 
-    expect((await screen.findAllByText(/MOSS ASR \(Platform/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/mediahub-moss-asr \(Platform/)).length).toBeGreaterThan(0);
   });
 });

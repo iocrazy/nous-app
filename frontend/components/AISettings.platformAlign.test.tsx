@@ -4,7 +4,8 @@
  *   1. Same NAME. Admin labels a row by `actual_model`
  *      (`doubao-embedding-vision-251215`), falling back to the row `name` when
  *      `actual_model` is empty. The user side used to print `display_name`
- *      (`Doubao Embedding (Vision)`), so the two pages could not be matched.
+ *      (`Doubao Embedding (Vision)`), so the two pages could not be matched;
+ *      since 2026-09-25 `display_name` is not shown on the user side at all.
  *   2. Same AVAILABILITY. A row whose last probe failed is not offered;
  *      `not_probed` rows (image / local-daemon rows the hourly poll cannot
  *      judge) stay listed.
@@ -160,12 +161,18 @@ describe('AISettings — platform list matches Admin → AI Models', () => {
     vi.clearAllMocks();
   });
 
-  it('names each row the way admin does: actual_model first, display_name secondary', async () => {
+  it('names each row exactly the way admin does: actual_model, and no display_name', async () => {
     await renderRows([...PRODUCTION_ROWS, ...FAILING_ROWS]);
     const el = rowEl('nous-doubao-embedding-vision')!;
     const spans = el.querySelectorAll('span');
     expect(spans[0].textContent).toBe('doubao-embedding-vision-251215');
-    expect(spans[1].textContent).toBe('Doubao Embedding (Vision)');
+    // The only other text on the chip is its type tag.
+    expect(spans[1].textContent).toBe('EMBEDDING');
+    expect(el.textContent).toBe('doubao-embedding-vision-251215EMBEDDING');
+    // No production display_name reaches the page anywhere.
+    for (const r of PRODUCTION_ROWS) {
+      expect(document.body.textContent, r.name).not.toContain(r.display_name);
+    }
   });
 
   it('falls back to the row name for jimeng-local rows with an empty actual_model', async () => {
@@ -196,8 +203,9 @@ describe('AISettings — platform list matches Admin → AI Models', () => {
     const llm = document.querySelector(
       'option[value="nous:nous-deepseek-v4-pro"]',
     ) as HTMLOptionElement;
-    expect(llm.textContent).toBe('deepseek-v4-pro · DeepSeek V4 Pro (Platform)');
+    expect(llm.textContent).toBe('deepseek-v4-pro (Platform)');
     const asr = document.querySelector('option[value="nous:nous-moss-asr"]') as HTMLOptionElement;
-    expect(asr.textContent).toMatch(/^moss-asr · MOSS ASR \(Platform · /);
+    expect(asr.textContent).toMatch(/^moss-asr \(Platform · /);
+    expect(asr.textContent).not.toContain('MOSS ASR');
   });
 });
