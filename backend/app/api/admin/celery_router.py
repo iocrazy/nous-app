@@ -11,6 +11,8 @@ from __future__ import annotations
 from fastapi import APIRouter
 from loguru import logger
 
+from app.core.admin_deps import AdminAuthDep
+
 router = APIRouter()
 
 
@@ -33,7 +35,7 @@ def _list_workflows(**kwargs):
 
 
 @router.get("/workers")
-async def get_celery_workers():
+async def get_celery_workers(auth: AdminAuthDep):
     """Return DBOS worker info. Single in-process 'worker' since DBOS
     runs in the FastAPI host process. Payload mirrors the legacy
     Celery-shape so the admin UI keeps rendering."""
@@ -62,7 +64,7 @@ async def get_celery_workers():
 
 
 @router.get("/queues")
-async def get_celery_queues():
+async def get_celery_queues(auth: AdminAuthDep):
     """Return queue depths. PR-D7: there are no Celery queues. We
     report the DBOS `agent_workforce` queue depth instead, plus an
     empty list of legacy queue names for back-compat with the admin
