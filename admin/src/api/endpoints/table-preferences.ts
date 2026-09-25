@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../client'
 import type { TableFilter, TableSort } from '../../components/notion-table/types'
+import type { Schema } from '../../types/api'
 
 interface TablePreference {
   table_key: string
@@ -9,6 +10,9 @@ interface TablePreference {
   visible_columns: string[] | null
   column_order: string[] | null
 }
+
+/** Reset = delete the caller's own saved preferences (idempotent). */
+export type TablePreferenceResetResult = Schema<'AdminTablePreferenceResetResult'>
 
 interface TablePreferenceUpdate {
   filters: TableFilter[]
@@ -51,7 +55,9 @@ export function useResetTablePreference(tableKey: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async () => {
-      await apiClient.delete(`/api/v1/admin/table-preferences/${tableKey}`)
+      await apiClient.delete<TablePreferenceResetResult>(
+        `/api/v1/admin/table-preferences/${tableKey}`,
+      )
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['table-preferences', tableKey] })
