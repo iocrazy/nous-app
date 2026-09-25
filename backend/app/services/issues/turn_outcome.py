@@ -32,6 +32,15 @@ Precedence (fh2 T4):
    FinishIssue re-declared in a loop (run 347463025060485) is not "kept
    working": the last declaration stands. ``run_timeout`` and abort mid-call
    route by the declaration as-is (ruling A); both end at a step boundary.
+6. An approval exit (``awaiting_approval``, fh3 T5 ruling 10) beats every
+   declaration, at the same tier as a park: a pre-hook approval means the gated
+   tool never ran, so an earlier ``completed`` must not close the issue. The
+   true-stream path carries the trace and would otherwise route by it; the
+   buffered path drops the trace but emits a non-empty bracket line, which the
+   executor used to answer with a forced declaration. The turn routes to
+   ``needs_followup`` with reason ``awaiting_approval: <reason>`` and is not
+   parked (no approval producer exists yet); when approvals are built this
+   becomes a real park.
 
 The budget question the gate recorded on the run stays in that run's
 transcript (``question_asked`` with no ``question_answered``), and the chat
@@ -65,6 +74,12 @@ MAX_ITERATION_EXITS = frozenset(
 #: What a stale declaration becomes, and the prefix of its reason.
 _STALE_DECLARATION_AS = "continue"
 STALE_DECLARATION_REASON = "declaration_stale_after_tools"
+#: An approval exit's outcome (``route_finish_outcome`` → status
+#: needs_followup, ``agent_outcome`` awaiting_approval) and reason prefix.
+AWAITING_APPROVAL_OUTCOME = "needs_followup"
+AWAITING_APPROVAL_REASON_PREFIX = "awaiting_approval: "
+#: Same default the buffered branch prints when the hook gave no reason.
+_DEFAULT_APPROVAL_REASON = "approval required"
 
 
 class TurnOutcome(NamedTuple):
@@ -77,8 +92,10 @@ class TurnOutcome(NamedTuple):
 def resolve_turn_outcome(result: dict[str, Any]) -> TurnOutcome:
     """Declaration first (demoted to ``continue`` when a max-iterations exit
     left it stale), a park overrides it, a budget park yields to a declared
-    ``completed``, a human cancel demotes ``completed`` to ``continue``. See
-    the module docstring."""
+    ``completed``, a human cancel demotes ``completed`` to ``continue``, and an
+    approval exit beats them all. See the module docstring."""
+    if result.get("awaiting_approval"):
+        return _awaiting_approval_outcome(result)
     outcome, reason = extract_issue_outcome(result.get("tool_calls"))
     if outcome not in (None, _STALE_DECLARATION_AS) and _declaration_went_stale(result):
         reason = (
@@ -101,6 +118,17 @@ def resolve_turn_outcome(result: dict[str, Any]) -> TurnOutcome:
     return TurnOutcome("needs_input", park_reason, question, True)
 
 
+def _awaiting_approval_outcome(result: dict[str, Any]) -> TurnOutcome:
+    """Rule 6: never routed by a declaration, never parked (yet)."""
+    why = str(result.get("approval_reason") or "") or _DEFAULT_APPROVAL_REASON
+    return TurnOutcome(
+        AWAITING_APPROVAL_OUTCOME,
+        f"{AWAITING_APPROVAL_REASON_PREFIX}{why}",
+        None,
+        False,
+    )
+
+
 def _declaration_went_stale(result: dict[str, Any]) -> bool:
     """Ruling A′: only on a max-iterations exit, and only when a tool other
     than FinishIssue ran after the last FinishIssue in the trace."""
@@ -114,6 +142,8 @@ def _declaration_went_stale(result: dict[str, Any]) -> bool:
 
 
 __all__ = [
+    "AWAITING_APPROVAL_OUTCOME",
+    "AWAITING_APPROVAL_REASON_PREFIX",
     "BUDGET_QUESTION_KIND",
     "MAX_ITERATION_EXITS",
     "STALE_DECLARATION_REASON",

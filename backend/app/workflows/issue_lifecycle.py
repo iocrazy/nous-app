@@ -42,7 +42,10 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_message,
     publish_status,
 )
-from app.services.issues.turn_outcome import resolve_turn_outcome
+from app.services.issues.turn_outcome import (
+    AWAITING_APPROVAL_OUTCOME,
+    resolve_turn_outcome,
+)
 from app.services.issues.turn_recovery import (
     current_dbos_step_key,
     enforce_recovery_limit,
@@ -1050,6 +1053,9 @@ async def route_finish_outcome(
                         from blocked=errored; carries the agent's reason)
       continue (capped)→ in_review (handed to a human after the cap; never
                         auto-closes — the agent never said it finished)
+      needs_followup  → needs_followup, agent_outcome="awaiting_approval" (fh3
+                        T5: an approval exit, typed by ``turn_outcome``; not a
+                        park, never done, no disarm)
       none declared (but has content) → in_review (default — unchanged
                         legacy behavior)
 
@@ -1066,7 +1072,9 @@ async def route_finish_outcome(
         ``max_tool_iterations_exceeded`` (the last declaration, but
         ``continue`` when a non-FinishIssue tool ran after it —
         ``turn_outcome``). Awaiting-approval deliberately carries no trace
-        and routes by the exit (the gated tool may never have run). Their
+        and routes by the exit (the gated tool may never have run): fh3 T5
+        sends it to the ``needs_followup`` branch below with no forced
+        declaration, even on the true-stream path, which has a trace. Their
         runs keep the typed ``turn_end_reason`` / ``error_code``; only a
         turn with NO declaration is stamped EMPTY_OUTPUT. Prod, 2026-09-08: 347463748025273 (budget halt)
         now routes by its declaration; 347463025060485 (PauseHook) keeps its
@@ -1141,6 +1149,13 @@ async def route_finish_outcome(
             outcome_reason=reason,
         )
         await disarm(issue_id, _WAKEUP_ISSUE_NOT_ACTIVE)
+    elif outcome == AWAITING_APPROVAL_OUTCOME:
+        await set_status(
+            issue_id,
+            "needs_followup",
+            agent_outcome="awaiting_approval",
+            outcome_reason=reason,
+        )
     else:
         # No declaration → preserve legacy behavior (park for human review).
         await set_status(issue_id, "in_review")
