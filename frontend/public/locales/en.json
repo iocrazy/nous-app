@@ -1155,7 +1155,7 @@
       "errorByokRow": "A personal API key row cannot back a shared embedding space.",
       "errorActiveUnknown": "Could not tell which space is active, so nothing was deleted. Try again.",
       "arrivesWithPr4": "Arrives with PR 4",
-      "visualSource": "one keyframe per shot · hist_v1",
+      "visualSource": "one keyframe per shot",
       "run20": "Run 20",
       "shotsDryRunFirst": "Run a Dry Run first — every video is a task and every shot a paid embedding",
       "shotsDryRunLine": "Dry run · Visual",

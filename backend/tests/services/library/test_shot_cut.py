@@ -149,7 +149,7 @@ def test_empty_and_degenerate_inputs():
 
 
 def test_algo_version_is_named():
-    assert ALGO_VERSION == "hist_v1"
+    assert ALGO_VERSION == "hist_v2"
 
 
 def test_signature_length_mismatch_is_an_error():

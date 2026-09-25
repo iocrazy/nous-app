@@ -15,6 +15,7 @@ import pytest
 
 from app.services.library import shot_frames
 from app.services.library.shot_frames import (
+    BASE_FPS,
     MAX_FRAMES,
     ShotFramesError,
     choose_fps,
@@ -59,10 +60,10 @@ def _make_clip(path: Path, *, red_s: int = 4, blue_s: int = 6) -> None:
 
 
 def test_choose_fps_caps_the_frame_count():
-    assert choose_fps(600) == 1.0
-    assert choose_fps(MAX_FRAMES) == 1.0
+    assert choose_fps(600) == BASE_FPS == 3.0
+    assert choose_fps(MAX_FRAMES / BASE_FPS) == BASE_FPS
     assert choose_fps(MAX_FRAMES * 4) == pytest.approx(0.25)
-    assert choose_fps(0) == 1.0
+    assert choose_fps(0) == BASE_FPS
 
 
 @_needs_ffmpeg
@@ -72,9 +73,9 @@ async def test_two_scene_clip_cuts_at_the_scene_change(tmp_path):
     scratch_before = set(Path(shot_frames.tempfile.gettempdir()).glob("shots_*"))
     async with cut_video_file(str(clip)) as result:
         assert result.duration_ms == pytest.approx(10_000, abs=200)
-        assert result.fps == 1.0
-        assert len(result.frames) in (10, 11)
-        assert [f.t_ms for f in result.frames[:3]] == [0, 1000, 2000]
+        assert result.fps == BASE_FPS == 3.0
+        assert len(result.frames) in (30, 31)
+        assert [f.t_ms for f in result.frames[:3]] == [0, 333, 667]
         spans = [(s.start_ms, s.end_ms) for s in result.shots]
         assert len(spans) == 2, spans
         assert spans[0][0] == 0 and spans[-1][1] == result.duration_ms

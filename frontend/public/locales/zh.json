@@ -1155,7 +1155,7 @@
       "errorByokRow": "个人 API Key 的模型行不能用于共享向量空间。",
       "errorActiveUnknown": "无法确定当前空间，未删除任何内容。请重试。",
       "arrivesWithPr4": "PR 4 上线后可用",
-      "visualSource": "每个镜头一帧关键帧 · hist_v1",
+      "visualSource": "每个镜头一帧关键帧",
       "run20": "回填 20 支",
       "shotsDryRunFirst": "请先预演——每支视频是一个任务，每个镜头是一次付费嵌入",
       "shotsDryRunLine": "预演 · 视觉",

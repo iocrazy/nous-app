@@ -25,6 +25,7 @@ from app.core.scope_guards import get_auth_or_media_token
 from app.main import app
 from app.repositories.video_shots_repository import ShotBackfillRow
 from app.services.distribution.cover_frames import CoverFrameError
+from app.services.library.shot_cut import ALGO_VERSION
 from app.services.library.shot_index import ShotIndexError
 from tests.api.wire_parity import SAMPLE_BIGINT
 
@@ -265,7 +266,7 @@ async def test_shots_not_indexed_is_a_plain_false(client, visible, monkeypatch):
 async def test_shots_indexed_shape(client, visible, monkeypatch):
     index = {
         "resource_id": SAMPLE_BIGINT,
-        "algo_version": "hist_v1",
+        "algo_version": ALGO_VERSION,
         "shot_count": 1,
         "duration_ms": 9000,
         "indexed_at": "2026-09-25T10:00:00+00:00",
@@ -297,7 +298,7 @@ async def test_shots_indexed_shape(client, visible, monkeypatch):
     out = r.json()
     assert out["indexed"] is True
     assert out["index"] == {
-        "algo_version": "hist_v1",
+        "algo_version": ALGO_VERSION,
         "shot_count": 1,
         "duration_ms": 9000,
         "indexed_at": "2026-09-25T10:00:00+00:00",

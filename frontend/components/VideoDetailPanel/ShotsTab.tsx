@@ -269,7 +269,7 @@ export const ShotsTab: React.FC<ShotsTabProps> = ({
       <div data-testid="shots-indexed" className="p-4 sm:p-6 space-y-4 animate-in fade-in duration-300">
         <div className="flex items-center gap-2 text-xs text-content-2">
           <Clapperboard size={14} className="text-content-3" />
-          <span data-testid="shots-index-line" className="font-mono truncate">
+          <span data-testid="shots-index-line" className="min-w-0 font-mono truncate">
             {t('detail.shots.indexedLine', 'indexed {{date}} · {{algo}}', {
               date: indexedOn,
               algo: index.algo_version,
@@ -280,7 +280,7 @@ export const ShotsTab: React.FC<ShotsTabProps> = ({
             data-testid="shots-reindex"
             disabled={busy}
             onClick={() => void start(true)}
-            className="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded text-xs border border-line-strong text-content-2 hover:bg-island disabled:opacity-50"
+            className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-xs whitespace-nowrap border border-line-strong text-content-2 hover:bg-island disabled:opacity-50"
           >
             <RefreshCw size={11} />
             {t('detail.shots.reindex', 'Re-index')}
