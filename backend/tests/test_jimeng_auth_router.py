@@ -128,8 +128,14 @@ async def test_login_returns_device_flow_material(monkeypatch):
     assert result["status"] == "pending"
     assert result["verification_uri"].startswith("https://jimeng.jianying.com/")
     assert result["user_code"] == "a8b16ef3cf1e5ed42608f30239283597"
-    assert result["device_code"] == "b9fc128ece579cb87f1f9c09a49e3633"
     assert result["expires_at"] == "2099-01-01T00:00:00Z"
+    # The device_code is the polling client's secret: it stays server-side.
+    assert "device_code" not in result
+    assert "b9fc128ece579cb87f1f9c09a49e3633" not in repr(result)
+    # ...while the live session still holds it (the CLI polls with it).
+    assert m._current_login.material["device_code"] == (
+        "b9fc128ece579cb87f1f9c09a49e3633"
+    )
     # The process is kept alive as the current session (drives the device poll).
     assert m._current_login is not None
 
