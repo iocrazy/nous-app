@@ -1,49 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../client'
+import type { Schema } from '../../types/api'
 
 const BASE = '/api/v1/admin/storage'
 
-export interface StorageStats {
-  videos: { count: number; size_bytes: number }
-  fs_residue: number
-  orphans: number
-  hls_ready: number
-  broken: number | null
-  last_scan: { at: string; scanned: number; missing: number; errors: number } | null
-}
+export type StorageStats = Schema<'AdminStorageStats'>
+export type MediaStorageRow = Schema<'AdminStorageMediaStatusRow'>
+export type MediaStorageDetail = Schema<'AdminStorageMediaDetail'>
+export type StorageAsset = Schema<'AdminStorageAsset'>
+export type DeepVerifyDispatch = Schema<'AdminStorageDeepVerifyDispatch'>
+export type AuditMissing = Schema<'AdminStorageAuditMissing'>
+/** `status` is the run's task_tracking phase, or `none` before any scan. */
+export type AuditResult = Schema<'AdminStorageAudit'>
 
-export interface MediaStorageRow {
-  media_id: string
-  video_key: string | null
-  video_size: number | null
-  cover_ok: boolean
-  thumbnail_ok: boolean
-  hls_ok: boolean
-  storage_status: 'ok' | 'no_video' | 'fs_residue'
-  scope_id: string | null
-}
+// task_tracking phases that are not terminal: the backend's ACTIVE_PHASES
+// (unified_task_manager.py). A running audit sits at `processing` almost the
+// whole time; `in_progress` is only the trigger's brief mirror value.
+const AUDIT_ACTIVE_PHASES = new Set(['queued', 'dedup_check', 'processing', 'in_progress'])
 
-export interface StorageAsset {
-  kind: 'video' | 'cover' | 'thumbnail' | 'sprite' | 'hls'
-  key: string | null
-  size_bytes: number | null
-  present_in_db: boolean
-}
-
-export interface AuditMissing {
-  key: string
-  kind: string
-  media_id: string | null
-  resource_id: string | null
-}
-
-export interface AuditResult {
-  status: 'none' | 'queued' | 'in_progress' | 'completed' | 'failed'
-  scanned: number
-  errors: number
-  scanned_at: string | null
-  missing: AuditMissing[]
-  missing_truncated?: boolean
+export function isAuditRunning(status: string | undefined): boolean {
+  return status != null && AUDIT_ACTIVE_PHASES.has(status)
 }
 
 export function useStorageStats() {
@@ -57,10 +33,7 @@ export function useAudit() {
   return useQuery({
     queryKey: ['storage-audit'],
     queryFn: async () => (await apiClient.get<AuditResult>(`${BASE}/audit`)).data,
-    refetchInterval: (q) =>
-      q.state.data?.status === 'queued' || q.state.data?.status === 'in_progress'
-        ? 4000
-        : false,
+    refetchInterval: (q) => (isAuditRunning(q.state.data?.status) ? 4000 : false),
   })
 }
 
@@ -70,7 +43,7 @@ export function useMediaStatus(ids: string[]) {
     enabled: ids.length > 0,
     queryFn: async () =>
       (
-        await apiClient.get<{ rows: MediaStorageRow[] }>(`${BASE}/media-status`, {
+        await apiClient.get<Schema<'AdminStorageMediaStatusList'>>(`${BASE}/media-status`, {
           params: { media_ids: ids.join(',') },
         })
       ).data.rows,
@@ -83,9 +56,7 @@ export function useMediaStorageDetail(id: number | null) {
     enabled: id != null,
     queryFn: async () =>
       (
-        await apiClient.get<{ assets: StorageAsset[]; scope_id: string | null }>(
-          `${BASE}/media/${id}/detail`,
-        )
+        await apiClient.get<MediaStorageDetail>(`${BASE}/media/${id}/detail`)
       ).data,
   })
 }
@@ -94,9 +65,7 @@ export function useVerifyMedia() {
   return useMutation({
     mutationFn: async (id: number) =>
       (
-        await apiClient.post<{
-          results: { kind: string; key: string; exists: boolean | null }[]
-        }>(`${BASE}/media/${id}/verify`)
+        await apiClient.post<Schema<'AdminStorageMediaVerify'>>(`${BASE}/media/${id}/verify`)
       ).data.results,
   })
 }
@@ -106,9 +75,7 @@ export function useDeepVerify() {
   return useMutation({
     mutationFn: async () =>
       (
-        await apiClient.post<{ workflow_id: string; already_running: boolean }>(
-          `${BASE}/verify`,
-        )
+        await apiClient.post<DeepVerifyDispatch>(`${BASE}/verify`)
       ).data,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['storage-audit'] })

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Tag, Typography } from '@arco-design/web-react'
+import { Button, Message, Tag, Typography } from '@arco-design/web-react'
 import { useMediaStorageDetail, useVerifyMedia } from '../../api/endpoints/storage'
 import { formatBytes } from '../../utils/format'
 
@@ -80,6 +80,7 @@ export function StorageSection({ mediaId }: { mediaId: number }) {
               })
               setResults(next)
             },
+            onError: (err) => Message.error(`Verify failed: ${err.message}`),
           })
         }
       >
