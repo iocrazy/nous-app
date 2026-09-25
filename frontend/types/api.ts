@@ -659,4 +659,12 @@ export type PaymentPackagesResponse = Schemas['Envelope_list_PaymentPackageRow__
 export type PaymentOrdersResponse = Schemas['Envelope_list_PaymentOrderRow__'];
 export type PaymentOrderResponse = Schemas['Envelope_PaymentOrderRow_'];
 export type PaymentOrderStatusResponse = Schemas['Envelope_PaymentOrderStatus_'];
+// `/api/v1/cleanup/*`: bare bodies (no envelope). Media ids are Snowflake
+// BIGINTs sent as JSON **numbers**.
+/** `POST /cleanup/media/{id}/action` and `POST|DELETE /cleanup/media/{id}/keep`. */
+export type CleanupMediaActionResult = Schemas['CleanupMediaActionResult'];
+/** `POST /cleanup/batch`: `failed_ids` = media the caller owns no resource for. */
+export type CleanupBatchResult = Schemas['CleanupBatchResult'];
+/** `GET /cleanup/storage`: over the caller's non-trashed media only. */
+export type CleanupStorageBreakdown = Schemas['CleanupStorageBreakdown'];
 // —— end P9 payment/cleanup/probes ——
