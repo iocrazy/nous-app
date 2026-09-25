@@ -5,7 +5,8 @@ DELETE /agent-memory/{memory_id} — delete a memory the caller owns
 
 Isolation guarantees:
   - team_ids come from get_user_team_ids(auth.user_id) — never a client value.
-  - DELETE is owner-scoped: only the owner can delete their own row.
+  - DELETE is owner-scoped: only the owner can delete their own row; a miss
+    is a typed 404.
   - owner_user_id is never returned to the client; is_owner is computed server-side.
 """
 
@@ -14,13 +15,18 @@ from __future__ import annotations
 from fastapi import APIRouter
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.repositories.agent_memory_repository import (
     delete_user_memory,
     get_user_team_ids,
     list_user_memories,
 )
-from app.schemas.agent_memory import UserMemoryItem, UserMemoryListResponse
+from app.schemas.agent_memory import (
+    AgentMemoryDeleteResponse,
+    UserMemoryItem,
+    UserMemoryListResponse,
+)
 
 router = APIRouter(prefix="/agent-memory", tags=["Agent Memories"])
 
@@ -52,15 +58,19 @@ async def list_my_memories(auth: AuthDep) -> UserMemoryListResponse:
     return UserMemoryListResponse(items=items)
 
 
-@router.delete("/{memory_id}")
+@router.delete("/{memory_id}", response_model=AgentMemoryDeleteResponse)
 async def delete_my_memory(memory_id: int, auth: AuthDep) -> dict:
     """Delete a memory row.
 
     Only succeeds if the row is owned by the authenticated user.
     A teammate's shared row cannot be deleted by another team member.
+    Unknown, not the caller's, or a failed delete: typed 404 — it used to be
+    ``200 {"deleted": false}``, which the settings page read as success.
     """
     deleted = await delete_user_memory(memory_id=memory_id, user_id=auth.user_id)
     logger.info(
         "[agent_memory] user {} delete memory {}: {}", auth.user_id, memory_id, deleted
     )
-    return {"deleted": deleted}
+    if not deleted:
+        require_row(None)
+    return {"deleted": True}
