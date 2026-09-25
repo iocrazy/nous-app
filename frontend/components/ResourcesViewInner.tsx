@@ -29,6 +29,7 @@ import { useResourceOperations } from '../hooks/useResourceOperations';
 import { useContextMenuItems } from '../hooks/useContextMenuItems';
 import { useResourcesDisplay } from '../hooks/useResourcesDisplay';
 import { useResourceTouch } from '../hooks/useResourceTouch';
+import { describeFolderMutationFailure } from '../hooks/moveBatch';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
 import { ResourcesModals } from './ResourcesModals';
 import { GalleryUploadDialog } from './GalleryUploadDialog';
@@ -255,11 +256,23 @@ export const ResourcesViewInner: React.FC = () => {
           await moveResourceItem(itemId, targetFolderId, selectedLibraryId);
         }
       }
+      setSelectedIds(new Set());
+    } catch (err) {
+      // Same verdict as the "Move to…" dialog: a drop that fails must say so,
+      // never leave the user staring at items that silently did not move.
+      console.error('[ResourcesViewInner] drop on folder failed:', err);
+      if (describeFolderMutationFailure(err) === 'system_folder') {
+        addToast(t('resources.systemFolderLocked'), 'error');
+      } else {
+        addToast(t('resources.moveFailed', 'Move failed — nothing was changed for the remaining items'), 'error');
+      }
+    } finally {
+      // A multi-item drop can fail halfway; what did move must still show up
+      // in its new home.
       await Promise.all([loadFolders(), loadChildFolders()]);
       await reloadResources();
-      setSelectedIds(new Set());
-    } catch { /* ignore */ }
-  }, [selectedLibraryId, loadFolders, loadChildFolders, reloadResources, setSelectedIds]);
+    }
+  }, [selectedLibraryId, loadFolders, loadChildFolders, reloadResources, setSelectedIds, addToast, t]);
 
   // ─── Touch handlers (drag, long-press, double-tap) ────
   const {
