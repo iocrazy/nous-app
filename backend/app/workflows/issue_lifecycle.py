@@ -43,6 +43,10 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_status,
 )
 from app.services.issues.turn_outcome import resolve_turn_outcome
+from app.services.issues.turn_recovery import (
+    current_dbos_step_key,
+    enforce_recovery_limit,
+)
 
 # Task 7a defect 2: extra turns a dispatch may run purely to drain items that
 # landed on the inbox after its last step boundary. Bounded on purpose — a
@@ -412,8 +416,9 @@ async def ensure_issue_session_step(issue_id: int) -> str:
 
 
 @DBOS.step()
-# no step retry: run_session_turn is non-idempotent (appends user msg + charges);
-# it has its own internal LLM fallback chain.
+# no step retry: a retry would be a second billed turn; run_session_turn has its
+# own internal LLM fallback chain. DBOS *recovery* still re-executes this step
+# after a worker dies — that path is made idempotent below (fh3 T2).
 async def run_issue_reply_step(
     *,
     issue_id: int,
@@ -440,6 +445,13 @@ async def run_issue_reply_step(
     ``@DBOS.step``, and DBOS refuses ``start_workflow`` inside one. The caller
     — always a workflow body — drains them. Same route-C split as
     ``deliver_or_dispatch``; see ``app.services.infra.deferred_dispatch``.
+
+    Recovery (fh3 T2, same mechanism as ``run_issue_agent``): the attempt is
+    counted under ``<workflow_id>:<step_id>`` before any turn work — past
+    ``ISSUE_TURN_MAX_RECOVERIES`` it raises and the callers' existing
+    ``except`` blocks route it — and the same key rides into
+    ``run_session_turn``, which reuses the stamped user message instead of
+    appending it again and links the new run to the killed one.
     """
     from uuid import UUID
 
@@ -456,6 +468,10 @@ async def run_issue_reply_step(
     attachment_objects = (
         [AttachmentRequest(**a) for a in attachments] if attachments else None
     )
+
+    step_key = current_dbos_step_key()
+    if step_key is not None:
+        await enforce_recovery_limit(issue_id, step_key)
 
     async with collect_deferred_dispatches() as pending:
         try:
@@ -482,6 +498,9 @@ async def run_issue_reply_step(
                 # Hotfix-2 PR-3: same gate as the dispatch turn — re-read the
                 # issue AFTER the per-user slot wait, before anything is written.
                 pre_turn_gate=issue_status_gate(issue_id),
+                # Spread only when set: outside DBOS the call stays byte-for-byte
+                # today's (fakes pin run_session_turn's exact kwarg set).
+                **({"dbos_step_key": step_key} if step_key else {}),
             )
         except IssuePreemptedBeforeTurn as stop:
             logger.info(

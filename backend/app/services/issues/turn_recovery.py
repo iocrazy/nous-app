@@ -6,15 +6,24 @@ re-execution is a new billed run. Before this the only bound was DBOS
 ``recovery_attempts`` (prod: one execute_issue workflow reached 6), and the
 count lived nowhere an issue reader could see.
 
-``run_issue_agent`` calls ``enforce_recovery_limit`` first thing inside the
-step. It counts executions per ``<workflow_id>:<step_id>`` in
+Two turn steps call ``enforce_recovery_limit`` first thing inside the step:
+``run_issue_agent`` (via ``run_issue_agent_step``, the dispatch turn) and
+``run_issue_reply_step`` (the reply turn, fh3 T2 — reached from both
+``respond_to_issue_reply`` and ``execute_issue``'s wait loop). Each also
+threads the same key into ``run_session_turn`` so a re-execution reuses the
+stamped user message and links its run to the killed one.
+
+The limit counts executions per ``<workflow_id>:<step_id>`` in
 ``issues.execution_state.step_attempts`` (atomic jsonb increment) and raises
 ``IssueTurnRecoveryLimitExceeded`` past ``ISSUE_TURN_MAX_RECOVERIES``. The
-exception propagates out of the step; ``execute_issue``'s existing ``except``
-parks the issue ``blocked`` (DBOS failure must raise, never return a dict).
+exception propagates out of the step; the callers' existing ``except`` blocks
+route it (DBOS failure must raise, never return a dict): ``execute_issue``
+parks the issue ``blocked`` / ``execute_issue_failed``; a resuming reply parks
+it ``blocked`` / ``issue_reply_resume_failed``; a plain reply never touched
+status, so its workflow just ends in ERROR.
 
-That ``except`` writes ``error_code="execute_issue_failed"`` — changing it
-would change the workflow's source and so its DBOS app-version hash, which
+Those ``except`` blocks write their own error codes — changing them would
+change the workflow's source and so its DBOS app-version hash, which
 orphans every workflow in flight at the deploy. The typed code therefore
 rides in the message: ``error_message`` starts with
 ``[issue_turn_recovery_limit]``, and ``step_attempts`` stays on the row.
