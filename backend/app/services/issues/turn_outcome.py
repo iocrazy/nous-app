@@ -25,6 +25,13 @@ Precedence (fh2 T4):
    capped route in ``route_finish_outcome``: ``in_review``, never ``done``
    regardless of ``auto_close`` (review MEDIUM-1). Other declarations pass
    through unchanged.
+5. A max-iterations exit (``exit_code``, fh3 T4 ruling A′) whose trace has a
+   non-FinishIssue tool AFTER the last FinishIssue: the agent declared, then
+   kept working until the ceiling, so the declaration went stale and the turn
+   is ``continue`` (reason prefixed ``declaration_stale_after_tools``).
+   FinishIssue re-declared in a loop (run 347463025060485) is not "kept
+   working": the last declaration stands. ``run_timeout`` and abort mid-call
+   route by the declaration as-is (ruling A); both end at a step boundary.
 
 The budget question the gate recorded on the run stays in that run's
 transcript (``question_asked`` with no ``question_answered``), and the chat
@@ -39,7 +46,10 @@ from __future__ import annotations
 from typing import Any, NamedTuple, Optional
 
 from app.services.ai.tools.ask_user_tool import awaiting_input_outcome
-from app.services.ai.tools.finish_issue_tool import extract_issue_outcome
+from app.services.ai.tools.finish_issue_tool import (
+    FINISH_ISSUE_TOOL_NAME,
+    extract_issue_outcome,
+)
 
 #: ``question.kind`` the budget gate parks with (``budget_hook._ask``).
 BUDGET_QUESTION_KIND = "budget"
@@ -47,6 +57,14 @@ BUDGET_QUESTION_KIND = "budget"
 _WORK_DONE_OUTCOMES = frozenset({"completed"})
 #: A cancelled turn's ``completed`` becomes this: in_review, never done.
 _CANCELLED_COMPLETED_AS = "continue"
+#: ``run_session_turn``'s ``exit_code`` for the iteration ceiling, buffered
+#: (``run_turn``) and true-stream spelling.
+MAX_ITERATION_EXITS = frozenset(
+    {"max_tool_iterations_exceeded", "max_stream_iterations_exceeded"}
+)
+#: What a stale declaration becomes, and the prefix of its reason.
+_STALE_DECLARATION_AS = "continue"
+STALE_DECLARATION_REASON = "declaration_stale_after_tools"
 
 
 class TurnOutcome(NamedTuple):
@@ -57,10 +75,18 @@ class TurnOutcome(NamedTuple):
 
 
 def resolve_turn_outcome(result: dict[str, Any]) -> TurnOutcome:
-    """Declaration first, a park overrides it, a budget park yields to a
-    declared ``completed``, a human cancel demotes ``completed`` to
-    ``continue``. See the module docstring."""
+    """Declaration first (demoted to ``continue`` when a max-iterations exit
+    left it stale), a park overrides it, a budget park yields to a declared
+    ``completed``, a human cancel demotes ``completed`` to ``continue``. See
+    the module docstring."""
     outcome, reason = extract_issue_outcome(result.get("tool_calls"))
+    if outcome not in (None, _STALE_DECLARATION_AS) and _declaration_went_stale(result):
+        reason = (
+            f"{STALE_DECLARATION_REASON}: declared {outcome!r} "
+            f"({reason or 'no reason'}), then kept calling tools until the "
+            f"iteration limit"
+        )
+        outcome = _STALE_DECLARATION_AS
     if result.get("stop_reason") == "cancelled" and outcome == "completed":
         outcome = _CANCELLED_COMPLETED_AS
     parked = awaiting_input_outcome(result)
@@ -75,4 +101,22 @@ def resolve_turn_outcome(result: dict[str, Any]) -> TurnOutcome:
     return TurnOutcome("needs_input", park_reason, question, True)
 
 
-__all__ = ["BUDGET_QUESTION_KIND", "TurnOutcome", "resolve_turn_outcome"]
+def _declaration_went_stale(result: dict[str, Any]) -> bool:
+    """Ruling A′: only on a max-iterations exit, and only when a tool other
+    than FinishIssue ran after the last FinishIssue in the trace."""
+    if result.get("exit_code") not in MAX_ITERATION_EXITS:
+        return False
+    names = [c.get("name") for c in (result.get("tool_calls") or [])]
+    if FINISH_ISSUE_TOOL_NAME not in names:
+        return False
+    last = len(names) - 1 - names[::-1].index(FINISH_ISSUE_TOOL_NAME)
+    return any(n != FINISH_ISSUE_TOOL_NAME for n in names[last + 1 :])
+
+
+__all__ = [
+    "BUDGET_QUESTION_KIND",
+    "MAX_ITERATION_EXITS",
+    "STALE_DECLARATION_REASON",
+    "TurnOutcome",
+    "resolve_turn_outcome",
+]

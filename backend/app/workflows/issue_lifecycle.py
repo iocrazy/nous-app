@@ -1060,10 +1060,15 @@ async def route_finish_outcome(
         ``AgentRunner._stopped_response`` now carries the ``tool_calls``
         trace, and ``turn_outcome`` lets a declared ``completed`` beat a
         budget park (a human cancel demotes it to ``continue`` → in_review,
-        never done). Covers the hook STOP exit ONLY: ``run_timeout``, abort
-        mid-call, ``max_tool_iterations_exceeded`` and awaiting-approval
-        still drop the trace (ticketed — routing them by the declaration is
-        a semantic decision). Prod, 2026-09-08: 347463748025273 (budget halt)
+        never done). Since fh3 T4 (user ruling 2026-09-25) the same holds
+        for the hook STOP, ``run_timeout`` and abort mid-call (routed by the
+        declaration; the cancel demotion applies to the abort) and for
+        ``max_tool_iterations_exceeded`` (the last declaration, but
+        ``continue`` when a non-FinishIssue tool ran after it —
+        ``turn_outcome``). Awaiting-approval deliberately carries no trace
+        and routes by the exit (the gated tool may never have run). Their
+        runs keep the typed ``turn_end_reason`` / ``error_code``; only a
+        turn with NO declaration is stamped EMPTY_OUTPUT. Prod, 2026-09-08: 347463748025273 (budget halt)
         now routes by its declaration; 347463025060485 (PauseHook) keeps its
         trace, but the body returns on ``paused`` before routing, so its
         routing waits for resume (ticketed).

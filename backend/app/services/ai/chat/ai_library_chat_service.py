@@ -116,6 +116,20 @@ MAX_ASSET_REF_ATTACHMENTS: int = 8
 ATTACHMENT_LIMIT_REASON: str = "attachment_limit_exceeded"
 
 
+def _terminal_exit_code(usage: Optional[dict]) -> Optional[str]:
+    """The typed exit a stream chunk's ``usage`` carries, if any.
+
+    ``stream_turn``'s buffered fallback (production's only path) files
+    run_turn's ``error_code`` / ``error`` literal as ``usage.error_code``; the
+    true-stream path files its ceilings as ``usage.warning``
+    (``turn_end.WARNING_MARKERS``). Both are the same fact for a caller:
+    this turn ended on a limit, not on a final answer."""
+    if not usage:
+        return None
+    code = usage.get("error_code") or usage.get("warning")
+    return str(code) if code else None
+
+
 @dataclass(frozen=True)
 class _ChatAnswer:
     """A validated chat-side answer (or supersede), recorded once the user
@@ -1625,6 +1639,7 @@ class AILibraryChatService:
                         stream_stop_reason: Optional[str] = None
                         stream_hook_decision: Optional[str] = None
                         stream_approval_reason: str = ""
+                        stream_exit_code: Optional[str] = None
                         try:
                             async for chunk in runner.stream_turn(
                                 composed,
@@ -1675,6 +1690,13 @@ class AILibraryChatService:
                                     stream_approval_reason = str(
                                         (chunk.usage or {}).get("approval_reason") or ""
                                     )
+                                # fh3 T4: the typed exit (buffered branch:
+                                # ``usage.error_code``; true stream:
+                                # ``usage.warning``). turn_outcome needs it to
+                                # tell a max-iterations exit from a normal end.
+                                chunk_exit = _terminal_exit_code(chunk.usage)
+                                if chunk_exit:
+                                    stream_exit_code = chunk_exit
                         except RunAborted as abort_exc:
                             # User cancel mid-stream. The buffered path
                             # (run_turn) returns {"cancelled": True} instead
@@ -1734,6 +1756,10 @@ class AILibraryChatService:
                         result["cancelled"] = True
                     if stream_stop_reason:
                         result["stop_reason"] = stream_stop_reason
+                    # Never as ``error``: that key raises 502 below, and a
+                    # timeout / iteration ceiling must still route the issue.
+                    if stream_exit_code:
+                        result["exit_code"] = stream_exit_code
                     if stream_hook_decision == "await_approval":
                         result["awaiting_approval"] = True
                         result["approval_reason"] = stream_approval_reason
@@ -1993,6 +2019,12 @@ class AILibraryChatService:
             # (turn_end.STOP_REASON_TO_TURN_END), from run_turn's stopped
             # result or the stream's terminal chunk. None on a normal end.
             "stop_reason": result.get("stop_reason"),
+            # fh3 T4: the typed non-stop exit of a chunk_callback turn
+            # (``run_timeout`` / ``max_tool_iterations_exceeded`` /
+            # ``max_stream_iterations_exceeded`` …), orthogonal to
+            # ``stop_reason``. None on a normal end and on the buffered
+            # ``run_turn`` path, where such an exit raises 502 above.
+            "exit_code": result.get("exit_code"),
         }
 
     async def _merge_asset_primaries(

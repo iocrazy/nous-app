@@ -1841,12 +1841,12 @@ class AgentRunner:
         forwarded ``[]`` and the declaration was lost: 2 of the 4 production
         EMPTY_OUTPUT runs (2026-09-08) had declared ``completed``. Exits that
         carry it: the normal final answer, ``_awaiting_input_response``, the
-        true-stream stop chunk, and this one. Exits that still do NOT (a
-        declaration made before them is lost — same defect family, left as is
-        because routing them by the declaration is a semantic call, ticketed):
-        ``run_timeout`` (``_run_turn_inner`` ~:2000), abort mid-call (~:2069),
-        ``max_tool_iterations_exceeded`` (~:2488) and
-        ``_awaiting_approval_response`` (~:2720)."""
+        true-stream stop chunk, this one (hook STOP), and since fh3 T4
+        ``run_timeout``, abort mid-call and ``max_tool_iterations_exceeded``
+        (``services/issues/turn_outcome.py`` routes them). The one exit that
+        deliberately does NOT is ``_awaiting_approval_response``: a pre-hook
+        approval means the gated tool never ran, so an earlier declaration
+        must not route the issue (user ruling B, 2026-09-25)."""
         from app.services.ai.runner.question import payload_from_view
 
         reason = step_ctx.stop_reason
@@ -2013,6 +2013,10 @@ class AgentRunner:
                         f"({composed.timeout_sec}s)"
                     ),
                     "error_code": "run_timeout",
+                    # fh3 T4: the deadline is checked at a step boundary, so
+                    # everything in the trace ran; a FinishIssue declared
+                    # before it routes the issue (ruling A).
+                    "tool_calls": tool_call_trace,
                 }
 
             _step_ctx = StepContext(
@@ -2082,6 +2086,9 @@ class AgentRunner:
                         "raw": None,
                         "cancelled": True,
                         "abort_reason": str(exc),
+                        # fh3 T4: the tools before this call ran; the cancel
+                        # demotion in turn_outcome applies (ruling A).
+                        "tool_calls": tool_call_trace,
                     }
             else:
                 resp = await self.adapter.call(composed_for_call, messages)
@@ -2500,7 +2507,15 @@ class AgentRunner:
                     )
                     return self._awaiting_input_response(recorder, tool_call_trace)
 
-        return {"content": "", "raw": None, "error": "max_tool_iterations_exceeded"}
+        # fh3 T4: every tool of the last iteration ran. turn_outcome routes by
+        # the last declaration unless a non-FinishIssue tool followed it
+        # (ruling A′).
+        return {
+            "content": "",
+            "raw": None,
+            "error": "max_tool_iterations_exceeded",
+            "tool_calls": tool_call_trace,
+        }
 
     # ------------------------------------------------------------------
     # Hook chain plumbing
@@ -2733,6 +2748,9 @@ class AgentRunner:
 
     @staticmethod
     def _awaiting_approval_response(result: HookResult) -> dict[str, Any]:
+        """Deliberately carries no ``tool_calls`` (user ruling B, fh3 T4): a
+        pre-hook approval means the gated tool never ran, so a FinishIssue
+        declared earlier must not route the issue. Route by the exit."""
         approval = result.approval_request
         return {
             "content": "",
