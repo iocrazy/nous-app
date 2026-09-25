@@ -9356,6 +9356,18 @@
             "minimum": 1.0,
             "title": "Limit",
             "type": "integer"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{1,20}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
           }
         },
         "title": "BackfillEmbeddingsBody",
@@ -14188,6 +14200,22 @@
         "title": "CreateShareRequest",
         "type": "object"
       },
+      "CreateSpaceRequest": {
+        "description": "``POST /search/vectors/spaces``: a ``nous_models`` embedding row name.",
+        "properties": {
+          "model_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Model Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_name"
+        ],
+        "title": "CreateSpaceRequest",
+        "type": "object"
+      },
       "CreateTagRequest": {
         "properties": {
           "color": {
@@ -14363,6 +14391,30 @@
           "dates"
         ],
         "title": "DatesResponse",
+        "type": "object"
+      },
+      "DeleteSpaceResponse": {
+        "description": "``DELETE /search/vectors/spaces/{id}``. ``deleted_vectors`` = rows of\n``resource_embeddings`` (every user, every layer) the FK cascade removed.",
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "deleted_vectors": {
+            "title": "Deleted Vectors",
+            "type": "integer"
+          },
+          "space_id": {
+            "title": "Space Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deleted",
+          "space_id",
+          "deleted_vectors"
+        ],
+        "title": "DeleteSpaceResponse",
         "type": "object"
       },
       "DeletedResponse": {
@@ -46227,6 +46279,72 @@
         "title": "SpaceInfo",
         "type": "object"
       },
+      "SpaceStatus": {
+        "description": "One embedding space and the caller's coverage in it.\n\n``active`` = the admin governance embedder writes and searches here;\nevery other space is a candidate. ``catalog_name`` is the ``nous_models``\nrow serving ``actual_model`` (null when it was removed from the catalog:\nsuch a space can neither be filled nor switched to).",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "actual_model": {
+            "title": "Actual Model",
+            "type": "string"
+          },
+          "catalog_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Name"
+          },
+          "dims": {
+            "title": "Dims",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "instruction_version": {
+            "title": "Instruction Version",
+            "type": "string"
+          },
+          "layers": {
+            "items": {
+              "$ref": "#/components/schemas/LayerStatus"
+            },
+            "title": "Layers",
+            "type": "array"
+          },
+          "modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Modalities",
+            "type": "array"
+          },
+          "protocol": {
+            "title": "Protocol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "actual_model",
+          "protocol",
+          "dims",
+          "modalities",
+          "instruction_version",
+          "active",
+          "layers"
+        ],
+        "title": "SpaceStatus",
+        "type": "object"
+      },
       "SplitDeriveRequest": {
         "description": "A ``rows × cols`` grid request.\n\nBounds are enforced here (payload guard) AND in\n``image_grid_split.split_grid`` (single source of truth) — the\nlatter surfaces as a 400 if a caller bypasses the schema.",
         "properties": {
@@ -51613,8 +51731,13 @@
         "type": "object"
       },
       "VectorsStatusResponse": {
-        "description": "``GET /search/vectors/status``.\n\n``status``: \"ok\" (space resolved, coverage counted) | \"unconfigured\" (no\nembedding model; ``space`` null, coverage 0 of the caller's total) |\n\"store_missing\" (migration 499 not applied; ``space`` null, ``layers``\nempty). A layer is \"not_built\" until it holds at least one vector;\n``transcript`` is always \"not_built\" until that layer ships.",
+        "description": "``GET /search/vectors/status``.\n\n``status``: \"ok\" (space resolved, coverage counted) | \"unconfigured\" (no\nembedding model; ``space`` null, coverage 0 of the caller's total) |\n\"store_missing\" (migration 499 not applied; ``space`` null, ``layers``\nempty). A layer is \"not_built\" until it holds at least one vector;\n``transcript`` is always \"not_built\" until that layer ships.\n\n``space`` / ``layers`` describe the ACTIVE space (kept for old readers);\n``spaces`` lists every space, active and candidates, each with the\ncaller's coverage. ``can_manage`` = the caller may add / switch / delete\nspaces (admin).",
         "properties": {
+          "can_manage": {
+            "default": false,
+            "title": "Can Manage",
+            "type": "boolean"
+          },
           "layers": {
             "items": {
               "$ref": "#/components/schemas/LayerStatus"
@@ -51631,6 +51754,13 @@
                 "type": "null"
               }
             ]
+          },
+          "spaces": {
+            "items": {
+              "$ref": "#/components/schemas/SpaceStatus"
+            },
+            "title": "Spaces",
+            "type": "array"
           },
           "status": {
             "enum": [
@@ -71340,7 +71470,7 @@
     },
     "/api/v1/ai/analyze/backfill-embeddings": {
       "post": {
-        "description": "Backfill the semantic layer of ``resource_embeddings`` for the\ncaller's downloads that have no vector in the CURRENT embedding space.\n\nEvery candidate is embedded in place: one embedding call each, no Task\nCenter row. This endpoint used to dispatch a full ``analyze_l1`` (VLM +\nembed) for rows without a visual analysis, because the document was made\nof the VLM fields. The semantic document (``embedding_document``) now\nuses whatever the resource has — title, description, tags, summary,\ntranscript excerpt, and the analysis when present — so there is nothing\nto wait for and nothing to pay the VLM for. ``limit`` caps the batch so\na first run can be inspected before the rest (``total_missing``) is\nreleased. ``dry_run`` only reports, with the same shapes as a real run.\n\nCandidates are missing OR stale vectors\n(``ResourceEmbeddingsRepository.pending_for_user``): stale = written by\nanother ``DOC_VERSION``, or older than the resource's summary /\ntranscript. Missing rows come first.\n\nResponse: ``space`` names the space the vectors land in; ``reembedded``\nlanded (or was already current) NOW; ``skipped`` names batch rows that\nwere attempted or refused, with a stable reason code (never provider\ntext); ``total_missing`` counts missing + stale (despite the name, kept\nfor readers of the old shape); ``stale`` is how many rows of THIS batch\nwere stale rather than missing; ``remaining`` is ``total_missing`` minus\nwhat landed; ``rehashed`` counts rows whose vector was already current\nunder a legacy bare-sha1 hash and only had the hash relabelled (no\nembedding call; not in ``reembedded``, but out of ``remaining``).\nResource ids (``reembedded[]``, ``skipped[].resource_id``)\nare strings, like ``space.id`` (Snowflake > 2^53).\n``aborted_reason`` says why the batch stopped early: ``\"provider_error\"``\n(3 in a row), ``\"time_budget\"`` (past ``_BACKFILL_WALL_CLOCK_S``; the\nrest are skipped as ``not_attempted``), one of the process-wide codes\n(``embedder_unconfigured`` / ``dimension_mismatch`` / ``store_missing``),\nor null when every row was attempted. ``space.id`` is a string\n(Snowflake). ``dispatched`` / ``in_flight`` are kept, always empty / 0,\nso readers of the old shape keep parsing.",
+        "description": "Backfill the semantic layer of ``resource_embeddings`` for the\ncaller's downloads that have no vector in the CURRENT embedding space.\n\nEvery candidate is embedded in place: one embedding call each, no Task\nCenter row. This endpoint used to dispatch a full ``analyze_l1`` (VLM +\nembed) for rows without a visual analysis, because the document was made\nof the VLM fields. The semantic document (``embedding_document``) now\nuses whatever the resource has — title, description, tags, summary,\ntranscript excerpt, and the analysis when present — so there is nothing\nto wait for and nothing to pay the VLM for. ``limit`` caps the batch so\na first run can be inspected before the rest (``total_missing``) is\nreleased. ``dry_run`` only reports, with the same shapes as a real run.\n\nCandidates are missing OR stale vectors\n(``ResourceEmbeddingsRepository.pending_for_user``): stale = written by\nanother ``DOC_VERSION``, or older than the resource's summary /\ntranscript. Missing rows come first.\n\nResponse: ``space`` names the space the vectors land in; ``reembedded``\nlanded (or was already current) NOW; ``skipped`` names batch rows that\nwere attempted or refused, with a stable reason code (never provider\ntext); ``total_missing`` counts missing + stale (despite the name, kept\nfor readers of the old shape); ``stale`` is how many rows of THIS batch\nwere stale rather than missing; ``remaining`` is ``total_missing`` minus\nwhat landed; ``rehashed`` counts rows whose vector was already current\nunder a legacy bare-sha1 hash and only had the hash relabelled (no\nembedding call; not in ``reembedded``, but out of ``remaining``).\nResource ids (``reembedded[]``, ``skipped[].resource_id``)\nare strings, like ``space.id`` (Snowflake > 2^53).\n``aborted_reason`` says why the batch stopped early: ``\"provider_error\"``\n(3 in a row), ``\"time_budget\"`` (past ``_BACKFILL_WALL_CLOCK_S``; the\nrest are skipped as ``not_attempted``), one of the process-wide codes\n(``embedder_unconfigured`` / ``dimension_mismatch`` / ``store_missing``),\nor null when every row was attempted. ``space.id`` is a string\n(Snowflake). ``dispatched`` / ``in_flight`` are kept, always empty / 0,\nso readers of the old shape keep parsing.\n\n``space_id`` (optional, string) fills that CANDIDATE space instead, with\nthe embedder of its own catalog row (Settings -> Vectors, before Switch);\n404 ``space_not_found`` / 409 ``space_catalog_row_missing`` /\n``catalog_model_disabled`` when it cannot.",
         "operationId": "backfill_embeddings_api_v1_ai_analyze_backfill_embeddings_post",
         "parameters": [
           {
@@ -114058,9 +114188,305 @@
         ]
       }
     },
+    "/api/v1/search/vectors/catalog": {
+      "get": {
+        "description": "Catalog models Add Space may pick: enabled PLATFORM embedding rows\nonly (public fields). ``/ai/nous-models`` also lists the caller's own\nBYOK rows, which must never back a shared space.",
+        "operationId": "vector_space_catalog_api_v1_search_vectors_catalog_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiNousModelsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Vector Space Catalog",
+        "tags": [
+          "Search",
+          "Search"
+        ]
+      }
+    },
+    "/api/v1/search/vectors/spaces": {
+      "post": {
+        "description": "Add a candidate space for a catalog embedding model (Add Space).\n\nProbes the model once with its own config before creating anything: a\nvector of the wrong width is a 422 ``dimension_mismatch`` carrying both\nwidths (the columns are fixed at ``EMBEDDING_DIM``); an unreachable\nprovider is a 502 ``provider_error``. Idempotent on the model: adding a\nmodel that already has a space returns that space.",
+        "operationId": "create_vector_space_api_v1_search_vectors_spaces_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Vector Space",
+        "tags": [
+          "Search",
+          "Search"
+        ]
+      }
+    },
+    "/api/v1/search/vectors/spaces/{space_id}": {
+      "delete": {
+        "description": "Delete a candidate (or retired) space and, by FK cascade, every vector\nin it — every user's. The active space is refused (409\n``space_active``): switch away first.",
+        "operationId": "delete_vector_space_api_v1_search_vectors_spaces__space_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "title": "Space Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSpaceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Vector Space",
+        "tags": [
+          "Search",
+          "Search"
+        ]
+      }
+    },
+    "/api/v1/search/vectors/spaces/{space_id}/activate": {
+      "post": {
+        "description": "Switch: make ``space_id`` the active space by writing its catalog row\nname to ``ai_module.embedding.model`` (the same key the admin AI\nGovernance page writes). Answers with the new status.\n\nCoverage is NOT checked here: it is per user, and the admin's own\ncoverage says nothing about anyone else's. The UI gates the button.",
+        "operationId": "activate_vector_space_api_v1_search_vectors_spaces__space_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "title": "Space Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorsStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Vector Space",
+        "tags": [
+          "Search",
+          "Search"
+        ]
+      }
+    },
     "/api/v1/search/vectors/status": {
       "get": {
-        "description": "How much of the caller's library has a vector, per retrieval layer, in\nthe CURRENT embedding space (the admin-configured embedder).\n\n``status`` is \"ok\", \"unconfigured\" (no embedder: ``space`` null, coverage\n0 of the caller's total) or \"store_missing\" (migration 499 not applied:\n``space`` null, ``layers`` empty). A typed answer in every case, never a\n500 — the UI shows it next to the search box.",
+        "description": "How much of the caller's library has a vector, per retrieval layer, in\nthe CURRENT embedding space (the admin-configured embedder), plus every\ncandidate space (``spaces``) and whether the caller may manage them.\n\n``status`` is \"ok\", \"unconfigured\" (no embedder: ``space`` null, coverage\n0 of the caller's total) or \"store_missing\" (migration 499 not applied:\n``space`` null, ``layers`` / ``spaces`` empty). A typed answer in every\ncase, never a 500 — the UI shows it next to the search box.",
         "operationId": "vectors_status_api_v1_search_vectors_status_get",
         "parameters": [
           {

@@ -20,6 +20,7 @@ from app.repositories.resource_embeddings_repository import (
     EmbeddingStoreMissing,
     get_resource_embeddings_repository,
 )
+from app.schemas.ai_settings_responses import AiNousModelsResponse
 from app.schemas.search import (
     CreateSpaceRequest,
     DeleteSpaceResponse,
@@ -577,7 +578,7 @@ def _client_ip(request: Request) -> Optional[str]:
     return request.client.host if request.client else None
 
 
-@router.get("/vectors/catalog")
+@router.get("/vectors/catalog", response_model=AiNousModelsResponse)
 async def vector_space_catalog(auth: AuthDep):
     """Catalog models Add Space may pick: enabled PLATFORM embedding rows
     only (public fields). ``/ai/nous-models`` also lists the caller's own

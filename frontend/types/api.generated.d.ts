@@ -4377,6 +4377,11 @@ export interface paths {
          *     or null when every row was attempted. ``space.id`` is a string
          *     (Snowflake). ``dispatched`` / ``in_flight`` are kept, always empty / 0,
          *     so readers of the old shape keep parsing.
+         *
+         *     ``space_id`` (optional, string) fills that CANDIDATE space instead, with
+         *     the embedder of its own catalog row (Settings -> Vectors, before Switch);
+         *     404 ``space_not_found`` / 409 ``space_catalog_row_missing`` /
+         *     ``catalog_model_disabled`` when it cannot.
          */
         post: operations["backfill_embeddings_api_v1_ai_analyze_backfill_embeddings_post"];
         delete?: never;
@@ -14462,6 +14467,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search/vectors/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Vector Space Catalog
+         * @description Catalog models Add Space may pick: enabled PLATFORM embedding rows
+         *     only (public fields). ``/ai/nous-models`` also lists the caller's own
+         *     BYOK rows, which must never back a shared space.
+         */
+        get: operations["vector_space_catalog_api_v1_search_vectors_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search/vectors/spaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Vector Space
+         * @description Add a candidate space for a catalog embedding model (Add Space).
+         *
+         *     Probes the model once with its own config before creating anything: a
+         *     vector of the wrong width is a 422 ``dimension_mismatch`` carrying both
+         *     widths (the columns are fixed at ``EMBEDDING_DIM``); an unreachable
+         *     provider is a 502 ``provider_error``. Idempotent on the model: adding a
+         *     model that already has a space returns that space.
+         */
+        post: operations["create_vector_space_api_v1_search_vectors_spaces_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search/vectors/spaces/{space_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Vector Space
+         * @description Delete a candidate (or retired) space and, by FK cascade, every vector
+         *     in it — every user's. The active space is refused (409
+         *     ``space_active``): switch away first.
+         */
+        delete: operations["delete_vector_space_api_v1_search_vectors_spaces__space_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search/vectors/spaces/{space_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate Vector Space
+         * @description Switch: make ``space_id`` the active space by writing its catalog row
+         *     name to ``ai_module.embedding.model`` (the same key the admin AI
+         *     Governance page writes). Answers with the new status.
+         *
+         *     Coverage is NOT checked here: it is per user, and the admin's own
+         *     coverage says nothing about anyone else's. The UI gates the button.
+         */
+        post: operations["activate_vector_space_api_v1_search_vectors_spaces__space_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search/vectors/status": {
         parameters: {
             query?: never;
@@ -14472,12 +14572,13 @@ export interface paths {
         /**
          * Vectors Status
          * @description How much of the caller's library has a vector, per retrieval layer, in
-         *     the CURRENT embedding space (the admin-configured embedder).
+         *     the CURRENT embedding space (the admin-configured embedder), plus every
+         *     candidate space (``spaces``) and whether the caller may manage them.
          *
          *     ``status`` is "ok", "unconfigured" (no embedder: ``space`` null, coverage
          *     0 of the caller's total) or "store_missing" (migration 499 not applied:
-         *     ``space`` null, ``layers`` empty). A typed answer in every case, never a
-         *     500 — the UI shows it next to the search box.
+         *     ``space`` null, ``layers`` / ``spaces`` empty). A typed answer in every
+         *     case, never a 500 — the UI shows it next to the search box.
          */
         get: operations["vectors_status_api_v1_search_vectors_status_get"];
         put?: never;
@@ -20116,6 +20217,8 @@ export interface components {
              * @default 20
              */
             limit: number;
+            /** Space Id */
+            space_id?: string | null;
         };
         /**
          * BackfillRequest
@@ -22391,6 +22494,14 @@ export interface components {
              */
             share_type: string;
         };
+        /**
+         * CreateSpaceRequest
+         * @description ``POST /search/vectors/spaces``: a ``nous_models`` embedding row name.
+         */
+        CreateSpaceRequest: {
+            /** Model Name */
+            model_name: string;
+        };
         /** CreateTagRequest */
         CreateTagRequest: {
             /**
@@ -22452,6 +22563,19 @@ export interface components {
              * @default true
              */
             success: boolean;
+        };
+        /**
+         * DeleteSpaceResponse
+         * @description ``DELETE /search/vectors/spaces/{id}``. ``deleted_vectors`` = rows of
+         *     ``resource_embeddings`` (every user, every layer) the FK cascade removed.
+         */
+        DeleteSpaceResponse: {
+            /** Deleted */
+            deleted: boolean;
+            /** Deleted Vectors */
+            deleted_vectors: number;
+            /** Space Id */
+            space_id: string;
         };
         /** DeletedResponse */
         DeletedResponse: {
@@ -34196,6 +34320,35 @@ export interface components {
             protocol: string;
         };
         /**
+         * SpaceStatus
+         * @description One embedding space and the caller's coverage in it.
+         *
+         *     ``active`` = the admin governance embedder writes and searches here;
+         *     every other space is a candidate. ``catalog_name`` is the ``nous_models``
+         *     row serving ``actual_model`` (null when it was removed from the catalog:
+         *     such a space can neither be filled nor switched to).
+         */
+        SpaceStatus: {
+            /** Active */
+            active: boolean;
+            /** Actual Model */
+            actual_model: string;
+            /** Catalog Name */
+            catalog_name?: string | null;
+            /** Dims */
+            dims: number;
+            /** Id */
+            id: string;
+            /** Instruction Version */
+            instruction_version: string;
+            /** Layers */
+            layers: components["schemas"]["LayerStatus"][];
+            /** Modalities */
+            modalities: string[];
+            /** Protocol */
+            protocol: string;
+        };
+        /**
          * SplitDeriveRequest
          * @description A ``rows × cols`` grid request.
          *
@@ -36439,11 +36592,23 @@ export interface components {
          *     "store_missing" (migration 499 not applied; ``space`` null, ``layers``
          *     empty). A layer is "not_built" until it holds at least one vector;
          *     ``transcript`` is always "not_built" until that layer ships.
+         *
+         *     ``space`` / ``layers`` describe the ACTIVE space (kept for old readers);
+         *     ``spaces`` lists every space, active and candidates, each with the
+         *     caller's coverage. ``can_manage`` = the caller may add / switch / delete
+         *     spaces (admin).
          */
         VectorsStatusResponse: {
+            /**
+             * Can Manage
+             * @default false
+             */
+            can_manage: boolean;
             /** Layers */
             layers: components["schemas"]["LayerStatus"][];
             space?: components["schemas"]["SpaceInfo"] | null;
+            /** Spaces */
+            spaces?: components["schemas"]["SpaceStatus"][];
             /**
              * Status
              * @enum {string}
@@ -63995,6 +64160,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    vector_space_catalog_api_v1_search_vectors_catalog_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiNousModelsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_vector_space_api_v1_search_vectors_spaces_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSpaceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_vector_space_api_v1_search_vectors_spaces__space_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteSpaceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_vector_space_api_v1_search_vectors_spaces__space_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VectorsStatusResponse"];
                 };
             };
             /** @description Validation Error */
