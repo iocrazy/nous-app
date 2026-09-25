@@ -100,3 +100,12 @@ async def test_celery_routes_serve_an_admin(client, signed_in, role, dbos_off, p
     role["role"] = "admin"
     resp = await client.get(path)
     assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_admin_health_is_gone(client):
+    """``GET /admin/health`` answered anyone with the ``user_profiles`` row
+    count and raw exception text from the database clients. Nothing called
+    it; the admin dashboard reads the admin-only ``/system/health``."""
+    resp = await client.get("/api/v1/admin/health")
+    assert resp.status_code == 404, resp.text
