@@ -139,15 +139,23 @@ async def test_soft_delete_keeps_runs_including_other_agents_child_runs(
     own_run = await _run(pg, doomed, user)
     other_child = await _run(pg, other, user, parent=own_run)
 
-    # Control: today's hard delete takes the OTHER agent's child run with it.
+    # Control: since mig 505 parent_run_id is SET NULL, so even a raw hard
+    # delete keeps the OTHER agent's child run (it used to CASCADE away). The
+    # soft delete below must still keep the agent's OWN run, which a hard
+    # delete removes through agent_runs.agent_id CASCADE.
     tx = pg.transaction()
     await tx.start()
     try:
         await pg.execute("DELETE FROM ai_agents WHERE id = $1", doomed)
-        gone = await pg.fetchval(
-            "SELECT count(*) FROM agent_runs WHERE id = $1", other_child
+        child = await pg.fetchrow(
+            "SELECT parent_run_id FROM agent_runs WHERE id = $1", other_child
         )
-        assert gone == 0, "control: parent_run_id CASCADE removes the child run"
+        assert child is not None, "control: parent_run_id SET NULL keeps the child"
+        assert child["parent_run_id"] is None
+        own = await pg.fetchval(
+            "SELECT count(*) FROM agent_runs WHERE id = $1", own_run
+        )
+        assert own == 0, "control: agent_id CASCADE removes the agent's own run"
     finally:
         await tx.rollback()
 
@@ -338,7 +346,7 @@ async def test_skill_used_by_and_workforce_board_hide_deleted(orm_dsn, pg, user)
         mapped = await repo.map_binding_agents([skill])
         assert {a["slug"] for a in mapped[int(skill)]} == {kept_slug}
 
-        board = await get_workforce_board(_user=None)
+        board = await get_workforce_board(_auth=None)
         slugs = {a["slug"] for a in board["agents"]}
         assert kept_slug in slugs and doomed_slug not in slugs
     finally:

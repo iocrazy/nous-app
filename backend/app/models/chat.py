@@ -245,6 +245,14 @@ class ConversationAiMeta(Base):
             ondelete="CASCADE",
             name="conversation_ai_meta_conversation_id_fkey",
         ),
+        # mig 505: SET NULL, not CASCADE — chat resolves by agent_slug, so the
+        # conversation keeps its sidecar when the agent row goes away.
+        ForeignKeyConstraint(
+            ["agent_id"],
+            ["public.ai_agents.id"],
+            ondelete="SET NULL",
+            name="conversation_ai_meta_agent_id_fkey",
+        ),
         PrimaryKeyConstraint("conversation_id", name="conversation_ai_meta_pkey"),
         {
             "comment": (

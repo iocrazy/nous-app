@@ -123,16 +123,17 @@ async def test_self_fk_constraints_rebuilt():
     assert (
         "agent_runs_parent_run_id_fkey" in found
     ), "agent_runs_parent_run_id_fkey constraint not found"
+    # 232 built both as CASCADE / NO ACTION; mig 505 turned both into SET NULL
+    # so deleting a run keeps its descendants (other agents' Delegate children).
     assert (
-        found["agent_runs_parent_run_id_fkey"] == "CASCADE"
-    ), f"parent_run_id ON DELETE should be CASCADE, got {found['agent_runs_parent_run_id_fkey']}"
+        found["agent_runs_parent_run_id_fkey"] == "SET NULL"
+    ), f"parent_run_id ON DELETE should be SET NULL, got {found['agent_runs_parent_run_id_fkey']}"
 
     assert (
         "agent_runs_root_run_id_fkey" in found
     ), "agent_runs_root_run_id_fkey constraint not found"
-    # Default (no ON DELETE clause) = NO ACTION in PostgreSQL
-    assert found["agent_runs_root_run_id_fkey"] in ("NO ACTION", "RESTRICT"), (
-        f"root_run_id ON DELETE should be NO ACTION/RESTRICT, "
+    assert found["agent_runs_root_run_id_fkey"] == "SET NULL", (
+        f"root_run_id ON DELETE should be SET NULL, "
         f"got {found['agent_runs_root_run_id_fkey']}"
     )
 

@@ -247,8 +247,8 @@ async def tree(pg):
     连接，看不见一个未提交的事务。所以只能真写真删。
 
     id 取 9100x 段（迁移那个文件占 9000x），与任何真实 Snowflake id 都不可能撞。
-    删除顺序从叶子往根：``parent_run_id`` 是 ON DELETE CASCADE，但 ``root_run_id``
-    那条 FK 没有级联，先删 A 会撞外键。
+    删除顺序从叶子往根：mig 505 起 ``parent_run_id`` / ``root_run_id`` 都是 ON DELETE
+    SET NULL，先删 A 不再撞外键，但会把后代留成孤儿行；逐个显式删最干净。
     """
     suffix = uuid.uuid4().hex[:8]
     agent_x = await pg.fetchval(

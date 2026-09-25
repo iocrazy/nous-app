@@ -366,9 +366,10 @@ class AgentRepository:
         row changed; an already-deleted agent returns False.
 
         Why not a row delete: eleven FKs to ai_agents CASCADE, among them
-        agent_runs — and agent_runs.parent_run_id CASCADEs again, so a hard
-        delete also removed OTHER agents' Delegate child runs, the agent's
-        transcripts and cost history, and pipeline steps. The preset guard is
+        agent_runs, so a hard delete removes the agent's own runs,
+        transcripts and cost history, and pipeline steps (before mig 505,
+        agent_runs.parent_run_id CASCADEd too and took OTHER agents' Delegate
+        child runs; it is SET NULL now). The preset guard is
         enforced here as well as at the router. The live-reference refusal
         (409 agent_in_use) is the router's job — see agent_references."""
         try:
