@@ -110,6 +110,22 @@ class _SpaceRepo:
         return self.spaces.pop(space_id, None) is not None
 
 
+class _ShotRepo:
+    """Visual layer (mig 507). The activate / delete answers carry the fresh
+    status, which reads this repo too — an unwired one would reach a real
+    database (CI has none, so the endpoint's RuntimeError surfaced as a red
+    test that passed locally)."""
+
+    def __init__(self, covered: int = 0, total: int = 0, stale: int = 0):
+        self.covered, self.total, self.stale = covered, total, stale
+
+    async def coverage(self, **kwargs):
+        return self.covered, self.total
+
+    async def stale_count(self, **kwargs):
+        return self.stale
+
+
 class _EmbRepo:
     def __init__(self, count=0):
         self.count = count
@@ -146,9 +162,11 @@ def _wire(
     real_active: bool = False,
     space_repo=None,
     emb_repo=None,
+    shot_repo=None,
 ) -> SimpleNamespace:
     space_repo = space_repo or _SpaceRepo()
     emb_repo = emb_repo or _EmbRepo()
+    shot_repo = shot_repo or _ShotRepo()
     settings = _Settings()
     audits: List[dict] = []
     forgotten: List[int] = []
@@ -197,6 +215,9 @@ def _wire(
     )
     monkeypatch.setattr(
         search_router, "get_resource_embeddings_repository", lambda: emb_repo
+    )
+    monkeypatch.setattr(
+        search_router, "get_video_shot_embeddings_repository", lambda: shot_repo
     )
     monkeypatch.setattr(
         search_router, "get_system_settings_repository", lambda: settings

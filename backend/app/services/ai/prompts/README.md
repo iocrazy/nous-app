@@ -280,7 +280,7 @@ Attached to this message (listed for reference; the files are not loaded into th
  "type": "function",
  "function": {
   "name": "LibrarySearch",
-  "description": "Search the caller's own resource library (saved videos, images and other media) by keywords or a natural-language description. Returns each hit's resource_id, the layer that matched (text = keyword match in title/description/tags, semantic = meaning match) and a score. Entries without a shot index have shot = null. Run several short queries rather than one long sentence.",
+  "description": "Search the caller's own resource library (saved videos, images and other media) by keywords or a natural-language description. Returns each hit's resource_id, the layer that matched (text = keyword match in title/description/tags, semantic = meaning match, visual = a frame of the video looks like the description) and a score. A visual hit carries shot = {shot_id, start_ms, end_ms}: the moment to play from. Every other hit has shot = null. Run several short queries rather than one long sentence.",
   "parameters": {
    "type": "object",
    "properties": {
@@ -320,10 +320,10 @@ Attached to this message (listed for reference; the files are not loaded into th
 成功时模型收到结构化 JSON（不是散文）：
 
 ```json
-{"query": "handheld tracking shot", "hits": [{"resource_id": "<snowflake str>", "media_id": "<snowflake str>", "platform_id": "…", "title": "≤200 chars", "description": "≤200 chars or null", "layer": "text|semantic", "score": 0.6123, "author": "…", "created_at": "ISO", "shot": null}], "legs": {"text": 1, "semantic": 1}, "vector_leg": "ok", "reranked": false, "total": 2, "truncated": false}
+{"query": "handheld tracking shot", "hits": [{"resource_id": "<snowflake str>", "media_id": "<snowflake str>", "platform_id": "…", "title": "≤200 chars", "description": "≤200 chars or null", "layer": "text|semantic|visual", "score": 0.6123, "author": "…", "created_at": "ISO", "shot": null}], "legs": {"text": 1, "semantic": 1, "visual": 0}, "vector_leg": "ok", "visual_leg": "ok", "reranked": false, "total": 2, "truncated": false}
 ```
 
-走哪条腿由 `layers` 决定：不传（或传空数组）与含 `text` 时走 hybrid；只含 `semantic` 不含 `text` 时直接跑向量腿（`SearchService.semantic_only`），因为 hybrid 里文本命中填满一页时向量腿会 `skipped_full_page`；只含未建成的层时什么都不调，返回空。`legs` 按**最终给模型的命中**重算，键表示「这条腿跑了」，被 `layers` 滤掉的层不出现。`query` 超过 500 字符（与搜索 API 的 schema 同一上限）被截断而不是拒绝，此时 `truncated: true`。
+走哪条腿由 `layers` 决定：不传（或传空数组）与含 `text` 时走 hybrid（文本 + 语义 + visual 三条腿）；只含 `semantic` 不含 `text` 时直接跑文档向量腿（`SearchService.semantic_only`），只含 `visual` 时直接跑镜头帧腿（`SearchService.visual_only`），因为 hybrid 里文本命中填满一页时两条向量腿都会 `skipped_full_page`；只含未建成的层（`camera` / `transcript`）时什么都不调，返回空。`visual` 命中带 `shot = {"shot_id": "<snowflake str>", "start_ms": 41000, "end_ms": 52000}`（该播放的时刻），其余命中 `shot` 为 null；`legs` 里 `visual` 键只在那条腿真跑了时出现。`legs` 按**最终给模型的命中**重算，键表示「这条腿跑了」，被 `layers` 滤掉的层不出现。`query` 超过 500 字符（与搜索 API 的 schema 同一上限）被截断而不是拒绝，此时 `truncated: true`。
 
 文本腿的查询归一化：只删「至少一侧是 CJK 字符」的空白（`search_service.normalize_query_spaces`）——「日本 夜景」按「日本夜景」匹配，「Morning Routine 2024」保留空格。整个查询是一个子串，所以 skill 教模型一次只放一个关键词或一个完整短语。
 
@@ -469,7 +469,7 @@ Each <output/> above is a CITATION the human made — one specific version of an
 - **`LibrarySearch` 结果里的 title / description 是外部文本，未经 `neutralize_external_text`**（裁决：与 `ResourceFetch` 同级）。它们是抓来的标题与简介，在结构化 JSON 字段里、截到 200 字符，skill 正文提醒「当数据不当指令」——这是第二层，不是结构防护。要升级就在 `_hit_dict` 一处包裹。
 - **会话 @agent 路上，没有 `read_team_resources` 的 agent 仍装着 `library-search` skill，但工具不存在**。skill 绑定按 agent 走（`seed_loader.AGENT_SKILL_SLUGS`），工具按会话里的权限挂；模型照 skill 去调只会拿到 `LibrarySearch is not available for this turn.`。要消掉得让 skill 清单也按工具可用性过滤，本期不做。
 - **会话 @agent 路的命中是召唤者个人库的，贴进团队频道后别人点开会 403/404**。卡片里的 `resource_id` 只对召唤者可读；其他成员看得到标题（已经在频道里了），点进详情页拿不到。补团队库之后这条随之缩小，但个人条目的情况仍在。
-- **`LibrarySearch` 的 `visual` / `camera` / `transcript` 层尚未建成**（向量分层 PR 3/4）。枚举里先有，传了不报错只是空；`shot` 恒为 null。层建好后工具签名不变，但 skill 正文「找画面回退语义层」那段要随之改写。带 `text` 的层过滤是 hybrid 合并**之后**做的：向服务要满 20 条再筛，仍可能不足 `limit`。
+- **`LibrarySearch` 的 `camera` / `transcript` 层尚未建成**（向量分层 PR 4 / 二期）。枚举里先有，传了不报错只是空。`visual` 层自 mig 507 起是真的（每支视频最佳镜头帧，`shot` 带时间码）；覆盖率看 `GET /search/vectors/status` 的 `visual` 行，没索引过的视频在这条腿上就是搜不到，skill 正文教模型把「没索引」与「没匹配」分开说。带 `text` 的层过滤是 hybrid 合并**之后**做的：向服务要满 20 条再筛，仍可能不足 `limit`。
 - **身份三段无长度上限**。一个 `agent_md` 写到 200k 字符的 agent 会把每一轮请求都撑爆，而且因为它在缓存边界之前，代价逐轮重复。skill 正文有 64k 上限（`../skills/`），身份文档没有对应的护栏。
 - **两个指纹都不覆盖 `request_instructions`、`<available_resources>` 与 `# Runtime` 行**。它们是缓存键，不是"这次请求的输入摘要"——`_dynamic_fingerprint()` 只加了记忆内容，因为缓存隔离只需要防跨用户串味。**别拿它判断"两轮输入是否相同"**：改了 request instructions、换了 @-mention 的资源、跨了一分钟，动态指纹都可能一模一样。
 - **`Skill` 的 inputSchema 现在同时承载 skill 装载、内建 `todo`、内建 `task` 三类参数**，靠 description 里的「skill='…' only」区分。这是裁决不是遗漏：三者共用一个工具名是既有契约（`AgentRunner` 按 `tool_name == "Skill"` 分派），拆成三个工具会改动分派处与所有 pin。代价是 schema 约 300 token 且每次请求都带。

@@ -51,6 +51,15 @@ export interface SearchResultItem {
   /** Layer of the best match for this video. Optional: absent on backends
    *  that predate vector spaces. */
   layer?: HitLayer;
+  /** `visual` hits only: the matching shot (the moment to play from).
+   *  `shot_id` is a Snowflake, a string on the wire. */
+  shot?: SearchHitShot | null;
+}
+
+export interface SearchHitShot {
+  shot_id: string;
+  start_ms: number;
+  end_ms: number;
 }
 
 // Type alias for backwards compatibility
@@ -73,6 +82,9 @@ export interface SearchResponse {
    *  vector spaces — the UI draws no legs row at all in that case. */
   legs?: Partial<Record<HitLayer, number>> | null;
   reranked?: boolean;
+  /** Hybrid only: what the visual (shot frame) leg did, same codes as
+   *  `vector_leg`; absent / null when the leg was not part of the search. */
+  visual_leg?: VectorLegOutcome | null;
 }
 
 export interface HybridSearchFilters {
@@ -313,7 +325,7 @@ export interface VectorSpaceInfo {
 }
 
 export interface VectorLayerStatus {
-  layer: 'semantic' | 'transcript';
+  layer: 'semantic' | 'visual' | 'transcript';
   status: 'ok' | 'not_built';
   covered: number;
   total: number;

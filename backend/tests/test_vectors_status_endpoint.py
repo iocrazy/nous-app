@@ -93,6 +93,24 @@ class _EmbRepo:
         return covered, self.total
 
 
+class _ShotRepo:
+    """Visual layer (mig 507): frame vectors per video, counted against the
+    caller's VIDEOS."""
+
+    def __init__(self, covered: int = 0, total: int = 0, stale: int = 0, fail=None):
+        self.covered, self.total, self.stale, self.fail = covered, total, stale, fail
+        self.calls: List[dict] = []
+
+    async def coverage(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.fail is not None:
+            raise self.fail
+        return self.covered, self.total
+
+    async def stale_count(self, **kwargs):
+        return self.stale
+
+
 _CATALOG = {
     "doubao-embedding-vision-251215": "nous-doubao-embedding-vision",
     "wemm-embedding-2b": "nous-wemm-embedding-2b",
@@ -107,8 +125,13 @@ def _wire(
     emb_repo=None,
     admin: bool = False,
     catalog=None,
+    shot_repo=None,
 ) -> Any:
     emb_repo = emb_repo or _EmbRepo(0, 0)
+    shot_repo = shot_repo or _ShotRepo()
+    monkeypatch.setattr(
+        search_router, "get_video_shot_embeddings_repository", lambda: shot_repo
+    )
     names = _CATALOG if catalog is None else catalog
 
     async def _is_admin(user_id):
@@ -154,6 +177,13 @@ async def test_ok_reports_space_and_coverage(monkeypatch):
             "stale": 0,
         },
         {
+            "layer": "visual",
+            "status": "not_built",
+            "covered": 0,
+            "total": 0,
+            "stale": 0,
+        },
+        {
             "layer": "transcript",
             "status": "not_built",
             "covered": 0,
@@ -170,7 +200,7 @@ async def test_ok_reports_stale_vectors_of_the_semantic_layer(monkeypatch):
 
     emb = _wire(monkeypatch, emb_repo=_EmbRepo(12, 1409, stale=5))
     body = (await search_router.vectors_status(_AUTH)).model_dump()
-    assert [x["stale"] for x in body["layers"]] == [5, 0]
+    assert [x["stale"] for x in body["layers"]] == [5, 0, 0]
     assert emb.stale_calls == [
         {
             "user_id": "u-1",
@@ -204,6 +234,7 @@ async def test_unconfigured_still_reports_the_callers_total(monkeypatch):
         (x["layer"], x["status"], x["covered"], x["total"]) for x in body["layers"]
     ] == [
         ("semantic", "not_built", 0, 7),
+        ("visual", "not_built", 0, 0),
         ("transcript", "not_built", 0, 7),
     ]
     # No space exists to count against; the count must not match any real one.
@@ -302,3 +333,47 @@ async def test_active_space_is_listed_even_if_the_listing_misses_it(monkeypatch)
     _wire(monkeypatch, space_repo=_SpaceRepo(spaces=[]))
     body = (await search_router.vectors_status(_AUTH)).model_dump()
     assert [(s["id"], s["active"]) for s in body["spaces"]] == [("3", True)]
+
+
+@pytest.mark.asyncio
+async def test_visual_layer_row_counts_videos_in_the_space(monkeypatch):
+    """The visual row (mig 507) sits between semantic and transcript, counts
+    the caller's VIDEOS (its own total) in the same space, and reports its
+    own stale count (older cut algorithm)."""
+    shot_repo = _ShotRepo(covered=38, total=1409, stale=2)
+    _wire(monkeypatch, emb_repo=_EmbRepo(1445, 1445), shot_repo=shot_repo)
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    assert [x["layer"] for x in body["layers"]] == ["semantic", "visual", "transcript"]
+    visual = body["layers"][1]
+    assert visual == {
+        "layer": "visual",
+        "status": "ok",
+        "covered": 38,
+        "total": 1409,
+        "stale": 2,
+    }
+    assert shot_repo.calls[0]["kind"] == "frame"
+    assert str(shot_repo.calls[0]["space_id"]) == body["spaces"][0]["id"]
+    assert body["spaces"][0]["layers"][1]["covered"] == 38
+
+
+@pytest.mark.asyncio
+async def test_missing_shot_store_leaves_the_semantic_row_alone(monkeypatch):
+    """Migration 507 not applied: the visual row is not_built with zero
+    totals; the semantic row and the status are unaffected."""
+    from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
+
+    _wire(
+        monkeypatch,
+        emb_repo=_EmbRepo(12, 20),
+        shot_repo=_ShotRepo(fail=EmbeddingStoreMissing("no 507")),
+    )
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    assert body["status"] == "ok" and body["layers"][0]["covered"] == 12
+    assert body["layers"][1] == {
+        "layer": "visual",
+        "status": "not_built",
+        "covered": 0,
+        "total": 0,
+        "stale": 0,
+    }

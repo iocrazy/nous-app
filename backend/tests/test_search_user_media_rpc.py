@@ -1137,7 +1137,9 @@ async def test_hybrid_skips_the_vector_leg_under_chip_filters(monkeypatch) -> No
         filters=LibraryChipFilters(ai_transcribed=False, tag_ids=[], min_rating=None),
     )
     assert resp.vector_leg == "ok", "off chips are not filters"
-    assert called == [1]
+    # Two embeds: the semantic leg and the visual (shot frame) leg each
+    # carry their own query instruction (mig 507).
+    assert called == [1, 1]
 
 
 @pytest.mark.asyncio
@@ -1282,7 +1284,13 @@ async def test_hybrid_embeds_the_query_with_the_retrieval_instruction(
     svc = _hybrid_svc_with(monkeypatch, text_rows=[], vector_rows=[])
     monkeypatch.setattr(svc.embedding_service, "try_embed", _spy)
     await svc.hybrid_search(query="  comfyui ", user_id="u-1", limit=10)
-    assert seen == [QUERY_INSTRUCTION + "comfyui"]
+    # The semantic leg embeds under the keyword instruction; the visual leg
+    # (mig 507) embeds the same query once more under its own instruction.
+    from app.services.library.search_service import VISUAL_QUERY_INSTRUCTION
+
+    assert sorted(seen) == sorted(
+        [QUERY_INSTRUCTION + "comfyui", VISUAL_QUERY_INSTRUCTION + "comfyui"]
+    )
 
 
 @pytest.mark.asyncio

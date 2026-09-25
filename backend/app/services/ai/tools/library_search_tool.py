@@ -13,12 +13,15 @@ strings — Snowflake BIGINTs do not survive a JS number.
 Scope: only the caller's OWN library. ``hybrid_search`` has no team argument
 yet; team libraries are a Known Limitation (prompts/README.md).
 
-Layers: today the search yields ``text`` and ``semantic`` hits. Without a
-filter, or with ``text`` in it, the hybrid search runs; ``semantic``
-without ``text`` runs the vector leg alone (``SearchService.semantic_only``). ``visual`` /
-``camera`` / ``transcript`` are in the enum so the signature does not change
-when PR 3/4 land; asking for them now is not an error, it is simply empty.
-``shot`` is always ``None`` until shot-level indexing exists.
+Layers: the search yields ``text``, ``semantic`` and (mig 507) ``visual``
+hits. Without a filter, or with ``text`` in it, the hybrid search runs (all
+three legs); ``semantic`` without ``text`` runs the document-vector leg alone
+(``SearchService.semantic_only``); ``visual`` without ``text`` / ``semantic``
+runs the shot-frame leg alone (``SearchService.visual_only``). ``camera`` /
+``transcript`` are in the enum so the signature does not change when they
+land; asking for them alone is not an error, it is simply empty. A ``visual``
+hit carries ``shot`` (the moment to play from); every other hit has
+``shot = null``.
 """
 
 from __future__ import annotations
@@ -57,9 +60,11 @@ def library_search_spec() -> dict[str, Any]:
                 "images and other media) by keywords or a natural-language "
                 "description. Returns each hit's resource_id, the layer that "
                 "matched (text = keyword match in title/description/tags, "
-                "semantic = meaning match) and a score. Entries without a "
-                "shot index have shot = null. Run several short queries "
-                "rather than one long sentence."
+                "semantic = meaning match, visual = a frame of the video looks "
+                "like the description) and a score. A visual hit carries shot = "
+                "{shot_id, start_ms, end_ms}: the moment to play from. Every "
+                "other hit has shot = null. Run several short queries rather "
+                "than one long sentence."
             ),
             "parameters": {
                 "type": "object",
@@ -126,7 +131,17 @@ def _hit_dict(result: Any, resource: Optional[dict]) -> dict[str, Any]:
         "score": round(float(result.similarity), 4),
         "author": result.author,
         "created_at": result.created_at,
-        "shot": None,
+        "shot": _shot_dict(getattr(result, "shot", None)),
+    }
+
+
+def _shot_dict(shot: Any) -> Optional[dict[str, Any]]:
+    if not shot:
+        return None
+    return {
+        "shot_id": str(shot["shot_id"]),  # Snowflake: string
+        "start_ms": int(shot["start_ms"]),
+        "end_ms": int(shot["end_ms"]),
     }
 
 
@@ -168,6 +183,11 @@ async def _search_legs(
         # Through hybrid a page of text hits would skip the vector leg
         # entirely (skipped_full_page); ask it directly.
         return await search_service.semantic_only(
+            query, user_id=user_id, limit=limit, threshold=SIMILARITY_THRESHOLD
+        )
+    if "visual" in wanted:
+        # Same reason: the shot-frame leg alone, never skipped by text hits.
+        return await search_service.visual_only(
             query, user_id=user_id, limit=limit, threshold=SIMILARITY_THRESHOLD
         )
     return None
