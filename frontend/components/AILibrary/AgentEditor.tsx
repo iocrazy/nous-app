@@ -28,8 +28,8 @@ import type {
   AgentPermissionAudit,
   AILibraryAgent,
   AILibrarySkill,
-  NousModelPublic,
 } from '../../types';
+import type { NousModelPublic } from '../../types/api';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { getNousModels, getAIGovernance } from '../../services/aiService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -49,6 +49,7 @@ import {
   visiblePlatformModels,
 } from './agentEditorModel';
 import { buildModelHealth, healthReasonKey } from '../../utils/modelHealth';
+import { isPlatformModelAvailable, platformModelText } from '../../utils/platformModel';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { GROUP_AVATAR, agentGroupOf } from './agentStatus';
 import { getAgentIcon } from './agentIcons';
@@ -184,10 +185,9 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
         providerKey: 'nous',
         providerName: PROVIDER_DISPLAY_NAMES.nous,
         models: platform.map((m) => m.name),
-        // Show the catalog's display name, not the row id.
-        labels: Object.fromEntries(
-          platform.map((m) => [m.name, m.display_name || m.name]),
-        ),
+        // Same label as the admin AI Models card (actual_model, else the row
+        // name), with display_name alongside. The VALUE stays the row name.
+        labels: Object.fromEntries(platform.map((m) => [m.name, platformModelText(m)])),
       });
     }
     return base;
@@ -197,6 +197,24 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
   // Derived from the payload rather than matched by name here: "Codex (Local)"
   // is a display string an admin can rename, and a hint keyed on a guessed name
   // would go silent the moment they did.
+  // Platform rows hidden from the picker because their last probe failed. If
+  // the agent already uses one, the picker keeps it as a leading option that
+  // says "unavailable" instead of the generic "provider not enabled" — the
+  // saved value is never swapped out behind the user's back.
+  const unavailablePlatformLabels = useMemo(() => {
+    if (!nousEnabled) return {};
+    return Object.fromEntries(
+      nousLlm
+        .filter((m) => !isPlatformModelAvailable(m))
+        .map((m) => [
+          m.name,
+          t('aiLibrary.agents.modelUnavailableOption', '{{name}} (unavailable)', {
+            name: platformModelText(m),
+          }),
+        ]),
+    );
+  }, [nousEnabled, nousLlm, t]);
+
   const localModelNames = useMemo(
     () => nousLlm.filter((m) => m.is_local).map((m) => m.name),
     [nousLlm],
@@ -776,6 +794,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
           modelHealth={modelHealth}
           unhealthyModelLabels={unhealthyModelLabels}
           nonChatModelLabels={nonChatModelLabels}
+          unavailableModelLabels={unavailablePlatformLabels}
           localSkillIds={localSkillIds}
           allSkills={allSkills}
           skillsLoading={skillsLoading}

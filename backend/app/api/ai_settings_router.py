@@ -26,6 +26,12 @@ from app.schemas.ai import (
     TestConnectionRequest,
     TestConnectionResponse,
 )
+from app.schemas.ai_settings_responses import (
+    AiGovernanceResponse,
+    AiHealthResponse,
+    AiNousModelsResponse,
+    AiProviderHealthReportResponse,
+)
 from app.services.ai.provider_health import (
     InvalidProviderKey,
     persist_provider_health,
@@ -360,7 +366,7 @@ async def test_ai_connection(body: TestConnectionRequest, auth: AuthDep):
     return TestConnectionResponse(**result)
 
 
-@router.post("/provider-health")
+@router.post("/provider-health", response_model=AiProviderHealthReportResponse)
 async def report_provider_health(body: ProviderHealthUpdate, auth: AuthDep):
     """Record a browser-direct local-provider test outcome.
 
@@ -385,7 +391,9 @@ async def report_provider_health(body: ProviderHealthUpdate, auth: AuthDep):
     return {"ok": True}
 
 
-@router.get("/health")
+@router.get(
+    "/health", response_model=AiHealthResponse, response_model_exclude_unset=True
+)
 async def get_ai_health(auth: AuthDep):
     """Capability health board: what model+provider+key each AI feature
     actually resolves to, with an actionable status per capability.
@@ -397,13 +405,7 @@ async def get_ai_health(auth: AuthDep):
     return {"capabilities": await get_capability_health(str(auth.user_id))}
 
 
-@router.get("/providers")
-async def list_providers():
-    """List available AI provider keys."""
-    return {"providers": AIProviderFactory.available_providers()}
-
-
-@router.get("/governance")
+@router.get("/governance", response_model=AiGovernanceResponse)
 async def get_ai_governance(auth: AuthDep):
     """Return per-module ``user_allowed`` booleans plus the Nous master-control
     state for all governed AI modules.
@@ -432,7 +434,7 @@ async def get_ai_governance(auth: AuthDep):
     return result
 
 
-@router.get("/nous-models")
+@router.get("/nous-models", response_model=AiNousModelsResponse)
 async def list_nous_models(auth: AuthDep, type: str | None = None):
     """List enabled Nous models (public, no API keys), optionally filtered by
     model type (``llm`` / ``embedding`` / ``tts`` / ``asr``).

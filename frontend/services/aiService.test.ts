@@ -19,7 +19,6 @@ import {
   triggerSummaryByResource,
   triggerTranscription,
   triggerTranscriptionByResource,
-  triggerVisualAnalysis,
   triggerVisualAnalysisByResource,
 } from './aiService';
 
@@ -44,7 +43,12 @@ beforeEach(() => {
 
 describe('transcription endpoints', () => {
   it('triggerTranscription POSTs /transcribe/:platformId', async () => {
-    const spy = stubJson({ task_id: 't1' });
+    // Real wire body of the legacy endpoint: no task id.
+    const spy = stubJson({
+      message: 'Transcription queued',
+      platform_id: 'p-123',
+      extracting_audio: false,
+    });
     await triggerTranscription('p-123');
     expect(spy.mock.calls[0][0]).toBe(
       'https://api.test/api/v1/ai/transcribe/p-123',
@@ -81,7 +85,7 @@ describe('transcription endpoints', () => {
 
 describe('summary endpoints', () => {
   it('triggerSummary POSTs /summarize/:platformId', async () => {
-    const spy = stubJson({ task_id: 's1' });
+    const spy = stubJson({ message: 'Summary generation queued', platform_id: 'p-123' });
     await triggerSummary('p-123');
     expect(spy.mock.calls[0][0]).toBe(
       'https://api.test/api/v1/ai/summarize/p-123',
@@ -105,16 +109,6 @@ describe('summary endpoints', () => {
     const result = await getSummaryByResource('r-1');
     expect(result.key_points).toEqual([]);
     expect(result.topics).toEqual([]);
-  });
-});
-
-describe('visual analysis', () => {
-  it('triggerVisualAnalysis POSTs /analyze/:platformId', async () => {
-    const spy = stubJson({ task_id: 'v1' });
-    await triggerVisualAnalysis('p-123');
-    expect(spy.mock.calls[0][0]).toBe(
-      'https://api.test/api/v1/ai/analyze/p-123',
-    );
   });
 });
 
@@ -472,14 +466,27 @@ describe('transcription hotwords settings mapping', () => {
 });
 
 describe('resource-scoped trigger response contract (RECON#4)', () => {
+  // Real wire body of the transcribe endpoint's queued answer.
+  const TRANSCRIBE_QUEUED = {
+    message: 'Transcription queued',
+    resource_id: 'r-9',
+    platform_id: 'p-9',
+    points_charged: 0,
+    extracting_audio: false,
+    transcription_pending_audio: false,
+    already_transcribed: false,
+  };
+
   it('passes through the real transcribe body — message, not task_id', async () => {
     // Wire body copied from ai_router.trigger_transcription_by_resource.
     stubJson({
       message: 'Audio extraction started — transcription will follow',
       resource_id: '7301234567890123456',
       platform_id: 'p-1',
-      points_charged: 5,
+      points_charged: 0,
       extracting_audio: true,
+      transcription_pending_audio: false,
+      already_transcribed: false,
     });
 
     const res = await triggerTranscriptionByResource('7301234567890123456');
@@ -496,20 +503,26 @@ describe('resource-scoped trigger response contract (RECON#4)', () => {
     // W2-5 (438): the flag is what makes the summary survive a page refresh
     // — the server persists the intent and the transcription success chain
     // consumes it. No flag → no body → legacy request byte-for-byte.
-    const spy = stubJson({ message: 'ok', resource_id: 'r-9' });
+    const spy = stubJson(TRANSCRIBE_QUEUED);
     await triggerTranscriptionByResource('r-9', { followUpSummary: true });
     const [, init] = spy.mock.calls[0];
     expect(JSON.parse(String(init?.body))).toEqual({ follow_up_summary: true });
 
     // spyOn returns the SAME spy across stubs — read this call, not call #0.
-    const spy2 = stubJson({ message: 'ok', resource_id: 'r-9' });
+    const spy2 = stubJson(TRANSCRIBE_QUEUED);
     await triggerTranscriptionByResource('r-9');
     const secondInit = spy2.mock.calls.at(-1)?.[1];
     expect(secondInit?.body).toBeUndefined();
   });
 
   it('passes through the dedup body (200 "already in progress")', async () => {
-    stubJson({ message: 'Summary already in progress', resource_id: 'r-1' });
+    // The dedup-SELECT branch: the one summarize answer without platform_id.
+    stubJson({
+      message: 'Summary already in progress',
+      resource_id: 'r-1',
+      points_charged: 0,
+      already_summarized: false,
+    });
 
     const res = await triggerSummaryByResource('r-1');
 
@@ -530,8 +543,8 @@ describe('resource-scoped trigger response contract (RECON#4)', () => {
   });
 
   it('does not type the response as carrying a task id', async () => {
-    stubJson({ message: 'Transcription queued', resource_id: 'r-1' });
-    const res = await triggerTranscriptionByResource('r-1');
+    stubJson(TRANSCRIBE_QUEUED);
+    const res = await triggerTranscriptionByResource('r-9');
 
     // Compile-time tripwire: `tsc --noEmit` reports the directive below
     // as unused the moment someone re-adds task_id to the return type

@@ -2,6 +2,7 @@
 // All ids are strings — the backend serializes bigints via coerce_numbers_to_str.
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import type { InspirationNoteActivityDay, InspirationNoteTagCount } from '../types/api';
 
 export interface NoteAttachment {
   id: string;
@@ -195,19 +196,19 @@ export async function deleteNote(id: string): Promise<void> {
 export async function getActivity(
   dateFrom: string,
   dateTo: string,
-): Promise<{ day: string; cnt: number }[]> {
+): Promise<InspirationNoteActivityDay[]> {
   const resp = await fetch(
     `${base()}/notes/activity?date_from=${dateFrom}&date_to=${dateTo}`,
     { headers: await getAuthHeaders() },
   );
-  return toArray<{ day: string; cnt: number }>(await jsonOrThrow(resp), 'getActivity');
+  return toArray<InspirationNoteActivityDay>(await jsonOrThrow(resp), 'getActivity');
 }
 
-export async function getTagCounts(): Promise<{ tag: string; cnt: number }[]> {
+export async function getTagCounts(): Promise<InspirationNoteTagCount[]> {
   const resp = await fetch(`${base()}/notes/tags`, {
     headers: await getAuthHeaders(),
   });
-  return toArray<{ tag: string; cnt: number }>(await jsonOrThrow(resp), 'getTagCounts');
+  return toArray<InspirationNoteTagCount>(await jsonOrThrow(resp), 'getTagCounts');
 }
 
 export async function uploadAttachment(

@@ -52,6 +52,9 @@ const shot = (over: Partial<Shot> = {}): Shot => ({
   video_url: null,
   status: 'empty',
   sort_order: 1000,
+  created_at: '2026-09-24T01:02:03.456789+00:00',
+  updated_at: '2026-09-24T01:02:03.456789+00:00',
+  created_by_agent_run_id: null,
   ...over,
 });
 

@@ -51,12 +51,8 @@ import { OwnerPicker, type AgentOption, type PersonOption } from '../workflow/Ow
 import { OwnerCandidateList } from '../workflow/OwnerCandidateList';
 import { DateTimePopover } from '../common/DateTimePopover';
 import { BriefField } from '../workflow/BriefField';
-import type {
-  EpisodeProgress,
-  ProjectNodePatch,
-  ProjectStageNode,
-  WorkflowMemberRef,
-} from '../../types';
+import type { ProjectNodePatch, WorkflowMemberRef } from '../../types';
+import type { EpisodeProgress, ProjectStageNode } from '../../types/api';
 
 export interface WorkspaceNodeSettingsProps {
   projectId: string;

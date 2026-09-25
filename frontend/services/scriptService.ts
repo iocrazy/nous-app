@@ -1,15 +1,24 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import { handleResponse, unwrapResponse } from '../utils/apiHelpers';
-import { ScriptProject, ScriptChapter, ScriptProjectSummary } from '../types';
+import type {
+  ScriptAiTaskDispatch,
+  ScriptChapter,
+  ScriptProject,
+  ScriptProjectDetail,
+  ScriptProjectPage,
+  ScriptProjectUpdate,
+} from '../types/api';
 
 // ─── Script Project CRUD ─────────────────────────────────────────────────────
+// Plain `fetch`: Snowflake ids arrive as JSON numbers (see `ScriptProject` in
+// types/api.ts). Callers `String()` them where they build URLs or compare.
 
 export async function fetchScriptProjects(
   projectId: string,
   page = 1,
   limit = 20,
-): Promise<{ data: ScriptProjectSummary[]; total: number }> {
+): Promise<{ data: ScriptProject[]; total: number }> {
   const headers = await getAuthHeaders();
   const params = new URLSearchParams({
     project_id: projectId,
@@ -17,18 +26,17 @@ export async function fetchScriptProjects(
     limit: String(limit),
   });
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects?${params}`, { headers });
-  const result = await unwrapResponse<{ items: ScriptProjectSummary[]; total: number }>(res);
+  const result = await unwrapResponse<ScriptProjectPage>(res);
   return { data: result?.items ?? [], total: result?.total ?? 0 };
 }
 
-export interface ScriptProjectFull extends ScriptProject {
-  chapters: ScriptChapter[];
-}
+/** The project row with its chapters folded in (the raw payload nests it). */
+export type ScriptProjectFull = ScriptProject & { chapters: ScriptChapter[] };
 
 export async function fetchScriptProject(scriptId: string): Promise<ScriptProjectFull> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}`, { headers });
-  const raw = await unwrapResponse<{ project: ScriptProject; chapters: ScriptChapter[] }>(res);
+  const raw = await unwrapResponse<ScriptProjectDetail>(res);
   return { ...raw.project, chapters: raw.chapters ?? [] };
 }
 
@@ -53,12 +61,7 @@ export async function createScriptProject(data: {
 
 export async function updateScriptProject(
   scriptId: string,
-  data: Partial<
-    Pick<
-      ScriptProject,
-      'name' | 'description' | 'status' | 'settings_json' | 'episode_id' | 'target_duration_sec'
-    >
-  >,
+  data: ScriptProjectUpdate,
 ): Promise<ScriptProject> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}`, {
@@ -71,10 +74,12 @@ export async function updateScriptProject(
 
 export async function deleteScriptProject(scriptId: string): Promise<void> {
   const headers = await getAuthHeaders();
-  await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects/${scriptId}`, {
     method: 'DELETE',
     headers,
   });
+  // A 403/404/500 used to resolve as success: the response was never read.
+  await handleResponse<unknown>(res);
 }
 
 // ─── AI Operations (async) ───────────────────────────────────────────────────
@@ -95,14 +100,14 @@ export async function expandChapter(data: {
   summary: string;
   expansion_request?: string;
   context?: string;
-}): Promise<{ task_id: string }> {
+}): Promise<ScriptAiTaskDispatch> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/expand-chapter`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return handleResponse<{ task_id: string }>(res);
+  return handleResponse<ScriptAiTaskDispatch>(res);
 }
 
 export async function createBranches(data: {
@@ -113,12 +118,12 @@ export async function createBranches(data: {
   branch_count: number;
   branch_type: 'choice' | 'condition';
   context?: string;
-}): Promise<{ task_id: string }> {
+}): Promise<ScriptAiTaskDispatch> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/create-branches`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return handleResponse<{ task_id: string }>(res);
+  return handleResponse<ScriptAiTaskDispatch>(res);
 }

@@ -7,7 +7,7 @@ Version management: upload, set-current, delete, HLS serve, transcode.
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import (
     APIRouter,
@@ -20,14 +20,19 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
 from app.core.scope_guards import verify_resource_write_access
 from app.db.scope import Scope, request_scope
 from app.repositories.resources_repository import ResourcesRepository
+from app.schemas.envelope import Envelope
+from app.schemas.resource_responses import ResourcesMessage
+from app.schemas.resource_rows import ResourceVersionRow
+from app.schemas.wire import binary_response
 from app.services.library.resources_service import ResourcesService
 from app.services.media.render.thumbnail_service import ThumbnailService
 
@@ -53,7 +58,9 @@ async def _scoped_generate_thumbnail(svc: ThumbnailService, user_id, **kwargs) -
         await svc.generate_thumbnail(**kwargs)
 
 
-@router.get("/{resource_id}/versions")
+@router.get(
+    "/{resource_id}/versions", response_model=Envelope[List[ResourceVersionRow]]
+)
 async def list_versions(resource_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """List all versions of a resource."""
     try:
@@ -70,7 +77,7 @@ async def list_versions(resource_id: str, auth: AuthDep, _scope: ScopedRequestDe
         raise HTTPException(status_code=500, detail="Failed to list versions")
 
 
-@router.post("/{resource_id}/versions")
+@router.post("/{resource_id}/versions", response_model=Envelope[ResourceVersionRow])
 async def upload_version(
     resource_id: str,
     auth: AuthDep,
@@ -148,7 +155,10 @@ async def upload_version(
         raise HTTPException(status_code=500, detail="Failed to upload version")
 
 
-@router.put("/{resource_id}/versions/{version_id}/content")
+@router.put(
+    "/{resource_id}/versions/{version_id}/content",
+    response_model=Envelope[ResourceVersionRow],
+)
 async def overwrite_version_content(
     resource_id: str,
     version_id: str,
@@ -175,7 +185,7 @@ async def overwrite_version_content(
             user_id=auth.user_id,
             file=file,
         )
-        return {"success": True, "data": result}
+        return {"success": True, "data": require_row(result)}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except HTTPException:
@@ -188,7 +198,10 @@ async def overwrite_version_content(
         raise HTTPException(status_code=500, detail="Failed to overwrite version")
 
 
-@router.post("/{resource_id}/versions/{version_number}/set-current")
+@router.post(
+    "/{resource_id}/versions/{version_number}/set-current",
+    response_model=Envelope[ResourceVersionRow],
+)
 async def set_current_version(
     resource_id: str,
     version_number: int,
@@ -209,7 +222,7 @@ async def set_current_version(
         raise HTTPException(status_code=500, detail="Failed to set current version")
 
 
-@router.delete("/{resource_id}/versions/{version_id}")
+@router.delete("/{resource_id}/versions/{version_id}", response_model=ResourcesMessage)
 async def delete_version(
     resource_id: str,
     version_id: str,
@@ -228,7 +241,17 @@ async def delete_version(
         raise HTTPException(status_code=500, detail="Failed to delete version")
 
 
-@router.get("/{resource_id}/versions/{version_id}/hls/{path:path}")
+@router.get(
+    "/{resource_id}/versions/{version_id}/hls/{path:path}",
+    response_class=Response,
+    responses=binary_response(
+        "An HLS playlist or segment.",
+        "application/vnd.apple.mpegurl",
+        "video/mp2t",
+        "video/iso.segment",
+        "video/mp4",
+    ),
+)
 async def serve_hls_file(
     resource_id: str,
     version_id: str,
@@ -349,7 +372,10 @@ async def serve_hls_file(
         raise HTTPException(status_code=500, detail="Failed to serve HLS file")
 
 
-@router.post("/{resource_id}/versions/{version_id}/transcode")
+@router.post(
+    "/{resource_id}/versions/{version_id}/transcode",
+    response_model=ResourcesMessage,
+)
 async def retry_transcode(
     resource_id: str,
     version_id: str,
@@ -393,7 +419,14 @@ async def retry_transcode(
         raise HTTPException(status_code=500, detail="Failed to trigger transcoding")
 
 
-@router.get("/{resource_id}/versions/{version_id}/file")
+@router.get(
+    "/{resource_id}/versions/{version_id}/file",
+    response_class=Response,
+    responses=binary_response(
+        "The version's file as a download (or a redirect to it).",
+        "application/octet-stream",
+    ),
+)
 async def serve_version_file(
     resource_id: str,
     version_id: str,

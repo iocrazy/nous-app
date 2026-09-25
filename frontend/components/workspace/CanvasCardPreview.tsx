@@ -90,8 +90,9 @@ function extractMiniEdges(
 }
 
 interface CanvasCardPreviewProps {
-  nodes: CanvasNode[] | undefined;
-  connections: CanvasConnection[] | undefined;
+  /** Absent when the caller only has a summary row (no node graph). */
+  nodes?: CanvasNode[];
+  connections?: CanvasConnection[];
 }
 
 export function CanvasCardPreview({ nodes, connections }: CanvasCardPreviewProps) {

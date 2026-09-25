@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Layers, Loader2, Upload } from 'lucide-react';
 import { Loading } from './common/Loading';
 import { useTranslation } from 'react-i18next';
-import { FileVersion } from '../types';
+import type { FileVersion } from '../types/api';
 import { fetchFileVersions, uploadNewVersion } from '../services/projectsService';
 import { useToast } from './Toast';
 

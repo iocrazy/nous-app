@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Share2, Copy, ExternalLink } from 'lucide-react';
-import { ProjectShare } from '../types';
+import type { ProjectShare } from '../types/api';
 import { fetchProjectShares } from '../services/projectsService';
 
 interface ProjectSharesViewProps {
@@ -19,7 +19,7 @@ export const ProjectSharesView: React.FC<ProjectSharesViewProps> = ({ projectId,
       setLoading(true);
       const data = await fetchProjectShares(projectId);
       setShares(data);
-      onCountChange?.(data.filter(s => s.is_active).length);
+      onCountChange?.(data.filter(s => s.status === 'active').length);
     } catch (err) {
       console.error('Failed to load project shares:', err);
     } finally {
@@ -97,7 +97,7 @@ export const ProjectSharesView: React.FC<ProjectSharesViewProps> = ({ projectId,
             <tr key={share.id} className="hover:bg-ink-700/20 transition-colors">
               <td className="px-4 py-3">
                 <span className="text-sm text-ink-50 font-mono">{share.share_code}</span>
-                {share.password && (
+                {share.has_password && (
                   <span className="ml-2 text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
                     {t('projects.shares.protected', 'Protected')}
                   </span>
@@ -112,7 +112,7 @@ export const ProjectSharesView: React.FC<ProjectSharesViewProps> = ({ projectId,
                 <span className="text-sm text-ink-300">{share.view_count}</span>
               </td>
               <td className="px-4 py-3 text-center">
-                {share.is_active ? (
+                {share.status === 'active' ? (
                   <span className="text-xs text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">
                     {t('shares.status.active', 'Active')}
                   </span>

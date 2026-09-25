@@ -30,16 +30,24 @@ import uuid as _uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from loguru import logger
 
 from app.core.deps import AuthDep
 from app.core.scope_dep import scoped_request
 from app.repositories.resources_repository import ResourcesRepository
+from app.schemas.envelope import Envelope
+from app.schemas.resource_responses import (
+    ResourceBatchAiResult,
+    ResourceGenPrompts,
+    ResourceTaskDispatch,
+)
 from app.schemas.resources import (
     BatchAssetAiRequest,
     GenPromptTranslateRequest,
     TrainingSetExportRequest,
 )
+from app.schemas.wire import binary_response
 
 # Both moved to app/services/library/resource_ai_ops.py so the asset library's
 # prompt translate endpoint can drive the SAME translation agent without
@@ -50,7 +58,10 @@ from app.services.library.resource_ai_ops import build_translate_plan, translate
 router = APIRouter(prefix="/resources", dependencies=[Depends(scoped_request)])
 
 
-@router.post("/{resource_id}/gen-prompt/translate")
+@router.post(
+    "/{resource_id}/gen-prompt/translate",
+    response_model=Envelope[ResourceGenPrompts],
+)
 async def translate_gen_prompt(
     resource_id: str,
     data: GenPromptTranslateRequest,
@@ -240,7 +251,7 @@ async def _single_asset_ai(resource_id: str, user_id: str, operation: str) -> di
     return {"success": True, "task_id": task_id}
 
 
-@router.post("/{resource_id}/gen-prompt/generate")
+@router.post("/{resource_id}/gen-prompt/generate", response_model=ResourceTaskDispatch)
 async def generate_gen_prompt(
     resource_id: str,
     auth: AuthDep,
@@ -255,7 +266,10 @@ async def generate_gen_prompt(
     return await _single_asset_ai(resource_id, auth.user_id, "caption")
 
 
-@router.post("/{resource_id}/slides/{slide_name}/generate-prompt")
+@router.post(
+    "/{resource_id}/slides/{slide_name}/generate-prompt",
+    response_model=ResourceTaskDispatch,
+)
 async def generate_slide_prompt(
     resource_id: str,
     slide_name: str,
@@ -364,7 +378,7 @@ async def generate_slide_prompt(
     return {"success": True, "task_id": wf_id}
 
 
-@router.post("/{resource_id}/classify")
+@router.post("/{resource_id}/classify", response_model=ResourceTaskDispatch)
 async def classify_resource(
     resource_id: str,
     auth: AuthDep,
@@ -378,7 +392,7 @@ async def classify_resource(
     return await _single_asset_ai(resource_id, auth.user_id, "classify")
 
 
-@router.post("/ai/batch")
+@router.post("/ai/batch", response_model=ResourceBatchAiResult)
 async def batch_asset_ai(
     data: BatchAssetAiRequest,
     auth: AuthDep,
@@ -418,7 +432,14 @@ async def batch_asset_ai(
     return {"success": True, "dispatched": dispatched, "skipped": skipped}
 
 
-@router.post("/export/training-set")
+@router.post(
+    "/export/training-set",
+    response_class=Response,
+    responses=binary_response(
+        "LoRA training zip: images plus same-stem .txt captions.",
+        "application/zip",
+    ),
+)
 async def export_training_set(
     data: TrainingSetExportRequest,
     auth: AuthDep,

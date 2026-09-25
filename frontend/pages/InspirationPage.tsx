@@ -35,7 +35,7 @@ import { PageHeader } from '../components/layout/PageHeader';
 import { FilterChip } from '../components/resources/filter/FilterChip';
 import { RatingFilterDropdown } from '../components/resources/filter/RatingFilterDropdown';
 import { NoteTagsFilterDropdown } from '../components/Inspiration/NoteTagsFilterDropdown';
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 
 const PAGE_SIZE = 50;
 

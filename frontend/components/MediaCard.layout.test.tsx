@@ -70,7 +70,6 @@ vi.mock('../services/aiService', () => ({
   getTranscript: vi.fn(),
   triggerSummary: vi.fn(),
   getSummary: vi.fn(),
-  triggerVisualAnalysis: vi.fn(),
 }));
 
 vi.mock('./Toast', () => ({

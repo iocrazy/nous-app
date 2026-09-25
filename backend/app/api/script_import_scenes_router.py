@@ -1,10 +1,9 @@
 """Script screenplay-import router — POST /scripts/import-screenplay.
 
 Creates a NEW script from imported text (Fountain or prose) and dispatches the
-async ``script_import`` workflow. Distinct from the pre-existing
-``POST /scripts/import`` (``script_import_router.py``), which synchronously
-extracts a document's text into a chapter — this endpoint produces a fully
-scened script asynchronously and returns a task to poll.
+async ``script_import`` workflow; it returns a task to poll. (The old
+synchronous ``POST /scripts/import`` document → chapter extractor had no caller
+left and was removed in the OpenAPI P6 pass.)
 """
 
 import uuid as _uuid
@@ -13,19 +12,24 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from app.core.deps import AuthDep, require_team_id
+from app.core.scope_guards import verify_project_write_access
 from app.schemas.script import ScriptImportRequest
+from app.schemas.script_ai_responses import ScriptImportScreenplayDispatch
 from app.services.infra.unified_task_manager import get_task_manager
 from app.services.script.fountain_parser import MAX_FOUNTAIN_CHARS
 
 router = APIRouter(prefix="/scripts", tags=["Script Import"])
 
 
-@router.post("/import-screenplay")
+@router.post("/import-screenplay", response_model=ScriptImportScreenplayDispatch)
 async def import_screenplay(auth: AuthDep, body: ScriptImportRequest) -> dict:
     """Create a script from imported text and dispatch the import workflow.
 
-    Guard口径 mirrors ``create_script_project``: ``require_team_id`` scopes the
-    new script to the caller's team. Returns ``{success, script_id, task_id}``
+    Guard口径 mirrors ``create_script_project``: the caller must be able to
+    write the target project (it is in the body, so the guard runs
+    imperatively — before this, any signed-in user could create a script in
+    any project id), and ``require_team_id`` scopes the new script to the
+    caller's team. Returns ``{success, script_id, task_id}``
     immediately; the client polls ``task_id`` and opens the editor on the new
     ``script_id`` once the workflow completes.
     """
@@ -35,6 +39,7 @@ async def import_screenplay(auth: AuthDep, body: ScriptImportRequest) -> dict:
             detail=f"Content too large (max {MAX_FOUNTAIN_CHARS} characters)",
         )
 
+    await verify_project_write_access(str(body.project_id), auth)
     team_id = await require_team_id(auth.user_id)
 
     try:

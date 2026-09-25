@@ -692,10 +692,7 @@ class TestTranscribeLegacy:
         repo.get_resource_by_media_id_and_creator = AsyncMock(
             return_value={"id": "res-9"}
         )
-        monkeypatch.setattr(
-            "app.repositories.resources_repository.ResourcesRepository",
-            lambda: repo,
-        )
+        monkeypatch.setattr(ai_router, "ResourcesRepository", lambda: repo)
 
     @pytest.mark.asyncio
     async def test_no_audio_but_video_dispatches_extract_chain(
@@ -738,6 +735,7 @@ class TestTranscribeLegacy:
             "title": "Nothing",
         }
         self._patch_media(monkeypatch, media)
+        self._patch_owner_resource(monkeypatch)
 
         team_spy = AsyncMock(return_value="team-1")
         monkeypatch.setattr(ai_router, "get_team_id_for_user", team_spy)
@@ -1017,10 +1015,7 @@ class TestManualTranscribeFlowGrouping:
         repo.get_resource_by_media_id_and_creator = AsyncMock(
             return_value={"id": "res-9"}
         )
-        monkeypatch.setattr(
-            "app.repositories.resources_repository.ResourcesRepository",
-            lambda: repo,
-        )
+        monkeypatch.setattr(ai_router, "ResourcesRepository", lambda: repo)
         monkeypatch.setattr(
             ai_router, "get_team_id_for_user", AsyncMock(return_value=None)
         )
@@ -1153,6 +1148,11 @@ class TestTranscribePreflight:
             return media
 
         monkeypatch.setattr(ai_router, "_get_media_or_404", _get)
+        owned = MagicMock()
+        owned.get_resource_by_media_id_and_creator = AsyncMock(
+            return_value={"id": "res-9"}
+        )
+        monkeypatch.setattr(ai_router, "ResourcesRepository", lambda: owned)
         dispatched: list = []
         created: list = []
         _patch_common(monkeypatch, dispatched, created)
@@ -1188,10 +1188,7 @@ class TestTranscribePreflight:
         repo.get_resource_by_media_id_and_creator = AsyncMock(
             return_value={"id": "res-9"}
         )
-        monkeypatch.setattr(
-            "app.repositories.resources_repository.ResourcesRepository",
-            lambda: repo,
-        )
+        monkeypatch.setattr(ai_router, "ResourcesRepository", lambda: repo)
         pts = MagicMock()
         pts.check_and_consume = AsyncMock()
         monkeypatch.setattr(ai_router, "PointsService", lambda: pts, raising=False)

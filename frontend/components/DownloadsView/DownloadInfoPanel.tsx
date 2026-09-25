@@ -12,7 +12,8 @@ import {
   Plus,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Video, Tag } from '../../types';
+import { Video } from '../../types';
+import type { Tag } from '../../types/api';
 import { EagleTagPicker } from '../EagleTagPicker';
 import { ResourcePromptSection } from '../resources/ResourcePromptSection';
 import { AIStatusBadge } from './AIStatusBadge';

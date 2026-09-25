@@ -26,10 +26,10 @@ import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Layers, X } from 'lucide-react';
 
 import { listCanvases } from '../../features/canvas-core/services/canvasService';
-import type { Canvas } from '../../features/canvas-core/types';
+import type { CanvasSummary } from '../../features/canvas-core/types';
 import { getResourceCoverUrl } from '../../services/resourceService';
 import { fetchProjects } from '../../services/projectsService';
-import type { Project } from '../../types';
+import type { Project } from '../../types/api';
 
 export interface SendToCanvasModalProps {
   /** The picture that accompanies the prompt, or `null` for a TEXT-ONLY
@@ -73,7 +73,7 @@ export function SendToCanvasModal({
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [canvases, setCanvases] = useState<Canvas[]>([]);
+  const [canvases, setCanvases] = useState<CanvasSummary[]>([]);
   const [loadingCanvases, setLoadingCanvases] = useState(false);
 
   useEffect(() => {
@@ -94,13 +94,13 @@ export function SendToCanvasModal({
   const handlePickProject = (project: Project) => {
     setSelectedProject(project);
     setLoadingCanvases(true);
-    listCanvases(project.id)
+    listCanvases(String(project.id))
       .then((rows) => setCanvases(rows.filter((c) => c.kind !== 'classic')))
       .catch((err) => console.error('[SendToCanvasModal] listCanvases failed:', err))
       .finally(() => setLoadingCanvases(false));
   };
 
-  const handlePickCanvas = (canvas: Canvas) => {
+  const handlePickCanvas = (canvas: CanvasSummary) => {
     // Mirrors ResourceDetailPage's canvas-ref navigation: team prefix only
     // when the destination project actually belongs to a team.
     const target = `${selectedProject?.team_id ? `/team/${selectedProject.team_id}` : ''}/canvas/${canvas.id}`;

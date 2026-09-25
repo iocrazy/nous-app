@@ -136,6 +136,14 @@ async def read_resource_tag_slugs(resource_id: str) -> set[str]:
     return {r[0] for r in rows if r[0]}
 
 
+def _workflow_resource_id(resource_id: str | int | None) -> int | None:
+    """``resource_id`` as the int an AI workflow input takes (Snowflake ids
+    travel as numeric strings); anything else leaves the workflow to its
+    initiator-filtered fallback lookup."""
+    text = str(resource_id) if resource_id is not None else ""
+    return int(text) if text.isdigit() else None
+
+
 async def chain_transcript_summary_for_tags(
     platform_id: str,
     user_id: str,
@@ -247,6 +255,8 @@ async def chain_transcript_summary_for_tags(
             dbos_workflow_kwargs={
                 "parsed_media_id": int(parsed_media_id),
                 "user_id": user_id,
+                # The resource resolved above; the workflow writes there only.
+                "resource_id": _workflow_resource_id(resource_id),
             },
             workflow_id=tr_wf_id,
         )
@@ -267,6 +277,7 @@ async def chain_transcription_unconditional(
     platform_id: str,
     user_id: str,
     *,
+    resource_id: str | None = None,
     flow_id: str | None = None,
     video_title: str = "",
 ):
@@ -303,10 +314,20 @@ async def chain_transcription_unconditional(
             )
             return
 
-        resource = await ResourcesRepository().get_resource_by_media_id_and_creator(
-            str(parsed_media_id), user_id
-        )
-        resource_id = str(resource["id"]) if resource else None
+        # The resource the manual click was for (threaded through
+        # extract_audio). Only when the caller did not name one, fall back to
+        # the initiator's own resource of this media.
+        if not resource_id:
+            resource = await ResourcesRepository().get_resource_by_media_id_and_creator(
+                str(parsed_media_id), user_id
+            )
+            resource_id = str(resource["id"]) if resource else None
+        if not resource_id:
+            logger.warning(
+                f"[AI] No resource of {user_id} for {platform_id}; not dispatching "
+                "a transcription that would have no row of theirs to land on"
+            )
+            return
 
         mgr = get_task_manager()
         title_clip = (video_title or (media or {}).get("title") or platform_id or "")[
@@ -331,6 +352,8 @@ async def chain_transcription_unconditional(
             dbos_workflow_kwargs={
                 "parsed_media_id": int(parsed_media_id),
                 "user_id": user_id,
+                # The resource resolved above; the workflow writes there only.
+                "resource_id": _workflow_resource_id(resource_id),
             },
             workflow_id=tr_wf_id,
         )
@@ -432,7 +455,9 @@ async def _dispatch_post_transcript_summary(
     )
 
 
-async def chain_summary_for_tags(parsed_media_id: int, user_id: str):
+async def chain_summary_for_tags(
+    parsed_media_id: int, user_id: str, *, resource_id: str | None = None
+):
     """Dispatch ai_summary_workflow IFF the resource tied to
     ``parsed_media_id`` carries the Summary tag. Called by
     ``ai_transcription_workflow``'s success path so summary always runs
@@ -481,7 +506,14 @@ async def chain_summary_for_tags(parsed_media_id: int, user_id: str):
         )
         res_repo = ResourcesRepository()
         async with scope_cm:
-            resource = await res_repo.get_resource_by_media_id(str(parsed_media_id))
+            # The resource the transcription wrote to. By media id alone the
+            # lookup picks an arbitrary holder when several users share the
+            # media, and the summary (and its charge) went to them.
+            resource = (
+                await res_repo.get_resource_by_id(str(resource_id))
+                if resource_id
+                else await res_repo.get_resource_by_media_id(str(parsed_media_id))
+            )
 
         if not resource:
             logger.info(
@@ -528,7 +560,9 @@ async def _clear_summary_follow_up(resource_id: str) -> None:
         )
 
 
-async def consume_summary_follow_up(parsed_media_id: int) -> None:
+async def consume_summary_follow_up(
+    parsed_media_id: int, *, resource_id: str | None = None
+) -> None:
     """Honour a persisted "summarize after this transcription" intent.
 
     The other half of migration 438: the transcribe trigger endpoint writes
@@ -577,8 +611,14 @@ async def consume_summary_follow_up(parsed_media_id: int) -> None:
             else nullcontext()
         )
         async with scope_cm:
-            resource = await ResourcesRepository().get_resource_by_media_id(
-                str(parsed_media_id)
+            # Same rule as chain_summary_for_tags: the intent to honour is the
+            # one on the resource that was just transcribed.
+            resource = (
+                await ResourcesRepository().get_resource_by_id(str(resource_id))
+                if resource_id
+                else await ResourcesRepository().get_resource_by_media_id(
+                    str(parsed_media_id)
+                )
             )
         if not resource:
             return
@@ -714,6 +754,7 @@ async def maybe_chain_ai_pipeline(
                 "title": (media or {}).get("title") or "",
                 "description": (media or {}).get("description") or "",
                 "user_id": user_id,
+                "resource_id": _workflow_resource_id(resource_id),
             },
             workflow_id=wf_id,
         )

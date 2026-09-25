@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { summarizeToolCall } from './SubTaskCard';
-import type { ChatToolCall } from '../../types';
+import type { ChatToolCall } from '../../types/api';
 
 function call(over: Partial<ChatToolCall>): ChatToolCall {
   return {

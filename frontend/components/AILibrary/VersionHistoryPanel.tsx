@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { History, RefreshCw, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { useToast } from '../Toast';
-import type { AILibraryVersionItem } from '../../types';
+import type { AILibraryVersionItem } from '../../types/api';
 
 interface VersionHistoryPanelProps {
   /** What kind of entity we're listing versions for. */
@@ -198,7 +198,7 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
                       <div className="text-[10px] text-ink-500 mt-0.5">
                         {_fmtTime(v.created_at)}
                       </div>
-                      {isExpanded && kind === 'agent' && (
+                      {isExpanded && kind === 'agent' && 'model' in v && (
                         <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-ink-500 bg-ink-950/50 rounded p-2">
                           <div>
                             <div className="text-ink-600">

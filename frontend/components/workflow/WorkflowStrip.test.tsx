@@ -8,13 +8,14 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { WorkflowStrip } from './WorkflowStrip';
-import type { ProjectStageNode } from '../../types';
+import type { ProjectStageNode } from '../../types/api';
+import { makeStageNode } from '../../tests/fixtures/projects';
 
 const FUTURE = '2999-01-01';
 const PAST = '2000-01-01';
 
 function node(over: Partial<ProjectStageNode>): ProjectStageNode {
-  return {
+  return makeStageNode({
     id: '1',
     project_id: '10',
     source_template_node_id: null,
@@ -33,9 +34,9 @@ function node(over: Partial<ProjectStageNode>): ProjectStageNode {
     skipped: false,
     members: [],
     completion_policy: 'owner',
-    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false },
+    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false, prepare_agent_run: false, auto_start: false },
     ...over,
-  };
+  });
 }
 
 describe('WorkflowStrip', () => {

@@ -20,10 +20,13 @@ import { useTranslation } from 'react-i18next';
 
 import type { PromptGenSettings } from '../types';
 import { useModelCapabilities } from './useModelCapabilities';
+import { platformModelText } from '../../../../utils/platformModel';
 
 export interface FooterModel {
   name: string;
   display_name?: string;
+  /** Upstream model id; the primary label, as on the admin AI Models card. */
+  actual_model?: string | null;
   /** True when the row runs on the user's own machine via the paired codex
    *  daemon (C 方案). Derived server-side — the raw provider name is behind
    *  the 2026-08-14 leak tripwire and never reaches the client. */
@@ -34,9 +37,16 @@ export interface FooterModel {
  *  "· local" suffix are gone on purpose: the server twin is hidden whenever
  *  the local one can run (see visible_generation_rows), so "local" is not a
  *  distinction the user needs — one engine, one entry, one name. */
-export function modelLabel(m: { name: string; display_name?: string; is_local?: boolean }): string {
-  const base = m.display_name || m.name;
-  return base.replace(/\s*\((Local|本地)\)\s*$/i, '').trim() || m.name;
+export function modelLabel(m: {
+  name: string;
+  display_name?: string;
+  actual_model?: string | null;
+  is_local?: boolean;
+}): string {
+  // Primary = the admin card's label (actual_model, else the row name); the
+  // display name follows as secondary text, minus the retired local tag.
+  const display = (m.display_name ?? '').replace(/\s*\((Local|本地)\)\s*$/i, '').trim();
+  return platformModelText({ name: m.name, display_name: display, actual_model: m.actual_model });
 }
 
 export interface GenFooterControlsProps {

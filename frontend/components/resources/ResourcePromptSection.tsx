@@ -41,9 +41,10 @@ import {
 import { fetchAllTags } from '../../services/unifiedTagService';
 import { ensureDefaultTriggerTag } from '../../utils/promptTriggerTags';
 import { providerErrorMessage } from '../../utils/providerErrorMessage';
-import type { Resource, Tag } from '../../types';
+import type { Resource } from '../../types';
+import type { Tag } from '../../types/api';
 import { useOptionalToast } from '../Toast';
-import { PromptSection } from './PromptSection';
+import { PromptSection, type PromptFieldPatch } from './PromptSection';
 
 // `slide_prompts` is fetched unconditionally rather than only in slide mode:
 // making the select depend on `slideName` would refetch the row the moment the
@@ -86,9 +87,13 @@ const SLIDE_FIELD_OF: Record<string, keyof SlidePromptEntry> = {
  * holds the raw platform type code ('0', '4', '68', …), so `file_type ===
  * 'video'` would miss most of the video library.
  */
-export function canGenerateForResource(
-  resource: Pick<PromptResource, 'file_type' | 'mime_type' | 'media_id'>,
-): boolean {
+export function canGenerateForResource(resource: {
+  file_type: string | null;
+  mime_type: string | null;
+  /** A JSON number from the resources API, a string/number from PostgREST —
+   *  only its presence matters here. */
+  media_id: string | number | null;
+}): boolean {
   const mime = (resource.mime_type || '').toLowerCase();
   const fileType = (resource.file_type || '').toLowerCase();
   if (mime.startsWith('video/') || (!mime && fileType === 'video')) return true;
@@ -161,7 +166,7 @@ export function ResourcePromptSection({
     return () => { cancelled = true; };
   }, [resourceId]);
 
-  const handlePatch = useCallback((fields: Partial<Resource>) => {
+  const handlePatch = useCallback((fields: PromptFieldPatch) => {
     setResource((prev) => (prev ? { ...prev, ...fields } : prev));
     updateResource(resourceId, fields as Parameters<typeof updateResource>[1]).catch((err) =>
       console.error('Failed to update resource prompt:', err),
@@ -174,7 +179,7 @@ export function ResourcePromptSection({
   // between edits) rather than reading it inside a state updater keeps the
   // PATCH out of the updater — updaters can be double-invoked.
   const slidePromptsMap = resource?.slide_prompts ?? null;
-  const handleSlidePatch = useCallback((fields: Partial<Resource>) => {
+  const handleSlidePatch = useCallback((fields: PromptFieldPatch) => {
     if (!slideName) return;
     const entry: SlidePromptEntry = { ...(slidePromptsMap?.[slideName] || {}) };
     let touched = false;
@@ -326,7 +331,7 @@ export function ResourcePromptSection({
   return (
     <PromptSection
       key={resourceId}
-      resource={(slideMode ? slideResource : resource) as unknown as Resource}
+      resource={slideMode ? slideResource : resource}
       onPatch={slideMode ? handleSlidePatch : handlePatch}
       onEnsureTriggerTag={handleEnsureTriggerTag}
       canGenerate={slideMode || canGenerate}

@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { aiLibraryService } from '../../services/aiLibraryService';
-import type { AgentRunEvent } from '../../types';
+import type { AgentRunEvent } from '../../types/api';
 import { foldEvents, type TrajectoryNode } from './TrajectoryRenderer/foldEvents';
 import {
   denialsFromTranscriptEvents,

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Copy, Check, Link2, Lock, Clock, Download } from 'lucide-react';
-import { ProjectFile } from '../types';
+import type { ProjectFile, ProjectShare } from '../types/api';
 import { UiSelect } from './ui';
 import { useToast } from './Toast';
 
@@ -10,7 +10,7 @@ interface ProjectShareModalProps {
   projectId: string;
   isOpen: boolean;
   onClose: () => void;
-  onCreated: (share: any) => void;
+  onCreated: (share: ProjectShare) => void;
 }
 
 export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
@@ -24,7 +24,7 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
   const [allowDownload, setAllowDownload] = useState(true);
   const [expiresHours, setExpiresHours] = useState<number | null>(null);
   const [isCreating, setIsCreating] = useState(false);
-  const [createdShare, setCreatedShare] = useState<any>(null);
+  const [createdShare, setCreatedShare] = useState<ProjectShare | null>(null);
   const [copied, setCopied] = useState(false);
 
   if (!isOpen) return null;
@@ -34,12 +34,13 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
     try {
       const { createProjectShare } = await import('../services/projectsService');
       const share = await createProjectShare(projectId, {
-        file_id: file.id,
+        file_id: String(file.id),
         share_type: shareType,
         password: usePassword ? password : undefined,
         allow_download: allowDownload,
         expires_hours: expiresHours || undefined,
       });
+      if (!share) throw new Error('Empty response from createProjectShare');
       setCreatedShare(share);
       onCreated(share);
     } catch (err) {
@@ -217,9 +218,11 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
                   {copied ? <Check size={16} /> : <Copy size={16} />}
                 </button>
               </div>
-              {createdShare.password && (
+              {/* The share row never echoes the password back (only
+                  `has_password`); show what the user just typed. */}
+              {createdShare.has_password && usePassword && password && (
                 <p className="text-xs text-ink-500">
-                  {t('projects.share.passwordHint', 'Password: {{password}}', { password: createdShare.password })}
+                  {t('projects.share.passwordHint', 'Password: {{password}}', { password })}
                 </p>
               )}
             </div>

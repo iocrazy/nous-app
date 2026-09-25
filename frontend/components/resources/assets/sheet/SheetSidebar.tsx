@@ -36,7 +36,7 @@ import {
 } from 'lucide-react';
 
 import { createCanvas } from '../../../../features/canvas-core/services/canvasService';
-import type { Project } from '../../../../types';
+import type { Project } from '../../../../types/api';
 import type {
   AssetLoadoutRow,
   AssetRowDetail,

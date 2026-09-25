@@ -1,6 +1,7 @@
 /**
- * Unit tests for permissionService — URL/query shape and data-envelope
- * fallback handling for /resources/permissions.
+ * Unit tests for permissionService — URL/query shape and envelope unwrapping
+ * for /resources/permissions. The route declares `Envelope[ResourcePermissions]`,
+ * so every stub below is the enveloped wire shape.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,7 +28,7 @@ beforeEach(() => {
 
 describe('fetchEffectiveRole', () => {
   it('threads object_type/id + team_id as query params', async () => {
-    const spy = stubJson({ role: 'admin', capabilities: ['read', 'write'] });
+    const spy = stubJson({ success: true, data: { role: 'admin', capabilities: ['read', 'write'] } });
     await fetchEffectiveRole('resource', 'r-1', 't-9');
     const url = spy.mock.calls[0][0] as string;
     expect(url).toContain('object_type=resource');
@@ -35,16 +36,10 @@ describe('fetchEffectiveRole', () => {
     expect(url).toContain('team_id=t-9');
   });
 
-  it('returns direct payload when not wrapped', async () => {
-    stubJson({ role: 'viewer', capabilities: ['read'] });
-    const result = await fetchEffectiveRole('resource', 'r-1', 't-9');
-    expect(result.role).toBe('viewer');
-    expect(result.capabilities).toEqual(['read']);
-  });
-
-  it('unwraps { data: ... } envelope', async () => {
-    stubJson({ data: { role: 'owner', capabilities: ['*'] } });
+  it('unwraps the { success, data } envelope', async () => {
+    stubJson({ success: true, data: { role: 'owner', capabilities: ['*'] } });
     const result = await fetchEffectiveRole('resource', 'r-1', 't-9');
     expect(result.role).toBe('owner');
+    expect(result.capabilities).toEqual(['*']);
   });
 });

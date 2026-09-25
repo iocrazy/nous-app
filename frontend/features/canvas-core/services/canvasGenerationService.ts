@@ -10,17 +10,21 @@
  */
 
 import { apiFetch, ApiError } from '../../../services/apiClient';
+import type {
+  CanvasGenerationCapability,
+  CanvasGenerationDispatch,
+  CanvasGenerationTask,
+  CanvasModelOption,
+  CanvasTimelineDispatch,
+  Envelope,
+} from '../../../types/api';
+import { isPlatformModelAvailable } from '../../../utils/platformModel';
 
-export interface GenerationModel {
-  name: string;
-  display_name: string;
-  type: 'image' | 'video';
-  /** True when this row runs on the viewer's own machine via the paired
-   *  codex daemon. (The raw provider name is deliberately not exposed —
-   *  2026-08-14 leak tripwire.) */
-  is_local?: boolean;
-  sort_order?: number;
-}
+/** An image/video catalog row for the composer picker — the backend's public
+ *  projection (`CanvasModelOption`): no credential, host or provider name
+ *  (2026-08-14 leak tripwire); `is_local` is the one bit derived from the
+ *  provider. `type` is `'image' | 'video'` on this endpoint. */
+export type GenerationModel = CanvasModelOption;
 
 export interface GenerationDispatchRequest {
   node_id: string;
@@ -32,33 +36,42 @@ export interface GenerationDispatchRequest {
   source_url?: string | null;
 }
 
-export interface GenerationTask {
-  phase: string;
-  status?: string;
-  error_msg?: string | null;
-  metadata?: {
-    result_url?: string;
-    generated_media_id?: number;
-    media_kind?: string;
-    /** Knobs the request asked for that this provider cannot honour (P2).
-     *  Always written by the workflow, `[]` meaning "nothing dropped" — an
-     *  ABSENT key means an older task row, not a clean run. */
-    dropped_knobs?: string[];
-    /** References the run could not resolve, each with a reason code (P4
-     *  asset library). Same contract as `dropped_knobs`: always written,
-     *  `[]` meaning "every reference was used", an ABSENT key meaning an
-     *  older task row. Reported SEPARATELY from `dropped_knobs` because a
-     *  run can drop a knob, a reference, or both. */
-    dropped_refs?: Array<{ url: string; reason: string }>;
-    /** Written by the workflow when a failure brought an explanation for
-     *  the user (2026-09-05): `detail` is the model's own words for a
-     *  content refusal — why, and the rewrite it offers. Chinese-safe here
-     *  (jsonb) where `error_msg` is not. Empty `detail` = the provider
-     *  could not say (e.g. a 0.4.0 daemon). */
-    failure?: { code?: string; detail?: string };
-    [k: string]: unknown;
-  };
+/** The keys the generation workflows write into `task_tracking.metadata`.
+ *  The backend declares that column as open jsonb (`CanvasGenerationTask`),
+ *  so this is the one place the known keys are named; every key stays
+ *  optional because an older row may predate it. */
+export interface GenerationTaskMetadata {
+  result_url?: string;
+  /** A JSON number from a fresh registration, a string when the daemon had
+   *  already registered the file (the `existing_gen_id` branch). Stringify
+   *  at use. */
+  generated_media_id?: number | string;
+  media_kind?: string;
+  /** Knobs the request asked for that this provider cannot honour (P2).
+   *  Always written by the workflow, `[]` meaning "nothing dropped" — an
+   *  ABSENT key means an older task row, not a clean run. */
+  dropped_knobs?: string[];
+  /** References the run could not resolve, each with a reason code (P4
+   *  asset library). Same contract as `dropped_knobs`: always written,
+   *  `[]` meaning "every reference was used", an ABSENT key meaning an
+   *  older task row. Reported SEPARATELY from `dropped_knobs` because a
+   *  run can drop a knob, a reference, or both. */
+  dropped_refs?: Array<{ url: string; reason: string }>;
+  /** Written by the workflow when a failure brought an explanation for
+   *  the user (2026-09-05): `detail` is the model's own words for a
+   *  content refusal — why, and the rewrite it offers. Chinese-safe here
+   *  (jsonb) where `error_msg` is not. Empty `detail` = the provider
+   *  could not say (e.g. a 0.4.0 daemon). */
+  failure?: { code?: string; detail?: string };
+  [k: string]: unknown;
 }
+
+/** `GET /canvases/generations/{task_id}` payload with its open `metadata`
+ *  narrowed to the keys above. `phase` is null until the engine picks the
+ *  task up; `metadata` is null on a row nothing has decorated yet. */
+export type GenerationTask = Omit<CanvasGenerationTask, 'metadata'> & {
+  metadata: GenerationTaskMetadata | null;
+};
 
 const TERMINAL_PHASES = new Set(['completed', 'failed', 'cancelled', 'lost']);
 /** Infinite polls image tasks every 2s for up to 30min — same envelope. */
@@ -67,49 +80,32 @@ const DEFAULT_POLL_TIMEOUT_MS = 30 * 60 * 1000;
 
 export async function listGenerationModels(): Promise<GenerationModel[]> {
   const response = await apiFetch('/api/v1/canvases/generation-models');
-  const body = (await response.json()) as { success: boolean; data?: GenerationModel[] };
+  const body = (await response.json()) as Partial<Envelope<GenerationModel[]>>;
   if (!body.success || !Array.isArray(body.data)) {
     throw new ApiError('generation-models response missing data', 500);
   }
-  return body.data;
+  // Same availability rule as Settings (utils/platformModel). The backend
+  // already drops failed rows here; filtering again keeps the two pickers on
+  // one predicate should that server filter ever change.
+  return body.data.filter(isPlatformModelAvailable);
 }
 
 /** What one catalog model can actually honour, as projected by the backend
  *  (`GET /api/v1/canvases/generation-capabilities`). The UI hides a knob only
  *  when a model is present here and says no — absence means "unknown", never
  *  "unsupported". `honours_ratio` is deliberately absent: it names an internal
- *  strategy, not something the UI can act on. */
-export interface ModelCapabilities {
-  ratios: string[];
-  quality: boolean;
-  /** Which rungs of the quality ramp this provider honours, ordered low→max
-   *  by the router's one ordering constant (`QUALITY_TIER_ORDER`) — never
-   *  alphabetically, or "high" would lead. `quality` says whether the pill
-   *  exists at all; this says what it may offer. `[]` whenever the provider
-   *  honours no tier (always alongside `quality: false` today).
-   *
-   *  Optional because a backend older than 2026-09-13 omits the key entirely
-   *  and the two halves deploy independently: that wire shape is real for as
-   *  long as the window lasts, and consumers must read the missing value as
-   *  "unknown" (offer everything) rather than "supports nothing". Declaring
-   *  it required forced every test constructing the old shape to cast the
-   *  type away, which is the check disabling itself. */
-  quality_tiers?: string[];
-  resolution: boolean;
-  max_refs: number;
-  negative: boolean;
-  video_modes: string[];
-}
+ *  strategy, not something the UI can act on. `quality_tiers` runs low→max
+ *  (the router's `QUALITY_TIER_ORDER`), `[]` whenever no tier is honoured. */
+export type ModelCapabilities = CanvasGenerationCapability;
 
 /** Per-model capabilities keyed by catalog model name. Visibility matches
  *  `listGenerationModels` row for row (both endpoints read one server-side
  *  predicate), so every model the picker offers has an entry here. */
 export async function listGenerationCapabilities(): Promise<Record<string, ModelCapabilities>> {
   const response = await apiFetch('/api/v1/canvases/generation-capabilities');
-  const body = (await response.json()) as {
-    success: boolean;
-    data?: Record<string, ModelCapabilities>;
-  };
+  const body = (await response.json()) as Partial<
+    Envelope<Record<string, ModelCapabilities>>
+  >;
   if (!body.success || !body.data || typeof body.data !== 'object' || Array.isArray(body.data)) {
     throw new ApiError('generation-capabilities response missing data', 500);
   }
@@ -117,15 +113,10 @@ export async function listGenerationCapabilities(): Promise<Record<string, Model
 }
 
 /** An enabled `llm` catalog row for the text prompt's model picker. Same
- *  public-field contract as GenerationModel — the two come from the same
- *  `nous_models` table, differing only in `type`. */
-export interface TextModel {
-  name: string;
-  display_name: string;
-  type: 'llm';
-  actual_provider: string;
-  sort_order?: number;
-}
+ *  public projection as GenerationModel — the two come from the same
+ *  `nous_models` table, differing only in `type`. It never carries
+ *  `actual_provider` (the old hand-written type claimed it always did). */
+export type TextModel = CanvasModelOption;
 
 /** Enabled llm models from the platform catalog (public columns only) — the
  *  single source of truth for the text prompt node's model dropdown, replacing
@@ -133,11 +124,12 @@ export interface TextModel {
  *  carry (the 2026-07-12 "default prompt won't run" root cause). */
 export async function listTextModels(): Promise<TextModel[]> {
   const response = await apiFetch('/api/v1/canvases/text-models');
-  const body = (await response.json()) as { success: boolean; data?: TextModel[] };
+  const body = (await response.json()) as Partial<Envelope<TextModel[]>>;
   if (!body.success || !Array.isArray(body.data)) {
     throw new ApiError('text-models response missing data', 500);
   }
-  return body.data;
+  // text-models does not filter failed rows server-side; this is the filter.
+  return body.data.filter(isPlatformModelAvailable);
 }
 
 export async function dispatchGenerations(
@@ -156,7 +148,7 @@ export async function dispatchGenerations(
       ...(req.source_url ? { source_url: req.source_url } : {}),
     },
   });
-  const body = (await response.json()) as { success: boolean; task_ids?: string[] };
+  const body = (await response.json()) as Partial<CanvasGenerationDispatch>;
   if (!body.success || !Array.isArray(body.task_ids)) {
     throw new ApiError('generation dispatch response missing task_ids', 500);
   }
@@ -165,7 +157,7 @@ export async function dispatchGenerations(
 
 export async function getGeneration(taskId: string): Promise<GenerationTask> {
   const response = await apiFetch(`/api/v1/canvases/generations/${taskId}`);
-  const body = (await response.json()) as { success: boolean; data?: GenerationTask };
+  const body = (await response.json()) as Partial<Envelope<GenerationTask>>;
   if (!body.success || !body.data) {
     throw new ApiError('generation task response missing data', 500);
   }
@@ -256,7 +248,7 @@ export async function dispatchTimelineRun(
     method: 'POST',
     json: req,
   });
-  const body = (await response.json()) as { data?: { task_id?: string } };
+  const body = (await response.json()) as Partial<Envelope<CanvasTimelineDispatch>>;
   const taskId = body.data?.task_id;
   if (!taskId) throw new Error('timeline dispatch returned no task id');
   return taskId;

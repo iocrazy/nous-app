@@ -11,7 +11,8 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { WorkspaceEpisodes } from './WorkspaceEpisodes';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
+import { makeEpisodeProgress } from '../../tests/fixtures/episodes';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -53,7 +54,7 @@ const FakeApiError = vi.hoisted(
 vi.mock('../../services/apiClient', () => ({ ApiError: FakeApiError }));
 
 const EPISODES: EpisodeProgress[] = [
-  {
+  makeEpisodeProgress({
     episode_id: '1',
     title: 'Pilot',
     sort_order: 10,
@@ -63,8 +64,8 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 9,
     renders_count: 1,
     status: 'boarding',
-  },
-  {
+  }),
+  makeEpisodeProgress({
     episode_id: '2',
     title: 'BTS teaser',
     sort_order: 20,
@@ -74,7 +75,7 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 0,
     renders_count: 0,
     status: 'planned',
-  },
+  }),
 ];
 
 beforeEach(() => {

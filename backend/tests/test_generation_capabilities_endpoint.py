@@ -24,6 +24,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.deps import AuthContext, get_auth
 from app.main import app
+from tests.api.catalog_wire_rows import list_enabled_row
 
 FAKE_USER_ID = str(uuid4())
 
@@ -89,7 +90,7 @@ def _catalog(monkeypatch, rows: list[dict]) -> None:
     ):
         out = []
         for r in rows:
-            row = dict(r)
+            row = list_enabled_row(**r)
             provider = row.pop("actual_provider", None)
             row["is_local"] = provider in ("codex-local", "jimeng-local")
             if include_actual_provider:

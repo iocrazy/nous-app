@@ -9,7 +9,8 @@ import { createInstance, type i18n as I18n } from 'i18next';
 
 import enJson from '../../../public/locales/en.json';
 import { StageBriefMirror } from './StageBriefBlock';
-import type { ProjectStageNode, StageBoardData } from '../../../types';
+import type { ProjectStageNode, StageBoardData } from '../../../types/api';
+import { makeStageNode } from '../../../tests/fixtures/projects';
 
 function makeI18n(): I18n {
   const instance = createInstance();
@@ -28,7 +29,7 @@ const mockWorkflowService = vi.hoisted(() => ({
 vi.mock('../../../services/workflowService', () => mockWorkflowService);
 
 function node(over: Partial<ProjectStageNode> = {}): ProjectStageNode {
-  return {
+  return makeStageNode({
     id: '1',
     project_id: '10',
     source_template_node_id: null,
@@ -47,10 +48,10 @@ function node(over: Partial<ProjectStageNode> = {}): ProjectStageNode {
     skipped: false,
     members: [],
     completion_policy: 'owner',
-    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false },
+    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false, prepare_agent_run: false, auto_start: false },
     brief: 'Check pacing in act 2.',
     ...over,
-  };
+  });
 }
 
 function renderMirror() {

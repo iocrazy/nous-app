@@ -1,6 +1,23 @@
 import { supabase } from '../supabaseClient';
 import { fetchAllRows } from '../utils/pgAllRows';
-import { Folder, Resource, ResourceItem, ResourceVersion, SmartCollection } from '../types';
+import { Folder, Resource, ResourceItem, SmartCollection } from '../types';
+import type {
+  CheckDuplicatesResultItem,
+  Envelope,
+  FolderContentCount,
+  GalleryChild,
+  GalleryMembership,
+  ResourceBatchAiResult,
+  ResourceCanvasRef,
+  ResourceDuplicateCheck,
+  ResourceGenPrompts,
+  ResourceLinkExisting,
+  ResourceLyricsUpload,
+  ResourceRow,
+  ResourceVersion,
+} from '../types/api';
+import type { CheckBatchResultItem } from '../utils/importPipeline';
+import { parseResourceLyrics, type ResourceLyrics } from '../utils/resourceLyrics';
 import {
   applyKeysetCursor,
   sliceKeysetPage,
@@ -89,7 +106,7 @@ export async function updateResource(
     url?: string;
     rating?: number;
   },
-): Promise<Resource> {
+): Promise<ResourceRow> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}`, {
     method: 'PATCH',
@@ -97,7 +114,7 @@ export async function updateResource(
     body: JSON.stringify(data),
   });
   if (!response.ok) throw new Error('Failed to update resource');
-  const json = await response.json();
+  const json = (await response.json()) as Envelope<ResourceRow>;
   return json.data;
 }
 
@@ -171,10 +188,7 @@ export async function classifyResource(resourceId: string): Promise<string> {
 export async function batchAssetAi(
   resourceIds: string[],
   operation: 'caption' | 'classify',
-): Promise<{
-  dispatched: Array<{ resource_id: string; task_id: string }>;
-  skipped: Array<{ resource_id: string; reason: string }>;
-}> {
+): Promise<Pick<ResourceBatchAiResult, 'dispatched' | 'skipped'>> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/ai/batch`, {
     method: 'POST',
@@ -190,8 +204,8 @@ export async function batchAssetAi(
       typeof detail === 'string' ? detail : 'Failed to dispatch batch AI tasks',
     );
   }
-  const json = await response.json();
-  return { dispatched: json.dispatched ?? [], skipped: json.skipped ?? [] };
+  const json = (await response.json()) as ResourceBatchAiResult;
+  return { dispatched: json.dispatched, skipped: json.skipped };
 }
 
 /** Download a LoRA-training zip (image + same-stem .txt caption per
@@ -231,12 +245,7 @@ export async function exportTrainingSet(
 export async function translateGenPrompt(
   resourceId: string,
   targetLang: 'en' | 'zh',
-): Promise<{
-  gen_prompt: string | null;
-  gen_prompt_zh: string | null;
-  gen_prompt_negative?: string | null;
-  gen_prompt_negative_zh?: string | null;
-}> {
+): Promise<ResourceGenPrompts> {
   const apiUrl = getApiUrl();
   const response = await fetch(
     `${apiUrl}/api/v1/resources/${resourceId}/gen-prompt/translate`,
@@ -258,14 +267,14 @@ export async function translateGenPrompt(
     if (typeof body?.code === 'string') err.code = body.code;
     throw err;
   }
-  const json = await response.json();
+  const json = (await response.json()) as Envelope<ResourceGenPrompts>;
   return json.data;
 }
 
 export async function setResourceChorus(
   resourceId: string,
   chorusMs: number | null,
-): Promise<Resource> {
+): Promise<ResourceRow> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/chorus`, {
     method: 'PUT',
@@ -273,7 +282,7 @@ export async function setResourceChorus(
     body: JSON.stringify({ chorus_start_ms: chorusMs }),
   });
   if (!response.ok) throw new Error('Failed to set chorus');
-  const json = await response.json();
+  const json = (await response.json()) as Envelope<ResourceRow>;
   return json.data;
 }
 
@@ -283,10 +292,10 @@ export async function trashFolder(id: string): Promise<void> {
 
 export async function getFolderContentCount(
   id: string,
-): Promise<{ resource_count: number; subfolder_count: number }> {
-  const json = await apiClient.get<{
-    data: { resource_count: number; subfolder_count: number };
-  }>(`/api/v1/resources/folders/${id}/content-count`);
+): Promise<FolderContentCount> {
+  const json = await apiClient.get<Envelope<FolderContentCount>>(
+    `/api/v1/resources/folders/${id}/content-count`,
+  );
   return json.data;
 }
 
@@ -1104,9 +1113,9 @@ export async function fetchResourceCount(
  */
 export async function checkDuplicatesBatch(
   items: { file_hash: string; file_size: number }[],
-): Promise<{ file_hash: string; duplicate: boolean; existing: Resource | null }[]> {
+): Promise<CheckBatchResultItem[]> {
   const apiUrl = getApiUrl();
-  const failOpen = () =>
+  const failOpen = (): CheckBatchResultItem[] =>
     items.map((i) => ({ file_hash: i.file_hash, duplicate: false, existing: null }));
   try {
     const response = await fetch(`${apiUrl}/api/v1/resources/check-duplicates`, {
@@ -1118,21 +1127,53 @@ export async function checkDuplicatesBatch(
     // The endpoint returns an envelope `{ results: [...] }` (CheckDuplicatesResponse).
     // Accept a bare array too so either shape stays fail-open — a shape drift
     // here once threw "not iterable" downstream and blocked ALL uploads.
-    const data = await response.json();
-    if (Array.isArray(data)) return data;
-    if (data && Array.isArray(data.results)) return data.results;
-    console.error('checkDuplicatesBatch: unexpected response shape', data);
-    return failOpen();
+    const data: unknown = await response.json();
+    const results = Array.isArray(data)
+      ? data
+      : isCheckDuplicatesResponse(data)
+        ? data.results
+        : null;
+    if (results === null) {
+      console.error('checkDuplicatesBatch: unexpected response shape', data);
+      return failOpen();
+    }
+    return results.map(toCheckBatchResultItem);
   } catch (err) {
     console.error('checkDuplicatesBatch failed', err);
     return failOpen();
   }
 }
 
+function isCheckDuplicatesResponse(value: unknown): value is { results: unknown[] } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Array.isArray((value as { results?: unknown }).results)
+  );
+}
+
+/**
+ * `existing` is the whole matching row on the wire (an open object whose `id`
+ * is a JSON number). The import pipeline only needs the id, as the string it
+ * puts in the link-existing query, so that is what crosses this boundary.
+ */
+function toCheckBatchResultItem(raw: unknown): CheckBatchResultItem {
+  const item = (raw ?? {}) as Partial<CheckDuplicatesResultItem>;
+  const existingId = item.existing?.id;
+  return {
+    file_hash: String(item.file_hash ?? ''),
+    duplicate: item.duplicate === true,
+    existing:
+      typeof existingId === 'number' || typeof existingId === 'string'
+        ? { id: String(existingId) }
+        : null,
+  };
+}
+
 export async function checkDuplicate(
   fileHash: string,
   fileSize: number,
-): Promise<{ duplicate: boolean; existing: Resource | null }> {
+): Promise<ResourceDuplicateCheck> {
   const apiUrl = getApiUrl();
   const params = new URLSearchParams({
     file_hash: fileHash,
@@ -1143,7 +1184,7 @@ export async function checkDuplicate(
       headers: await getAuthHeaders(),
     });
     if (!response.ok) return { duplicate: false, existing: null };
-    return response.json();
+    return (await response.json()) as ResourceDuplicateCheck;
   } catch {
     return { duplicate: false, existing: null };
   }
@@ -1154,7 +1195,7 @@ export async function linkExistingResource(
   scopeId: string,
   folderId?: string | null,
   libraryId?: string | null,
-): Promise<Resource> {
+): Promise<ResourceRow> {
   const apiUrl = getApiUrl();
   const params = new URLSearchParams({
     resource_id: resourceId,
@@ -1168,7 +1209,7 @@ export async function linkExistingResource(
     headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to link resource');
-  const json = await response.json();
+  const json = (await response.json()) as ResourceLinkExisting;
   return json.data;
 }
 
@@ -1321,7 +1362,7 @@ export async function uploadResource(
   onProgress?: (sample: UploadProgressSample) => void,
   libraryId?: string | null,
   signal?: AbortSignal,
-): Promise<Resource> {
+): Promise<ResourceRow> {
   const apiUrl = getApiUrl();
   const formData = new FormData();
   formData.append('file', file);
@@ -1366,7 +1407,7 @@ export async function uploadResource(
         done();
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
-            resolve(JSON.parse(xhr.responseText).data);
+            resolve((JSON.parse(xhr.responseText) as Envelope<ResourceRow>).data);
           } catch {
             /* A 2xx we cannot read is its own failure and says so, rather than
                surfacing as a SyntaxError from inside a promise executor. */
@@ -1413,7 +1454,7 @@ export async function uploadResource(
       uploadDetail(await response.text().catch(() => '')),
     );
   }
-  const json = await response.json();
+  const json = (await response.json()) as Envelope<ResourceRow>;
   return json.data;
 }
 
@@ -1435,7 +1476,7 @@ async function multipartHeaders(): Promise<Record<string, string>> {
 export async function uploadResourceCover(
   resourceId: string,
   file: File,
-): Promise<Resource> {
+): Promise<ResourceRow> {
   const apiUrl = getApiUrl();
   const fd = new FormData();
   fd.append('file', file);
@@ -1445,16 +1486,13 @@ export async function uploadResourceCover(
     body: fd,
   });
   if (!res.ok) throw new Error('Failed to upload cover');
-  return (await res.json()).data;
+  return ((await res.json()) as Envelope<ResourceRow>).data;
 }
 
 export async function uploadResourceLyrics(
   resourceId: string,
   file: File,
-): Promise<{
-  lrc: string;
-  lines: Array<{ text: string; line_start_ms: number | null }>;
-}> {
+): Promise<ResourceLyrics | null> {
   const apiUrl = getApiUrl();
   const fd = new FormData();
   fd.append('file', file);
@@ -1469,21 +1507,20 @@ export async function uploadResourceLyrics(
       .catch(() => ({ detail: 'Failed to upload lyrics' }));
     throw new Error(e.detail || `HTTP ${res.status}`);
   }
-  return (await res.json()).data.lyrics_json;
+  const json = (await res.json()) as Envelope<ResourceLyricsUpload>;
+  return parseResourceLyrics(json.data.lyrics_json);
 }
 
 export async function getResourceLyrics(
   resourceId: string,
-): Promise<{
-  lrc: string;
-  lines: Array<{ text: string; line_start_ms: number | null }>;
-} | null> {
+): Promise<ResourceLyrics | null> {
   const apiUrl = getApiUrl();
   const res = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/lyrics`, {
     headers: await getAuthHeaders(),
   });
   if (!res.ok) return null;
-  return (await res.json()).data ?? null;
+  const json = (await res.json()) as Envelope<ResourceRow['lyrics_json']>;
+  return parseResourceLyrics(json.data);
 }
 
 // ─── Trash / Restore ─────────────────────────────────────
@@ -1600,13 +1637,13 @@ export async function fetchTrashedResourcesPaginated(
 
 // ─── Single Resource ────────────────────────────────────
 
-export async function fetchResourceById(resourceId: string): Promise<Resource> {
+export async function fetchResourceById(resourceId: string): Promise<ResourceRow> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}`, {
     headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to fetch resource');
-  const json = await response.json();
+  const json = (await response.json()) as Envelope<ResourceRow>;
   return json.data;
 }
 
@@ -1618,8 +1655,8 @@ export async function fetchResourceVersions(resourceId: string): Promise<Resourc
     headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to fetch versions');
-  const json = await response.json();
-  return json.data || [];
+  const json = (await response.json()) as Envelope<ResourceVersion[]>;
+  return json.data;
 }
 
 // ─── Version Management ─────────────────────────────────
@@ -1649,7 +1686,7 @@ export async function uploadNewVersion(
   if (!response.ok) {
     throw new Error(await errorMessageFromResponse(response, 'Failed to upload new version'));
   }
-  const json = await response.json();
+  const json = (await response.json()) as Envelope<ResourceVersion>;
   return json.data;
 }
 
@@ -1698,7 +1735,7 @@ export async function overwriteVersionContent(
   if (!response.ok) {
     throw new Error(await errorMessageFromResponse(response, 'Failed to overwrite version'));
   }
-  const json = await response.json();
+  const json = (await response.json()) as Envelope<ResourceVersion>;
   return json.data;
 }
 
@@ -2280,21 +2317,13 @@ export async function trashResources(
 // ordered child images are ordinary image resources linked through the
 // `gallery_items` junction.
 
-/** Ordered child image of a gallery, as returned by the gallery-items API. */
-export interface GalleryChildItem {
-  id: string;
-  filename: string;
-  thumbnail_path: string | null;
-  position: number;
-}
-
 /** Create an empty gallery entity in a scope. Children are attached
  *  separately via {@link setGalleryItems}. Returns the gallery resource. */
 export async function createGallery(
   scopeId: string,
   filename: string,
   folderId?: string | null,
-): Promise<Resource> {
+): Promise<ResourceRow> {
   const apiUrl = getApiUrl();
   const params = new URLSearchParams({ scope_id: scopeId, filename });
   if (folderId) params.set('folder_id', folderId);
@@ -2304,7 +2333,7 @@ export async function createGallery(
     headers: await getAuthHeaders(),
   });
   if (!response.ok) throw new Error('Failed to create gallery');
-  const json = await response.json();
+  const json = (await response.json()) as Envelope<ResourceRow>;
   return json.data;
 }
 
@@ -2314,7 +2343,7 @@ export async function setGalleryItems(
   galleryId: string,
   scopeId: string,
   imageIds: string[],
-): Promise<GalleryChildItem[]> {
+): Promise<GalleryChild[]> {
   const apiUrl = getApiUrl();
   const params = new URLSearchParams({ scope_id: scopeId });
   const response = await fetch(
@@ -2326,7 +2355,7 @@ export async function setGalleryItems(
     },
   );
   if (!response.ok) throw new Error('Failed to set gallery items');
-  const json = await response.json();
+  const json = (await response.json()) as Envelope<GalleryChild[]>;
   // Children just changed → drop cached membership so the next library list
   // reflects the new hidden-child set and badge count immediately.
   invalidateGalleryMembership(scopeId);
@@ -2336,14 +2365,14 @@ export async function setGalleryItems(
 /** Read a gallery's ordered child images. */
 export async function getGalleryItems(
   galleryId: string,
-): Promise<GalleryChildItem[]> {
+): Promise<GalleryChild[]> {
   const apiUrl = getApiUrl();
   const response = await fetch(
     `${apiUrl}/api/v1/resources/${galleryId}/gallery-items`,
     { headers: await getAuthHeaders() },
   );
   if (!response.ok) throw new Error('Failed to load gallery items');
-  const json = await response.json();
+  const json = (await response.json()) as Envelope<GalleryChild[]>;
   return json.data ?? [];
 }
 
@@ -2398,18 +2427,12 @@ async function requestGalleryMembership(
     { headers: await getAuthHeaders() },
   );
   if (!response.ok) throw new Error('Failed to load gallery membership');
-  const json = await response.json();
-  const data = (json.data ?? {}) as {
-    child_image_ids?: unknown[];
-    gallery_counts?: Record<string, unknown>;
-  };
+  const json = (await response.json()) as Envelope<GalleryMembership>;
+  // The raw wire shape (string ids, id-keyed counts) becomes the Set/Map the
+  // list paths consult. Keys stay strings; callers stringify row ids to match.
   return {
-    childIds: new Set<string>((data.child_image_ids ?? []).map(String)),
-    counts: new Map<string, number>(
-      Object.entries(data.gallery_counts ?? {}).map(
-        ([k, v]) => [String(k), Number(v)] as [string, number],
-      ),
-    ),
+    childIds: new Set<string>(json.data.child_image_ids),
+    counts: new Map<string, number>(Object.entries(json.data.gallery_counts)),
   };
 }
 
@@ -2465,22 +2488,16 @@ export function applyGalleryMembership(
 // 2026-08-29): the Project Assets view is gone, but the resource detail
 // panel's "Appears in N canvases" section still reads this endpoint.
 
-export interface CanvasBackRef {
-  canvas_id: string;
-  canvas_name: string;
-  kind: 'smart' | 'classic';
-  project_id: string;
-  role: 'reference' | 'output';
-}
-
 /** Canvases that reference this resource, with the role it plays in each. */
-export async function fetchResourceCanvasRefs(resourceId: string): Promise<CanvasBackRef[]> {
+export async function fetchResourceCanvasRefs(
+  resourceId: string,
+): Promise<ResourceCanvasRef[]> {
   const res = await fetch(`${getApiUrl()}/api/v1/resources/${resourceId}/canvas-refs`, {
     headers: await getAuthHeaders(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
-  return json.data as CanvasBackRef[];
+  return (json as Envelope<ResourceCanvasRef[]>).data;
 }
 
 // ─── Provenance (harness 三期 3b §5 稿四) ────────────────

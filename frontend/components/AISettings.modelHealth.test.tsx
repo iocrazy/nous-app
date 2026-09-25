@@ -1,20 +1,22 @@
 /**
- * Platform-model health in AI Settings (spec 2026-08-14 §F2).
+ * Platform-model health in AI Settings.
  *
- * The backend has probed these models hourly for months, but the result never
- * reached this page — so a user could assign a task to a model whose probe had
- * been failing all day and only find out when the job failed. Two surfaces
- * here: the platform card row (where you manage the models) and the task
- * pickers (where you pick one).
+ * 2026-08-14 (#1838) surfaced the probe result as a warning and deliberately
+ * kept failing models listed. 2026-09-24 reversed that at the user's request:
+ * the admin AI Models page shows a failed row as broken, so the user side no
+ * longer offers it — on the platform card or in the task pickers. `ok`,
+ * `not_probed` and never-probed rows stay listed.
  *
- * A failing model is marked, never hidden and never disabled: the probe has
- * been wrong in production (2026-08-14, a model marked unreachable that worked
- * end-to-end), so it advises and the user decides.
+ * The one place a failed model still appears is a task assignment that
+ * already points at it: the picker keeps it as an explicit "unavailable"
+ * option carrying the reason, instead of silently showing another model.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { AISettings } from './AISettings';
-import type { AISettings as AISettingsType, NousModelPublic } from '../types';
+import type { AISettings as AISettingsType } from '../types';
+import type { NousModelPublic } from '../types/api';
+import { makeNousModel } from '../tests/fixtures/ai';
 import en from '../public/locales/en.json';
 
 // Resolve against the REAL shipped English copy rather than a hand-written
@@ -36,7 +38,7 @@ vi.mock('react-i18next', () => ({
 
 const twentyMinutesAgo = new Date(Date.now() - 20 * 60_000).toISOString();
 
-const SICK_LLM: NousModelPublic = {
+const SICK_LLM = makeNousModel({
   name: 'mediahub-deepseek-v4-flash',
   display_name: 'DeepSeek V4 Flash',
   type: 'llm',
@@ -44,8 +46,8 @@ const SICK_LLM: NousModelPublic = {
   pricing_value: 2,
   last_test_status: 'fail',
   last_tested_at: twentyMinutesAgo,
-};
-const WELL_LLM: NousModelPublic = {
+});
+const WELL_LLM = makeNousModel({
   name: 'mediahub-deepseek-v4-pro',
   display_name: 'DeepSeek V4 Pro',
   type: 'llm',
@@ -53,16 +55,16 @@ const WELL_LLM: NousModelPublic = {
   pricing_value: 4,
   last_test_status: 'ok',
   last_tested_at: twentyMinutesAgo,
-};
+});
 /** Same red light as SICK_LLM, but the backend classified WHY (mig 427). */
-const RATE_LIMITED_LLM: NousModelPublic = {
+const RATE_LIMITED_LLM = makeNousModel({
   ...SICK_LLM,
   name: 'mediahub-doubao-seed-2-0-pro',
   display_name: 'Doubao Seed 2.0 Pro',
   last_test_code: 'rate_limit',
-};
+});
 /** Recorded as failing by construction — see the no-badge test below. */
-const SICK_IMAGE: NousModelPublic = {
+const SICK_IMAGE = makeNousModel({
   name: 'mediahub-doubao-seedream-t2i',
   display_name: 'Seedream T2I',
   type: 'image',
@@ -70,14 +72,14 @@ const SICK_IMAGE: NousModelPublic = {
   pricing_value: 5,
   last_test_status: 'fail',
   last_tested_at: twentyMinutesAgo,
-};
-const UNPROBED_ASR: NousModelPublic = {
+});
+const UNPROBED_ASR = makeNousModel({
   name: 'moss-asr',
   display_name: 'MOSS ASR',
   type: 'asr',
   pricing_type: 'per_hour',
   pricing_value: 3,
-};
+});
 
 vi.mock('../services/aiService', () => ({
   saveAISettings: vi.fn().mockResolvedValue(undefined),
@@ -121,21 +123,40 @@ const baseSettings: AISettingsType = {
   },
 };
 
-async function renderWith(models: NousModelPublic[]) {
+async function renderWith(
+  models: NousModelPublic[],
+  taskAssignment: Partial<AISettingsType['task_assignment']> = {},
+) {
   const { getNousModels } = await import('../services/aiService');
   vi.mocked(getNousModels).mockResolvedValue(models);
-  const result = render(<AISettings settings={baseSettings} onSave={vi.fn()} />);
-  await waitFor(() => {
-    expect(screen.getByText(models[0].display_name)).toBeInTheDocument();
-  });
+  const settings: AISettingsType = {
+    ...baseSettings,
+    task_assignment: { ...baseSettings.task_assignment, ...taskAssignment },
+  };
+  const result = render(<AISettings settings={settings} onSave={vi.fn()} />);
+  // Wait on a row that stays listed: the first healthy one.
+  const anchor = models.find((m) => m.last_test_status !== 'fail');
+  if (anchor) {
+    await waitFor(() => {
+      expect(cardRow(anchor.name)).toBeInTheDocument();
+    });
+  }
   return result;
 }
 
-/** The platform-card row for a model, by display name. */
-function cardRow(displayName: string): HTMLElement {
-  const row = screen.getByText(displayName).closest('.justify-between');
-  if (!row) throw new Error(`row not found for ${displayName}`);
+/** The platform-card row for a model, by row name. */
+function cardRow(name: string): HTMLElement {
+  const row = document.querySelector(
+    `[data-testid="platform-model-row"][data-model-name="${name}"]`,
+  );
+  if (!row) throw new Error(`row not found for ${name}`);
   return row as HTMLElement;
+}
+
+function queryCardRow(name: string): Element | null {
+  return document.querySelector(
+    `[data-testid="platform-model-row"][data-model-name="${name}"]`,
+  );
 }
 
 describe('AISettings — platform model health', () => {
@@ -143,83 +164,69 @@ describe('AISettings — platform model health', () => {
     vi.clearAllMocks();
   });
 
-  it('flags a failing model on its platform-card row, with the check time', async () => {
+  it('hides a failing model from the platform card', async () => {
     await renderWith([SICK_LLM, WELL_LLM]);
-    const badge = within(cardRow('DeepSeek V4 Flash')).getByTestId('model-health-badge');
-    expect(badge.textContent).toContain('20m ago');
+    expect(cardRow(WELL_LLM.name)).toBeInTheDocument();
+    expect(queryCardRow(SICK_LLM.name)).toBeNull();
   });
 
-  it('leaves a healthy model unflagged', async () => {
+  it('hides a failing image model too — the rule is by status, not by type', async () => {
+    // Image rows are only probed by the admin Test button now (the hourly poll
+    // writes `not_probed`), so a `fail` on one is a real verdict.
+    await renderWith([SICK_IMAGE, WELL_LLM]);
+    expect(queryCardRow(SICK_IMAGE.name)).toBeNull();
+  });
+
+  it('keeps a never-probed model listed — no signal is not a failure', async () => {
+    await renderWith([UNPROBED_ASR, WELL_LLM]);
+    expect(cardRow(UNPROBED_ASR.name)).toBeInTheDocument();
+  });
+
+  it('does not offer a failing model in the task picker', async () => {
     await renderWith([SICK_LLM, WELL_LLM]);
-    expect(
-      within(cardRow('DeepSeek V4 Pro')).queryByTestId('model-health-badge'),
-    ).toBeNull();
-  });
-
-  it('says nothing about an image model, whose red light is a probe artifact', async () => {
-    // The backend probe POSTs every non-asr/embedding type to
-    // /chat/completions, so image / video / tts models are recorded as failing
-    // no matter what. On 2026-08-14, 3 of the 4 production `fail` rows were
-    // exactly this — and all three models worked. Three permanently-lit
-    // warnings would teach users to ignore the badge, which is the failure
-    // this feature exists to prevent.
-    await renderWith([SICK_IMAGE, SICK_LLM]);
-    expect(within(cardRow('Seedream T2I')).queryByTestId('model-health-badge')).toBeNull();
-    // Same render, real signal still shown — proves the filter is by type and
-    // not a blanket mute.
-    expect(
-      within(cardRow('DeepSeek V4 Flash')).getByTestId('model-health-badge'),
-    ).toBeInTheDocument();
-  });
-
-  it('says nothing about a model that has never been probed', async () => {
-    await renderWith([UNPROBED_ASR]);
-    expect(within(cardRow('MOSS ASR')).queryByTestId('model-health-badge')).toBeNull();
-  });
-
-  it('still offers the failing model in the task picker — marked, not removed', async () => {
-    await renderWith([SICK_LLM, WELL_LLM]);
-    // The option label carries the warning; the model stays selectable because
-    // the probe is advisory (it has produced a false negative in production).
-    const marked = screen.getAllByText(/DeepSeek V4 Flash \(Platform\).*health check failed/);
-    expect(marked.length).toBeGreaterThan(0);
-    expect(marked[0].textContent).toContain('20m ago');
-  });
-
-  it('says WHY the check failed, when the backend classified it', async () => {
-    // 2026-08-14 produced both of these in one round, and they ask for opposite
-    // things: the timeout was a local engine still loading (wait), the 429 was
-    // a quota (go act). Under #1838 both rendered as "health check failed".
-    // The wording resolves through the shipped en.json, so a missing
-    // healthReason key fails here instead of showing users a raw key.
-    await renderWith([RATE_LIMITED_LLM, WELL_LLM]);
-    const badge = within(cardRow('Doubao Seed 2.0 Pro')).getByTestId('model-health-badge');
-    expect(badge.textContent).toContain('Rate limited');
-    expect(badge.textContent).toContain('20m ago');
-  });
-
-  it('falls back to the plain wording when there is no code to name', async () => {
-    // Rows probed before the column existed. The badge must still appear —
-    // losing the warning to gain a reason would be a straight regression.
-    await renderWith([SICK_LLM, WELL_LLM]);
-    const badge = within(cardRow('DeepSeek V4 Flash')).getByTestId('model-health-badge');
-    expect(badge.textContent).toContain('health check failed');
-    expect(badge.textContent).not.toContain(':');
-  });
-
-  it('still offers a rate-limited model in the picker — reason shown, not vetoed', async () => {
-    // #1838's rule survives the added reason: knowing why it failed is not a
-    // reason to start blocking the choice.
-    await renderWith([RATE_LIMITED_LLM, WELL_LLM]);
-    const marked = screen.getAllByText(
-      /Doubao Seed 2\.0 Pro \(Platform\).*health check failed: Rate limited/,
-    );
-    expect(marked.length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/DeepSeek V4 Pro \(Platform\)/).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(/DeepSeek V4 Flash/)).toHaveLength(0);
   });
 
   it('keeps the healthy model label clean in the task picker', async () => {
     await renderWith([SICK_LLM, WELL_LLM]);
     const healthy = screen.getAllByText(/DeepSeek V4 Pro \(Platform\)/);
     expect(healthy[0].textContent).not.toContain('health check failed');
+  });
+
+  it('says a saved-but-failing model is unavailable, with the reason, instead of swapping it', async () => {
+    await renderWith([RATE_LIMITED_LLM, WELL_LLM], {
+      summarization: `nous:${RATE_LIMITED_LLM.name}`,
+    });
+    const option = document.querySelector(
+      `option[data-unavailable="true"][value="nous:${RATE_LIMITED_LLM.name}"]`,
+    );
+    expect(option).not.toBeNull();
+    expect(option!.textContent).toContain('unavailable');
+    expect(option!.textContent).toContain('Rate limited');
+    expect(option!.textContent).toContain('20m ago');
+    // The select still holds the saved value.
+    const select = option!.closest('select') as HTMLSelectElement;
+    expect(select.value).toBe(`nous:${RATE_LIMITED_LLM.name}`);
+  });
+
+  it('does the same for a saved transcription model', async () => {
+    const sickAsr = makeNousModel({
+      ...UNPROBED_ASR,
+      name: 'nous-moss-asr',
+      last_test_status: 'fail',
+      last_tested_at: twentyMinutesAgo,
+    });
+    await renderWith([sickAsr, WELL_LLM], { transcription: `nous:${sickAsr.name}` });
+    const option = document.querySelector(
+      `option[value="nous:${sickAsr.name}"]`,
+    ) as HTMLOptionElement | null;
+    expect(option).not.toBeNull();
+    expect(option!.textContent).toContain('unavailable');
+    // Listed first, so the <select> shows the saved value rather than
+    // whichever option happened to come first.
+    const select = option!.closest('select') as HTMLSelectElement;
+    expect(select.options[0]).toBe(option);
+    expect(select.value).toBe(`nous:${sickAsr.name}`);
   });
 });

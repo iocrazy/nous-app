@@ -20,7 +20,7 @@ import {
   Loader2,
 } from 'lucide-react';
 
-import type { ChatToolCall } from '../../types';
+import type { ChatToolCall } from '../../types/api';
 import { LibrarySearchCard } from './LibrarySearchCard';
 import { getSupabaseClient } from '../../supabaseClient';
 import {

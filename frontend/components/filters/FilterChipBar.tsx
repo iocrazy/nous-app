@@ -22,7 +22,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { UseFilterBarConfigReturn } from '../../hooks/useFilterBarConfig';
 import type { ChipId } from '../resources/filter/types';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 import { FACETS, facetActiveLabel, facetIsFullscreen } from './facetMeta';
 import { FacetDropdown } from './FacetDropdown';
 

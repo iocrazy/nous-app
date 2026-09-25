@@ -17,20 +17,14 @@
 import { getApiUrl } from '../../utils/apiConfig';
 import { getAuthHeaders } from '../../services/parserService';
 import { unwrapResponse } from '../../utils/apiHelpers';
+import type { BeatMemo, BeatMemoImageUpload } from '../../types/api';
 
 const apiBase = () => `${getApiUrl()}/api/v1`;
 
-export interface Memo {
-  id: string;
-  script_id: string;
-  /** Whole-second offset on the script's beats timeline. */
-  anchor_sec: number;
-  content: string;
-  /** Object-store path strings (≤4); served via memoImageUrl. */
-  images: string[];
-  created_at: string;
-  updated_at: string;
-}
+/** A timeline memo (`BeatMemo`, ids already strings on the wire). `anchor_sec`
+ *  is a whole-second offset; `images` are ≤4 object-store paths served via
+ *  `memoImageUrl`. */
+export type Memo = BeatMemo;
 
 export interface MemoInput {
   anchor_sec?: number;
@@ -83,7 +77,7 @@ export async function uploadMemoImage(scriptId: string, file: File): Promise<str
     headers,
     body: form,
   });
-  const { path } = await unwrapResponse<{ path: string }>(res);
+  const { path } = await unwrapResponse<BeatMemoImageUpload>(res);
   return path;
 }
 

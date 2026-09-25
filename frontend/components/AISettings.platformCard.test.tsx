@@ -10,7 +10,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { AISettings } from './AISettings';
-import type { AISettings as AISettingsType, NousModelPublic } from '../types';
+import type { AISettings as AISettingsType } from '../types';
+import type { NousModelPublic } from '../types/api';
+import { makeNousModel } from '../tests/fixtures/ai';
 
 import en from '../public/locales/en.json';
 
@@ -34,34 +36,34 @@ vi.mock('react-i18next', () => {
 });
 
 const FOUR_TYPES: NousModelPublic[] = [
-  {
+  makeNousModel({
     name: 'doubao-embedding-vision-251215',
     display_name: 'Doubao Embedding Vision',
     type: 'embedding',
     pricing_type: 'per_request',
     pricing_value: 1,
-  },
-  {
+  }),
+  makeNousModel({
     name: 'moss-asr',
     display_name: 'MOSS ASR',
     type: 'asr',
     pricing_type: 'per_hour',
     pricing_value: 3,
-  },
-  {
+  }),
+  makeNousModel({
     name: 'nous-llm',
     display_name: 'Nous LLM',
     type: 'llm',
     pricing_type: 'per_token',
     pricing_value: 2,
-  },
-  {
+  }),
+  makeNousModel({
     name: 'doubao-seedream-3-0-t2i',
     display_name: 'Doubao Seedream 3.0',
     type: 'image',
     pricing_type: 'per_request',
     pricing_value: 5,
-  },
+  }),
 ];
 
 vi.mock('../services/aiService', () => ({
@@ -172,13 +174,13 @@ describe('AISettings — Nous (Platform) models card', () => {
   it('never renders an admin description note (even if one sneaks into the payload)', async () => {
     const { getNousModels } = await import('../services/aiService');
     // Simulate a stale/dirty payload carrying an internal ops note.
-    const leaky = [
-      {
-        ...FOUR_TYPES[2],
-        // @ts-expect-error — description is intentionally not part of the public type.
-        description: 'via ZeroTier (10.0.0.10:8000) from 8512939 BYOK',
-      },
-    ] as NousModelPublic[];
+    // `description` is not part of the public type; the spread keeps it on
+    // the object the way a stale payload would.
+    const dirty = {
+      ...FOUR_TYPES[2],
+      description: 'via ZeroTier (10.0.0.10:8000) from 8512939 BYOK',
+    };
+    const leaky: NousModelPublic[] = [dirty];
     vi.mocked(getNousModels).mockResolvedValue(leaky);
 
     renderSettings();

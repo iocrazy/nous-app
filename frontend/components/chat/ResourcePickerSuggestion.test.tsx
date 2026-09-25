@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ResourcePickerSuggestion } from './ResourcePickerSuggestion';
-import type { ResourceSearchResult } from '../../types';
+import type { ResourceSearchResult } from '../../types/api';
 
 // Real `/api/v1/resources/search` wire shape (Task 1 contract): every row
 // carries `thumbnail_url` (RELATIVE path or null) plus both status columns.

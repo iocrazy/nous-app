@@ -23,7 +23,7 @@ import { ChevronDown, ExternalLink, FolderInput, Loader2, PackagePlus, Trash2 } 
 import { useResourcesContext } from '../../../contexts/ResourcesContext';
 import { useToast } from '../../Toast';
 import { fetchProjects } from '../../../services/projectsService';
-import type { Project } from '../../../types';
+import type { Project } from '../../../types/api';
 import {
   batchGenerated,
   deleteGeneration,

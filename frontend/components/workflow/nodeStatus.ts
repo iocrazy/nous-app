@@ -4,7 +4,7 @@
  * amber=in progress, purple=review) so the workflow reads as the same system.
  */
 
-import type { ProjectStageNode, WorkflowNodeStatus } from '../../types';
+import type { ProjectStageNode, WorkflowNodeStatus } from '../../types/api';
 
 export interface NodeStatusMeta {
   /** Solid dot / tick hue (Tailwind bg-*). */

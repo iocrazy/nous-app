@@ -24,6 +24,12 @@ from pydantic import BaseModel, Field
 from app.core.deps import AuthDep
 from app.repositories.team_repository import TeamRepository
 from app.repositories.user_settings_repository import UserSettingsRepository
+from app.schemas.ai_memory_responses import (
+    AiMemoryCardResponse,
+    AiMemoryForgetResponse,
+    AiMemoryObservationDeleteResponse,
+    AiMemoryPrefsResponse,
+)
 from app.services.ai.memory.honcho_memory import get_honcho_memory_service
 from app.services.ai.memory.memory_prefs import get_memory_prefs
 
@@ -96,7 +102,7 @@ async def get_memory_profile(
     )
 
 
-@router.put("/prefs")
+@router.put("/prefs", response_model=AiMemoryPrefsResponse)
 async def put_memory_prefs(body: PrefsUpdate, auth: AuthDep):
     """Toggle the per-user learn / inject switches. Patches only the two
     keys into the shared ai_settings subtree (merge, never clobber —
@@ -118,7 +124,7 @@ async def put_memory_prefs(body: PrefsUpdate, auth: AuthDep):
     return {"learn_enabled": prefs.learn, "inject_enabled": prefs.inject}
 
 
-@router.put("/card")
+@router.put("/card", response_model=AiMemoryCardResponse)
 async def put_memory_card(
     body: CardUpdate, auth: AuthDep, workspace: Optional[str] = Query(default=None)
 ):
@@ -139,7 +145,9 @@ async def put_memory_card(
     return {"saved": True, "lines": lines}
 
 
-@router.delete("/observations/{conclusion_id}")
+@router.delete(
+    "/observations/{conclusion_id}", response_model=AiMemoryObservationDeleteResponse
+)
 async def delete_memory_observation(
     conclusion_id: str,
     auth: AuthDep,
@@ -159,7 +167,7 @@ async def delete_memory_observation(
     return {"deleted": conclusion_id}
 
 
-@router.delete("")
+@router.delete("", response_model=AiMemoryForgetResponse)
 async def forget_all_memory(
     auth: AuthDep, workspace: Optional[str] = Query(default=None)
 ):

@@ -7,15 +7,26 @@ Regular folder and smart folder CRUD operations.
 """
 
 from datetime import datetime, timezone
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.core.exceptions import AppError
 from app.core.scope_dep import scoped_request
 from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
+from app.schemas.envelope import Envelope
+from app.schemas.resource_responses import (
+    FolderContentCount,
+    FolderDeleteEnvelope,
+    FolderRestoreResult,
+    FolderTrashResult,
+    ResourcesMessage,
+)
+from app.schemas.resource_rows import FolderRow, ResourcePlacement
 from app.schemas.resources import (
     FolderCreate,
     FolderUpdate,
@@ -34,7 +45,7 @@ router = APIRouter(prefix="/resources", dependencies=[Depends(scoped_request)])
 # ============================================
 
 
-@router.post("/smart-folders")
+@router.post("/smart-folders", response_model=Envelope[FolderRow])
 async def create_smart_folder(data: SmartFolderCreate, auth: AuthDep):
     """Create a smart folder with rule-based filtering."""
     try:
@@ -56,7 +67,7 @@ async def create_smart_folder(data: SmartFolderCreate, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to create smart folder")
 
 
-@router.get("/smart-folders")
+@router.get("/smart-folders", response_model=Envelope[List[FolderRow]])
 async def list_smart_folders(
     auth: AuthDep,
     scope_id: str = Query(...),
@@ -72,7 +83,7 @@ async def list_smart_folders(
         raise HTTPException(status_code=500, detail="Failed to list smart folders")
 
 
-@router.patch("/smart-folders/{folder_id}")
+@router.patch("/smart-folders/{folder_id}", response_model=Envelope[FolderRow])
 async def update_smart_folder(folder_id: str, data: SmartFolderUpdate, auth: AuthDep):
     """Update a smart folder's name, rules, icon, or color."""
     try:
@@ -89,7 +100,7 @@ async def update_smart_folder(folder_id: str, data: SmartFolderUpdate, auth: Aut
             update_data["smart_rules"] = update_data.pop("rules")
 
         result = await repo.update_folder(folder_id, update_data)
-        return {"success": True, "data": result}
+        return {"success": True, "data": require_row(result)}
     except HTTPException:
         raise
     except Exception as e:
@@ -97,7 +108,7 @@ async def update_smart_folder(folder_id: str, data: SmartFolderUpdate, auth: Aut
         raise HTTPException(status_code=500, detail="Failed to update smart folder")
 
 
-@router.delete("/smart-folders/{folder_id}")
+@router.delete("/smart-folders/{folder_id}", response_model=ResourcesMessage)
 async def delete_smart_folder(folder_id: str, auth: AuthDep):
     """Delete a smart folder."""
     try:
@@ -117,7 +128,10 @@ async def delete_smart_folder(folder_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to delete smart folder")
 
 
-@router.get("/smart-folders/{folder_id}/results")
+@router.get(
+    "/smart-folders/{folder_id}/results",
+    response_model=Envelope[List[ResourcePlacement]],
+)
 async def smart_folder_results(
     folder_id: str,
     auth: AuthDep,
@@ -153,7 +167,7 @@ async def smart_folder_results(
 # ============================================
 
 
-@router.get("/folders/list")
+@router.get("/folders/list", response_model=Envelope[List[FolderRow]])
 async def list_folders(
     auth: AuthDep,
     scope_id: str = Query(...),
@@ -169,7 +183,7 @@ async def list_folders(
         raise HTTPException(status_code=500, detail="Failed to list folders")
 
 
-@router.post("/folders")
+@router.post("/folders", response_model=Envelope[FolderRow])
 async def create_folder(data: FolderCreate, auth: AuthDep):
     """Create a new folder."""
     try:
@@ -190,7 +204,7 @@ async def create_folder(data: FolderCreate, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to create folder")
 
 
-@router.patch("/folders/{folder_id}")
+@router.patch("/folders/{folder_id}", response_model=Envelope[FolderRow])
 async def update_folder(folder_id: str, data: FolderUpdate, auth: AuthDep):
     """Update a folder."""
     try:
@@ -213,7 +227,7 @@ async def update_folder(folder_id: str, data: FolderUpdate, auth: AuthDep):
             update_data["trashed_at"] = None
 
         result = await repo.update_folder(folder_id, update_data)
-        return {"success": True, "data": result}
+        return {"success": True, "data": require_row(result)}
     except (HTTPException, AppError):
         raise
     except Exception as e:
@@ -221,7 +235,10 @@ async def update_folder(folder_id: str, data: FolderUpdate, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to update folder")
 
 
-@router.get("/folders/{folder_id}/content-count")
+@router.get(
+    "/folders/{folder_id}/content-count",
+    response_model=Envelope[FolderContentCount],
+)
 async def get_folder_content_count(folder_id: str, auth: AuthDep):
     """Get count of resources and sub-folders inside a folder (including nested)."""
     try:
@@ -295,7 +312,7 @@ async def _verify_folder_ownership_inline(folder: dict, auth: AuthDep) -> None:
         )
 
 
-@router.post("/folders/{folder_id}/trash")
+@router.post("/folders/{folder_id}/trash", response_model=Envelope[FolderTrashResult])
 async def trash_folder_cascade(folder_id: str, auth: AuthDep):
     """Move a folder, all sub-folders, and their resources to the recycle bin."""
     try:
@@ -315,7 +332,9 @@ async def trash_folder_cascade(folder_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to trash folder")
 
 
-@router.post("/folders/{folder_id}/restore")
+@router.post(
+    "/folders/{folder_id}/restore", response_model=Envelope[FolderRestoreResult]
+)
 async def restore_folder_cascade(folder_id: str, auth: AuthDep):
     """Restore a trashed folder, all sub-folders, and their resources."""
     try:
@@ -333,7 +352,7 @@ async def restore_folder_cascade(folder_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to restore folder")
 
 
-@router.delete("/folders/{folder_id}")
+@router.delete("/folders/{folder_id}", response_model=FolderDeleteEnvelope)
 async def delete_folder(folder_id: str, auth: AuthDep):
     """Permanently delete a folder and all resources inside it (cascade)."""
     try:

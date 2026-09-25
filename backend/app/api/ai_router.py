@@ -27,6 +27,14 @@ from app.schemas.ai import (
     TranscriptResponse,
     VisualAnalysisResponse,
 )
+from app.schemas.ai_responses import (
+    AiAnalyzeTriggerResponse,
+    AiBackfillEmbeddingsResponse,
+    AiLegacySummarizeTriggerResponse,
+    AiLegacyTranscribeTriggerResponse,
+    AiSummarizeTriggerResponse,
+    AiTranscribeTriggerResponse,
+)
 from app.schemas.search import SpaceInfo
 from app.services.billing import transcription_billing
 from app.services.billing.points_service import PointsService
@@ -69,6 +77,38 @@ async def _resolve_resource_to_platform_id(
         raise HTTPException(status_code=404, detail="Linked media not found")
 
     return resource, media["platform_id"], media
+
+
+def _workflow_resource_id(resource_id: str | int | None) -> int | None:
+    """The ``resource_id`` a transcription workflow writes to, as the int the
+    workflow input takes. Snowflake ids arrive as numeric strings; anything
+    else (test doubles) is left to the workflow's initiator-filtered lookup.
+    """
+    text = str(resource_id) if resource_id is not None else ""
+    return int(text) if text.isdigit() else None
+
+
+async def _caller_resource_for_media_or_404(media: dict, user_id: str) -> dict:
+    """The caller's OWN resource for ``media``, or 404.
+
+    ``parsed_media`` is shared platform metadata (one row per platform id,
+    whoever parsed it first), so knowing a platform id proves nothing about
+    the caller. The transcription workflow then resolves "a resource of this
+    media" and writes the transcript and status onto it: before this check a
+    caller with no resource of their own could run (and pay for) a
+    transcription that landed on another user's row, and the summary path
+    charged points and dispatched a transcription the same way. 404 like an
+    unknown platform id, so the check does not reveal whose media it is.
+    """
+    resource = await ResourcesRepository().get_resource_by_media_id_and_creator(
+        str(media["id"]), user_id
+    )
+    if not resource:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Media not found: {media.get('platform_id')}",
+        )
+    return resource
 
 
 # Video container extensions that ffmpeg can stream-copy audio from. Used
@@ -395,7 +435,11 @@ async def _persist_summary_follow_up(resource_id: str, user_id: str) -> None:
         )
 
 
-@router.post("/transcribe/resource/{resource_id}")
+@router.post(
+    "/transcribe/resource/{resource_id}",
+    response_model=AiTranscribeTriggerResponse,
+    response_model_exclude_unset=True,
+)
 async def trigger_transcription_by_resource(
     resource_id: str,
     auth: AuthDep,
@@ -569,6 +613,7 @@ async def trigger_transcription_by_resource(
                 dbos_workflow_kwargs={
                     "parsed_media_id": int(media["id"]),
                     "user_id": auth.user_id,
+                    "resource_id": _workflow_resource_id(resource_id),
                 },
                 workflow_id=wf_id,
             )
@@ -686,7 +731,11 @@ async def trigger_transcription_by_resource(
     }
 
 
-@router.post("/summarize/resource/{resource_id}")
+@router.post(
+    "/summarize/resource/{resource_id}",
+    response_model=AiSummarizeTriggerResponse,
+    response_model_exclude_unset=True,
+)
 async def trigger_summary_by_resource(
     resource_id: str,
     auth: AuthDep,
@@ -853,6 +902,7 @@ async def trigger_summary_by_resource(
                 dbos_workflow_kwargs={
                     "parsed_media_id": int(media["id"]),
                     "user_id": auth.user_id,
+                    "resource_id": _workflow_resource_id(resource_id),
                 },
             )
             return {
@@ -932,7 +982,11 @@ async def trigger_summary_by_resource(
         )
 
 
-@router.post("/analyze/resource/{resource_id}")
+@router.post(
+    "/analyze/resource/{resource_id}",
+    response_model=AiAnalyzeTriggerResponse,
+    response_model_exclude_unset=True,
+)
 async def trigger_visual_analysis_by_resource(
     resource_id: str, auth: AuthDep, _scope: ScopedRequestDep
 ):
@@ -1133,7 +1187,9 @@ _EMBEDDER_UNCONFIGURED = {
 }
 
 
-@router.post("/analyze/backfill-embeddings")
+@router.post(
+    "/analyze/backfill-embeddings", response_model=AiBackfillEmbeddingsResponse
+)
 async def backfill_embeddings(
     auth: AuthDep, _scope: ScopedRequestDep, body: BackfillEmbeddingsBody | None = None
 ):
@@ -1359,7 +1415,9 @@ async def _embed_backfill_rows(
 # ------------------------------------------------------------------
 
 
-@router.post("/transcribe/{platform_id}")
+@router.post(
+    "/transcribe/{platform_id}", response_model=AiLegacyTranscribeTriggerResponse
+)
 async def trigger_transcription(
     platform_id: str, auth: AuthDep, _scope: ScopedRequestDep
 ):
@@ -1370,6 +1428,7 @@ async def trigger_transcription(
     end). Neither → 409.
     """
     media_row = await _get_media_or_404(platform_id)
+    owner_resource = await _caller_resource_for_media_or_404(media_row, auth.user_id)
 
     # === Audio-readiness classification (BEFORE billing so a dead-end
     # 409 never leaves points charged) ===
@@ -1408,19 +1467,10 @@ async def trigger_transcription(
     try:
         import uuid as _uuid
 
-        # Lookup the user's resource for this platform_id (best-effort —
-        # transcription can run without resource_id, the task_tracking
-        # row just won't link back to a card).
-        from app.repositories.resources_repository import ResourcesRepository
         from app.services.infra.dbos_orchestrator import start_workflow_routed
         from app.services.infra.unified_task_manager import get_task_manager
 
-        owner_resource = (
-            await ResourcesRepository().get_resource_by_media_id_and_creator(
-                str(media_row["id"]), auth.user_id
-            )
-        )
-        owner_resource_id = str(owner_resource["id"]) if owner_resource else None
+        owner_resource_id = str(owner_resource["id"])
 
         tracker = get_task_manager()
         wf_id = str(_uuid.uuid4())
@@ -1455,6 +1505,7 @@ async def trigger_transcription(
                 dbos_workflow_kwargs={
                     "parsed_media_id": int(media_row["id"]),
                     "user_id": auth.user_id,
+                    "resource_id": _workflow_resource_id(owner_resource_id),
                 },
                 workflow_id=wf_id,
             )
@@ -1518,13 +1569,24 @@ async def trigger_transcription(
     }
 
 
-@router.post("/summarize/{platform_id}")
+@router.post(
+    "/summarize/{platform_id}", response_model=AiLegacySummarizeTriggerResponse
+)
 async def trigger_summary(platform_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Manually trigger summary generation for a video (legacy, platform_id-based).
 
     Requires an existing transcript. If no transcript exists,
     queues the full pipeline (extract -> transcribe -> summarize).
+
+    The media and the caller's own resource are resolved BEFORE the points
+    charge: an unknown platform id (or one the caller holds no resource for)
+    used to be charged first and then 404ed with nothing refunded.
     """
+    media = await _get_media_or_404(platform_id)
+    media_id = media["id"]
+    resource = await _caller_resource_for_media_or_404(media, auth.user_id)
+    _resource_id = str(resource["id"])
+
     # === Points check ===
     points_service = PointsService()
     _team_id = await get_team_id_for_user(auth.user_id)
@@ -1541,18 +1603,8 @@ async def trigger_summary(platform_id: str, auth: AuthDep, _scope: ScopedRequest
         _points_cost = points_result.get("points_cost", 0)
     # === End points check ===
 
-    media = await _get_media_or_404(platform_id)
-    media_id = media["id"]
-
-    # Resolve resource_id for per-resource transcript lookup (user-specific)
-    res_repo = ResourcesRepository()
-    resource = await res_repo.get_resource_by_media_id_and_creator(
-        media_id, auth.user_id
-    )
-    _resource_id = str(resource["id"]) if resource else None
-
     ai_repo = get_ai_repository()
-    transcript = await ai_repo.get_transcript(_resource_id) if _resource_id else None
+    transcript = await ai_repo.get_transcript(_resource_id)
 
     _orphan_task_id: str | None = None
 
@@ -1605,6 +1657,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep, _scope: ScopedRequest
                 dbos_workflow_kwargs={
                     "parsed_media_id": int(media_id),
                     "user_id": auth.user_id,
+                    "resource_id": _workflow_resource_id(_resource_id),
                 },
             )
             return {
@@ -1643,51 +1696,6 @@ async def trigger_summary(platform_id: str, auth: AuthDep, _scope: ScopedRequest
         raise HTTPException(
             status_code=500, detail=f"Failed to queue summary: {str(e)}"
         )
-
-
-@router.post("/analyze/{platform_id}")
-async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
-    """Manually trigger visual analysis (L1: cover image) for a video.
-
-    Queues L1 analysis via Celery. If a local video file exists,
-    L2 analysis (cover + keyframes) is queued instead.
-    """
-    await _get_media_or_404(platform_id)
-
-    # === Points check ===
-    points_service = PointsService()
-    _team_id = await get_team_id_for_user(auth.user_id)
-    _points_cost = 0
-    if _team_id:
-        await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
-        points_result = await points_service.check_and_consume(
-            team_id=_team_id,
-            user_id=auth.user_id,
-            action_type="ai_visual_analysis",
-        )
-        if not points_result["success"]:
-            raise HTTPException(status_code=402, detail=points_result["reason"])
-        _points_cost = points_result.get("points_cost", 0)
-    # === End points check ===
-
-    # Visual analysis is not yet implemented -- refund consumed points
-    if _points_cost > 0 and _team_id:
-        try:
-            await points_service.refund_points(
-                team_id=_team_id,
-                user_id=auth.user_id,
-                amount=_points_cost,
-                reference_type="ai_visual_analysis",
-                reference_id=platform_id,
-                reason="Visual analysis not yet implemented",
-            )
-        except Exception as refund_err:
-            logger.error(f"Failed to refund points: {refund_err}")
-
-    raise HTTPException(
-        status_code=501,
-        detail="Visual analysis is not yet implemented",
-    )
 
 
 # ------------------------------------------------------------------

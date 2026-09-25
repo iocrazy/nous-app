@@ -1,6 +1,7 @@
 /**
- * Unit tests for sharesService — covers the success/failure envelope
- * unwrap behavior across the shares CRUD + public accessShare path.
+ * Unit tests for sharesService — URL shapes, bodies, and the real wire shapes
+ * of `/api/v1/shares` (Snowflake ids are JSON numbers; failures are non-2xx
+ * `ErrorResponse` bodies, not `success:false` 200s).
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,8 +11,6 @@ import {
   createShare,
   deleteSharePermanent,
   fetchShares,
-  getShare,
-  updateShare,
 } from './sharesService';
 
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
@@ -29,49 +28,86 @@ function stubJson(body: unknown, status: number = 200) {
   } as unknown as Response);
 }
 
+function errorBody(error: string, status: number) {
+  return { success: false, error, code: `http_${status}`, request_id: 'r1', details: null };
+}
+
+const SHARE_ID = 339710259795355;
+
+// An owner's share row as `_enrich_share` sends it: no `password`, a
+// `has_password` flag and a computed `share_url`.
+const SHARE_ROW = {
+  id: SHARE_ID,
+  share_type: 'review',
+  shared_by: '00000000-0000-0000-0000-000000000042',
+  share_name: 'My Share',
+  share_code: 'AbCd1234',
+  allow_download: true,
+  view_count: 0,
+  watermark: false,
+  status: 'active',
+  created_at: '2026-09-24T01:02:03.456789+00:00',
+  expires_at: null,
+  max_views: null,
+  project_file_id: null,
+  version_id: null,
+  resource_id: 339710259795001,
+  folder_id: null,
+  library_id: null,
+  team_id: null,
+  share_url: '/s/AbCd1234',
+  has_password: false,
+};
+
 beforeEach(() => {
   vi.restoreAllMocks();
 });
 
 describe('createShare', () => {
   it('POSTs body and unwraps { data }', async () => {
-    const spy = stubJson({
-      success: true,
-      data: { id: 's1', share_code: 'abc', share_type: 'review' },
-    });
+    const spy = stubJson({ success: true, data: SHARE_ROW });
     const result = await createShare({
-      resource_id: 'r1',
+      resource_id: '339710259795001',
       share_type: 'review',
       share_name: 'My Share',
     });
-    expect(result.id).toBe('s1');
+    expect(result.id).toBe(SHARE_ID);
     const init = spy.mock.calls[0][1] as RequestInit;
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string).share_name).toBe('My Share');
   });
 
-  it('throws the backend message on success=false', async () => {
-    stubJson({ success: false, message: 'quota exceeded' });
+  it('surfaces the typed 404 for a target the caller cannot share', async () => {
+    stubJson(
+      {
+        ...errorBody('Request failed', 404),
+        details: { code: 'not_found_or_out_of_scope', message: 'Share target not found' },
+      },
+      404,
+    );
     await expect(
-      createShare({ share_type: 'review', share_name: 'x' }),
-    ).rejects.toThrow('quota exceeded');
+      createShare({ share_type: 'review', share_name: 'x', resource_id: '1' }),
+    ).rejects.toMatchObject({
+      status: 404,
+      details: { code: 'not_found_or_out_of_scope' },
+    });
   });
 });
 
 describe('fetchShares', () => {
-  it('threads all filters as query params', async () => {
-    const spy = stubJson({ success: true, data: [] });
+  it('threads the filters the backend reads as query params', async () => {
+    const spy = stubJson({ success: true, data: [], count: 0 });
     await fetchShares({
-      resource_id: 'r1',
+      share_type: 'review',
       status: 'active',
-      team_id: 't1',
+      team_id: 'personal',
       limit: 10,
       offset: 20,
     });
     const url = spy.mock.calls[0][0] as string;
-    expect(url).toContain('resource_id=r1');
+    expect(url).toContain('share_type=review');
     expect(url).toContain('status=active');
-    expect(url).toContain('team_id=t1');
+    expect(url).toContain('team_id=personal');
     expect(url).toContain('limit=10');
     expect(url).toContain('offset=20');
   });
@@ -79,85 +115,65 @@ describe('fetchShares', () => {
   it('unwraps data array', async () => {
     stubJson({
       success: true,
-      data: [
-        { id: 's1', share_code: 'a' },
-        { id: 's2', share_code: 'b' },
-      ],
+      data: [SHARE_ROW, { ...SHARE_ROW, id: SHARE_ID + 1 }],
+      count: 2,
     });
     const result = await fetchShares();
     expect(result).toHaveLength(2);
   });
 });
 
-describe('getShare', () => {
-  it('GETs by id', async () => {
-    const spy = stubJson({
-      success: true,
-      data: { id: 's1', share_code: 'abc' },
-    });
-    const result = await getShare('s1');
-    expect(result.id).toBe('s1');
-    expect(spy.mock.calls[0][0]).toBe('https://api.test/api/v1/shares/s1');
-  });
-});
-
-describe('updateShare', () => {
-  it('PUTs partial updates', async () => {
-    const spy = stubJson({
-      success: true,
-      data: { id: 's1', share_name: 'Renamed' },
-    });
-    await updateShare('s1', { share_name: 'Renamed', allow_download: true });
-    const init = spy.mock.calls[0][1] as RequestInit;
-    expect(init.method).toBe('PUT');
-    const body = JSON.parse(init.body as string);
-    expect(body).toEqual({ share_name: 'Renamed', allow_download: true });
-  });
-});
-
 describe('cancel / deletePermanent', () => {
-  it('cancelShare DELETEs and unwraps envelope', async () => {
-    const spy = stubJson({ success: true, data: null });
-    await cancelShare('s1');
+  it('cancelShare DELETEs and returns the new status (no data key)', async () => {
+    const spy = stubJson({ success: true, message: 'Share inactive', status: 'inactive' });
+    expect(await cancelShare(SHARE_ID)).toBe('inactive');
     expect((spy.mock.calls[0][1] as RequestInit).method).toBe('DELETE');
   });
 
-  it('cancelShare throws on success=false', async () => {
-    stubJson({ success: false, message: 'already cancelled' });
-    await expect(cancelShare('s1')).rejects.toThrow('already cancelled');
+  it('cancelShare throws on the typed 404', async () => {
+    stubJson(errorBody('Request failed', 404), 404);
+    await expect(cancelShare(SHARE_ID)).rejects.toMatchObject({ status: 404 });
   });
 
   it('deleteSharePermanent DELETEs the permanent sub-URL', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 204,
-      headers: new Headers(),
-      text: async () => '',
-      json: async () => undefined,
-    } as unknown as Response);
-    await deleteSharePermanent('s1');
+    const spy = stubJson({ success: true, message: 'Share deleted' });
+    await deleteSharePermanent(SHARE_ID);
     expect(spy.mock.calls[0][0]).toBe(
-      'https://api.test/api/v1/shares/s1/permanent',
+      `https://api.test/api/v1/shares/${SHARE_ID}/permanent`,
     );
   });
 });
 
 describe('accessShare (public)', () => {
-  it('POSTs password to the share-code URL', async () => {
-    const spy = stubJson({
-      success: true,
-      data: { id: 's1', share_code: 'abc' },
-    });
-    await accessShare('abc', 'secret');
+  const VISITOR = {
+    id: SHARE_ID,
+    share_type: 'link',
+    share_name: 'My Share',
+    share_code: 'abc',
+    allow_download: true,
+    watermark: false,
+    view_count: 1,
+    resource_id: 339710259795001,
+    project_file_id: null,
+    folder_id: null,
+    version_id: null,
+    created_at: '2026-09-24T01:02:03.456789+00:00',
+    access_token: 'sg1.339710259795355.1790000000.abcdef',
+  };
+
+  it('POSTs password to the share-code URL and returns the grant', async () => {
+    const spy = stubJson({ success: true, data: VISITOR });
+    const result = await accessShare('abc', 'secret');
     const [url, init] = spy.mock.calls[0];
     expect(url).toBe('https://api.test/api/v1/shares/code/abc');
     expect((init as RequestInit).method).toBe('POST');
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body).toEqual({ password: 'secret' });
+    expect(result.access_token).toBe(VISITOR.access_token);
   });
 
   it('accessShare sends password: null when omitted', async () => {
-    const spy = stubJson({ success: true, data: { id: 's1' } });
+    const spy = stubJson({ success: true, data: VISITOR });
     await accessShare('abc');
     const body = JSON.parse(
       (spy.mock.calls[0][1] as RequestInit).body as string,
@@ -165,10 +181,8 @@ describe('accessShare (public)', () => {
     expect(body).toEqual({ password: null });
   });
 
-  it('accessShare surfaces the success=false message', async () => {
-    stubJson({ success: false, message: 'bad password' });
-    await expect(accessShare('abc', 'wrong')).rejects.toThrow(
-      'bad password',
-    );
+  it('accessShare surfaces the backend refusal text (SharePage matches on it)', async () => {
+    stubJson(errorBody('Incorrect password', 401), 401);
+    await expect(accessShare('abc', 'wrong')).rejects.toThrow('Incorrect password');
   });
 });

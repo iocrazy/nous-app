@@ -28,7 +28,7 @@ import { EpisodeSceneBoard } from './EpisodeSceneBoard';
 import { EpisodeShotListTable, type EpisodeShotListTableHandle } from './EpisodeShotListTable';
 import { SURFACE_VIEWS } from './nodeSurface';
 import { __clearSceneShotsCache } from './useSceneShots';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
 
 /** How many 150ms polls `scrollToShotCard` retries before giving up
  *  silently (~3s) — the shot-list view's data (scenes/shots) can still be

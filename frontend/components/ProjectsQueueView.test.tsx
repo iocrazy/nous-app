@@ -11,7 +11,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ProjectsQueueView } from './ProjectsQueueView';
 import * as svc from '../services/projectsService';
-import type { Project, ProjectSuggestionItem } from '../types';
+import type { Project, ProjectSuggestionItem } from '../types/api';
+import { makeProject } from '../tests/fixtures/projects';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -22,31 +23,12 @@ vi.mock('react-i18next', () => ({
 vi.mock('./Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 vi.mock('../utils/relativeTime', () => ({ formatRelativeTime: () => '2h ago' }));
 
-function makeProject(overrides: Partial<Project>): Project {
-  return {
-    id: '1',
-    name: 'Project',
-    description: null,
-    owner_id: 'u1',
-    team_id: null,
-    project_type: 'internal',
-    project_group: null,
-    announcement: null,
-    is_starred: false,
-    color_label: null,
-    archived_at: null,
-    file_count: 0,
-    created_at: '2026-06-01T00:00:00Z',
-    updated_at: '2026-07-01T00:00:00Z',
-    ...overrides,
-  };
-}
 
-const pDelivery = makeProject({ id: '1', name: 'Delivery Proj' });
-const pGenA = makeProject({ id: '2', name: 'Gen Proj A' });
-const pGenB = makeProject({ id: '3', name: 'Gen Proj B', is_starred: true });
-const pStalled = makeProject({ id: '4', name: 'Stalled Proj' });
-const pEmpty = makeProject({ id: '5', name: 'Empty Kind Proj' });
+const pDelivery = makeProject({ id: 1, name: 'Delivery Proj' });
+const pGenA = makeProject({ id: 2, name: 'Gen Proj A' });
+const pGenB = makeProject({ id: 3, name: 'Gen Proj B', is_starred: true });
+const pStalled = makeProject({ id: 4, name: 'Stalled Proj' });
+const pEmpty = makeProject({ id: 5, name: 'Empty Kind Proj' });
 
 const PROJECTS = [pDelivery, pGenA, pGenB, pStalled, pEmpty];
 

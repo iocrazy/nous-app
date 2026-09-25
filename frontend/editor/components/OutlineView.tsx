@@ -22,7 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { moveScene } from '../sceneService';
 import { sceneSummary } from '../nodes/sceneNodeMapper';
 import type { SceneDoc } from '../types';
-import type { ScriptChapter } from '../../types';
+import type { ScriptChapter } from '../../types/api';
 import { ChapterFallback } from './ChapterFallback';
 
 /** Longest chapter-excerpt line rendered under a title before truncation. */
@@ -127,7 +127,7 @@ export function OutlineView({
         groupScenes.forEach((s) => claimed.add(s.id));
         return {
           key: `ch-${key}`,
-          chapterId: ch.id,
+          chapterId: key,
           title: ch.title?.trim() || t('editor.untitledChapter'),
           excerpt: chapterExcerpt(ch),
           scenes: groupScenes,
@@ -334,7 +334,7 @@ export function OutlineView({
             <ChapterFallback
               key={ch.id}
               chapter={ch}
-              converting={!!converting[ch.id]}
+              converting={!!converting[String(ch.id)]}
               onConvert={onConvert ?? (() => {})}
               onStartWriting={onStartWriting ?? (() => {})}
             />

@@ -1,5 +1,12 @@
 
-import { ParsedMedia, DownloadStatus } from '../types';
+import type {
+  MediaBatchDispatched,
+  MediaBatchFetchResult,
+  MediaExtractAudioResult,
+  MediaFetchResult,
+  MediaSodaDownloadResult,
+  MediaTypeFetchResult,
+} from '../types/api';
 import { getSupabaseAccessToken } from '../supabaseClient';
 import { getApiUrl } from '../utils/apiConfig';
 import { STORAGE_KEYS } from '../utils/storageKeys';
@@ -68,43 +75,19 @@ export const applyIntentFields = (body: Record<string, unknown>, options: FetchO
   }
 };
 
-export interface FetchResponse {
-  success: boolean;
-  message: string;
-  id?: string;  // UUID database ID for tag operations
-  platform_id: string;
-  title?: string;
-  author?: string;
-  media_type?: string;
-  // Video/cover URLs
-  video_download_urls?: string[];
-  cover_urls?: string[];
-  image_download_urls?: string[][];
-  // Stats
-  like_count?: number;
-  comment_count?: number;
-  share_count?: number;
-  favorite_count?: number;
-  // Video info
-  duration?: string;
-  published_at?: string;
-  description?: string;
-  original_url?: string;
-  resolution?: string;
-  // Download status
-  video_download_status?: string;
-  // Task ID (unified_task_id for tracking)
-  task_id?: string;
-  download_task_id?: string; // legacy
-}
-
 /**
- * Parse a video link via backend API
+ * Parse a video link via backend API.
+ *
+ * Resolves to one of three shapes (see `MediaFetchResult`): already in the
+ * caller's library (`dedup_action: 'already_owned'`), a parse of this URL is
+ * already running or just finished (`'subscribed'` / `'completed'`, no task
+ * id), or a new parse was queued (`task_id`). No shape carries parsed video
+ * fields — those arrive later through the parse task.
  */
 export const parseShareLink = async (
   url: string,
   options: FetchOptions = {}
-): Promise<FetchResponse> => {
+): Promise<MediaFetchResult> => {
   const apiUrl = getApiUrl();
 
   const body: Record<string, unknown> = {
@@ -132,19 +115,12 @@ export const parseShareLink = async (
 };
 
 /**
- * Batch parse video links
+ * Batch parse video links (inline: every URL is parsed in the request).
  */
 export const parseBatchLinks = async (
   urls: string[],
   options: FetchOptions = {}
-): Promise<{
-  success: boolean;
-  total: number;
-  submitted: number;
-  failed: number;
-  results: Array<{ url: string; platform_id: string; status: string; data?: ParsedMedia }>;
-  errors: Array<{ url: string; error: string }>;
-}> => {
+): Promise<MediaBatchFetchResult> => {
   const apiUrl = getApiUrl();
 
   const batchBody: Record<string, unknown> = {
@@ -168,7 +144,13 @@ export const parseBatchLinks = async (
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 
-  return response.json();
+  // The queued shape only answers `use_celery: true`, which this client never
+  // sends; if it ever arrives the per-URL results below do not exist.
+  const body = (await response.json()) as MediaBatchFetchResult | MediaBatchDispatched;
+  if (!('results' in body)) {
+    throw new Error('Batch was queued instead of parsed; no per-link results');
+  }
+  return body;
 };
 
 export interface SodaTrackSummary {
@@ -228,7 +210,7 @@ export const getSodaPlaylist = async (url: string): Promise<SodaPlaylistResult> 
 export const downloadSodaTracks = async (
   items: SodaDownloadItem[],
   playlistTitle?: string,
-): Promise<{ success: boolean; flow_id: string; submitted: number; total: number }> => {
+): Promise<MediaSodaDownloadResult> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/media/soda/playlist/download`, {
@@ -249,83 +231,17 @@ export const downloadSodaTracks = async (
 };
 
 /**
- * Fetch video list from backend API
- */
-export const fetchVideosFromApi = async (
-  skip: number = 0,
-  limit: number = 20
-): Promise<{
-  success: boolean;
-  count: number;
-  media: ParsedMedia[];
-}> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(
-    `${apiUrl}/api/v1/media?skip=${skip}&limit=${limit}`,
-    {
-      method: 'GET',
-      headers: await buildHeaders(),
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
-
-/**
- * Fetch statistics
- */
-export const fetchStatistics = async (): Promise<{
-  success: boolean;
-  statistics: {
-    total: number;
-    pending: number;
-    completed: number;
-    failed: number;
-    skipped: number;
-    total_storage_bytes: number;
-    unique_authors: number;
-  };
-}> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/media/statistics`, {
-    method: 'GET',
-    headers: await buildHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-};
-
-/**
  * Fetch specific media types for an already-parsed media item.
  * Used by PlayerPage when user clicks Fetch Video / Fetch Audio / Fetch Cover.
+ *
+ * `already_in_library` true means NO download task was created (every
+ * requested asset is already in this user's library): `task_id` is null and
+ * no Task Center card will appear, so don't promise one.
  */
-export interface TypeFetchResponse {
-  task_id: string | null;
-  types_submitted: string[];
-  types_skipped: string[];
-  types_subscribed: string[];
-  /** True when the backend created NO download task because every requested
-   * asset is already in this user's library. `task_id` is null in that case —
-   * no Task Center card will ever appear, so don't promise one. */
-  already_in_library?: boolean;
-}
-
 export const fetchMediaByType = async (
   platformId: string,
   types: string[],
-): Promise<TypeFetchResponse> => {
+): Promise<MediaTypeFetchResult> => {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/media/${platformId}/fetch`, {
     method: 'POST',
@@ -345,10 +261,9 @@ export const fetchMediaByType = async (
 /**
  * Re-extract audio from downloaded video file (ffmpeg -c:a copy).
  */
-export const extractAudio = async (platformId: string): Promise<{
-  success: boolean;
-  message: string;
-}> => {
+export const extractAudio = async (
+  platformId: string,
+): Promise<MediaExtractAudioResult> => {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/media/${platformId}/extract-audio`, {
     method: 'POST',
@@ -358,27 +273,5 @@ export const extractAudio = async (platformId: string): Promise<{
     const error = await response.json().catch(() => ({ detail: 'Request failed' }));
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
-  return response.json();
-};
-
-/**
- * Retry download
- */
-export const retryDownload = async (platformId: string): Promise<{
-  success: boolean;
-  message: string;
-}> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/media/retry/${platformId}`, {
-    method: 'POST',
-    headers: await buildHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
   return response.json();
 };

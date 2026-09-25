@@ -257,7 +257,11 @@ async def extract_audio_workflow(
                 # Manual transcribe click: the user explicitly asked to
                 # transcribe, so dispatch it regardless of intent tags.
                 await chain_transcription_unconditional(
-                    platform_id, user_id, flow_id=flow_id, video_title=video_title
+                    platform_id,
+                    user_id,
+                    resource_id=resource_id,
+                    flow_id=flow_id,
+                    video_title=video_title,
                 )
             else:
                 await chain_transcript_summary_for_tags(

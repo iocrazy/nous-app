@@ -53,7 +53,12 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
   const onRetry  = async () => { await retryTask(task.id); };
   const onDelete = async () => {
     if (window.confirm('Delete this task row? Underlying job state stays in the workflow log.')) {
-      await deleteTask(task.id);
+      try {
+        await deleteTask(task.id);
+      } catch (err) {
+        // The row stays listed: it was not deleted.
+        console.error('[TaskRowExpanded] delete failed:', err);
+      }
     }
   };
 

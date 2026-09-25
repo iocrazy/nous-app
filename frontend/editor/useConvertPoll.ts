@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { listScenes } from './sceneService';
 import { fetchScriptProject } from '../services/scriptService';
 import type { SceneDoc } from './types';
-import type { ScriptChapter } from '../types';
+import type { ScriptChapter } from '../types/api';
 
 /** Poll cadence + cap while waiting for a workflow's output to appear. */
 export const CONVERT_POLL_MS = 5000;

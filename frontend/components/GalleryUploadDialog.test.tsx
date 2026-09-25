@@ -25,12 +25,15 @@ function makeFiles(): File[] {
   ];
 }
 
+const ID_OF: Record<string, number> = { 'a.jpg': 101, 'b.jpg': 102 };
+
 describe('GalleryUploadDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    asMock(createGallery).mockResolvedValue({ id: 'gal-1' });
-    // Return the file name as the resource id so we can assert ORDER.
-    asMock(uploadResource).mockImplementation(async (file: File) => ({ id: file.name }));
+    // Service mocks return `ResourceRow`s, whose ids are JSON numbers.
+    asMock(createGallery).mockResolvedValue({ id: 900 });
+    // Derive the resource id from the file so we can assert ORDER.
+    asMock(uploadResource).mockImplementation(async (file: File) => ({ id: ID_OF[file.name] }));
     asMock(setGalleryItems).mockResolvedValue([]);
   });
 
@@ -63,7 +66,7 @@ describe('GalleryUploadDialog', () => {
     // Step 2: every image uploaded into the scope.
     expect(uploadResource).toHaveBeenCalledTimes(2);
     // Step 3: children attached in the SELECTED order (file names as ids).
-    expect(setGalleryItems).toHaveBeenCalledWith('gal-1', 'scope-1', ['a.jpg', 'b.jpg']);
+    expect(setGalleryItems).toHaveBeenCalledWith('900', 'scope-1', ['101', '102']);
     expect(onCreated).toHaveBeenCalled();
     expect(addToast).toHaveBeenCalledWith('Gallery created', 'success');
   });
@@ -89,7 +92,7 @@ describe('GalleryUploadDialog', () => {
   it('reports a partial failure when some uploads fail', async () => {
     asMock(uploadResource).mockImplementation(async (file: File) => {
       if (file.name === 'b.jpg') throw new Error('boom');
-      return { id: file.name };
+      return { id: ID_OF[file.name] };
     });
     const addToast = vi.fn();
     render(
@@ -112,7 +115,7 @@ describe('GalleryUploadDialog', () => {
 
     await waitFor(() => expect(setGalleryItems).toHaveBeenCalled());
     // Only the successful image is attached.
-    expect(setGalleryItems).toHaveBeenCalledWith('gal-1', 'scope-1', ['a.jpg']);
+    expect(setGalleryItems).toHaveBeenCalledWith('900', 'scope-1', ['101']);
     expect(addToast).toHaveBeenCalledWith(expect.any(String), 'info');
   });
 });

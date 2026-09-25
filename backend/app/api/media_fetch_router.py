@@ -10,6 +10,7 @@ Helper functions are in media_fetch_helpers.py.
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from loguru import logger
 
+from app.api.media_access_guard import require_media_access
 from app.api.media_batch_router import router as batch_router
 from app.api.media_fetch_helpers import (
     MediaFetchRequest,
@@ -24,6 +25,11 @@ from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
 from app.repositories.user_logs_repository import log_user_action
 from app.schemas.media import MediaTypeFetchRequest
+from app.schemas.media_responses import (
+    MediaExtractAudioResponse,
+    MediaFetchResponse,
+    MediaTypeFetchResponse,
+)
 from app.services.billing.points_service import PointsService
 from app.services.media.parsers.douyin_parse.parse_chain import reparse_douyin
 from app.services.media.parsers.media_service import MediaService
@@ -41,7 +47,7 @@ TAGS_FETCH = ["Video Fetch"]
 # ============================================
 
 
-@router.post("/fetch", tags=TAGS_FETCH)
+@router.post("/fetch", response_model=MediaFetchResponse, tags=TAGS_FETCH)
 async def fetch_video(
     request: MediaFetchRequest,
     background_tasks: BackgroundTasks,
@@ -174,7 +180,9 @@ async def fetch_video(
         raise HTTPException(status_code=500, detail=f"Failed to fetch video: {str(e)}")
 
 
-@router.post("/{platform_id}/fetch", tags=TAGS_FETCH)
+@router.post(
+    "/{platform_id}/fetch", response_model=MediaTypeFetchResponse, tags=TAGS_FETCH
+)
 async def fetch_media_by_type(
     platform_id: str,
     request: MediaTypeFetchRequest,
@@ -378,7 +386,11 @@ async def fetch_media_by_type(
         raise HTTPException(status_code=500, detail=f"Fetch failed: {str(e)}")
 
 
-@router.post("/{platform_id}/extract-audio", tags=TAGS_FETCH)
+@router.post(
+    "/{platform_id}/extract-audio",
+    response_model=MediaExtractAudioResponse,
+    tags=TAGS_FETCH,
+)
 async def extract_audio(
     platform_id: str,
     auth: AuthDep,
@@ -404,6 +416,11 @@ async def extract_audio(
         media = await repo.get_by_platform_id(platform_id)
         if not media:
             raise HTTPException(status_code=404, detail="Media not found")
+
+        # Starting the workflow writes the shared row's audio columns and
+        # opens a task in the caller's Task Center; only for media the caller
+        # may read (same rule and 404 as the download routes).
+        await require_media_access(media.get("id"), auth.user_id, "Media not found")
 
         if not media.get("download_path"):
             raise HTTPException(

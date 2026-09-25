@@ -202,7 +202,7 @@ def _memo_row(**over) -> Dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_create_returns_memo_shape(client, _same_team, monkeypatch):
-    """POST create returns the MemoOut envelope: bigint ids serialize to strings,
+    """POST create returns the BeatMemoOut envelope: bigint ids serialize to strings,
     anchor_sec stays an int, images stays a list."""
     captured: Dict[str, Any] = {}
 

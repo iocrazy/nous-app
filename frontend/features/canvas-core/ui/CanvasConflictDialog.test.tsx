@@ -19,6 +19,9 @@ const serverRow: Canvas = {
   created_at: '2026-06-10T12:00:00+00:00',
   updated_at: '2026-06-10T12:00:30+00:00',
   created_by: null,
+  episode_id: null,
+  asset_id: null,
+  deleted_at: null,
 };
 
 afterEach(() => {

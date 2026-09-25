@@ -8,7 +8,7 @@
  * stack, 2026-09-09). Both facts are in the run's events, which outlive the
  * live view, so the row derives them itself.
  */
-import type { AgentRunEvent } from '../../types';
+import type { AgentRunEvent } from '../../types/api';
 
 export interface ForkOrigin {
   ofRunId: string;

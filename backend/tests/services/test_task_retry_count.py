@@ -116,3 +116,35 @@ async def test_a_task_that_is_not_terminal_is_not_retried(monkeypatch):
 
     assert task is None
     assert session.values == []
+
+
+@pytest.mark.asyncio
+async def test_the_returned_task_matches_every_column_the_update_wrote(monkeypatch):
+    """The response used to overlay only metadata / id on the pre-update
+    snapshot, so a retried row came back ``status="failed"`` with the old
+    error while the database already held it as pending/queued."""
+    task, session = await _retry(
+        monkeypatch,
+        _row(
+            phase="failed",
+            progress=40,
+            error_msg="boom",
+            error_code="UNKNOWN",
+            started_at="2026-09-24T01:02:03+00:00",
+            completed_at="2026-09-24T01:03:03+00:00",
+            updated_at="2026-09-24T01:03:03+00:00",
+        ),
+    )
+
+    written = session.values[-1]
+    for column in written:
+        if column in ("updated_at", "started_at", "completed_at"):
+            continue  # compared below: the response keeps the ISO string
+        assert task[column] == written[column], column
+    assert task["status"] == "pending"
+    assert task["phase"] == "queued"
+    assert task["progress"] == 0
+    assert task["error_msg"] is None and task["error_code"] is None
+    assert task["started_at"] is None and task["completed_at"] is None
+    assert isinstance(task["updated_at"], str)
+    assert task["updated_at"] == task["metadata"]["last_retry_at"]

@@ -14,39 +14,8 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import { decodeErrorEnvelope } from './errorEnvelope';
-import type {
-  AgentCapabilities,
-  AgentChatPermissions,
-  AgentDashboard,
-  AgentPermissionAudit,
-  AgentRunDetail,
-  AgentRunUndoReport,
-  AgentUsage,
-  AgentRunEvent,
-  AgentRunGroupListResponse,
-  AgentRunListResponse,
-  LiveAgentRun,
-  AILibraryAgent,
-  AILibraryApprovalRequest,
-  AILibraryCommitment,
-  AILibraryMCPServer,
-  AILibrarySkill,
-  AILibraryUsageSummary,
-  AILibraryVersionItem,
-  AILibrarySkillFile,
-  ChatResponse,
-  ChatSession,
-  ChatSessionWithMessages,
-  CreateAgentPayload,
-  CreateChatSessionPayload,
-  CreateSkillPayload,
-  UsageAggregate,
-  UsageDailySummary,
-  UsageGroupBy,
-  RunCost,
-  UsageRunsPage,
-  UsageScope,
-} from '../types';
+import type { AgentCapabilities, AgentChatPermissions, AgentPermissionAudit, AgentRunDetail, AgentRunUndoReport, AgentRunGroupListResponse, AgentRunListResponse, AILibraryAgent, AILibrarySkill, AILibrarySkillFile, ChatSession, ChatSessionWithMessages, CreateAgentPayload, CreateChatSessionPayload, CreateSkillPayload, RunCost, UsageScope } from '../types';
+import type { AgentDashboard, AgentStatus, AgentUsage, AgentVersionDetail, AgentVersionList, AILibraryApprovalRequest, AILibraryCommitment, AILibraryMCPServer, AILibraryUsageSummary, ApprovalDecisionResult, ChatAttachmentUpload, ChatResponse, CommitmentStatusResult, LiveAgentRun, RunForkItem, RunForkResult, RunTranscriptPage, RunViewAt, SkillVersionDetail, SkillVersionList, UsageAggregate, UsageDailySummary, UsageGroupBy, UsageRunsPage, VersionRollbackResult } from '../types/api';
 
 const base = (): string => `${getApiUrl()}/api/v1/ai-library`;
 
@@ -374,11 +343,7 @@ export const aiLibraryService = {
   },
 
   /** Derived header-chip status: paused / running / idle (caller-scoped runs). */
-  async getAgentStatus(slug: string): Promise<{
-    status: 'idle' | 'running' | 'paused';
-    paused_reason: string | null;
-    running_count: number;
-  }> {
+  async getAgentStatus(slug: string): Promise<AgentStatus> {
     const resp = await fetch(
       `${base()}/agents/${encodeURIComponent(slug)}/status`,
       { headers: await getAuthHeaders() },
@@ -403,7 +368,7 @@ export const aiLibraryService = {
     runId: string,
     afterSeq = 0,
     uptoSeq?: number,
-  ): Promise<{ items: AgentRunEvent[]; count: number; has_more?: boolean }> {
+  ): Promise<RunTranscriptPage> {
     const q = uptoSeq == null ? '' : `&upto_seq=${uptoSeq}`;
     const resp = await fetch(
       `${base()}/runs/${encodeURIComponent(runId)}/events?after_seq=${afterSeq}${q}`,
@@ -423,13 +388,7 @@ export const aiLibraryService = {
   async forkRun(
     runId: string,
     body: { at_seq: number; steer?: string },
-  ): Promise<{
-    run_id: string | null;
-    session_id: string;
-    workflow_id: string;
-    issue_id: number;
-    forked_from: { run_id: number; at_seq: number };
-  }> {
+  ): Promise<RunForkResult> {
     const resp = await fetch(`${base()}/runs/${encodeURIComponent(runId)}/fork`, {
       method: 'POST',
       headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
@@ -441,7 +400,7 @@ export const aiLibraryService = {
   /** Runs forked from this run, oldest first (harness 2b-1 §2). */
   async getRunForks(
     runId: string,
-  ): Promise<{ items: { run_id: string; at_seq: number; created_at: string; status: string }[] }> {
+  ): Promise<{ items: RunForkItem[] }> {
     const resp = await fetch(`${base()}/runs/${encodeURIComponent(runId)}/forks`, {
       headers: await getAuthHeaders(),
     });
@@ -456,7 +415,7 @@ export const aiLibraryService = {
   async getRunViewAt(
     runId: string,
     seq: number,
-  ): Promise<{ seq: number; view: unknown; cost: unknown }> {
+  ): Promise<RunViewAt> {
     const resp = await fetch(
       `${base()}/runs/${encodeURIComponent(runId)}/view-at?seq=${seq}`,
       { headers: await getAuthHeaders() },
@@ -902,7 +861,7 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
-  async fulfillCommitment(commitmentId: number): Promise<{ id: number; status: string }> {
+  async fulfillCommitment(commitmentId: number): Promise<CommitmentStatusResult> {
     const resp = await fetch(
       `${base()}/commitments/${commitmentId}/fulfill`,
       { method: 'POST', headers: await getAuthHeaders() },
@@ -910,7 +869,7 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
-  async cancelCommitment(commitmentId: number): Promise<{ id: number; status: string }> {
+  async cancelCommitment(commitmentId: number): Promise<CommitmentStatusResult> {
     const resp = await fetch(
       `${base()}/commitments/${commitmentId}/cancel`,
       { method: 'POST', headers: await getAuthHeaders() },
@@ -969,15 +928,7 @@ export const aiLibraryService = {
    * straight into ChatRequest.attachments. Use `resource_id` to promote a
    * temp upload into a long-lived resource later.
    */
-  async uploadChatAttachment(file: File): Promise<{
-    kind: 'image' | 'video' | 'pdf';
-    resource_id: string;
-    file_path: string;
-    url: string;
-    size_bytes: number;
-    mime: string | null;
-    filename: string;
-  }> {
+  async uploadChatAttachment(file: File): Promise<ChatAttachmentUpload> {
     const formData = new FormData();
     formData.append('file', file);
     const headers: Record<string, string> = {};
@@ -1019,7 +970,7 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
-  async approveRequest(id: string, note?: string): Promise<{ id: string; status: string }> {
+  async approveRequest(id: string, note?: string): Promise<ApprovalDecisionResult> {
     const resp = await fetch(`${base()}/approval-requests/${encodeURIComponent(id)}/approve`, {
       method: 'POST',
       headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
@@ -1028,7 +979,7 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
-  async rejectRequest(id: string, note?: string): Promise<{ id: string; status: string }> {
+  async rejectRequest(id: string, note?: string): Promise<ApprovalDecisionResult> {
     const resp = await fetch(`${base()}/approval-requests/${encodeURIComponent(id)}/reject`, {
       method: 'POST',
       headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
@@ -1040,17 +991,14 @@ export const aiLibraryService = {
   /**
    * Phase 3: Version history (lists snapshots of agents/skills/skill_files).
    */
-  async listAgentVersions(slug: string, limit = 50): Promise<{
-    items: AILibraryVersionItem[];
-    current_version: number | null;
-  }> {
+  async listAgentVersions(slug: string, limit = 50): Promise<AgentVersionList> {
     const resp = await fetch(`${base()}/agents/${encodeURIComponent(slug)}/versions?limit=${limit}`, {
       headers: await getAuthHeaders(),
     });
     return handle(resp);
   },
 
-  async getAgentVersion(slug: string, versionNumber: number): Promise<Record<string, unknown>> {
+  async getAgentVersion(slug: string, versionNumber: number): Promise<AgentVersionDetail> {
     const resp = await fetch(
       `${base()}/agents/${encodeURIComponent(slug)}/versions/${versionNumber}`,
       { headers: await getAuthHeaders() },
@@ -1058,7 +1006,7 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
-  async getSkillVersion(slug: string, versionNumber: number): Promise<Record<string, unknown>> {
+  async getSkillVersion(slug: string, versionNumber: number): Promise<SkillVersionDetail> {
     const resp = await fetch(
       `${base()}/skills/${encodeURIComponent(slug)}/versions/${versionNumber}`,
       { headers: await getAuthHeaders() },
@@ -1066,7 +1014,7 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
-  async rollbackAgent(slug: string, versionNumber: number): Promise<Record<string, unknown>> {
+  async rollbackAgent(slug: string, versionNumber: number): Promise<VersionRollbackResult> {
     const resp = await fetch(
       `${base()}/agents/${encodeURIComponent(slug)}/rollback/${versionNumber}`,
       { method: 'POST', headers: await getAuthHeaders() },
@@ -1074,7 +1022,7 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
-  async rollbackSkill(slug: string, versionNumber: number): Promise<Record<string, unknown>> {
+  async rollbackSkill(slug: string, versionNumber: number): Promise<VersionRollbackResult> {
     const resp = await fetch(
       `${base()}/skills/${encodeURIComponent(slug)}/rollback/${versionNumber}`,
       { method: 'POST', headers: await getAuthHeaders() },
@@ -1092,10 +1040,7 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
-  async listSkillVersions(slug: string, limit = 50): Promise<{
-    items: AILibraryVersionItem[];
-    current_version: number | null;
-  }> {
+  async listSkillVersions(slug: string, limit = 50): Promise<SkillVersionList> {
     const resp = await fetch(`${base()}/skills/${encodeURIComponent(slug)}/versions?limit=${limit}`, {
       headers: await getAuthHeaders(),
     });

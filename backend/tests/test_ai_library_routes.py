@@ -39,6 +39,19 @@ FAKE_USER_ID = str(uuid4())
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _caller_in_row_scope(monkeypatch):
+    """The agent/skill row-scope guard has its own tests
+    (``tests/api/test_ai_library_row_scope.py``); here every caller is in scope."""
+    import sys
+
+    monkeypatch.setattr(
+        sys.modules["app.api.ai_library_router"],
+        "_in_row_scope",
+        AsyncMock(return_value=True),
+    )
+
+
 async def _fake_auth() -> AuthContext:
     return AuthContext(user_id=FAKE_USER_ID, auth_type="jwt")
 
@@ -504,9 +517,12 @@ async def test_get_skill_version_returns_body(client: AsyncClient) -> None:
     """GET /skills/{slug}/versions/{n} returns the full snapshot body."""
     skill = _skill_row(slug="my-skill", is_public=False, project_id=42)
     skill_patches = _patch_skill_repo(get_by_slug=AsyncMock(return_value=skill))
+    # Every skill_versions column, as _serialize_row hands it to the route.
     snapshot = {
         "id": str(uuid4()),
+        "skill_id": 101,
         "version_number": 3,
+        "created_at": _NOW_ISO,
         "body_md": "OLD body text",
         "frontmatter_json": {"k": "v"},
         "notes": None,

@@ -17,26 +17,38 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.deps import AuthContext, get_auth
 from app.main import app
+from app.models import Folders
+from tests.api.wire_parity import sample_orm
 
 fr = sys.modules["app.api.resources_folders_router"]
 
 FAKE_USER_ID = "00000000-0000-0000-0000-000000000042"
-SYSTEM_FOLDER = {
-    "id": 342691028665012,
-    "name": "封面",
-    "scope_id": 42,
-    "is_system": True,
-    "system_key": "cover_templates",
-    "is_trashed": False,
-}
-PLAIN_FOLDER = {
-    "id": 7,
-    "name": "misc",
-    "scope_id": 42,
-    "is_system": False,
-    "system_key": None,
-    "is_trashed": False,
-}
+repo_mod = sys.modules["app.repositories.resources_repository"]
+
+
+def _folder(**over) -> dict:
+    """A full ``folders`` row as the repository returns it (every column)."""
+    row = repo_mod._folder_row_to_dict(sample_orm(Folders))
+    row.update(over)
+    return row
+
+
+SYSTEM_FOLDER = _folder(
+    id=342691028665012,
+    name="封面",
+    scope_id=42,
+    is_system=True,
+    system_key="cover_templates",
+    is_trashed=False,
+)
+PLAIN_FOLDER = _folder(
+    id=7,
+    name="misc",
+    scope_id=42,
+    is_system=False,
+    system_key=None,
+    is_trashed=False,
+)
 
 
 async def _fake_auth() -> AuthContext:
@@ -73,7 +85,7 @@ class _Repo:
 
     async def trash_folder_cascade(self, folder_id):
         self.trashed.append(folder_id)
-        return {"trashed": True}
+        return {"trashed_folders": 1, "trashed_resources": 0}
 
 
 class _Svc:
@@ -82,7 +94,7 @@ class _Svc:
 
     async def permanent_delete_folder(self, folder_id, user_id):
         self.deleted.append(folder_id)
-        return {"deleted": True}
+        return {"deleted_folders": 1, "deleted_resources": 0}
 
 
 def _wire(monkeypatch, folder):

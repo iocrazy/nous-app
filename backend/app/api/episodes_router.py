@@ -11,12 +11,11 @@ IDOR fix, pinned by test_episodes_scenes_authz_wiring.py). The PATCH/DELETE
 guards resolve episode → project before applying project write-access.
 """
 
-from typing import Any, Dict
-
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
     verify_episode_write_access,
@@ -24,17 +23,26 @@ from app.core.scope_guards import (
     verify_project_write_access,
 )
 from app.repositories.episode_repository import get_episode_repository
+from app.schemas.envelope import Envelope
+from app.schemas.episode_responses import (
+    EpisodeDeleted,
+    EpisodeListRow,
+    EpisodeProgressRow,
+    EpisodeRow,
+)
 from app.schemas.script import EpisodeCreate, EpisodeUpdate
 
 router = APIRouter()
 
 
-@router.get("/projects/{project_id}/episodes")
+@router.get(
+    "/projects/{project_id}/episodes", response_model=Envelope[list[EpisodeListRow]]
+)
 async def list_episodes(
     project_id: str,
     auth: AuthDep,
     _guard: None = Depends(verify_project_read_access),
-) -> Dict[str, Any]:
+):
     """List all episodes for a project, ordered by sort_order."""
     try:
         episodes = await get_episode_repository().list_by_project(project_id)
@@ -44,12 +52,15 @@ async def list_episodes(
         raise HTTPException(status_code=500, detail="Failed to list episodes")
 
 
-@router.get("/projects/{project_id}/episodes/progress")
+@router.get(
+    "/projects/{project_id}/episodes/progress",
+    response_model=Envelope[list[EpisodeProgressRow]],
+)
 async def get_episodes_progress(
     project_id: str,
     auth: AuthDep,
     _guard: None = Depends(verify_project_read_access),
-) -> Dict[str, Any]:
+):
     """Per-episode progress (script/scene/shot counts + derived status) for
     the workspace shell Episodes panel (spec G12). A static 'progress'
     segment after the collection path — no route-order conflict with the
@@ -62,13 +73,13 @@ async def get_episodes_progress(
         raise HTTPException(status_code=500, detail="Failed to load episode progress")
 
 
-@router.post("/projects/{project_id}/episodes")
+@router.post("/projects/{project_id}/episodes", response_model=Envelope[EpisodeRow])
 async def create_episode(
     project_id: str,
     auth: AuthDep,
     body: EpisodeCreate,
     _guard: None = Depends(verify_project_write_access),
-) -> Dict[str, Any]:
+):
     """Create an episode under a project. Title defaults to 'Ep 1' (DB
     default) when omitted.
 
@@ -87,6 +98,9 @@ async def create_episode(
     except Exception as exc:
         logger.error(f"[Episodes] create for project {project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create episode")
+    # ``create`` answers ``{}`` when the INSERT returned no row; that is not
+    # an episode, and the workflow hook below would KeyError on it.
+    episode = require_row(episode)
 
     # B3 trigger 3 (spec §5): a new episode in a workflow-bound project gets its
     # own node chain + arrival hooks, reusing the project's stored template +
@@ -101,13 +115,13 @@ async def create_episode(
     return {"success": True, "data": episode}
 
 
-@router.patch("/episodes/{episode_id}")
+@router.patch("/episodes/{episode_id}", response_model=Envelope[EpisodeRow])
 async def update_episode(
     episode_id: str,
     auth: AuthDep,
     body: EpisodeUpdate,
     _guard: None = Depends(verify_episode_write_access),
-) -> Dict[str, Any]:
+):
     """Update an episode (title / sort_order / owner_id).
 
     Two fields are gated tighter than the base write-access guard above —
@@ -177,12 +191,12 @@ async def update_episode(
         raise HTTPException(status_code=500, detail="Failed to update episode")
 
 
-@router.delete("/episodes/{episode_id}")
+@router.delete("/episodes/{episode_id}", response_model=EpisodeDeleted)
 async def delete_episode(
     episode_id: str,
     auth: AuthDep,
     _guard: None = Depends(verify_episode_write_access),
-) -> Dict[str, Any]:
+):
     """Delete an episode.
 
     script_projects.episode_id is ON DELETE RESTRICT (mig 338): deleting an

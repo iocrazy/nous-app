@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { searchResources } from '../services/resourceSearchService';
-import type { ResourceSearchResponse } from '../types';
+import type { ResourceSearchResponse } from '../types/api';
 
 const DEBOUNCE_MS = 150;
 

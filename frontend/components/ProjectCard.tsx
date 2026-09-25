@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { Star, Clock, FileText, MoreVertical, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Project, ProjectSuggestionItem } from '../types';
+import type { Project, ProjectSuggestionItem } from '../types/api';
 import { formatRelativeTime } from '../utils/relativeTime';
 import { StageRing, ringStageFromBadge } from './project/StageRing';
 import { generateMissingFrames } from '../services/projectsService';

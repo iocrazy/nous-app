@@ -75,6 +75,11 @@ def wired(monkeypatch):
     require_team = AsyncMock(return_value="team-1")
     monkeypatch.setattr(router_mod, "require_team_id", require_team)
 
+    # The project write guard has its own HTTP tests
+    # (tests/api/test_script_ai_wire.py); here the caller may write.
+    project_guard = AsyncMock(return_value=None)
+    monkeypatch.setattr(router_mod, "verify_project_write_access", project_guard)
+
     svc = MagicMock()
     svc.create_project = AsyncMock(return_value={"id": _SCRIPT_ID})
     svc_cls = MagicMock(return_value=svc)
@@ -86,7 +91,13 @@ def wired(monkeypatch):
     monkeypatch.setattr(
         "app.services.infra.dbos_orchestrator.start_workflow_routed", dispatch
     )
-    return {"mgr": mgr, "require_team": require_team, "svc": svc, "dispatch": dispatch}
+    return {
+        "mgr": mgr,
+        "require_team": require_team,
+        "svc": svc,
+        "dispatch": dispatch,
+        "project_guard": project_guard,
+    }
 
 
 async def test_import_threads_shared_wf_id_and_dispatches(wired):
@@ -98,6 +109,8 @@ async def test_import_threads_shared_wf_id_and_dispatches(wired):
         "task_id": wired["mgr"].create.return_value,
     }
 
+    wired["project_guard"].assert_awaited_once()
+    assert wired["project_guard"].call_args.args[0] == "42"
     wired["require_team"].assert_awaited_once()
     wired["svc"].create_project.assert_awaited_once()
     wired["mgr"].create.assert_awaited_once()

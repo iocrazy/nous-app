@@ -25,6 +25,7 @@ import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { useTextModels } from './useTextModels';
 import { UiSelect } from '../../../../components/ui';
+import { platformModelText } from '../../../../utils/platformModel';
 
 const asObj = (n: unknown) => n as Record<string, unknown>;
 
@@ -126,8 +127,8 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
           >
             <option value="">Catalog default</option>
             {textModels.map((m) => (
-              <option key={m.name} value={m.name} data-description={m.actual_provider}>
-                {m.display_name || m.name}
+              <option key={m.name} value={m.name}>
+                {platformModelText(m)}
               </option>
             ))}
           </UiSelect>

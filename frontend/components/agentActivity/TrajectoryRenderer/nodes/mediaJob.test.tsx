@@ -8,7 +8,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { AgentRunEvent } from '../../../../types';
+import type { AgentRunEvent } from '../../../../types/api';
 import { foldEvents, type InboxNode, type MediaJobNode } from '../foldEvents';
 import { InboxNodeView, MediaJobNodeView } from './builtins';
 

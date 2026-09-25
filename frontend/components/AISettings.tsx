@@ -32,7 +32,8 @@ import {
   AlertTriangle,
   Terminal,
 } from 'lucide-react';
-import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibraryAgent, AIGovernanceFlags } from '../types';
+import { AISettings as AISettingsType, AIProviderConfig, AILibraryAgent } from '../types';
+import type { AIGovernanceFlags, NousModelPublic } from '../types/api';
 import {
   saveAISettings as saveAISettingsApi,
   testAIConnection as testAIConnectionApi,
@@ -45,6 +46,11 @@ import { useTranslation } from 'react-i18next';
 import { visiblePlatformModels } from './AILibrary/agentEditorModel';
 import { relativeTime } from '../utils/taskDisplay';
 import { buildModelHealth, healthReasonKey } from '../utils/modelHealth';
+import {
+  isPlatformModelAvailable,
+  platformModelLabel,
+  platformModelText,
+} from '../utils/platformModel';
 import {
   suspectedNonChatKind,
   nonChatKindKey,
@@ -841,6 +847,36 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     return visiblePlatformModels(nousModels, nousConfig);
   }, [governance.nous_enabled, nousConfig, nousModels]);
 
+  // Platform rows the card lists: every row the user could toggle, minus the
+  // ones whose last probe failed (utils/platformModel). NOT visibleNousModels —
+  // that one also drops the user's own disabled rows, and the card is where
+  // they switch those back on.
+  const listedNousModels = useMemo(
+    () => nousModels.filter(isPlatformModelAvailable),
+    [nousModels],
+  );
+
+  // A saved task assignment pointing at a platform row that is now hidden
+  // (failed probe). The picker keeps it as an explicit "unavailable" option so
+  // the value is never silently replaced by whatever the <select> shows first.
+  const unavailableNousOption = (
+    value: string,
+    type: NousModelPublic['type'],
+  ): { value: string; label: string } | null => {
+    if (!governance.nous_enabled || !value.startsWith('nous:')) return null;
+    const m = nousModels.find(
+      (x) => `nous:${x.name}` === value && x.type === type && !isPlatformModelAvailable(x),
+    );
+    if (!m) return null;
+    const warning = nousHealthWarning(m.name);
+    return {
+      value,
+      label:
+        t('aiSettings.platformUnavailableOption', { name: platformModelText(m) }) +
+        (warning ? ` — ${warning}` : ''),
+    };
+  };
+
   // Flip the platform-card master switch. Absent config => currently ON, so the
   // first toggle turns it off.
   const toggleNousMaster = () => {
@@ -1092,11 +1128,17 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
         value: `nous:${model.name}`,
         label:
           t('aiSettings.platformAsrOption', {
-            name: model.display_name,
+            name: platformModelText(model),
             pricing: pricingLabel,
           }) + (warning ? ` — ${warning}` : ''),
       });
     }
+
+    const unavailable = unavailableNousOption(
+      localSettings.task_assignment.transcription,
+      'asr',
+    );
+    if (unavailable) options.unshift(unavailable);
 
     if (options.length === 0) {
       options.push({ value: '', label: t('aiSettings.noProviderEnabled') });
@@ -1195,7 +1237,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
             return {
               value: `nous:${m.name}`,
               label:
-                t('aiSettings.platformLlmOption', { name: m.display_name }) +
+                t('aiSettings.platformLlmOption', { name: platformModelText(m) }) +
                 (warning ? ` — ${warning}` : ''),
             };
           })
@@ -1204,7 +1246,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
       ...options.map((o) => o.value),
       ...nousLlmOptions.map((o) => o.value),
     ]);
-    const isLegacy = currentValue !== '' && !knownSlugs.has(currentValue);
+    const unavailable = unavailableNousOption(currentValue, 'llm');
+    const isLegacy = !unavailable && currentValue !== '' && !knownSlugs.has(currentValue);
 
     return (
       <UiSelect
@@ -1220,6 +1263,11 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           {isLegacy && (
             <option value={currentValue}>
               {t('aiSettings.legacyOption', { value: currentValue })}
+            </option>
+          )}
+          {unavailable && (
+            <option value={unavailable.value} data-unavailable="true">
+              {unavailable.label}
             </option>
           )}
           {systemOptions.length > 0 && (
@@ -1829,41 +1877,41 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                   and each row carries a per-model toggle (blacklist semantics). */}
               {nousUserEnabled && (
                 <div className="px-6 pb-4 space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-300">
-                  {nousModels.length === 0 ? (
+                  {listedNousModels.length === 0 ? (
                     <p className="text-xs text-ink-500">{t('aiSettings.noPlatformModels')}</p>
                   ) : (
-                    [...nousModels]
+                    [...listedNousModels]
                       .sort(
                         (a, b) =>
                           (NOUS_TYPE_ORDER[a.type] ?? 99) - (NOUS_TYPE_ORDER[b.type] ?? 99),
                       )
                       .map((m) => {
                         const modelEnabled = !nousDisabledModels.includes(m.name);
+                        const label = platformModelLabel(m);
                         return (
                           <div
                             key={m.name}
+                            data-testid="platform-model-row"
+                            data-model-name={m.name}
                             className="flex items-center justify-between gap-3 text-sm text-ink-200 border-t border-ink-800 pt-1.5 first:border-t-0 first:pt-0"
                           >
                             <div className="flex items-center gap-2 min-w-0">
+                              {/* Same string as the admin AI Models card. */}
                               <span
-                                className={`font-medium truncate ${
+                                className={`font-mono font-medium truncate ${
                                   modelEnabled ? 'text-ink-200' : 'text-ink-500'
                                 }`}
                               >
-                                {m.display_name}
+                                {label.primary}
                               </span>
+                              {label.secondary && (
+                                <span className="text-xs text-ink-500 truncate">
+                                  {label.secondary}
+                                </span>
+                              )}
                               <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-ink-800 text-ink-400">
                                 {m.type}
                               </span>
-                              {nousHealthWarning(m.name) && (
-                                <span
-                                  data-testid="model-health-badge"
-                                  className="shrink-0 flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-warn-line bg-warn-soft text-warn"
-                                >
-                                  <AlertTriangle size={10} />
-                                  {nousHealthWarning(m.name)}
-                                </span>
-                              )}
                             </div>
                             {renderToggle(modelEnabled, () => toggleNousModel(m.name))}
                           </div>

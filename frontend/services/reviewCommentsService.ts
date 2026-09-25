@@ -5,33 +5,30 @@
  *
  * Provides functions for fetching and creating comments
  * on review-type shares.
+ *
+ * `shareToken` is the `access_token` from `accessShare`. A password-protected
+ * share refuses its comments without it (the share code alone proves nothing
+ * about the password).
  */
 
 import { apiClient } from './apiClient';
+import type { Envelope, ShareComment, ShareCommentRow } from '../types/api';
 
-export interface ReviewComment {
-  id: string;
-  content: string;
-  timestamp_seconds: number | null;
-  visibility: string;
-  author_id: string | null;
-  created_at: string;
-}
-
-interface Envelope<T> {
-  data?: T;
-}
+const tokenQuery = (shareToken?: string | null) =>
+  shareToken ? { share_token: shareToken } : {};
 
 /**
  * Fetch comments for a share by share code.
  */
 export const fetchShareComments = async (
   shareCode: string,
-): Promise<ReviewComment[]> => {
-  const result = await apiClient.get<Envelope<ReviewComment[]>>(
+  shareToken?: string | null,
+): Promise<ShareComment[]> => {
+  const result = await apiClient.get<Envelope<ShareComment[]>>(
     `/api/v1/shares/code/${shareCode}/comments`,
+    { query: tokenQuery(shareToken) },
   );
-  return result.data || [];
+  return result.data;
 };
 
 /**
@@ -42,17 +39,16 @@ export const createShareComment = async (
   data: {
     content: string;
     timecode?: number;
-    visibility?: string;
   },
-): Promise<ReviewComment> => {
-  const result = await apiClient.post<Envelope<ReviewComment>>(
+  shareToken?: string | null,
+): Promise<ShareCommentRow> => {
+  const result = await apiClient.post<Envelope<ShareCommentRow>>(
     `/api/v1/shares/code/${shareCode}/comments`,
     {
       content: data.content,
       timecode: data.timecode ?? null,
-      visibility: data.visibility ?? 'all',
     },
+    { query: tokenQuery(shareToken) },
   );
-  if (!result.data) throw new Error('Empty response from createShareComment');
   return result.data;
 };

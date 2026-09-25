@@ -26,7 +26,7 @@ import { ChevronDown, Loader2, Plus } from 'lucide-react';
 
 import { useResourcesContext } from '../../../contexts/ResourcesContext';
 import { fetchProjects } from '../../../services/projectsService';
-import type { Project } from '../../../types';
+import type { Project } from '../../../types/api';
 import { ASSET_TYPES, type AssetType } from '../../assets/assetSlots';
 import { listAssets } from '../../../services/assetsService';
 import type { AssetRow, AssetSummary } from '../../../services/assetsService';

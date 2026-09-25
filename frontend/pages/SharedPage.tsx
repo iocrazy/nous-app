@@ -28,7 +28,8 @@ import Loading from '../components/common/Loading';
 import { fetchShares, cancelShare as cancelShareApi, deleteSharePermanent } from '../services/sharesService';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useTeamContext } from '../contexts/TeamContext';
-import { Share, ShareType, ShareStatus } from '../types';
+import { ShareType, ShareStatus } from '../types';
+import type { Share } from '../types/api';
 
 const SHARE_TYPE_ICONS: Record<ShareType, React.ReactNode> = {
   link: <Link2 size={16} />,
@@ -50,7 +51,7 @@ export const SharedPage: React.FC = () => {
   const [shares, setShares] = useState<Share[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ShareStatus | 'all'>('all');
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<Share['id'] | null>(null);
   const confirm = useConfirm();
 
   const isPersonal = !selectedTeamId || selectedTeamId === personalTeamId;
@@ -80,7 +81,7 @@ export const SharedPage: React.FC = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleToggleActive = async (shareId: string) => {
+  const handleToggleActive = async (shareId: Share['id']) => {
     try {
       await cancelShareApi(shareId);
       await loadShares();
@@ -89,7 +90,7 @@ export const SharedPage: React.FC = () => {
     }
   };
 
-  const handleDeleteShare = async (shareId: string) => {
+  const handleDeleteShare = async (shareId: Share['id']) => {
     const ok = await confirm({
       title: 'Delete Share',
       message: 'This share record will be permanently deleted. This cannot be undone.',

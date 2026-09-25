@@ -29,6 +29,19 @@ function jsonResponse(body: unknown) {
   return { json: async () => body } as Response;
 }
 
+/** A `GET /canvases/generations/{id}` payload as the route sends it
+ *  (`CanvasGenerationTask`): every column present, nulls included. */
+function taskRow(overrides: Record<string, unknown> = {}) {
+  return {
+    dbos_workflow_id: 't1',
+    phase: 'queued',
+    status: 'pending',
+    error_msg: null,
+    metadata: null,
+    ...overrides,
+  };
+}
+
 afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
@@ -53,6 +66,49 @@ describe('canvasGenerationService', () => {
     expect(models[0].name).toBe('mediahub-doubao-llm');
   });
 
+  // Real wire rows (2026-09-24): exactly the canvases_router public fields,
+  // with jimeng-local's empty actual_model as production has it.
+  const wireRow = (name: string, type: string, actual_model: string, last_test_status: string) => ({
+    name,
+    display_name: name.toUpperCase(),
+    actual_model,
+    type,
+    is_local: name.includes('-local-'),
+    sort_order: 10,
+    last_test_status,
+  });
+
+  it('drops failed rows from both canvas catalogs, keeps not_probed', async () => {
+    apiFetch.mockResolvedValueOnce(
+      jsonResponse({
+        success: true,
+        data: [
+          wireRow('jimeng-local-image', 'image', '', 'not_probed'),
+          wireRow('openai-image-flare', 'image', 'gpt-image-2.5-flare', 'fail'),
+          wireRow('nous-studio-upscale', 'image', 'studio-upscale', 'ok'),
+        ],
+      }),
+    );
+    expect((await listGenerationModels()).map((m) => m.name)).toEqual([
+      'jimeng-local-image',
+      'nous-studio-upscale',
+    ]);
+
+    apiFetch.mockResolvedValueOnce(
+      jsonResponse({
+        success: true,
+        data: [
+          wireRow('nous-deepseek-v4-pro', 'llm', 'deepseek-v4-pro', 'ok'),
+          wireRow('nous-broken-llm', 'llm', 'broken-llm-0101', 'fail'),
+          wireRow('Codex (Local)', 'llm', '', 'not_probed'),
+        ],
+      }),
+    );
+    const text = await listTextModels();
+    expect(text.map((m) => m.name)).toEqual(['nous-deepseek-v4-pro', 'Codex (Local)']);
+    expect(text[0].actual_model).toBe('deepseek-v4-pro');
+  });
+
   it('cancels a generation task via DELETE', async () => {
     apiFetch.mockResolvedValue(jsonResponse({ success: true }));
     await cancelGeneration('task-9');
@@ -63,7 +119,7 @@ describe('canvasGenerationService', () => {
 
   it('dispatches generations and returns task ids', async () => {
     apiFetch.mockResolvedValue(
-      jsonResponse({ success: true, task_ids: ['t1', 't2'] }),
+      jsonResponse({ success: true, task_ids: ['t1', 't2'], flow_id: 'flow-1' }),
     );
     const ids = await dispatchGenerations('123', {
       node_id: 'n1',
@@ -91,7 +147,11 @@ describe('canvasGenerationService', () => {
     apiFetch.mockResolvedValue(
       jsonResponse({
         success: true,
-        data: { phase: 'completed', metadata: { result_url: '/api/v1/generated-media/5/cover' } },
+        data: taskRow({
+          phase: 'completed',
+          status: 'completed',
+          metadata: { result_url: '/api/v1/generated-media/5/cover' },
+        }),
       }),
     );
     const task = await getGeneration('t1');
@@ -101,12 +161,14 @@ describe('canvasGenerationService', () => {
 
   it('polls until a terminal phase', async () => {
     apiFetch
-      .mockResolvedValueOnce(jsonResponse({ success: true, data: { phase: 'queued' } }))
-      .mockResolvedValueOnce(jsonResponse({ success: true, data: { phase: 'in_progress' } }))
+      .mockResolvedValueOnce(jsonResponse({ success: true, data: taskRow() }))
+      .mockResolvedValueOnce(
+        jsonResponse({ success: true, data: taskRow({ phase: 'in_progress', status: 'running' }) }),
+      )
       .mockResolvedValueOnce(
         jsonResponse({
           success: true,
-          data: { phase: 'completed', metadata: { result_url: '/x' } },
+          data: taskRow({ phase: 'completed', status: 'completed', metadata: { result_url: '/x' } }),
         }),
       );
     const task = await pollGeneration('t1', { intervalMs: 1, timeoutMs: 5000 });
@@ -116,7 +178,10 @@ describe('canvasGenerationService', () => {
 
   it('poll returns the failed task as-is (caller owns the error)', async () => {
     apiFetch.mockResolvedValue(
-      jsonResponse({ success: true, data: { phase: 'failed', error_msg: 'boom' } }),
+      jsonResponse({
+        success: true,
+        data: taskRow({ phase: 'failed', status: 'failed', error_msg: 'boom' }),
+      }),
     );
     const task = await pollGeneration('t1', { intervalMs: 1, timeoutMs: 5000 });
     expect(task.phase).toBe('failed');
@@ -125,7 +190,7 @@ describe('canvasGenerationService', () => {
 
   it('poll times out with an error', async () => {
     apiFetch.mockResolvedValue(
-      jsonResponse({ success: true, data: { phase: 'queued' } }),
+      jsonResponse({ success: true, data: taskRow() }),
     );
     await expect(
       pollGeneration('t1', { intervalMs: 1, timeoutMs: 5 }),

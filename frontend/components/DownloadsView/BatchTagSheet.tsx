@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom';
 import { X, Check, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 interface BatchTagSheetProps {
   open: boolean;

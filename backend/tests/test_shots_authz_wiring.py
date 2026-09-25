@@ -131,8 +131,8 @@ async def test_shot_patch_403_foreign_team(client, _foreign_team):
 
 
 @pytest.mark.asyncio
-async def test_shot_move_403_foreign_team(client, _foreign_team):
-    resp = await client.post("/api/v1/shots/123/move", json={})
+async def test_auto_storyboard_403_foreign_team(client, _foreign_team):
+    resp = await client.post("/api/v1/scenes/8001/auto-storyboard")
     assert resp.status_code == 403
 
 
@@ -145,5 +145,5 @@ async def test_shot_missing_returns_404(client, monkeypatch):
         return None
 
     monkeypatch.setattr(ScriptShotRepository, "get_by_id", fake_shot_get)
-    resp = await client.delete("/api/v1/shots/123")
+    resp = await client.patch("/api/v1/shots/123", json={"description": "X"})
     assert resp.status_code == 404

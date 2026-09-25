@@ -13,7 +13,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { UploadCloud, FileCheck2, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { fetchProjectFiles, uploadFile } from '../../services/projectsService';
-import type { ProjectFile } from '../../types';
+import type { ProjectFile } from '../../types/api';
 import { useToast } from '../Toast';
 
 interface DeliverablesZoneProps {

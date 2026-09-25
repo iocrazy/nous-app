@@ -1,19 +1,33 @@
 """Script Assets Router — CRUD endpoints for script asset entities."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
-from app.core.deps import AuthDep
+from app.api.row_guard import require_row
+from app.core.deps import AuthContext, AuthDep
 from app.core.scope_guards import verify_script_access, verify_script_read_access
+from app.schemas.envelope import Envelope
 from app.schemas.script import ScriptAssetCreate, ScriptAssetUpdate
+from app.schemas.script_project_responses import ScriptAck, ScriptAssetRow
 from app.services.storyboard.script.script_service import ScriptService
 
 router = APIRouter(prefix="/scripts/projects")
 
 
-@router.post("/{script_id}/assets")
+async def _verify_asset_access(asset_id: str, auth: AuthContext) -> None:
+    """Resolve an asset to its owning script and apply the script WRITE guard
+    (404 if the asset is gone). The ``/assets/{asset_id}`` routes carry no
+    script id in the path; before this guard they checked nothing at all, so
+    any signed-in user could edit or delete any script's asset by id."""
+    asset = await ScriptService().asset_repo.get_by_id(asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    await verify_script_access(str(asset.get("script_id")), auth)
+
+
+@router.post("/{script_id}/assets", response_model=Envelope[ScriptAssetRow])
 async def create_asset(
     auth: AuthDep, script_id: str, body: ScriptAssetCreate
 ) -> Dict[str, Any]:
@@ -36,7 +50,7 @@ async def create_asset(
         raise HTTPException(status_code=500, detail="Failed to create asset")
 
 
-@router.get("/{script_id}/assets")
+@router.get("/{script_id}/assets", response_model=Envelope[List[ScriptAssetRow]])
 async def list_assets(
     auth: AuthDep,
     script_id: str,
@@ -55,23 +69,27 @@ async def list_assets(
         raise HTTPException(status_code=500, detail="Failed to list assets")
 
 
-@router.put("/assets/{asset_id}")
+@router.put("/assets/{asset_id}", response_model=Envelope[ScriptAssetRow])
 async def update_asset(
     auth: AuthDep, asset_id: str, body: ScriptAssetUpdate
 ) -> Dict[str, Any]:
     """Update an existing script asset."""
+    # Outside the try below (which maps everything to 500) so 404/403 surface.
+    await _verify_asset_access(asset_id, auth)
     try:
         svc = ScriptService()
         asset = await svc.update_asset(asset_id, body.model_dump(exclude_none=True))
-        return {"success": True, "data": asset}
     except Exception as exc:
         logger.error(f"[ScriptAssets] update_asset {asset_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to update asset")
+    # ``update`` returns {} when the row is gone by the time it writes.
+    return {"success": True, "data": require_row(asset)}
 
 
-@router.delete("/assets/{asset_id}")
+@router.delete("/assets/{asset_id}", response_model=ScriptAck)
 async def delete_asset(auth: AuthDep, asset_id: str) -> Dict[str, Any]:
     """Delete a script asset."""
+    await _verify_asset_access(asset_id, auth)
     try:
         svc = ScriptService()
         await svc.delete_asset(asset_id)

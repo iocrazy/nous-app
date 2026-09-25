@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Music, Heart, MessageCircle, Bookmark, MoreVertical } from 'lucide-react';
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 import { buildSodaTheme, type SodaTheme } from '../utils/sodaTheme';
 import type { LyricLine } from '../services/lyricsService';
 import { fetchResourceTags, addResourceTag, removeResourceTag } from '../services/resourceService';

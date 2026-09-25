@@ -8,7 +8,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-import type { ChatToolCall } from '../../types';
+import type { ChatToolCall } from '../../types/api';
 import { LibrarySearchCard } from './LibrarySearchCard';
 import { summarizeToolCall, SubTaskList } from './SubTaskCard';
 

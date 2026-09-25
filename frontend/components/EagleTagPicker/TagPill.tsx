@@ -1,7 +1,7 @@
 import React from 'react';
 import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 interface TagPillProps {
   tag: Tag;

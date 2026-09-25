@@ -33,13 +33,21 @@ import zhJson from '../public/locales/zh.json';
 // past the loading gate and renders the label-bearing UI deterministically.
 vi.mock('../services/pointsService', () => ({
   fetchPointsBalance: vi.fn(async () => ({
+    team_id: '7300000000000000009',
     points_balance: 1234,
     storage_used_bytes: 1024 * 1024,
     storage_limit_bytes: 10 * 1024 * 1024,
     storage_used_percent: 10,
   })),
   fetchPointsPricing: vi.fn(async () => []),
-  fetchUsageStats: vi.fn(async () => ({ total_consumed_this_month: 0, top_consumers: [] })),
+  // Real `/points/usage-stats` payload: all-time totals, nothing per month
+  // or per member. The view used to read `total_consumed_this_month`, which
+  // the endpoint never sent, so the figure was always 0.
+  fetchUsageStats: vi.fn(async () => ({
+    total_consumed: 4321,
+    total_purchased: 5000,
+    by_type: { consume: -4321, purchase: 5000 },
+  })),
   adjustPoints: vi.fn(async () => ({ new_balance: 0 })),
 }));
 vi.mock('../services/paymentService', () => ({
@@ -93,6 +101,8 @@ describe('BillingView i18n rendering', () => {
     expect(text).toContain('Points Balance');
     expect(text).toContain('Buy Points');
     expect(text).toContain('Storage Usage');
+    expect(text).toContain('Total Points Used');
+    expect(text).toContain((4321).toLocaleString());
     expect(text).not.toMatch(RAW_KEY);
   });
 
@@ -105,6 +115,7 @@ describe('BillingView i18n rendering', () => {
     expect(text).toContain('积分余额');
     expect(text).toContain('购买积分');
     expect(text).toContain('存储用量');
+    expect(text).toContain('累计已用积分');
     expect(text).not.toMatch(RAW_KEY);
   });
 });

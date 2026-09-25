@@ -100,9 +100,17 @@ describe('scriptService project CRUD', () => {
   });
 
   it('deleteScriptProject DELETEs', async () => {
-    const spy = stubJson({});
+    const spy = stubJson({ success: true });
     await deleteScriptProject('s1');
     expect((spy.mock.calls[0][1] as RequestInit).method).toBe('DELETE');
+  });
+
+  it('deleteScriptProject rejects when the server refuses', async () => {
+    stubJson(
+      { success: false, error: 'Access denied', code: 'http_403', request_id: 'r', details: null },
+      403,
+    );
+    await expect(deleteScriptProject('s1')).rejects.toThrow('API error 403');
   });
 });
 

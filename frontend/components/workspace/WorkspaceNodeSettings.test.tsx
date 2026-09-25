@@ -14,7 +14,9 @@ import { createInstance, type i18n as I18n } from 'i18next';
 import enJson from '../../public/locales/en.json';
 import { WorkspaceNodeSettings, type WorkspaceNodeSettingsProps } from './WorkspaceNodeSettings';
 import { ApiError } from '../../services/apiClient';
-import type { EpisodeProgress, ProjectStageNode, ProjectWorkflow } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
+import { makeEpisodeProgress } from '../../tests/fixtures/episodes';
+import type { ProjectStageNode, ProjectWorkflow } from '../../types/api';
 import type { PersonOption } from '../workflow/OwnerCandidateList';
 
 function makeI18n(): I18n {
@@ -50,7 +52,7 @@ vi.mock('../Toast', () => ({
 }));
 
 const EPISODES: EpisodeProgress[] = [
-  {
+  makeEpisodeProgress({
     episode_id: 'ep1',
     title: 'Ep 1 — Pilot',
     sort_order: 10,
@@ -61,8 +63,8 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 9,
     renders_count: 1,
     status: 'boarding',
-  },
-  {
+  }),
+  makeEpisodeProgress({
     episode_id: 'ep2',
     title: 'Ep 2 — Cutdown',
     sort_order: 20,
@@ -73,7 +75,7 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 0,
     renders_count: 0,
     status: 'drafting',
-  },
+  }),
 ];
 
 function makeNode(overrides: Partial<ProjectStageNode> = {}): ProjectStageNode {

@@ -47,7 +47,8 @@ import { ApiError } from '../../services/apiClient';
 import type { AgentOption, PersonOption } from '../workflow/OwnerPicker';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
 import type { FilesChip } from './WorkspaceFiles';
-import type { AdvancePreview, EpisodeProgress, Project, ProjectStageNode } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
+import type { AdvancePreview, Project, ProjectStageNode } from '../../types/api';
 
 // Code-split the heavier / non-default modules out of the ProjectsPage chunk
 // (PR-19). Overview is the landing module so it stays eager, as do the
@@ -124,6 +125,9 @@ export function ProjectWorkspace({
 }: ProjectWorkspaceProps) {
   const { t } = useTranslation();
   const { addToast } = useToast();
+  // Snowflake ids are JSON numbers on the wire; URLs, storage keys and
+  // service calls all take the string form.
+  const projectId = String(project.id);
   // Same identity source as the standalone editor route (pages/ScriptEditor)
   // — the inline-mounted EditorShell needs it for collaboration presence.
   const { currentUserId, userProfile } = useAuth();
@@ -213,7 +217,7 @@ export function ProjectWorkspace({
     let cancelled = false;
     setEpisodes([]);
     setCurrentEpisodeId(null);
-    fetchEpisodesProgress(project.id)
+    fetchEpisodesProgress(projectId)
       .then((rows) => {
         if (cancelled) return;
         setEpisodes(rows);
@@ -221,7 +225,7 @@ export function ProjectWorkspace({
         const fallback = sorted[0]?.episode_id ?? null;
         let stored: string | null = null;
         try {
-          stored = localStorage.getItem(episodeStorageKey(project.id));
+          stored = localStorage.getItem(episodeStorageKey(projectId));
         } catch (err) {
           console.error('[ProjectWorkspace] failed to read stored episode:', err);
         }
@@ -243,7 +247,7 @@ export function ProjectWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [project.id]);
+  }, [projectId]);
 
   const currentEpisode = episodes.find((e) => e.episode_id === currentEpisodeId) ?? null;
 
@@ -257,7 +261,7 @@ export function ProjectWorkspace({
     loading: workflowLoading,
     reload: reloadWorkflow,
     patchNodeLocally,
-  } = useProjectWorkflow(project.id, currentEpisodeId);
+  } = useProjectWorkflow(projectId, currentEpisodeId);
 
   // Owner/agent candidates for `EpisodeNodeCard`'s Task 9 editable owner
   // field — one project-scoped fetch (mirrors `WorkflowSection`'s own
@@ -267,7 +271,7 @@ export function ProjectWorkspace({
   useEffect(() => {
     let alive = true;
     Promise.all([
-      fetchProjectMembers(project.id).catch(() => []),
+      fetchProjectMembers(projectId).catch(() => []),
       aiLibraryService.listAgents().catch(() => []),
     ]).then(([mem, ag]) => {
       if (!alive) return;
@@ -277,7 +281,7 @@ export function ProjectWorkspace({
     return () => {
       alive = false;
     };
-  }, [project.id]);
+  }, [projectId]);
 
   // Task 9 (角色门控行内编辑): the project owner OR the SELECTED episode's own
   // owner (episodes/progress `owner_id`, Task 6) may edit that episode's
@@ -328,7 +332,7 @@ export function ProjectWorkspace({
     async (nodeId: string, patch: NodeConfigPatch): Promise<void> => {
       patchNodeLocally(nodeId, patch);
       try {
-        await updateProjectNode(project.id, nodeId, patch);
+        await updateProjectNode(projectId, nodeId, patch);
         await reloadWorkflow();
       } catch (err) {
         await reloadWorkflow();
@@ -345,7 +349,7 @@ export function ProjectWorkspace({
         );
       }
     },
-    [project.id, patchNodeLocally, reloadWorkflow, addToast, t],
+    [projectId, patchNodeLocally, reloadWorkflow, addToast, t],
   );
   // The advance/back confirm gate — one instance, shared by the node card's
   // Complete/Back buttons and the top-bar stepper. Holds the server preview so
@@ -365,7 +369,7 @@ export function ProjectWorkspace({
       // defensive no-op for the brief window before that resolves.
       if (!currentEpisodeId) return;
       setAdvance({ direction, preview: null, confirming: false });
-      fetchAdvancePreview(project.id, direction, currentEpisodeId)
+      fetchAdvancePreview(projectId, direction, currentEpisodeId)
         .then((preview) =>
           setAdvance((cur) => (cur && cur.direction === direction ? { ...cur, preview } : cur)),
         )
@@ -375,7 +379,7 @@ export function ProjectWorkspace({
           addToast(t('common.error'), 'error');
         });
     },
-    [project.id, currentEpisodeId, addToast, t],
+    [projectId, currentEpisodeId, addToast, t],
   );
 
   const confirmAdvance = useCallback(() => {
@@ -384,7 +388,7 @@ export function ProjectWorkspace({
     if (!currentEpisodeId) return;
     setAdvance((cur) => (cur ? { ...cur, confirming: true } : cur));
     const direction = advance?.direction ?? 'forward';
-    executeAdvance(project.id, direction, currentEpisodeId)
+    executeAdvance(projectId, direction, currentEpisodeId)
       .then(() => {
         setAdvance(null);
         void reloadWorkflow();
@@ -394,7 +398,7 @@ export function ProjectWorkspace({
         addToast(t('common.error'), 'error');
         setAdvance((cur) => (cur ? { ...cur, confirming: false } : cur));
       });
-  }, [advance?.direction, project.id, currentEpisodeId, reloadWorkflow, addToast, t]);
+  }, [advance?.direction, projectId, currentEpisodeId, reloadWorkflow, addToast, t]);
 
   // Overview accordion node selection (IA redesign Task 4) — writes URL
   // `node=` only; it does NOT itself navigate/route anywhere. Task 5's
@@ -508,7 +512,7 @@ export function ProjectWorkspace({
       // `ep` (Task 1) is now the first source of truth on load, so keep both
       // in sync on every explicit switch.
       try {
-        localStorage.setItem(episodeStorageKey(project.id), episodeId);
+        localStorage.setItem(episodeStorageKey(projectId), episodeId);
       } catch (err) {
         console.error('[ProjectWorkspace] failed to persist episode selection:', err);
       }
@@ -540,7 +544,7 @@ export function ProjectWorkspace({
         { replace: true },
       );
     },
-    [project.id, setSearchParams],
+    [projectId, setSearchParams],
   );
 
   // Overview accordion row toggle (IA redesign Task 4, ambiguity #3): a
@@ -564,7 +568,7 @@ export function ProjectWorkspace({
   // Episodes management module. Keeps the current selection when it still
   // exists; otherwise falls back to the lowest sort_order episode.
   const refetchEpisodes = useCallback(() => {
-    return fetchEpisodesProgress(project.id)
+    return fetchEpisodesProgress(projectId)
       .then((rows) => {
         setEpisodes(rows);
         setCurrentEpisodeId((cur) => {
@@ -574,7 +578,7 @@ export function ProjectWorkspace({
         });
       })
       .catch((err) => console.error('[ProjectWorkspace] failed to refresh episodes progress:', err));
-  }, [project.id]);
+  }, [projectId]);
 
   // ── Studio (inline EditorShell) state ──────────────────────────────────
   // studioView drives BOTH which work view the sidebar highlights and which
@@ -610,7 +614,7 @@ export function ProjectWorkspace({
   // panel rendered).
   const findExistingScript = useCallback(
     async (episode: EpisodeProgress): Promise<string | null> => {
-      const result = await fetchScriptProjects(project.id);
+      const result = await fetchScriptProjects(projectId);
       const candidates = (result.data ?? []).filter(
         (s) => String(s.episode_id ?? '') === String(episode.episode_id),
       );
@@ -618,9 +622,9 @@ export function ProjectWorkspace({
       candidates.sort(
         (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
       );
-      return candidates[0].id;
+      return String(candidates[0].id);
     },
-    [project.id],
+    [projectId],
   );
 
   const resolveOrProvisionScript = useCallback(
@@ -641,11 +645,11 @@ export function ProjectWorkspace({
         // Open deep-link, or the storyboard panel's "Start Storyboard" CTA)
         // — never from a passive render, see findExistingScript above.
         const created = await createScriptProject({
-          project_id: project.id,
+          project_id: projectId,
           name: episode.title,
           episode_id: episode.episode_id,
         });
-        return created.id;
+        return String(created.id);
       })();
       provisionInFlightRef.current.set(key, run);
       // Housekeeping branch: clear the in-flight entry once settled. The
@@ -663,7 +667,7 @@ export function ProjectWorkspace({
         .catch(() => {});
       return run;
     },
-    [project.id, findExistingScript],
+    [projectId, findExistingScript],
   );
 
   // Resolve a given episode's most recently updated script and mount
@@ -1025,7 +1029,7 @@ export function ProjectWorkspace({
         workflow={workflow}
         onRequestAdvance={requestAdvance}
         onJumpToNode={handleJumpToNode}
-        projectId={project.id}
+        projectId={projectId}
         autopilotEnabled={project.autopilot_enabled ?? true}
         onAutopilotChange={(enabled) => onProjectUpdated?.({ ...project, autopilot_enabled: enabled })}
       />
@@ -1079,7 +1083,7 @@ export function ProjectWorkspace({
               scriptId={resolvedScriptId}
               currentUserId={currentUserId}
               currentUserName={userProfile.name}
-              projectId={project.id}
+              projectId={projectId}
               initialRailView={studioView}
               embedded
               onScenesChange={handleScenesChange}
@@ -1168,7 +1172,7 @@ export function ProjectWorkspace({
             )}
             {activeModule === 'episodes' && (
               <WorkspaceEpisodes
-                projectId={project.id}
+                projectId={projectId}
                 episodes={episodes}
                 onEpisodesChanged={() => void refetchEpisodes()}
                 onOpenEpisode={handleOpenEpisode}
@@ -1183,24 +1187,24 @@ export function ProjectWorkspace({
               activeModule === 'costumes') && (
               <WorkspaceEntities
                 kind={activeModule}
-                projectId={project.id}
+                projectId={projectId}
                 // The project's own team, which is the asset scope its library
                 // lives in (null on a personal project — the panel resolves
                 // that to the personal team).
-                projectTeamId={project.team_id}
+                projectTeamId={project.team_id == null ? null : String(project.team_id)}
                 teamId={teamId}
               />
             )}
             {activeModule === 'files' && (
               <WorkspaceFiles
                 key={filesEntryToken}
-                projectId={project.id}
+                projectId={projectId}
                 currentEpisode={currentEpisode}
                 initialChip={filesInitialChip}
                 initialEpisodeFilterOn={filesEpFilterOn}
               />
             )}
-            {activeModule === 'trash' && <ProjectTrashView projectId={project.id} />}
+            {activeModule === 'trash' && <ProjectTrashView projectId={projectId} />}
             {activeModule === 'settings' && (
               <div className="space-y-4">
                 <div className="flex gap-1 border-b border-line" data-testid="settings-tabs">
@@ -1245,7 +1249,7 @@ export function ProjectWorkspace({
                   />
                 ) : (
                   <WorkspaceNodeSettings
-                    projectId={project.id}
+                    projectId={projectId}
                     episodes={episodes}
                     initialEpisodeId={readWorkspaceParams(searchParams).ep}
                     initialNodeId={readWorkspaceParams(searchParams).node}
@@ -1262,11 +1266,11 @@ export function ProjectWorkspace({
               </div>
             )}
             {activeModule === 'canvas' && (
-              <WorkspaceCanvas projectId={project.id} teamId={teamId} />
+              <WorkspaceCanvas projectId={projectId} teamId={teamId} />
             )}
             {activeModule === 'tasks' && (
               <WorkspaceTasks
-                projectId={project.id}
+                projectId={projectId}
                 projectName={project.name}
                 teamId={teamId}
                 currentEpisodeId={currentEpisodeId}
@@ -1274,7 +1278,7 @@ export function ProjectWorkspace({
             )}
             {activeModule === 'stage' && stageNodeId && (
               <WorkspaceStageBoard
-                projectId={project.id}
+                projectId={projectId}
                 projectName={project.name}
                 nodeId={stageNodeId}
                 episodeId={currentEpisodeId}

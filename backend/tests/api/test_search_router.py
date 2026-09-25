@@ -120,3 +120,18 @@ async def test_an_out_of_range_page_size_is_refused_by_the_signature(client):
     # 上限在签名里（``le=50``）。没有它，一次 limit=100000 会让 SQL 层被要求
     # 取三十万行——分组裁剪在 Python 里做，代价全落在数据库上。
     assert (await _get(client[0], q="rain", limit_per_group=999)).status_code == 422
+
+
+def test_quick_search_route_is_gone() -> None:
+    """``GET /search/quick`` had no caller (the only reference was an unused
+    ``quickSearch`` service wrapper whose declared shape did not even match
+    the body) and was removed in P6. ``/semantic`` and ``/hybrid`` remain."""
+    from app.main import app
+
+    ops = {
+        (method, route.path)
+        for route in app.routes
+        for method in getattr(route, "methods", ()) or ()
+    }
+    assert ("GET", "/api/v1/search/quick") not in ops
+    assert ("POST", "/api/v1/search/semantic") in ops

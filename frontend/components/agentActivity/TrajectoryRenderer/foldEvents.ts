@@ -13,7 +13,7 @@
  * Unknown event types are skipped: a new backend type never breaks a client.
  */
 
-import type { AgentRunEvent } from '../../../types';
+import type { AgentRunEvent } from '../../../types/api';
 import type { CostKind } from '../outputCost';
 import { judgeToolOk, toolTimedOut } from '../toolOutcome';
 

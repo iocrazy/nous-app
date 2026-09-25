@@ -10,7 +10,8 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
 import { EpisodeSummaryRow, stageFill } from './EpisodeSummaryRow';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
+import { makeEpisodeProgress } from '../../tests/fixtures/episodes';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -23,7 +24,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-const EP: EpisodeProgress = {
+const EP: EpisodeProgress = makeEpisodeProgress({
   episode_id: '7',
   title: 'Ep 7 — Finale',
   sort_order: 70,
@@ -33,7 +34,7 @@ const EP: EpisodeProgress = {
   shots_done: 12,
   renders_count: 3,
   status: 'boarding',
-};
+});
 
 afterEach(() => cleanup());
 

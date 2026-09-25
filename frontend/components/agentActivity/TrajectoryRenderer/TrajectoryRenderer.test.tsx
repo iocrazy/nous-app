@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AgentRunEvent } from '../../../types';
+import type { AgentRunEvent } from '../../../types/api';
 import { registeredTrajectoryNodeKinds } from './nodes/registry';
 import { TrajectoryRenderer } from './TrajectoryRenderer';
 

@@ -7,14 +7,28 @@ Unified task center API: list, cancel, retry, delete, clear completed tasks.
 Covers all task types: download, upload, transcode, ai_pipeline, ai_extract, ai_transcription, ai_summary.
 """
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
+from app.schemas.envelope import Envelope
+from app.schemas.task_manager_responses import (
+    TaskAck,
+    TaskActiveCounts,
+    TaskClearCompletedResult,
+    TaskExtendResult,
+    TaskHealthOverrideResult,
+    TaskIdList,
+    TaskListPage,
+    TaskProgress,
+    TaskStats,
+    TaskTrackingRow,
+)
 from app.services.infra.unified_task_manager import (
     VALID_TASK_STATUSES,
     VALID_TASK_TYPES,
@@ -77,7 +91,7 @@ async def _peek_task_row(task_id: str, user_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
-@router.get("/tasks")
+@router.get("/tasks", response_model=TaskListPage)
 async def list_tasks(
     auth: AuthDep,
     task_type: Optional[str] = Query(
@@ -132,7 +146,7 @@ async def list_tasks(
     }
 
 
-@router.get("/active-counts")
+@router.get("/active-counts", response_model=Envelope[TaskActiveCounts])
 async def active_counts(auth: AuthDep):
     """Active (pending/processing) task counts by type — the sidebar badge
     source, decoupled from the paged task list."""
@@ -140,7 +154,7 @@ async def active_counts(auth: AuthDep):
     return {"success": True, "data": await tracker.get_active_counts(auth.user_id)}
 
 
-@router.get("/tasks/active")
+@router.get("/tasks/active", response_model=Envelope[List[TaskTrackingRow]])
 async def get_active_tasks(auth: AuthDep):
     """Get active (pending/processing) tasks — used by TopBar panel on init."""
     tracker = get_task_manager()
@@ -148,7 +162,7 @@ async def get_active_tasks(auth: AuthDep):
     return {"success": True, "data": tasks}
 
 
-@router.get("/tasks/stats")
+@router.get("/tasks/stats", response_model=Envelope[TaskStats])
 async def get_task_stats(auth: AuthDep):
     """Get task counts grouped by type and status."""
     tracker = get_task_manager()
@@ -156,7 +170,7 @@ async def get_task_stats(auth: AuthDep):
     return {"success": True, "data": stats}
 
 
-@router.get("/tasks/ids")
+@router.get("/tasks/ids", response_model=TaskIdList)
 async def list_task_ids(
     auth: AuthDep,
     types: Optional[list[str]] = Query(None),
@@ -177,7 +191,7 @@ async def list_task_ids(
     return {"success": True, "ids": ids, "total": len(ids), "capped": capped}
 
 
-@router.post("/tasks/{task_id}/cancel")
+@router.post("/tasks/{task_id}/cancel", response_model=TaskAck)
 async def cancel_task(task_id: str, auth: AuthDep):
     """Cancel a pending/processing task and revoke its Celery job."""
     tracker = get_task_manager()
@@ -224,7 +238,9 @@ class HealthOverridePayload(BaseModel):
     )
 
 
-@router.patch("/tasks/{task_id}/health-override")
+@router.patch(
+    "/tasks/{task_id}/health-override", response_model=TaskHealthOverrideResult
+)
 async def patch_health_override(
     task_id: str, payload: HealthOverridePayload, auth: AuthDep
 ):
@@ -266,15 +282,15 @@ async def patch_health_override(
     except Exception as e:
         logger.exception(f"health override patch failed for task {task_id}: {e}")
         raise HTTPException(500, f"update failed: {e}")
-    if row is None:
-        raise HTTPException(404, "task not found or not owned by user")
+    # UPDATE ... RETURNING matched nothing: not this caller's row, or gone.
+    row = require_row(row)
     task = {
         k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in row.items()
     }
     return {"success": True, "task": task}
 
 
-@router.post("/tasks/{task_id}/extend")
+@router.post("/tasks/{task_id}/extend", response_model=TaskExtendResult)
 async def extend_task_timeout(task_id: str, auth: AuthDep, minutes: int = 30):
     """Convenience endpoint for the 'extend timeout' button.
 
@@ -325,16 +341,26 @@ async def extend_task_timeout(task_id: str, auth: AuthDep, minutes: int = 30):
             pass
 
     async with write_scope() as session:
-        await session.execute(
-            update(TaskTracking)
-            .where(TaskTracking.dbos_workflow_id == task_id)
-            .where(TaskTracking.user_id == str(auth.user_id))
-            .values(max_duration_minutes=new_max)
+        written = (
+            (
+                await session.execute(
+                    update(TaskTracking)
+                    .where(TaskTracking.dbos_workflow_id == task_id)
+                    .where(TaskTracking.user_id == str(auth.user_id))
+                    .values(max_duration_minutes=new_max)
+                    .returning(TaskTracking.dbos_workflow_id)
+                )
+            )
+            .mappings()
+            .first()
         )
+    # The row vanished (deleted / retried onto a new id) between the read and
+    # the write: reporting the new cap as applied would be a lie.
+    require_row(written)
     return {"success": True, "max_duration_minutes": new_max}
 
 
-@router.post("/tasks/{task_id}/retry")
+@router.post("/tasks/{task_id}/retry", response_model=Envelope[TaskTrackingRow])
 async def retry_task(task_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Reset a failed/cancelled/lost task and genuinely re-dispatch it.
 
@@ -608,7 +634,7 @@ async def retry_task(task_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     return {"success": True, "data": task}
 
 
-@router.delete("/tasks/{task_id}")
+@router.delete("/tasks/{task_id}", response_model=TaskAck)
 async def delete_task(task_id: str, auth: AuthDep):
     """Delete a task record."""
     tracker = get_task_manager()
@@ -618,7 +644,7 @@ async def delete_task(task_id: str, auth: AuthDep):
     return {"success": True}
 
 
-@router.post("/tasks/clear-completed")
+@router.post("/tasks/clear-completed", response_model=TaskClearCompletedResult)
 async def clear_completed(auth: AuthDep):
     """Delete old completed/failed/cancelled tasks, keeping the 50 most recent."""
     tracker = get_task_manager()
@@ -626,7 +652,11 @@ async def clear_completed(auth: AuthDep):
     return {"success": True, "cleared": count}
 
 
-@router.get("/tasks/{task_id}/progress")
+@router.get(
+    "/tasks/{task_id}/progress",
+    response_model=TaskProgress,
+    response_model_exclude_unset=True,
+)
 async def get_task_progress(task_id: str, auth: AuthDep):
     """Get real-time download progress from Redis.
 

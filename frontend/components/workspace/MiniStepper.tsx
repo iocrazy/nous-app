@@ -8,17 +8,21 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import type { ProjectStage } from '../../types';
+import type { ProjectStage } from '../../types/api';
+
+/** The fields a dot renders — satisfied by a catalog entry or a workflow
+ * node mapped onto it (WorkspaceTopBar). */
+export type MiniStepperStage = Pick<ProjectStage, 'id' | 'slug' | 'name' | 'sort_order'>;
 
 export interface MiniStepperProps {
-  catalog: ProjectStage[];
+  catalog: MiniStepperStage[];
   /** Index of the current stage within `catalog`, or -1 when unknown. */
   currentIndex: number;
   /** Whether the viewer may jump to another stage (write access). */
   canWrite?: boolean;
   /** Disables all dots while a jump request is in flight. */
   advancing?: boolean;
-  onJump: (stage: ProjectStage) => void;
+  onJump: (stage: MiniStepperStage) => void;
 }
 
 export function MiniStepper({

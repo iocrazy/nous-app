@@ -16,7 +16,7 @@ import { createInstance, type i18n as I18n } from 'i18next';
 import enJson from '../../public/locales/en.json';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { ToastProvider } from '../Toast';
-import type { Project, ProjectStageNode, ProjectWorkflow } from '../../types';
+import type { Project, ProjectStageNode, ProjectWorkflow } from '../../types/api';
 
 function makeI18n(): I18n {
   const instance = createInstance();

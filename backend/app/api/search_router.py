@@ -63,7 +63,7 @@ from app.services.search.service import ALL_SEARCH_KINDS, unified_search
 from app.utils.admin_helpers import create_audit_log
 
 # Router-level ambient tenant scope, same as the four ``resources_*`` routers:
-# ``/hybrid`` / ``/quick`` / ``/similar`` / ``/vectors/status`` all read the
+# ``/hybrid`` / ``/similar`` / ``/vectors/status`` all read the
 # ``resources`` table (hydration, coverage), and under
 # ``SCOPE_ENFORCE_RESOURCES=true`` (production) a read with no scope raises
 # ``UnscopedQueryError`` → 500. Local / CI run with the flag off, which is how
@@ -802,75 +802,6 @@ async def find_similar_media(
         )
     except Exception as e:
         logger.error(f"Similar media search failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Search failed.",
-        )
-
-
-@router.get("/quick")
-async def quick_search(
-    auth: AuthDep,
-    q: str = Query(..., min_length=1, max_length=200, description="Search query"),
-    limit: int = Query(10, ge=1, le=50),
-):
-    """
-    Quick search endpoint for search bar.
-
-    Simplified semantic search with fewer options.
-    """
-    search_service = SearchService()
-
-    try:
-        response = await search_service.semantic_search(
-            query=q,
-            limit=limit,
-            threshold=0.4,  # Lower threshold for broader results
-            user_id=auth.user_id,
-        )
-
-        # Ownership guardrail, same as /semantic. The RPC is user-scoped since
-        # migration 463, but this endpoint returns media_id / title / cover_url
-        # straight to the browser, so it does not rely on a single layer.
-        owned = await _hydrate_media_by_platform_ids(
-            [r.platform_id for r in response.results],
-            user_id=auth.user_id,
-        )
-        owned_pids = {v["platform_id"] for v in owned if v.get("platform_id")}
-        results = [r for r in response.results if r.platform_id in owned_pids]
-
-        # Return simplified format for quick display
-        return {
-            "results": [
-                {
-                    "media_id": r.media_id,
-                    "title": r.title,
-                    "cover_url": r.cover_url,
-                    "similarity": round(r.similarity, 2),
-                }
-                for r in results
-            ],
-            "total": len(results),
-        }
-
-    except EmbeddingDimensionMismatch:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=_DIMENSION_MISMATCH_DETAIL,
-        )
-    except EmbeddingSearchUnavailable:
-        # The engine cannot answer. Saying "0 results" here would be a wrong
-        # answer dressed as a right one — the caller cannot tell it apart from
-        # a genuine miss, and no probe would ever fire.
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Semantic search is temporarily unavailable.",
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Still not a silent empty page: log with context and surface a 500.
-        logger.error(f"Quick search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Search failed.",

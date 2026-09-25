@@ -13,6 +13,7 @@ filter and a limit far smaller than the total.
 
 from __future__ import annotations
 
+import datetime
 from unittest.mock import patch
 
 import pytest
@@ -54,7 +55,9 @@ def _row(idx: int, mime: str = "video/mp4") -> dict:
         "size": 10,
         "scope_type": "personal",
         "scope_id": "9",
-        "updated_at": "2026-08-01T00:00:00Z",
+        "updated_at": datetime.datetime(
+            2026, 8, 1, 0, 0, 0, tzinfo=datetime.timezone.utc
+        ),
         "thumbnail_path": None,
         "cover_image_path": None,
         "media_id": None,

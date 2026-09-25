@@ -413,7 +413,7 @@ class SkillOut(BaseModel):
     project_name: Optional[str] = None
 
 
-class SkillUpdate(BaseModel):
+class LibrarySkillUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     body_md: Optional[str] = None
@@ -423,7 +423,7 @@ class SkillUpdate(BaseModel):
     frontmatter_json: Optional[dict] = None
 
 
-class SkillCreate(BaseModel):
+class LibrarySkillCreate(BaseModel):
     """Payload for POST /skills — create a new user-owned (non-preset) skill.
 
     Mirrors ``AgentCreate`` in spirit:
@@ -457,7 +457,7 @@ class SkillCreate(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _mutually_exclusive_scope(self) -> "SkillCreate":
+    def _mutually_exclusive_scope(self) -> "LibrarySkillCreate":
         if self.team_id is not None and self.project_id is not None:
             raise ValueError("team_id and project_id are mutually exclusive")
         return self

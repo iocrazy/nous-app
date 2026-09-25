@@ -1,6 +1,5 @@
 """Script Editor request/response Pydantic schemas."""
 
-from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
@@ -52,31 +51,6 @@ class ScriptProjectUpdate(BaseModel):
     # same PG range guard as the beat arrangement fields (out-of-range → 422 here,
     # never asyncpg 22003 → opaque 500). NULL = unset (handled via exclude_none).
     target_duration_sec: Optional[int] = Field(None, ge=0, le=2_147_483_647)
-
-
-class ScriptProjectResponse(BaseModel):
-    """API response for a single script project."""
-
-    id: str
-    project_id: str
-    team_id: str
-    created_by: str
-    name: str
-    description: Optional[str] = None
-    display_code: Optional[str] = None
-    episode_id: Optional[str] = None
-    status: str
-    settings_json: Optional[Dict[str, Any]] = None
-    viewport_json: Optional[Dict[str, Any]] = None
-    target_duration_sec: Optional[int] = None
-    # Scene numbering (mig 403 / agent-layer spec §4). NULL = writing phase
-    # (scene numbers derived from order, never stored); once set, every
-    # script_scenes.scene_number under this script is frozen permanently.
-    numbering_locked_at: Optional[datetime] = None
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 # ---------------------------------------------------------------------------
@@ -214,17 +188,6 @@ class SceneMoveRequest(BaseModel):
     after_scene_id: Optional[str] = None
 
 
-class SceneCreateAfterLock(SceneCreate):
-    """Request body for `POST /scripts/{script_id}/scenes/after-lock` — a
-    scene create for an ALREADY-LOCKED script (agent-layer spec §4.2 "锁定后
-    插入"). Adds the same before/after sparse-insertion anchors ``move_scene``
-    uses; omitting both is a tail append (continues the plain integer
-    sequence — nothing to protect there, so no letter suffix)."""
-
-    before_scene_id: Optional[str] = None
-    after_scene_id: Optional[str] = None
-
-
 # ---------------------------------------------------------------------------
 # Shot schemas (Phase B P3 — storyboard shots hang off a scene)
 # ---------------------------------------------------------------------------
@@ -257,16 +220,6 @@ class ShotUpdate(BaseModel):
     focal_length: Optional[str] = Field(None, max_length=20)
     lighting: Optional[str] = None
     description: Optional[str] = None
-
-
-class ShotMoveRequest(BaseModel):
-    """Request body for `POST /shots/{shot_id}/move`.
-
-    Shots are reordered WITHIN their scene only (no cross-scene move in P3), so
-    there is no reparent field — just the sparse-insertion anchors."""
-
-    before_shot_id: Optional[str] = None
-    after_shot_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -412,15 +365,6 @@ class ViewportUpdate(BaseModel):
     zoom: float = Field(default=1, ge=0.1, le=10)
 
 
-class GenerateOutlineRequest(BaseModel):
-    """Request body for AI-generated story outline."""
-
-    script_id: str
-    premise: str = Field(..., min_length=1, max_length=10000)
-    chapter_count: int = Field(default=5, ge=2, le=20)
-    style_guide: Optional[str] = Field(None, max_length=2000)
-
-
 class ExpandChapterRequest(BaseModel):
     """Request body for AI chapter expansion."""
 
@@ -468,16 +412,3 @@ class ScriptAssetUpdate(BaseModel):
     content: Optional[str] = Field(None, max_length=100000)
     data_json: Optional[Dict[str, Any]] = None
     sort_order: Optional[int] = None
-
-
-# ---------------------------------------------------------------------------
-# Script-to-Storyboard conversion
-# ---------------------------------------------------------------------------
-
-
-class ConvertToStoryboardRequest(BaseModel):
-    """Request body for converting a chapter to storyboard scenes."""
-
-    script_id: str
-    chapter_id: str
-    storyboard_project_id: Optional[str] = None

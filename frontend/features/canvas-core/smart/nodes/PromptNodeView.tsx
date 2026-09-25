@@ -62,6 +62,7 @@ const GRIP_PX = 18;
 // Canvas pill trigger — keeps the node's ghost/rounded look while borrowing the
 // shared UiSelect portal menu (fixes the native popup covering the trigger).
 import { CANVAS_PILL_TRIGGER } from './canvasPill';
+import { platformModelText } from '../../../../utils/platformModel';
 
 export function PromptNodeView({ id, data, selected }: NodeProps) {
   const {
@@ -917,7 +918,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 <option value="">Catalog default</option>
                 {textModels.map((m) => (
                   <option key={m.name} value={m.name}>
-                    {m.display_name || m.name}
+                    {platformModelText(m)}
                   </option>
                 ))}
               </UiSelect>

@@ -84,12 +84,6 @@ export interface HybridSearchFilters {
   media_type?: number;
 }
 
-export interface QuickSearchSuggestion {
-  type: 'recent' | 'popular' | 'tag';
-  text: string;
-  count?: number;
-}
-
 /**
  * Semantic search using natural language query
  */
@@ -212,21 +206,6 @@ export const findSimilarVideos = async (
   apiClient.get<SearchResponse>(`/api/v1/search/similar/${mediaId}`, {
     query: { limit, threshold },
   });
-
-/**
- * Quick search for search bar autocomplete
- */
-export const quickSearch = async (
-  query: string,
-  limit: number = 5,
-): Promise<{
-  results: SearchResultItem[];
-  suggestions: QuickSearchSuggestion[];
-}> =>
-  apiClient.get<{
-    results: SearchResultItem[];
-    suggestions: QuickSearchSuggestion[];
-  }>('/api/v1/search/quick', { query: { q: query, limit } });
 
 /**
  * Local search - searches through already loaded library data (instant, no network)

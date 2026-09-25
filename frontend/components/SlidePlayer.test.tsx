@@ -1,16 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SlidePlayer } from './SlidePlayer';
+import type { MediaSlidesResponse } from '../types/api';
 
 vi.mock('../services/parserService', () => ({
   getAuthHeaders: vi.fn().mockResolvedValue({}),
 }));
 
-const slidesResponse = {
+// Real wire shape of GET /media/{id}/slides (media_type is built from the
+// file suffix, so `.jpg` really is `image/jpg`).
+const slidesResponse: MediaSlidesResponse = {
   slides: [
-    { name: 'a.jpg', type: 'image', media_type: 'image/jpeg', url: '' },
-    { name: 'b.jpg', type: 'image', media_type: 'image/jpeg', url: '' },
+    { name: 'a.jpg', type: 'image', media_type: 'image/jpg', url: '/api/v1/media/7/slides/a.jpg' },
+    { name: 'b.jpg', type: 'image', media_type: 'image/jpg', url: '/api/v1/media/7/slides/b.jpg' },
   ],
+  count: 2,
 };
 
 /**
@@ -72,10 +76,46 @@ describe('SlidePlayer — no slide, no report', () => {
   });
 
   it('reports nothing when the album has no slides', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ slides: [] }) }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ slides: [], count: 0 }) }));
     const onSlideChange = vi.fn();
     render(<SlidePlayer mediaId="m1" downloadStatus="completed" onSlideChange={onSlideChange} />);
     await waitFor(() => expect(screen.getByText(/No slides available/i)).toBeInTheDocument());
     expect(onSlideChange).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The public share page has no session: the slide list, each slide and the
+ * audio must all carry the share grant as `?share_token=`. SharePage used to
+ * pass the share code as `mediaToken` (`?token=`, which only takes a signed
+ * media token) and the list went out with no credential at all — every shared
+ * album was a 401.
+ */
+describe('SlidePlayer — share page credential', () => {
+  it('sends the share grant on the list, the slides and the audio', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => slidesResponse });
+    vi.stubGlobal('fetch', fetchMock);
+    const { container } = render(
+      <SlidePlayer mediaId="m1" shareToken="sg1.7.9.abc" downloadStatus="completed" />,
+    );
+    await waitFor(() => expect(screen.getByAltText('Slide 1')).toBeInTheDocument());
+
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/api\/v1\/media\/m1\/slides\?share_token=sg1\.7\.9\.abc$/);
+    expect(screen.getByAltText('Slide 1').getAttribute('src')).toMatch(
+      /\/api\/v1\/media\/m1\/slides\/a\.jpg\?share_token=sg1\.7\.9\.abc$/,
+    );
+    expect(container.querySelector('audio')?.getAttribute('src')).toMatch(
+      /\/api\/v1\/media\/m1\/audio\?share_token=sg1\.7\.9\.abc$/,
+    );
+  });
+
+  it('keeps the signed media token for signed-in hosts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => slidesResponse });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<SlidePlayer mediaId="m1" mediaToken="u.1.2.sig" downloadStatus="completed" />);
+    await waitFor(() => expect(screen.getByAltText('Slide 1')).toBeInTheDocument());
+
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/api\/v1\/media\/m1\/slides$/);
+    expect(screen.getByAltText('Slide 1').getAttribute('src')).toMatch(/\?token=u\.1\.2\.sig$/);
   });
 });

@@ -94,7 +94,9 @@ class TagResponse(TagBase):
     """Schema for tag response."""
 
     id: SnowflakeId
-    type: Literal["system", "user", "time"]
+    # mig 468 retired 'system' and made it structural: tags_type_check is
+    # CHECK (type IN ('user','time')), validated against every row when added.
+    type: Literal["user", "time"]
     slug: Optional[str] = Field(
         None,
         description=(
@@ -181,3 +183,10 @@ class TagStatisticsResponse(BaseModel):
     success: bool = True
     top_tags: List[TagCountItem]
     total_tagged_videos: int = 0
+
+
+class TagGroupMutationResult(BaseModel):
+    """``PUT /tags/groups/reorder`` and ``DELETE /tags/groups/{id}``: the
+    body is only the success flag; the caller refetches the groups."""
+
+    success: bool

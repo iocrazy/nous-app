@@ -70,6 +70,10 @@ while IFS= read -r f; do
   [ -z "$f" ] && continue
   case "$f" in
     frontend/*)            frontend=true ;;
+    # 契约快照：前端类型由它生成（npm run gen:api），所以它一变 frontend job
+    # 必须跑「Generate API types & diff」—— 否则只改后端 schema 的 PR 会让
+    # frontend/types/api.generated.d.ts 静默过期。必须排在 backend/* 之前。
+    backend/openapi.json)  backend=true; frontend=true ;;
     backend/*)             backend=true ;;
     supabase/*)            backend=true ;;            # 迁移取号查重跑在 backend job
     browser/*)             browser=true ;;

@@ -15,7 +15,8 @@ import { createInstance, type i18n as I18n } from 'i18next';
 import enJson from '../../public/locales/en.json';
 import { CurrentNodeCard } from './CurrentNodeCard';
 import type { AgentOption, PersonOption } from './OwnerPicker';
-import type { ProjectStageNode } from '../../types';
+import type { ProjectStageNode } from '../../types/api';
+import { makeStageNode } from '../../tests/fixtures/projects';
 
 // CurrentNodeCard's owner/schedule/brief edits all round-trip through
 // updateProjectNode — mocked so a brief blur-save test never hits a real
@@ -37,7 +38,7 @@ function makeI18n(): I18n {
 }
 
 function node(over: Partial<ProjectStageNode>): ProjectStageNode {
-  return {
+  return makeStageNode({
     id: '1',
     project_id: '10',
     source_template_node_id: null,
@@ -56,9 +57,9 @@ function node(over: Partial<ProjectStageNode>): ProjectStageNode {
     skipped: false,
     members: [],
     completion_policy: 'owner',
-    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false },
+    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false, prepare_agent_run: false, auto_start: false },
     ...over,
-  };
+  });
 }
 
 const people: PersonOption[] = [];
@@ -111,7 +112,7 @@ describe('CurrentNodeCard — suggest-agent-run chip', () => {
   it('renders with the agent name when both the flag and an agent owner are set', () => {
     renderCard({
       owner_agent_id: 'agent-1',
-      events: { notify_on_arrival: false, notify_on_complete: false, suggest_agent_run: true },
+      events: { notify_on_arrival: false, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
     });
     expect(screen.getByTestId('workflow-suggest-agent-chip')).toHaveTextContent(
       'Suggested: run Script Bot',
@@ -126,7 +127,7 @@ describe('CurrentNodeCard — suggest-agent-run chip', () => {
     // instead of a stray English word.
     renderCard({
       owner_agent_id: 'agent-unknown',
-      events: { notify_on_arrival: false, notify_on_complete: false, suggest_agent_run: true },
+      events: { notify_on_arrival: false, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
     });
     expect(screen.getByTestId('workflow-suggest-agent-chip')).toHaveTextContent(
       'Suggested: run Agent',
@@ -136,7 +137,7 @@ describe('CurrentNodeCard — suggest-agent-run chip', () => {
   it('hides the chip when suggest_agent_run is false, even with an agent owner', () => {
     renderCard({
       owner_agent_id: 'agent-1',
-      events: { notify_on_arrival: false, notify_on_complete: false, suggest_agent_run: false },
+      events: { notify_on_arrival: false, notify_on_complete: false, suggest_agent_run: false, prepare_agent_run: false, auto_start: false },
     });
     expect(screen.queryByTestId('workflow-suggest-agent-chip')).toBeNull();
   });
@@ -145,7 +146,7 @@ describe('CurrentNodeCard — suggest-agent-run chip', () => {
     renderCard({
       owner_user_id: 'user-1',
       owner_agent_id: null,
-      events: { notify_on_arrival: false, notify_on_complete: false, suggest_agent_run: true },
+      events: { notify_on_arrival: false, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
     });
     expect(screen.queryByTestId('workflow-suggest-agent-chip')).toBeNull();
   });
@@ -160,7 +161,7 @@ describe('CurrentNodeCard — suggest-agent-run chip', () => {
     renderCard(
       {
         owner_agent_id: 'agent-1',
-        events: { notify_on_arrival: false, notify_on_complete: false, suggest_agent_run: true },
+        events: { notify_on_arrival: false, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
       },
       { onOpenTodolist },
     );
@@ -178,6 +179,7 @@ describe('CurrentNodeCard — Run now chip (M3 Task H3)', () => {
         notify_on_complete: false,
         suggest_agent_run: true,
         prepare_agent_run: true,
+        auto_start: false,
       },
       metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
     });
@@ -193,6 +195,7 @@ describe('CurrentNodeCard — Run now chip (M3 Task H3)', () => {
         notify_on_complete: false,
         suggest_agent_run: true,
         prepare_agent_run: true,
+        auto_start: false,
       },
       // metadata omitted entirely — normalizeInstanceNode would default this to
       // {} in real data; the raw node() fixture leaves it undefined, which the
@@ -215,6 +218,7 @@ describe('CurrentNodeCard — Run now chip (M3 Task H3)', () => {
         notify_on_complete: false,
         suggest_agent_run: false,
         prepare_agent_run: true,
+        auto_start: false,
       },
       metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
     });
@@ -234,6 +238,7 @@ describe('CurrentNodeCard — Run now chip (M3 Task H3)', () => {
           notify_on_complete: false,
           suggest_agent_run: true,
           prepare_agent_run: true,
+          auto_start: false,
         },
         metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
       },
@@ -255,6 +260,7 @@ describe('CurrentNodeCard — Run now chip (M3 Task H3)', () => {
           notify_on_complete: false,
           suggest_agent_run: true,
           prepare_agent_run: true,
+          auto_start: false,
         },
         metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
       },

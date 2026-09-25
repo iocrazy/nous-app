@@ -26,7 +26,8 @@ import {
 import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublishService';
 import { AccountAvatar } from './platform';
 import { needsReconnect } from './accountStatus';
-import { SocialAccount, LibraryVideo, SelfDeclaration, TopicRef } from '../../types';
+import { LibraryVideo, SelfDeclaration } from '../../types';
+import type { SocialAccount, TopicRef } from '../../types/api';
 import { CoverSlots, type CoverOrientation, type CoverPair } from './CoverSlots';
 import { clearPublishDraft, readPublishDraft, writePublishDraft } from './publishDraft';
 import { HelpTip } from './CoverStudio/HelpTip';
@@ -1797,7 +1798,9 @@ export const PublishPage: React.FC = () => {
         undefined,
         signal,
       );
-      return { id: r.id, name: r.filename };
+      // The upload response id is a JSON number; the picker list and
+      // `selectedVideos` key on the string id `listLibraryMedia` produces.
+      return { id: String(r.id), name: r.filename };
     } catch (err) {
       console.error('distribution: inline image upload failed', err);
       return describeUploadFailure(file.name, err);

@@ -27,14 +27,32 @@ from sqlalchemy import select
 from app.db.scope import is_enforced, system_request_scope
 
 
-def _transcribe_inputs_select_stmt(parsed_media_id: int):
+def _transcribe_inputs_select_stmt(
+    parsed_media_id: int,
+    *,
+    resource_id: int | None = None,
+    creator_id: str | None = None,
+):
     """The parsed_media+resources lookup, column-level (not entity-level — the
     B4 row-shape lesson) so ``media_row.get(...)`` below reads real column
     values. Factored out so a real-aiosqlite row-shape test can import and
-    exercise the exact production statement."""
+    exercise the exact production statement.
+
+    Which resource the transcript lands on is decided HERE, so the statement
+    must name exactly one. ``parsed_media`` is shared (one row per platform
+    id, whoever parsed it), and several users can each hold a resource of the
+    same media; the bare ``JOIN ... LIMIT 1`` this used to be picked one of
+    them arbitrarily and wrote the caller's transcript onto another user's
+    row. ``resource_id`` pins the row the dispatcher chose (always passed by
+    new dispatches); ``creator_id`` is the fallback for workflows recorded
+    before that argument existed. The caller must pass one of the two.
+    """
     from app.models import ParsedMedia, Resources
 
-    return (
+    if resource_id is None and not creator_id:
+        raise ValueError("transcription inputs need a resource_id or a creator_id")
+
+    stmt = (
         select(
             ParsedMedia.id,
             ParsedMedia.download_path,
@@ -49,14 +67,35 @@ def _transcribe_inputs_select_stmt(parsed_media_id: int):
         )
         .join(Resources, Resources.media_id == ParsedMedia.id)
         .where(ParsedMedia.id == parsed_media_id)
-        .limit(1)
     )
+    if resource_id is not None:
+        stmt = stmt.where(Resources.id == int(resource_id))
+    else:
+        stmt = stmt.where(Resources.creator_id == creator_id).order_by(
+            Resources.created_at.asc()
+        )
+    return stmt.limit(1)
 
 
 @DBOS.step()
-async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
-    """Resolve the audio file path + the user's whisper provider config."""
+async def load_transcribe_inputs(
+    parsed_media_id: int, user_id: str, resource_id: int | None = None
+) -> dict[str, Any]:
+    """Resolve the audio file path + the user's whisper provider config.
+
+    ``resource_id`` is the resource the dispatcher chose; the transcript is
+    written there and nowhere else. ``None`` only for workflows recorded
+    before the argument existed: then the row must be one the initiating
+    user created, and an unknown initiator is a failure (raised, so DBOS
+    records ERROR), never a guess.
+    """
     from app.db.session import read_scope
+
+    if resource_id is None and not user_id:
+        raise RuntimeError(
+            f"transcription of parsed_media={parsed_media_id} has neither a "
+            "resource_id nor an initiating user; refusing to pick a resource"
+        )
 
     # Resources carries UserScoped(creator_id); SCOPE_ENFORCE_RESOURCES
     # defaults false in code but production sets it true via
@@ -79,12 +118,23 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
     async with scope_cm:
         async with read_scope() as session:
             media_row = (
-                (await session.execute(_transcribe_inputs_select_stmt(parsed_media_id)))
+                (
+                    await session.execute(
+                        _transcribe_inputs_select_stmt(
+                            parsed_media_id,
+                            resource_id=resource_id,
+                            creator_id=None if resource_id is not None else user_id,
+                        )
+                    )
+                )
                 .mappings()
                 .first()
             )
     if not media_row:
-        raise RuntimeError(f"no parsed_media for id={parsed_media_id}")
+        raise RuntimeError(
+            f"no resource to transcribe for parsed_media={parsed_media_id} "
+            f"(resource_id={resource_id}, user_id={user_id})"
+        )
 
     from app.models import UserSettings
 
@@ -475,8 +525,12 @@ async def charge_transcription_step(
 
 
 @DBOS.step()
-async def mark_transcript_completed(parsed_media_id: int) -> None:
+async def mark_transcript_completed(resource_id: int | str) -> None:
     """Flip resources.transcript_status='completed' for downstream consumers.
+
+    On the ONE resource the transcript was written to. It used to flip every
+    resource of the media, so other holders of the same video were told they
+    had a transcript that was never written for them.
 
     Bulk Core UPDATE on Resources (a UserScoped model) is FORBIDDEN under a
     real user Scope (app/db/scope.py's write-path guard — it can't be safely
@@ -501,15 +555,18 @@ async def mark_transcript_completed(parsed_media_id: int) -> None:
         async with write_scope() as session:
             await session.execute(
                 update(Resources)
-                .where(Resources.media_id == parsed_media_id)
+                .where(Resources.id == int(resource_id))
                 .values(transcript_status="completed")
             )
 
 
 @DBOS.step()
-async def mark_transcript_failed(parsed_media_id: int) -> None:
+async def mark_transcript_failed(resource_id: int | str) -> None:
     """Flip resources.transcript_status='failed' so the frontend Transcript
     tab stops its local "Transcribing..." spinner and surfaces the failure.
+
+    Only on the resource this run was for (it used to fail every holder's
+    row of the media).
 
     Without this the workflow only marks task_tracking failed (via
     record_workflow_failure); the resource's transcript_status stays 'none'
@@ -536,24 +593,29 @@ async def mark_transcript_failed(parsed_media_id: int) -> None:
             async with write_scope() as session:
                 await session.execute(
                     update(Resources)
-                    .where(Resources.media_id == parsed_media_id)
+                    .where(Resources.id == int(resource_id))
                     .where(Resources.transcript_status != "completed")
                     .values(transcript_status="failed")
                 )
     except Exception as e:
         logger.warning(
             f"[ai_transcription] transcript_status='failed' write for "
-            f"parsed_media_id={parsed_media_id} failed (non-fatal): {e}"
+            f"resource_id={resource_id} failed (non-fatal): {e}"
         )
 
 
 @DBOS.workflow()
 async def ai_transcription_workflow(
-    parsed_media_id: int, user_id: str
+    parsed_media_id: int, user_id: str, resource_id: int | None = None
 ) -> dict[str, Any]:
     """DBOS port of transcribe_audio_task. Same input/output contract:
     parsed_media_id + user_id → transcript persisted to resource_transcripts +
     resources.transcript_status='completed'.
+
+    ``resource_id``: the resource the dispatcher chose — every write of this
+    run (transcript, status, follow-up summary) targets it. DBOS inputs are
+    frozen at dispatch, so it must be passed there; ``None`` means a workflow
+    recorded before this argument existed (see ``load_transcribe_inputs``).
 
     Workflow_id idempotency: re-running with the same workflow_id returns the
     cached result; the actual whisper call (expensive) runs once.
@@ -564,8 +626,10 @@ async def ai_transcription_workflow(
     manager = get_task_manager()
     wf_id = DBOS.workflow_id
 
+    target_resource_id = resource_id
     try:
-        inputs = await load_transcribe_inputs(parsed_media_id, user_id)
+        inputs = await load_transcribe_inputs(parsed_media_id, user_id, resource_id)
+        target_resource_id = inputs["resource_id"]
         # Cheap on-disk assertion (one stat call). The chain dispatcher
         # only fires us after extract_audio_workflow succeeds, and the
         # manual trigger gate checks extract_audio_path/music_download_path
@@ -580,7 +644,7 @@ async def ai_transcription_workflow(
             language=inputs["language"],
             task_assignment=inputs.get("task_assignment", ""),
         )
-        await mark_transcript_completed(parsed_media_id)
+        await mark_transcript_completed(target_resource_id)
         # Bill AFTER the transcript is persisted: a failed run is never
         # charged, and all three entry points (both manual endpoints and the
         # post-download auto chain) converge here, so this is the one charge.
@@ -610,7 +674,9 @@ async def ai_transcription_workflow(
             # thread hop). `user_id` is a required workflow arg (always
             # present). INERT until SCOPE_ENFORCE_RESOURCES flips.
             async with request_scope(Scope(user_id=user_id)):
-                await chain_summary_for_tags(parsed_media_id, user_id)
+                await chain_summary_for_tags(
+                    parsed_media_id, user_id, resource_id=str(target_resource_id)
+                )
         except Exception as e:
             logger.warning(
                 f"[ai_transcription] post-success summary chain failed for "
@@ -627,7 +693,9 @@ async def ai_transcription_workflow(
             from app.tasks.download_helpers import consume_summary_follow_up
 
             async with request_scope(Scope(user_id=user_id)):
-                await consume_summary_follow_up(parsed_media_id)
+                await consume_summary_follow_up(
+                    parsed_media_id, resource_id=str(target_resource_id)
+                )
         except Exception as e:
             logger.warning(
                 f"[ai_transcription] summary follow-up consume failed for "
@@ -638,7 +706,11 @@ async def ai_transcription_workflow(
         # Surface the failure on the resource so the frontend Transcript
         # tab stops spinning. Business column (route-C rule 3), written by
         # business code — not a trigger-owned task_tracking column.
-        await mark_transcript_failed(parsed_media_id)
+        # Only when we know which resource this run was for: before
+        # load_transcribe_inputs resolved one (legacy input, no match) there
+        # is no row that is ours to mark.
+        if target_resource_id is not None:
+            await mark_transcript_failed(target_resource_id)
         # Route-C rule 4: record for task_tracking/UI, then RE-RAISE so
         # DBOS records ERROR — returning the dict made DBOS mark this
         # workflow SUCCESS while task_tracking said failed (observed live
@@ -649,6 +721,7 @@ async def ai_transcription_workflow(
             context={
                 "workflow": "ai_transcription",
                 "parsed_media_id": parsed_media_id,
+                "resource_id": target_resource_id,
                 "user_id": user_id,
             },
         )

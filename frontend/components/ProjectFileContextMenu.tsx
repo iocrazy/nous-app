@@ -4,7 +4,8 @@ import {
   Download, Pencil, FolderInput, ClipboardCheck,
   History, Info, Share2, Trash2,
 } from 'lucide-react';
-import { ProjectFile, ReviewStatus } from '../types';
+import { ReviewStatus } from '../types';
+import type { ProjectFile } from '../types/api';
 
 interface ProjectFileContextMenuProps {
   file: ProjectFile;

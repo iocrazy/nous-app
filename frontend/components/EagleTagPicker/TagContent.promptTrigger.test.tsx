@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { TagContent } from './TagContent';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 // Mock unifiedTagService
 vi.mock('../../services/unifiedTagService', () => ({
@@ -17,6 +17,9 @@ const tag = (over: Partial<Tag>): Tag => ({
   type: 'user',
   created_at: '2026-01-01',
   prompt_trigger: false,
+  enabled: true,
+  media_count: 0,
+  origin: 'curated',
   ...over,
 });
 

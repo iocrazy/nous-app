@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ArrowLeft, Upload, Link, LayoutGrid, LayoutList, Loader2, FileText, FolderOpen, ChevronDown, Plus, ChevronRight, Folder as FolderIcon, Search, Users, Inbox } from 'lucide-react';
 import { Loading } from './common/Loading';
 import { useTranslation } from 'react-i18next';
-import { Project, ProjectFile, ProjectFolder, ReviewStatus } from '../types';
+import { ReviewStatus } from '../types';
+import type { Project, ProjectFile, ProjectFolder } from '../types/api';
 import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder, updateFile, deleteFile, updateReviewStatus, getProjectFileDownloadUrl } from '../services/projectsService';
 import { FileCard } from './FileCard';
 import { FileInfoPanel } from './FileInfoPanel';
@@ -27,6 +28,8 @@ interface ProjectFilesViewProps {
 export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onBack, onFileReview }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
+  // Snowflake ids are JSON numbers on the wire; routes/URLs take strings.
+  const projectId = String(project.id);
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
   const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
@@ -65,14 +68,14 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
 
   useEffect(() => {
     loadContent();
-  }, [project.id, currentFolderId]);
+  }, [projectId, currentFolderId]);
 
   const loadContent = async () => {
     setIsLoading(true);
     try {
       const [filesData, foldersData] = await Promise.all([
-        fetchProjectFiles(project.id, false, currentFolderId),
-        fetchProjectFolders(project.id, currentFolderId),
+        fetchProjectFiles(projectId, false, currentFolderId),
+        fetchProjectFolders(projectId, currentFolderId),
       ]);
       setFiles(filesData);
       setFolders(foldersData);
@@ -88,7 +91,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
     if (folderId === null) {
       setFolderChain([]);
     } else if (folder) {
-      const existingIdx = folderChain.findIndex(f => f.id === folderId);
+      const existingIdx = folderChain.findIndex(f => String(f.id) === folderId);
       if (existingIdx >= 0) {
         setFolderChain(folderChain.slice(0, existingIdx + 1));
       } else {
@@ -100,7 +103,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
 
   const handleCreateFolder = async () => {
     try {
-      await createProjectFolder(project.id, 'New Folder', currentFolderId);
+      await createProjectFolder(projectId, 'New Folder', currentFolderId);
       await loadContent();
     } catch (err) {
       console.error('Failed to create folder:', err);
@@ -111,7 +114,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
     setSelectedIds(prev => {
       const next = new Set(prev);
       if (e.shiftKey && lastSelectedId) {
-        const allIds = filteredAndSorted.map(f => f.id);
+        const allIds = filteredAndSorted.map(f => String(f.id));
         const start = allIds.indexOf(lastSelectedId);
         const end = allIds.indexOf(id);
         if (start >= 0 && end >= 0) {
@@ -132,7 +135,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
     if (!window.confirm(t('projects.batch.confirmTrash', `Move ${selectedIds.size} files to trash?`))) return;
     try {
       for (const fileId of selectedIds) {
-        await updateFile(project.id, fileId, { is_trashed: true });
+        await updateFile(projectId, fileId, { is_trashed: true });
       }
       setSelectedIds(new Set());
       await loadContent();
@@ -157,7 +160,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
     setIsUploading(true);
     try {
       for (const file of Array.from(filesList)) {
-        await uploadFile(project.id, file);
+        await uploadFile(projectId, file);
       }
       await loadContent();
     } catch (err) {
@@ -214,7 +217,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
     // endpoint, which resolves it via the shared reader and forces
     // Content-Disposition: attachment.
     await downloadWithAuth(
-      getProjectFileDownloadUrl(project.id, file.id),
+      getProjectFileDownloadUrl(projectId, String(file.id)),
       file.filename || 'download',
       {
         onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
@@ -231,7 +234,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
   const handleRenameSubmit = async () => {
     if (!renameFile || !renameValue.trim()) return;
     try {
-      await updateFile(project.id, renameFile.id, { filename: renameValue.trim() });
+      await updateFile(projectId, String(renameFile.id), { filename: renameValue.trim() });
       await loadContent();
     } catch (err) {
       console.error('Failed to rename file:', err);
@@ -241,7 +244,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
 
   const handleSetStatus = async (file: ProjectFile, status: ReviewStatus | null) => {
     try {
-      await updateReviewStatus(project.id, file.id, status);
+      await updateReviewStatus(projectId, String(file.id), status);
       await loadContent();
     } catch (err) {
       console.error('Failed to set review status:', err);
@@ -250,7 +253,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
 
   const handleDeleteFile = async (file: ProjectFile) => {
     try {
-      await deleteFile(project.id, file.id);
+      await deleteFile(projectId, String(file.id));
       await loadContent();
     } catch (err) {
       console.error('Failed to delete file:', err);
@@ -418,9 +421,9 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <React.Fragment key={f.id}>
                 <ChevronRight size={14} className="text-ink-600" />
                 <button
-                  onClick={() => navigateToFolder(f.id, f)}
+                  onClick={() => navigateToFolder(String(f.id), f)}
                   className={`transition-colors ${
-                    f.id === currentFolderId ? 'text-ink-50' : 'text-ink-400 hover:text-ink-50'
+                    String(f.id) === currentFolderId ? 'text-ink-50' : 'text-ink-400 hover:text-ink-50'
                   }`}
                 >
                   {f.name}
@@ -470,7 +473,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
             {folders.map(folder => (
               <div
                 key={folder.id}
-                onClick={() => navigateToFolder(folder.id, folder)}
+                onClick={() => navigateToFolder(String(folder.id), folder)}
                 className="group bg-ink-800/50 hover:bg-ink-800 border border-ink-700/50 rounded-xl p-4 cursor-pointer transition-colors flex flex-col items-center gap-2"
               >
                 <FolderIcon size={44} className="text-amber-400" />
@@ -483,8 +486,8 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
                   file={file}
                   onClick={() => handleFileClick(file)}
                   viewMode="grid"
-                  isSelected={selectedIds.has(file.id)}
-                  onToggleSelect={(e) => toggleSelect(file.id, e)}
+                  isSelected={selectedIds.has(String(file.id))}
+                  onToggleSelect={(e) => toggleSelect(String(file.id), e)}
                 />
               </div>
             ))}
@@ -497,7 +500,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
             {folders.map(folder => (
               <div
                 key={folder.id}
-                onClick={() => navigateToFolder(folder.id, folder)}
+                onClick={() => navigateToFolder(String(folder.id), folder)}
                 className="flex items-center gap-3 px-4 py-3 bg-ink-800/50 hover:bg-ink-800 border border-ink-700/50 rounded-xl cursor-pointer transition-colors"
               >
                 <FolderIcon size={20} className="text-amber-400 shrink-0" />
@@ -510,8 +513,8 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
                   file={file}
                   onClick={() => handleFileClick(file)}
                   viewMode="list"
-                  isSelected={selectedIds.has(file.id)}
-                  onToggleSelect={(e) => toggleSelect(file.id, e)}
+                  isSelected={selectedIds.has(String(file.id))}
+                  onToggleSelect={(e) => toggleSelect(String(file.id), e)}
                 />
               </div>
             ))}
@@ -552,7 +555,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
       <LinkVideoModal
         isOpen={isLinkModalOpen}
         onClose={() => setIsLinkModalOpen(false)}
-        projectId={project.id}
+        projectId={projectId}
         onLinked={() => {
           setIsLinkModalOpen(false);
           loadContent();
@@ -563,7 +566,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
       {shareFile && (
         <ProjectShareModal
           file={shareFile}
-          projectId={project.id}
+          projectId={projectId}
           isOpen={!!shareFile}
           onClose={() => setShareFile(null)}
           onCreated={() => {}}
@@ -590,7 +593,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
 
       {/* Collect Modal */}
       <ProjectCollectModal
-        projectId={project.id}
+        projectId={projectId}
         isOpen={isCollectOpen}
         onClose={() => setIsCollectOpen(false)}
       />

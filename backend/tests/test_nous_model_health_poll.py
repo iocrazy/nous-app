@@ -49,7 +49,7 @@ async def test_poll_probes_only_enabled_and_persists():
         ):
             summary = await probe_nous_models_step()
 
-    assert summary == {"total": 2, "ok": 1, "failed": 1, "not_probed": 0}
+    assert summary == {"total": 2, "ok": 1, "failed": 1, "idle": 0, "not_probed": 0}
     # Disabled row (id=3) never probed/persisted.
     persisted = {c.args[0] for c in repo.record_test_result.await_args_list}
     assert persisted == {"1", "2"}
@@ -186,7 +186,7 @@ async def test_poll_no_models_is_noop():
     ):
         summary = await probe_nous_models_step()
 
-    assert summary == {"total": 0, "ok": 0, "failed": 0, "not_probed": 0}
+    assert summary == {"total": 0, "ok": 0, "failed": 0, "idle": 0, "not_probed": 0}
     repo.record_test_result.assert_not_awaited()
 
 
@@ -267,7 +267,7 @@ async def test_poll_counts_not_probed_separately_and_stays_quiet():
             with patch("app.workflows.scheduled_health.logger", logger):
                 summary = await probe_nous_models_step()
 
-    assert summary == {"total": 3, "ok": 1, "failed": 1, "not_probed": 1}
+    assert summary == {"total": 3, "ok": 1, "failed": 1, "idle": 0, "not_probed": 1}
     repo.record_test_result.assert_any_await(
         "2", "not_probed", "no protocol probe for type=image", None
     )
@@ -294,7 +294,9 @@ async def test_poll_summary_log_distinguishes_all_three_buckets():
     logger = MagicMock()
     with patch(
         "app.workflows.scheduled_health.probe_nous_models_step",
-        new=AsyncMock(return_value={"total": 4, "ok": 3, "failed": 0, "not_probed": 1}),
+        new=AsyncMock(
+            return_value={"total": 4, "ok": 3, "failed": 0, "idle": 0, "not_probed": 1}
+        ),
     ):
         with patch("app.workflows.scheduled_health.logger", logger):
             await body(None, None)

@@ -6,8 +6,17 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, f?: string) => f ?? _k }),
 }));
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
-const parseShareLink = vi.fn().mockResolvedValue({ title: 'ok' });
-const parseBatchLinks = vi.fn().mockResolvedValue({ submitted: 2, failed: 0 });
+// Real parserService return shapes (MediaFetchResult / MediaBatchFetchResult).
+const SUBMITTED = { success: true, async: true, message: 'Parse task submitted', task_id: 'wf-1' };
+const parseShareLink = vi.fn().mockResolvedValue(SUBMITTED);
+const parseBatchLinks = vi.fn().mockResolvedValue({
+  success: true,
+  total: 2,
+  submitted: 2,
+  failed: 0,
+  results: [],
+  errors: [],
+});
 vi.mock('../../services/parserService', () => ({
   parseShareLink: (...a: unknown[]) => parseShareLink(...a),
   parseBatchLinks: (...a: unknown[]) => parseBatchLinks(...a),
@@ -50,6 +59,33 @@ describe('FloatingParse AI intents', () => {
     expect(opts).toMatchObject({ transcribe: true, analyze: true });
     expect(opts.summarize).toBeFalsy();
     expect(opts.tag_ids).toEqual([]);
+  });
+
+  it.each([
+    [SUBMITTED, 'Download dispatched — see Task Center'],
+    [
+      {
+        success: true,
+        async: false,
+        message: 'You already have this in your library',
+        dedup_action: 'already_owned',
+        resource_id: '7300000000000000123',
+        media_id: '7300000000000000124',
+      },
+      'Already in your library',
+    ],
+    [
+      { success: true, async: true, message: 'Parse already subscribed', dedup_action: 'subscribed' },
+      'This link is already being parsed — no new task',
+    ],
+  ])('reports what the single-link fetch actually did (%#)', async (shape, text) => {
+    parseShareLink.mockResolvedValueOnce(shape);
+    render(<FloatingParse open onOpenChange={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText(/paste/i), {
+      target: { value: 'https://v.douyin.com/abc/' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
+    expect(await screen.findByText(text)).toBeTruthy();
   });
 
   it('clears the AI intents when the panel is reset via Done', async () => {

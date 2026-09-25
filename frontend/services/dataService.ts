@@ -1,6 +1,8 @@
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { ParsedMedia } from '../types';
 import { apiClient } from './apiClient';
+import type { MediaDeleteResult, MediaUserLog, MediaUserLogsPage } from '../types/api';
+import type { UserSettingsResponse } from '../types/api';
 import {
   applyKeysetCursor,
   sliceKeysetPage,
@@ -61,6 +63,13 @@ export const saveFrontendConfig = async (config: {
 }): Promise<FrontendConfig | null> =>
   apiClient.put<FrontendConfig>('/api/v1/config', config);
 
+/*
+ * The four `/media/download/{platform_id}*` URLs below require the caller's
+ * Bearer header (the routes are `AuthDep`, and check that the caller holds the
+ * media). Fetch them with `downloadWithAuth` (utils/download) — a plain
+ * `<a href>`, `<img src>` or `downloadFile` sends no credential and gets a 401.
+ */
+
 /**
  * Get video download URL via backend API
  */
@@ -113,9 +122,13 @@ function flattenResourceMedia(row: any): ParsedMedia {
 }
 
 /**
- * Fetch a single video by platform_id (through resources table)
+ * The caller's own web-sourced video whose `column` equals `value`, flattened
+ * (through the resources table, so only the caller's rows match).
  */
-export const fetchVideoByPlatformId = async (platformId: string): Promise<ParsedMedia | null> => {
+const fetchOwnedWebVideo = async (
+  column: 'parsed_media.platform_id' | 'media_id',
+  value: string,
+): Promise<ParsedMedia | null> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     return null;
@@ -130,7 +143,7 @@ export const fetchVideoByPlatformId = async (platformId: string): Promise<Parsed
       .select('id, parsed_media!inner(*)')
       .eq('creator_id', session.user.id)
       .eq('source_type', 'web')
-      .eq('parsed_media.platform_id', platformId)
+      .eq(column, value)
       .maybeSingle();
 
     if (error) {
@@ -141,10 +154,23 @@ export const fetchVideoByPlatformId = async (platformId: string): Promise<Parsed
     if (!data) return null;
     return flattenResourceMedia(data);
   } catch (e) {
-    console.error('Error fetching video by platform_id:', e);
+    console.error(`Error fetching video by ${column}:`, e);
     return null;
   }
 };
+
+/**
+ * Fetch a single video by platform_id (through resources table)
+ */
+export const fetchVideoByPlatformId = (platformId: string): Promise<ParsedMedia | null> =>
+  fetchOwnedWebVideo('parsed_media.platform_id', platformId);
+
+/**
+ * Fetch the caller's video by its `parsed_media.id` (a Snowflake id, passed
+ * as a string so it keeps full precision).
+ */
+export const fetchVideoByMediaId = (mediaId: string): Promise<ParsedMedia | null> =>
+  fetchOwnedWebVideo('media_id', mediaId);
 
 // Keep old name as alias
 export const fetchVideoByAwemeId = fetchVideoByPlatformId;
@@ -823,13 +849,12 @@ export const updateItem = async (id: string, updates: Partial<ParsedMedia>): Pro
   return data as ParsedMedia;
 };
 
-export interface DeleteResult {
-  success: boolean;
-  message: string;
-  files_deleted: string[];
-}
-
-export const deleteItem = async (id: string, deleteFiles: boolean = false): Promise<DeleteResult> => {
+/** `DELETE /media/{platform_id}`: 404 unless the caller owns the media, 409
+ * (`details.code: media_shared`) while other users still have it. */
+export const deleteItem = async (
+  id: string,
+  deleteFiles: boolean = false,
+): Promise<MediaDeleteResult> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");
@@ -859,23 +884,9 @@ export const deleteItem = async (id: string, deleteFiles: boolean = false): Prom
 };
 
 /**
- * User log interface
- */
-export interface UserLog {
-  id: string;
-  user_id: string;
-  action: string;
-  message: string;
-  status: 'success' | 'error' | 'warning' | 'info' | 'pending';
-  platform_id?: string;
-  details?: Record<string, unknown>;
-  created_at: string;
-}
-
-/**
  * Fetch user operation logs
  */
-export const fetchUserLogs = async (limit: number = 20): Promise<UserLog[]> => {
+export const fetchUserLogs = async (limit: number = 20): Promise<MediaUserLog[]> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     return [];
@@ -887,7 +898,8 @@ export const fetchUserLogs = async (limit: number = 20): Promise<UserLog[]> => {
       return [];
     }
 
-    const response = await fetch(`${getApiUrl()}/api/v1/media/logs?limit=${limit}`, {
+    // The route pages with `page_size`; a `limit` param is ignored.
+    const response = await fetch(`${getApiUrl()}/api/v1/media/logs?page_size=${limit}`, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`
       }
@@ -898,8 +910,8 @@ export const fetchUserLogs = async (limit: number = 20): Promise<UserLog[]> => {
       return [];
     }
 
-    const data = await response.json();
-    return data.logs || [];
+    const data: MediaUserLogsPage = await response.json();
+    return data.logs;
   } catch (error) {
     console.error('Error fetching logs:', error);
     return [];
@@ -1024,21 +1036,9 @@ export const fetchDashboardStats = async (): Promise<DashboardStats> => {
 };
 
 /**
- * User settings interface
- */
-export interface UserSettingsData {
-  id?: string;
-  user_id: string;
-  download_path: string;
-  settings_json?: Record<string, unknown>;
-  created_at?: string;
-  updated_at?: string;
-}
-
-/**
  * Fetch user settings
  */
-export const fetchUserSettings = async (): Promise<UserSettingsData | null> => {
+export const fetchUserSettings = async (): Promise<UserSettingsResponse | null> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     return null;
@@ -1074,7 +1074,7 @@ export const fetchUserSettings = async (): Promise<UserSettingsData | null> => {
 export const saveUserSettings = async (settings: {
   download_path?: string;
   settings_json?: Record<string, unknown>;
-}): Promise<UserSettingsData | null> => {
+}): Promise<UserSettingsResponse | null> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured");

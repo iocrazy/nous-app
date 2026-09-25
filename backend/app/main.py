@@ -309,6 +309,11 @@ else:
 
 # 媒体文件服务 - 用于访问下载的视频和封面
 # 使用普通路由而非 StaticFiles 子应用，确保 CORS 中间件覆盖
+# The file-serving routes below (and the SPA fallback further down) register
+# only when the host filesystem allows it, so they stay out of the OpenAPI
+# schema: the exported contract (scripts/export_openapi.py) must not depend on
+# which machine generated it. They serve bytes, not JSON, so no client types
+# are lost.
 try:
     _media_base_path = Path(Utils.get_download_base_path()).resolve()
     _media_base_path.mkdir(parents=True, exist_ok=True)
@@ -545,63 +550,17 @@ try:
     ) -> None:
         """Check resource-level permissions. Raises 403 if denied.
 
-        Uses cached ownership data from _resolve_file_path when possible,
-        falls back to check_media_access for share_token and team membership.
+        The rule lives in ``media_access_guard.require_media_file_access`` (one
+        rule for every holder of a shared media row); this wrapper passes the
+        ownership ``_resolve_file_path`` cached.
         """
-        from app.api.media_permissions import (
-            _get_resource_id_for_media,
-            _validate_share_token,
+        from app.api.media_access_guard import require_media_file_access
+
+        await require_media_file_access(
+            media_id, user_id, share_token, creator_id, team_ids
         )
 
-        # Fast path: share_token validation (never cached)
-        if share_token:
-            resource_id = await _get_resource_id_for_media(media_id)
-            if resource_id and await _validate_share_token(share_token, resource_id):
-                return
-            # Invalid share token — fall through to user-based checks
-
-        if not user_id:
-            if share_token:
-                raise HTTPException(
-                    status_code=403, detail="Invalid or expired share link"
-                )
-            raise HTTPException(status_code=403, detail="Access denied")
-
-        # Fast path: creator check using cached data
-        if creator_id and str(creator_id) == str(user_id):
-            return
-
-        # No ownership info (legacy parsed_media) — allow
-        if creator_id is None:
-            return
-
-        # Team membership check
-        if team_ids:
-            try:
-                from sqlalchemy import select
-
-                from app.db.session import read_scope
-                from app.models import TeamMembers
-
-                async with read_scope() as session:
-                    member = (
-                        await session.execute(
-                            select(TeamMembers.team_id)
-                            .where(TeamMembers.user_id == user_id)
-                            .where(
-                                TeamMembers.team_id.in_([int(str(t)) for t in team_ids])
-                            )
-                            .limit(1)
-                        )
-                    ).first()
-                if member is not None:
-                    return
-            except Exception as e:
-                logger.error(f"Team membership check failed: {e}")
-
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    @app.get("/media/{media_id}")
+    @app.get("/media/{media_id}", include_in_schema=False)
     async def serve_media_by_id(
         media_id: str,
         request: Request,
@@ -641,7 +600,7 @@ try:
             )
         return _serve_file(file_path)
 
-    @app.get("/media/{media_id}/cover")
+    @app.get("/media/{media_id}/cover", include_in_schema=False)
     async def serve_media_cover_by_id(
         media_id: str,
         request: Request,
@@ -678,7 +637,7 @@ try:
             )
         return _serve_file(file_path, cache_immutable=True)
 
-    @app.get("/media/{file_path:path}")
+    @app.get("/media/{file_path:path}", include_in_schema=False)
     async def serve_media_by_path(
         file_path: str,
         request: Request,
@@ -690,8 +649,31 @@ try:
 
         Handles old cached frontends that still use /media/{file_path} URLs.
         New frontends should use /media/{id} instead.
+
+        A share link does not open this route. There is no id here to match
+        against the share, and ``_authenticate_media_request`` lets any
+        non-empty ``share_token`` through unchecked (the id routes check it
+        afterwards) — so ``?share_token=x`` used to serve ANY file under the
+        media root to anyone, signed in or not.
+
+        Callers: the signed ``/media/{rel_path}?token=`` URLs the ASR workflow
+        and publish tasks hand to outbound APIs (always the token owner's own
+        file). The path must be stored on a row the caller may read
+        (``caller_can_read_stored_path``); otherwise 404.
         """
-        await _authenticate_media_request(request, token, share_token, review_token)
+        user_id = await _authenticate_media_request(request, token, None, review_token)
+        # The file must be one the caller may read: a signed token or media
+        # cookie only proves WHO is asking, and any signed-in caller used to
+        # get any file under the media root by path. Denied reads look like a
+        # missing file (404), as the id routes do.
+        from app.api.media_access_guard import caller_can_read_stored_path
+
+        relative = file_path.lstrip("/")
+        absolute = str((_media_base_path / relative).resolve())
+        if not await caller_can_read_stored_path(
+            (file_path, relative, absolute), user_id
+        ):
+            raise HTTPException(status_code=404, detail="File not found")
         return _serve_file(file_path)
 
 except ValueError:
@@ -749,7 +731,7 @@ if frontend_path.exists():
     logger.info(f"前端静态文件已挂载: /assets -> {frontend_path / 'assets'}")
 
     # SPA 路由：所有非 API 请求返回 index.html
-    @app.get("/{full_path:path}")
+    @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
         """SPA 路由支持：非 API 请求返回 index.html"""
         # 检查是否是静态文件
@@ -761,7 +743,7 @@ if frontend_path.exists():
 
 else:
     # 开发模式：前端独立运行
-    @app.get("/")
+    @app.get("/", include_in_schema=False)
     async def root():
         return {"message": "Nous API", "docs": "/docs", "health": "/health"}
 

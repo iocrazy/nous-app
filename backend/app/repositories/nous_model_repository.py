@@ -90,6 +90,12 @@ _PUBLIC_COLS = (
     NousModels.id,
     NousModels.name,
     NousModels.display_name,
+    # The upstream model id, e.g. ``doubao-embedding-vision-251215``. It is the
+    # label the admin AI Models card shows, and the user-facing lists show the
+    # same string so the two surfaces name a model identically (2026-09-24).
+    # A model id, not a credential: no host, no key, no account secret. Its
+    # sibling ``actual_provider`` stays private (see list_enabled).
+    NousModels.actual_model,
     NousModels.type,
     NousModels.pricing_type,
     NousModels.pricing_value,
@@ -369,7 +375,7 @@ class NousModelRepository:
         connectivity probe is not an edit).
 
         ``status`` is one of ``PROBE_STATUSES`` — ``ok`` / ``fail`` /
-        ``not_probed`` (migration 428). No check here: the DB CHECK is the one
+        ``idle`` / ``not_probed`` (migrations 428 + 503). No check here: the DB CHECK is the one
         enforcement point, and callers derive the value from
         ``probe_result_status`` rather than spelling it out.
 

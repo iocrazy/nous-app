@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { StatTiles } from './UsagePage';
 import type { EfficiencySummary } from '../services/usageService';
-import type { UsageDailySummary } from '../types';
+import type { UsageDailySummary } from '../types/api';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string, f?: string) => f ?? k }) }));
 afterEach(cleanup);

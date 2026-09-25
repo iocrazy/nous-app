@@ -23,7 +23,7 @@ import {
   type SourceHealth,
   type SourceHealthStatus,
 } from '../../services/topicService';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
 const VIEWS: HotspotView[] = ['all', 'featured', 'foryou', 'saved', 'hidden'];

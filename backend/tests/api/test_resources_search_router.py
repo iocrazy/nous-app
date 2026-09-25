@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -57,7 +58,9 @@ def test_search_returns_results_and_counts():
             "size": 100,
             "scope_type": "personal",
             "scope_id": "u",
-            "updated_at": "2026-05-24T10:00:00Z",
+            "updated_at": datetime.datetime(
+                2026, 5, 24, 10, 0, 0, tzinfo=datetime.timezone.utc
+            ),
         },
     ]
 

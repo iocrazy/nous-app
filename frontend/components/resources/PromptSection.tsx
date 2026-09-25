@@ -40,7 +40,8 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ChevronUp, Copy, Languages, Loader2, Send, Sparkles, X, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import type { Resource } from '../../types';
+import type { GenParams } from '../../types';
+import type { ResourceRow } from '../../types/api';
 import { hasPromptData } from '../../utils/promptTriggerTags';
 import { resolveTaskError, type ResolvedTaskError } from '../../utils/errorCatalog';
 import { generateGenPrompt } from '../../services/resourceService';
@@ -49,10 +50,32 @@ import { useOptionalToast } from '../Toast';
 import { SendToCanvasModal } from './SendToCanvasModal';
 import { GenParamsBlock } from './GenParamsBlock';
 
+/**
+ * What PromptSection reads. Two hosts feed it different boundaries: the detail
+ * page holds a `ResourceRow` from the resources API (numeric id, open-object
+ * `gen_params`), the list sidebars a PostgREST projection of `Resource`. Both
+ * satisfy this without a cast.
+ */
+export type PromptSectionResource = {
+  id: string | number;
+  filename: string;
+  gen_prompt: string | null;
+  gen_prompt_zh?: string | null;
+  gen_prompt_negative?: string | null;
+  gen_prompt_negative_zh?: string | null;
+  gen_prompt_json?: string | null;
+  gen_params?: GenParams | ResourceRow['gen_params'];
+};
+
+/** The only columns PromptSection ever writes back. */
+export type PromptFieldPatch = Partial<
+  Record<'gen_prompt' | 'gen_prompt_zh' | 'gen_prompt_negative' | 'gen_prompt_negative_zh', string>
+>;
+
 export interface PromptSectionProps {
-  resource: Resource;
+  resource: PromptSectionResource;
   /** Optimistic local-merge + PATCH (page's handleResourceUpdate). */
-  onPatch: (fields: Partial<Resource>) => void;
+  onPatch: (fields: PromptFieldPatch) => void;
   /** Apply the default trigger tag to this asset (page implements). */
   onEnsureTriggerTag: () => Promise<void>;
   /** Image assets get the Generate (reverse-engineer) button. */
@@ -144,7 +167,7 @@ export function PromptSection({
 }: PromptSectionProps) {
   const { t } = useTranslation();
   const toast = useOptionalToast();
-  const scopeKey = editorScopeKey ?? resource.id;
+  const scopeKey = editorScopeKey ?? String(resource.id);
   const [expanded, setExpanded] = useState(false);
   const [lang, setLang] = useState<'en' | 'zh'>(() =>
     (resource.gen_prompt?.trim() ? 'en' : resource.gen_prompt_zh?.trim() ? 'zh' : 'en'),
@@ -218,7 +241,7 @@ export function PromptSection({
     const target = scopeKey;
     setDispatching(true);
     try {
-      const id = await (onDispatchGenerate ? onDispatchGenerate() : generateGenPrompt(resource.id));
+      const id = await (onDispatchGenerate ? onDispatchGenerate() : generateGenPrompt(String(resource.id)));
       setTaskId(id);
       clearGenTimeout();
       genTimeoutRef.current = window.setTimeout(() => {
@@ -318,8 +341,8 @@ export function PromptSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenGenerateSimilar]);
 
-  const commit = (field: string, value: string, current: string) => {
-    if (value.trim() !== current.trim()) onPatch({ [field]: value.trim() } as Partial<Resource>);
+  const commit = (field: keyof PromptFieldPatch, value: string, current: string) => {
+    if (value.trim() !== current.trim()) onPatch({ [field]: value.trim() });
   };
 
   const copyText = (text: string) => {
@@ -634,7 +657,7 @@ export function PromptSection({
       <GenParamsBlock params={resource.gen_params} />
       {sendToCanvasOpen && (
         <SendToCanvasModal
-          resource={resource}
+          resource={{ id: String(resource.id), filename: resource.filename }}
           positive={posValue}
           negative={negValue.trim() ? negValue : null}
           onClose={() => setSendToCanvasOpen(false)}

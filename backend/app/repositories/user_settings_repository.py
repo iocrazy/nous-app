@@ -299,35 +299,3 @@ class UserSettingsRepository:
             else:
                 out[key] = value
         return out
-
-    async def delete(self, user_id: str) -> bool:
-        """
-        删除用户设置
-
-        Core DELETE inside the committing ``write_scope()`` session (the last
-        supabase-py ``.table()`` call in this repo — migrated to the ORM path).
-        Same contract as the legacy REST delete: True on success (whether or
-        not a row existed), False on error, never raises.
-
-        Args:
-            user_id: 用户 ID
-
-        Returns:
-            是否删除成功
-        """
-        try:
-            from sqlalchemy import delete as sa_delete
-
-            from app.db.session import write_scope
-            from app.models import UserSettings
-
-            async with write_scope() as session:
-                await session.execute(
-                    sa_delete(UserSettings).where(UserSettings.user_id == user_id)
-                )
-            user_settings_cache.invalidate(user_id)
-            logger.info(f"用户设置已删除: user_id={user_id}")
-            return True
-        except Exception as e:
-            logger.error(f"删除用户设置失败: {e}")
-            return False

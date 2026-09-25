@@ -123,3 +123,19 @@ class SourceCreateRequest(BaseModel):
 class SourceMutationResponse(BaseModel):
     success: bool = True
     source: Optional[SourceHealthOut] = None
+
+
+class TopicScriptChapter(BaseModel):
+    """One chapter of the script_ai outline (``ScriptAIService.generate_outline``
+    always emits both keys, truncated strings)."""
+
+    title: str
+    summary: str
+
+
+class TopicScriptResponse(BaseModel):
+    """``POST /topics/{hotspot_id}/generate-script``: no ``data`` key — the
+    outline travels as ``script`` next to ``success``."""
+
+    success: bool
+    script: list[TopicScriptChapter]

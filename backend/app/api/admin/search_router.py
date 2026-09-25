@@ -42,7 +42,7 @@ class Facets(BaseModel):
     status_codes: Dict[str, int] = {}
 
 
-class SearchResponse(BaseModel):
+class AdminSearchResponse(BaseModel):
     items: List[UnifiedLogEntry]
     total: int
     facets: Facets
@@ -138,7 +138,7 @@ def _apply_filter(
 # ============================================
 
 
-@router.get("", response_model=SearchResponse)
+@router.get("", response_model=AdminSearchResponse)
 async def search_logs(
     auth: AdminAuthDep,
     q: Optional[str] = Query(None, description="Free text search"),
@@ -355,7 +355,7 @@ async def search_logs(
     end_idx = start_idx + page_size
     paginated = all_entries[start_idx:end_idx]
 
-    return SearchResponse(items=paginated, total=total, facets=facets)
+    return AdminSearchResponse(items=paginated, total=total, facets=facets)
 
 
 # ============================================

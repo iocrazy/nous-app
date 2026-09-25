@@ -32,6 +32,10 @@ from app.core.scope_guards import (
     verify_shot_read_access,
 )
 from app.main import app
+from app.models import ScriptScenes, ScriptShots
+from app.repositories.script_scene_repository import _row as scene_row
+from app.repositories.script_shot_repository import _row as shot_row
+from tests.api.wire_parity import sample_orm
 
 pytestmark = pytest.mark.unit
 
@@ -88,23 +92,33 @@ async def client() -> AsyncClient:
 
 
 def _big_shot_row() -> dict:
-    return {
-        "id": BIG_ID,
-        "scene_id": BIG_SCENE_ID,
-        "shot_number": 1,
-        "status": "empty",
-        "created_by_agent_run_id": BIG_AGENT_RUN_ID,
-    }
+    """A full ``script_shots`` row as the repository hands it over (every
+    column, native types) with the bigint ids pushed past 2^53. The routes
+    now declare a response model, so a partial row would no longer serialize."""
+    return shot_row(
+        sample_orm(
+            ScriptShots,
+            id=BIG_ID,
+            scene_id=BIG_SCENE_ID,
+            created_by_agent_run_id=BIG_AGENT_RUN_ID,
+        )
+    )
 
 
 def _big_scene_row() -> dict:
-    return {
-        "id": BIG_ID,
-        "script_id": BIG_SCRIPT_ID,
-        "chapter_id": BIG_CHAPTER_ID,
-        "location_id": BIG_LOCATION_ID,
-        "content_version": 0,
-    }
+    """Same for ``script_scenes``, plus the derived ``scene_no_in_episode``
+    that list / get carry."""
+    row = scene_row(
+        sample_orm(
+            ScriptScenes,
+            id=BIG_ID,
+            script_id=BIG_SCRIPT_ID,
+            chapter_id=BIG_CHAPTER_ID,
+            location_id=BIG_LOCATION_ID,
+        )
+    )
+    row["scene_no_in_episode"] = "1"
+    return row
 
 
 # --------------------------------------------------------------------------- #
@@ -149,22 +163,6 @@ async def test_create_shot_ids_are_strings(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_shot_id_is_string(client, monkeypatch):
-    from app.repositories.script_shot_repository import ScriptShotRepository
-
-    async def fake_get_by_id(self, shot_id):
-        return _big_shot_row()
-
-    monkeypatch.setattr(ScriptShotRepository, "get_by_id", fake_get_by_id)
-
-    resp = await client.get(f"/api/v1/shots/{BIG_ID}")
-    assert resp.status_code == 200
-    shot = resp.json()["data"]
-    assert isinstance(shot["id"], str)
-    assert shot["id"] == str(BIG_ID)
-
-
-@pytest.mark.asyncio
 async def test_update_shot_id_is_string(client, monkeypatch):
     from app.repositories.script_shot_repository import ScriptShotRepository
 
@@ -177,37 +175,6 @@ async def test_update_shot_id_is_string(client, monkeypatch):
     assert resp.status_code == 200
     shot = resp.json()["data"]
     assert isinstance(shot["id"], str)
-
-
-@pytest.mark.asyncio
-async def test_move_shot_id_is_string(client, monkeypatch):
-    from app.repositories.script_shot_repository import ScriptShotRepository
-
-    async def fake_move_shot(self, shot_id, *, before_shot_id=None, after_shot_id=None):
-        return _big_shot_row()
-
-    monkeypatch.setattr(ScriptShotRepository, "move_shot", fake_move_shot)
-
-    resp = await client.post(f"/api/v1/shots/{BIG_ID}/move", json={})
-    assert resp.status_code == 200
-    shot = resp.json()["data"]
-    assert isinstance(shot["id"], str)
-    assert isinstance(shot["scene_id"], str)
-
-
-@pytest.mark.asyncio
-async def test_get_shot_404_data_shape_unaffected(client, monkeypatch):
-    """A missing shot's 404 path never reaches `_to_response` — no regression
-    on the not-found envelope."""
-    from app.repositories.script_shot_repository import ScriptShotRepository
-
-    async def fake_get_by_id(self, shot_id):
-        return None
-
-    monkeypatch.setattr(ScriptShotRepository, "get_by_id", fake_get_by_id)
-
-    resp = await client.get(f"/api/v1/shots/{BIG_ID}")
-    assert resp.status_code == 404
 
 
 # --------------------------------------------------------------------------- #

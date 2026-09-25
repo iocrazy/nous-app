@@ -30,9 +30,9 @@ import {
   sendAssetToCanvas,
   type SendFailureReason,
 } from '../../../../features/canvas-core/services/sendAssetToCanvas';
-import type { Canvas } from '../../../../features/canvas-core/types';
+import type { Canvas, CanvasSummary } from '../../../../features/canvas-core/types';
 import type { AssetRowDetail } from '../../../../services/assetsService';
-import type { Project } from '../../../../types';
+import type { Project } from '../../../../types/api';
 
 /** Every typed reason, plus the two this component owns (creating the new
  *  canvas, listing a project's canvases). One sentence each. */
@@ -89,7 +89,7 @@ export const SendAssetToCanvasDialog: React.FC<SendAssetToCanvasDialogProps> = (
   const { addToast } = useToast();
 
   const [project, setProject] = useState<Project | null>(null);
-  const [canvases, setCanvases] = useState<Canvas[]>([]);
+  const [canvases, setCanvases] = useState<CanvasSummary[]>([]);
   const [canvasesLoading, setCanvasesLoading] = useState(false);
   const [canvasesFailed, setCanvasesFailed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -301,7 +301,7 @@ const ProjectStep: React.FC<{
 };
 
 const CanvasStep: React.FC<{
-  canvases: Canvas[];
+  canvases: CanvasSummary[];
   loading: boolean;
   failed: boolean;
   busy: boolean;

@@ -89,7 +89,8 @@ _REPO_DIR = Path(__file__).resolve().parents[2] / "app" / "repositories"
 # canvas_refs_repository.py's two JOIN-resources sites (list_assets_for_canvas
 # / tree_for_projects) the same way — found only once the scan widened to the
 # whole directory, since they were invisible to both the single-file scanner
-# AND a naive FROM/UPDATE-only grep (JOIN shape). Positive pins for all six
+# AND a naive FROM/UPDATE-only grep (JOIN shape); both were later deleted with
+# their routes (P4 OpenAPI typing, 2026-09-24). Positive pins for the rest
 # live in test_migrated_methods_no_longer_use_text_on_resources below (so a
 # future regression back to raw SQL is caught instead of silently falling
 # through with no allowlist entry to widen).
@@ -294,8 +295,8 @@ def test_migrated_methods_no_longer_use_text_on_resources():
     raw ``resources`` text() — Phase C task 2 (2 methods, resources_repository.py,
     fully off text()/scoped_sql()), Phase C task 3 (4 methods, same file, fully
     off text() on resources specifically — two of them keep a legitimate
-    ``folders``-table text() out of scope), and the Phase C final review
-    (2 methods, canvas_refs_repository.py, fully off text()). Assert none of
+    ``folders``-table text() out of scope). (The Phase C final review's two
+    canvas_refs_repository.py methods were deleted with their routes.) Assert none of
     them has a raw text() touching `resources` any more, so a future
     regression back to raw SQL — which would silently need a NEW _ALLOWLIST
     entry that might not get added — is caught here instead of falling
@@ -323,8 +324,6 @@ def test_migrated_methods_no_longer_use_text_on_resources():
             "resources_only",
         ),
         ("resources_repository.py", "trash_folder_cascade", "update", "resources_only"),
-        ("canvas_refs_repository.py", "list_assets_for_canvas", "select", "any"),
-        ("canvas_refs_repository.py", "tree_for_projects", "select", "any"),
     ]
     for filename, method, expected_call, mode in cases:
         method_node = _method_node(filename, method)

@@ -29,9 +29,11 @@ from typing import Any, Dict, Iterable, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.api.row_guard import require_row
 from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
@@ -70,13 +72,13 @@ from app.schemas.ai_library import (
     AgentUpdate,
     CapabilitiesOut,
     ChatPermissionsOut,
+    LibrarySkillCreate,
+    LibrarySkillUpdate,
     PermissionAuditItem,
     PermissionAuditListOut,
-    SkillCreate,
     SkillFileOut,
     SkillFileUpsert,
     SkillOut,
-    SkillUpdate,
 )
 from app.schemas.ai_library_chat import (
     ChatRequest,
@@ -85,6 +87,33 @@ from app.schemas.ai_library_chat import (
     SessionOut,
     SessionUpdate,
     SessionWithMessages,
+)
+from app.schemas.ai_library_responses import (
+    AgentDashboard,
+    AgentStatusOut,
+    AgentUsageOut,
+    AgentVersionDetail,
+    AgentVersionList,
+    AiLibraryUsageDaily,
+    AiLibraryUsageRunsPage,
+    AiLibraryUsageSummary,
+    ApprovalDecisionResult,
+    ApprovalRequestList,
+    ChatAttachmentUpload,
+    CommitmentList,
+    CommitmentStatusResult,
+    LiveRunList,
+    McpServerList,
+    McpServerOut,
+    RunCancelResult,
+    RunForkList,
+    RunForkResult,
+    RunTranscriptPage,
+    RunViewAt,
+    SkillFileVersionList,
+    SkillVersionDetail,
+    SkillVersionList,
+    VersionRollbackResult,
 )
 from app.schemas.efficiency import (
     EfficiencyGroup,
@@ -231,6 +260,79 @@ async def _user_can_write_project(user_id: UUID, project_id: int) -> bool:
             )
         ).first()
     return member is not None
+
+
+# ---------------------------------------------------------------------------
+# Row-scope guards for agents / skills (OpenAPI P5 security fix)
+# ---------------------------------------------------------------------------
+#
+# A non-preset agent or skill belongs to one scope: its creator
+# (``user_id`` / ``created_by``), a team (``team_id``) or a project
+# (``project_id``). That scope is exactly the set ``list_accessible`` shows,
+# so it is also who may read the row by slug and who may edit it. Before
+# this, every by-slug route only checked "is it a system preset": anyone
+# logged in could read a private agent's prompts, or PATCH / pause / roll
+# back / rewrite files of someone else's agent or skill by naming its slug.
+# Platform admins pass (moderation), fail closed on a lookup error.
+
+
+async def _in_row_scope(
+    row: Dict[str, Any], user_uuid: UUID, *, owner_key: str
+) -> bool:
+    owner = row.get(owner_key)
+    if owner is not None and str(owner) == str(user_uuid):
+        return True
+    team_id = row.get("team_id")
+    if team_id is not None and await _user_is_team_member(user_uuid, int(team_id)):
+        return True
+    project_id = row.get("project_id")
+    if project_id is not None and await _user_can_write_project(
+        user_uuid, int(project_id)
+    ):
+        return True
+    try:
+        return await _user_is_admin(user_uuid)
+    except Exception as exc:  # noqa: BLE001 — fail closed
+        logger.warning(f"_user_is_admin check failed for user={user_uuid}: {exc}")
+        return False
+
+
+async def _require_agent_write(agent: Dict[str, Any], user_uuid: UUID) -> None:
+    """403 unless the caller is in the (non-preset) agent's scope."""
+    if not await _in_row_scope(agent, user_uuid, owner_key="user_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="not allowed to edit this agent",
+        )
+
+
+async def _require_agent_read(agent: Dict[str, Any], user_uuid: UUID) -> None:
+    """404 (same as a missing slug) unless the agent is a preset or in scope."""
+    if agent.get("is_system_preset"):
+        return
+    if not await _in_row_scope(agent, user_uuid, owner_key="user_id"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
+        )
+
+
+async def _require_skill_write(skill: Dict[str, Any], user_uuid: UUID) -> None:
+    """403 unless the caller is in the (non-preset) skill's scope."""
+    if not await _in_row_scope(skill, user_uuid, owner_key="created_by"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="not allowed to edit this skill",
+        )
+
+
+async def _require_skill_read(skill: Dict[str, Any], user_uuid: UUID) -> None:
+    """404 unless the skill is public or in the caller's scope."""
+    if skill.get("is_public"):
+        return
+    if not await _in_row_scope(skill, user_uuid, owner_key="created_by"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="skill not found"
+        )
 
 
 async def _fetch_user_team_ids(user_id: UUID) -> List[int]:
@@ -607,13 +709,13 @@ async def get_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
     # Merged view: the editor shows the caller's EFFECTIVE agent (their
     # personal override applied), with override_scope/override_fields set so
     # the UI can show the customized badge + reset affordance.
-    agent = await agent_repo.get_by_slug(
-        slug, override_user_id=_coerce_user_uuid(auth.user_id)
-    )
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    agent = await agent_repo.get_by_slug(slug, override_user_id=user_uuid)
     if not agent:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
         )
+    await _require_agent_read(agent, user_uuid)
     agent_uuid = UUID(str(agent["id"]))
     agent = _with_resolved_permissions(
         {**agent, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
@@ -811,6 +913,8 @@ async def update_agent(
             )
         override_updates = updates
         updates = {}
+    else:
+        await _require_agent_write(agent, user_uuid)
 
     # Role gate for chat-permission edits (CHAT-PERM-19 / review H1). The legacy
     # endpoint had NO role check — any logged-in user could PATCH any agent. We
@@ -1153,6 +1257,7 @@ async def resume_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="system preset agents are read-only in phase 1",
         )
+    await _require_agent_write(agent, _coerce_user_uuid(auth.user_id))
     if agent.get("paused_reason") is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1197,6 +1302,7 @@ async def pause_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="system preset agents are read-only in phase 1",
         )
+    await _require_agent_write(agent, _coerce_user_uuid(auth.user_id))
     if agent.get("paused_reason") is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1219,6 +1325,7 @@ async def pause_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
 
 @router.get(
     "/agents/{slug}/status",
+    response_model=AgentStatusOut,
     summary="Live agent status chip (idle / running / paused)",
 )
 async def get_agent_status(slug: str, auth: AuthDep) -> Dict[str, Any]:
@@ -1324,6 +1431,7 @@ async def get_skill(slug: str, auth: AuthDep) -> Dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="skill not found"
         )
+    await _require_skill_read(skill, _coerce_user_uuid(auth.user_id))
     skill_id = int(skill["id"])
     row = {
         **skill,
@@ -1341,7 +1449,7 @@ async def get_skill(slug: str, auth: AuthDep) -> Dict[str, Any]:
     summary="Create a new user-owned skill (optionally forked)",
 )
 async def create_skill(
-    payload: SkillCreate,
+    payload: LibrarySkillCreate,
     auth: AuthDep,
 ) -> Dict[str, Any]:
     """Create a non-preset skill owned by the current user.
@@ -1458,7 +1566,7 @@ async def create_skill(
 )
 async def update_skill(
     slug: str,
-    payload: SkillUpdate,
+    payload: LibrarySkillUpdate,
     auth: AuthDep,
 ) -> Dict[str, Any]:
     """Patch a skill's mutable fields.
@@ -1477,6 +1585,7 @@ async def update_skill(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="system preset skills are read-only in phase 1",
         )
+    await _require_skill_write(skill, _coerce_user_uuid(auth.user_id))
 
     skill_id = int(skill["id"])
     updates = payload.model_dump(exclude_none=True)
@@ -1669,6 +1778,7 @@ async def list_skill_files(slug: str, auth: AuthDep) -> List[Dict[str, Any]]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="skill not found"
         )
+    await _require_skill_read(skill, _coerce_user_uuid(auth.user_id))
     return await skill_repo.list_files(int(skill["id"]))
 
 
@@ -1704,6 +1814,7 @@ async def upsert_skill_file(
     # to keep routing + persistence in lockstep.
     skill_id = int(skill["id"])
     user_uuid = _coerce_user_uuid(auth.user_id)
+    await _require_skill_write(skill, user_uuid)
 
     # Skill scanner: non-blocking warning for now. Findings are logged
     # + surfaced in the response so the UI can show a security badge.
@@ -1758,6 +1869,7 @@ async def delete_skill_file(slug: str, path: str, auth: AuthDep) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="system preset skills are read-only in phase 1",
         )
+    await _require_skill_write(skill, _coerce_user_uuid(auth.user_id))
     await skill_repo.delete_file(int(skill["id"]), path)
 
 
@@ -1844,6 +1956,7 @@ def _month_bounds(month: str) -> tuple[str, str]:
 
 @router.get(
     "/agents/{slug}/dashboard",
+    response_model=AgentDashboard,
     summary="Per-agent dashboard aggregate (Paperclip-style)",
 )
 async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
@@ -1871,6 +1984,7 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
 
     user_uuid = _coerce_user_uuid(auth.user_id)
     agent_uuid = UUID(str(agent["id"]))
@@ -2123,6 +2237,7 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
 
 @router.get(
     "/agents/{slug}/usage",
+    response_model=AgentUsageOut,
     summary="Which product modules use this agent (static registry + 30d run evidence)",
 )
 async def get_agent_usage(slug: str, auth: AuthDep) -> Dict[str, Any]:
@@ -2146,6 +2261,7 @@ async def get_agent_usage(slug: str, auth: AuthDep) -> Dict[str, Any]:
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
 
     user_uuid = _coerce_user_uuid(auth.user_id)
     agent_uuid = UUID(str(agent["id"]))
@@ -2240,6 +2356,7 @@ async def list_agent_runs(
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
 
     runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
@@ -2282,6 +2399,7 @@ async def list_agent_run_groups(
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
 
     runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
@@ -2307,6 +2425,7 @@ async def list_agent_run_groups(
 
 @router.get(
     "/runs/live",
+    response_model=LiveRunList,
     summary="Currently-running agent runs across all agents (Workforce strip)",
 )
 async def list_live_runs(auth: AuthDep) -> Dict[str, Any]:
@@ -2546,6 +2665,7 @@ def _event_type_filter(te: Any, types: str) -> list:
 
 @router.get(
     "/runs/{run_id}/events",
+    response_model=RunTranscriptPage,
     summary="Transcript event stream for one run (mig 285, paperclip P3)",
 )
 async def list_run_events(
@@ -2618,6 +2738,7 @@ async def list_run_events(
 
 @router.get(
     "/runs/{run_id}/view-at",
+    response_model=RunViewAt,
     summary="Folded run.view / run.cost AS OF seq (phase 2b-1 replay)",
 )
 async def get_run_view_at(
@@ -2660,6 +2781,7 @@ class ForkRunRequest(BaseModel):
 
 @router.post(
     "/runs/{run_id}/fork",
+    response_model=RunForkResult,
     status_code=status.HTTP_201_CREATED,
     summary="Fork an issue run at a step boundary (phase 2b-1)",
 )
@@ -2695,6 +2817,7 @@ async def fork_run_endpoint(
 
 @router.get(
     "/runs/{run_id}/forks",
+    response_model=RunForkList,
     summary="Runs forked from this run (phase 2b-1)",
 )
 async def list_run_forks(run_id: str, auth: AuthDep) -> Dict[str, Any]:
@@ -2738,6 +2861,7 @@ async def list_run_children(run_id: str, auth: AuthDep) -> List[Dict[str, Any]]:
 
 @router.post(
     "/runs/{run_id}/cancel",
+    response_model=RunCancelResult,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Request cancellation (runner observes via RunRecorder polling)",
 )
@@ -2893,6 +3017,8 @@ async def get_usage(
 
 @router.get(
     "/usage/runs",
+    response_model=AiLibraryUsageRunsPage,
+    response_model_exclude_unset=True,
     summary="Caller's own per-call usage detail (paginated)",
 )
 async def get_usage_runs(
@@ -2992,6 +3118,7 @@ async def get_usage_runs(
 
 @router.get(
     "/usage/daily",
+    response_model=AiLibraryUsageDaily,
     summary="Caller's own daily usage rollup grouped by model or agent",
 )
 async def get_usage_daily(
@@ -3350,6 +3477,16 @@ def _stream_error_payload(exc: BaseException) -> str:
 @router.post(
     "/sessions/{session_id}/chat-stream",
     summary="Send a user turn and stream the assistant response (SSE)",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": (
+                "Server-Sent Events: `event: delta` text chunks, then "
+                "`event: done` (usage + run_id) or `event: error`."
+            ),
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        }
+    },
 )
 async def send_chat_message_stream(
     session_id: str, payload: ChatRequest, auth: AuthDep
@@ -3368,8 +3505,6 @@ async def send_chat_message_stream(
     Frontends should fall back to /chat (non-streaming) when they need
     full tool execution semantics.
     """
-    from fastapi.responses import StreamingResponse
-
     svc = AILibraryChatService()
     user_uuid = _coerce_user_uuid(auth.user_id)
 
@@ -3580,6 +3715,7 @@ async def admin_telemetry(
 
 @router.get(
     "/commitments",
+    response_model=CommitmentList,
     summary="List the caller's agent commitments (followups)",
 )
 async def list_my_commitments(
@@ -3639,6 +3775,7 @@ async def list_my_commitments(
 
 @router.post(
     "/commitments/{commitment_id}/fulfill",
+    response_model=CommitmentStatusResult,
     summary="Mark a commitment fulfilled (user-initiated)",
 )
 async def fulfill_commitment(
@@ -3667,6 +3804,7 @@ async def fulfill_commitment(
 
 @router.post(
     "/commitments/{commitment_id}/cancel",
+    response_model=CommitmentStatusResult,
     summary="Cancel a commitment (user-initiated)",
 )
 async def cancel_commitment(
@@ -3707,23 +3845,23 @@ class _MCPServerUpdate(BaseModel):
     enabled: Optional[bool] = None
 
 
-def _mcp_row_to_dict(row, *, include_token: bool = False):
-    out = {
+def _mcp_row_to_dict(row) -> Dict[str, Any]:
+    """The bearer token is never sent back; only whether one is set."""
+    return {
         "id": str(row.id),
         "name": row.name,
         "url": row.url,
         "description": row.description,
         "enabled": row.enabled,
+        "has_bearer_token": bool(row.bearer_token),
     }
-    if include_token:
-        out["bearer_token"] = row.bearer_token
-    else:
-        # Mask presence without leaking value
-        out["has_bearer_token"] = bool(row.bearer_token)
-    return out
 
 
-@router.get("/mcp-servers", summary="List the caller's MCP server registrations")
+@router.get(
+    "/mcp-servers",
+    response_model=McpServerList,
+    summary="List the caller's MCP server registrations",
+)
 async def list_mcp_servers(auth: AuthDep) -> Dict[str, Any]:
     from app.repositories.user_mcp_servers_repository import (
         get_user_mcp_servers_repository,
@@ -3736,6 +3874,7 @@ async def list_mcp_servers(auth: AuthDep) -> Dict[str, Any]:
 
 @router.post(
     "/mcp-servers",
+    response_model=McpServerOut,
     status_code=status.HTTP_201_CREATED,
     summary="Register an MCP server for the caller",
 )
@@ -3762,7 +3901,11 @@ async def create_mcp_server(payload: _MCPServerCreate, auth: AuthDep) -> Dict[st
     return _mcp_row_to_dict(row)
 
 
-@router.patch("/mcp-servers/{server_id}", summary="Update an MCP server registration")
+@router.patch(
+    "/mcp-servers/{server_id}",
+    response_model=McpServerOut,
+    summary="Update an MCP server registration",
+)
 async def update_mcp_server(
     server_id: UUID,
     payload: _MCPServerUpdate,
@@ -3788,7 +3931,11 @@ async def update_mcp_server(
     if not ok:
         raise HTTPException(status_code=400, detail="no fields to update")
     fresh = await repo.get_by_id(server_id)
-    return _mcp_row_to_dict(fresh) if fresh else {}
+    if fresh is None:
+        # Deleted between the update and the re-read: a typed 404, not an
+        # empty 200 the client would take for a saved row.
+        require_row(None)
+    return _mcp_row_to_dict(fresh)
 
 
 @router.delete(
@@ -3883,6 +4030,7 @@ def _check_magic_bytes(ext: str, head: bytes) -> bool:
 
 @router.post(
     "/chat-attachments/upload",
+    response_model=ChatAttachmentUpload,
     summary="Upload a one-off chat attachment (image/video/pdf) as a temp resource",
 )
 async def upload_chat_attachment(
@@ -4006,7 +4154,11 @@ async def upload_chat_attachment(
 # ─── G1: Approval requests (human-in-loop gates) ──────────────────────
 
 
-@router.get("/approval-requests", summary="List the caller's pending approval requests")
+@router.get(
+    "/approval-requests",
+    response_model=ApprovalRequestList,
+    summary="List the caller's pending approval requests",
+)
 async def list_approval_requests(auth: AuthDep, limit: int = 50) -> Dict[str, Any]:
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit must be 1..200")
@@ -4042,7 +4194,9 @@ class _ApprovalDecision(BaseModel):
 
 
 @router.post(
-    "/approval-requests/{request_id}/approve", summary="Approve a pending request"
+    "/approval-requests/{request_id}/approve",
+    response_model=ApprovalDecisionResult,
+    summary="Approve a pending request",
 )
 async def approve_approval_request(
     request_id: UUID,
@@ -4073,7 +4227,9 @@ async def approve_approval_request(
 
 
 @router.post(
-    "/approval-requests/{request_id}/reject", summary="Reject a pending request"
+    "/approval-requests/{request_id}/reject",
+    response_model=ApprovalDecisionResult,
+    summary="Reject a pending request",
 )
 async def reject_approval_request(
     request_id: UUID,
@@ -4186,6 +4342,7 @@ def _serialize_versions(rows, *, kind: str) -> List[Dict[str, Any]]:
 
 @router.get(
     "/agents/{slug}/versions",
+    response_model=AgentVersionList,
     summary="List version history of an agent",
 )
 async def list_agent_versions(
@@ -4200,6 +4357,7 @@ async def list_agent_versions(
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
 
     from sqlalchemy import select
 
@@ -4236,6 +4394,7 @@ async def list_agent_versions(
 
 @router.get(
     "/agents/{slug}/versions/{version_number}",
+    response_model=AgentVersionDetail,
     summary="Get a specific agent version (full body)",
 )
 async def get_agent_version(
@@ -4247,6 +4406,7 @@ async def get_agent_version(
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+    await _require_agent_read(agent, _coerce_user_uuid(auth.user_id))
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -4272,6 +4432,7 @@ async def get_agent_version(
 
 @router.post(
     "/agents/{slug}/rollback/{version_number}",
+    response_model=VersionRollbackResult,
     summary="Rollback agent to a previous version (creates a new version with the old content)",
 )
 async def rollback_agent(
@@ -4282,18 +4443,23 @@ async def rollback_agent(
     """Rollback writes a NEW version with the old body content rather than
     moving the current_version pointer back. This preserves the audit
     trail (you can see "v7 was a rollback of v3" in the version list)
-    and never loses intermediate versions."""
+    and never loses intermediate versions.
+
+    System presets are read-only at the base row (content edits go to the
+    caller's override layer via PATCH), so they cannot be rolled back."""
     agent_repo, _ = _repos()
     agent = await agent_repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
-    if _is_system_skill(agent):
+    if agent.get("is_system_preset"):
         raise HTTPException(
             status_code=403,
             detail="cannot rollback a system preset agent",
         )
 
+    agent_uuid = UUID(str(agent["id"]))
     user_uuid = _coerce_user_uuid(auth.user_id)
+    await _require_agent_write(agent, user_uuid)
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -4312,7 +4478,7 @@ async def rollback_agent(
                         AiAgentVersions.temperature,
                         AiAgentVersions.max_tokens,
                     )
-                    .where(AiAgentVersions.agent_id == str(agent["id"]))
+                    .where(AiAgentVersions.agent_id == str(agent_uuid))
                     .where(AiAgentVersions.version_number == version_number)
                     .limit(1)
                 )
@@ -4323,45 +4489,32 @@ async def rollback_agent(
     if not snap:
         raise HTTPException(status_code=404, detail="version not found")
 
-    # Use the existing versioned update — it snapshots current then writes new
+    # The versioned update snapshots the live row, then writes the old content.
     notes = f"rollback of v{version_number}"
-    updated = (
-        await agent_repo.update_fields_versioned(
-            agent_id=int(agent["id"]) if isinstance(agent["id"], int) else None,
-            agent_uuid=agent["id"],
-            updates={
-                "identity_md": snap.get("identity_md"),
-                "soul_md": snap.get("soul_md"),
-                "agent_md": snap.get("agent_md"),
-                "model": snap.get("model"),
-                "temperature": snap.get("temperature"),
-                "max_tokens": snap.get("max_tokens"),
-            },
-            editor_user_id=user_uuid,
-            notes=notes,
-        )
-        if hasattr(agent_repo, "update_fields_versioned")
-        else None
+    await agent_repo.update_fields_versioned(
+        agent_uuid,
+        {
+            "identity_md": snap.get("identity_md"),
+            "soul_md": snap.get("soul_md"),
+            "agent_md": snap.get("agent_md"),
+            "model": snap.get("model"),
+            "temperature": snap.get("temperature"),
+            "max_tokens": snap.get("max_tokens"),
+        },
+        created_by=user_uuid,
+        notes=notes,
     )
-
-    # Fall back to direct table update if signature mismatch (defensive)
-    if updated is None:
-        return {
-            "warning": "rollback signature mismatch — repo refactor needed",
-            "snap_loaded": True,
-        }
-
+    refreshed = await agent_repo.get_by_slug(slug)
     return {
         "rolled_back_to": version_number,
-        "new_version": (
-            updated.get("current_version") if isinstance(updated, dict) else None
-        ),
+        "new_version": refreshed.get("current_version") if refreshed else None,
         "notes": notes,
     }
 
 
 @router.get(
     "/skills/{slug}/versions",
+    response_model=SkillVersionList,
     summary="List version history of a skill",
 )
 async def list_skill_versions(
@@ -4373,6 +4526,7 @@ async def list_skill_versions(
     skill = await skill_repo.get_by_slug(slug)
     if not skill:
         raise HTTPException(status_code=404, detail="skill not found")
+    await _require_skill_read(skill, _coerce_user_uuid(auth.user_id))
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -4405,6 +4559,7 @@ async def list_skill_versions(
 
 @router.get(
     "/skills/{slug}/versions/{version_number}",
+    response_model=SkillVersionDetail,
     summary="Get a specific skill version (full body)",
 )
 async def get_skill_version(
@@ -4419,6 +4574,7 @@ async def get_skill_version(
     skill = await skill_repo.get_by_slug(slug)
     if not skill:
         raise HTTPException(status_code=404, detail="skill not found")
+    await _require_skill_read(skill, _coerce_user_uuid(auth.user_id))
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -4444,6 +4600,7 @@ async def get_skill_version(
 
 @router.get(
     "/skills/{slug}/files/{path:path}/versions",
+    response_model=SkillFileVersionList,
     summary="List version history of a skill file",
 )
 async def list_skill_file_versions(
@@ -4458,6 +4615,7 @@ async def list_skill_file_versions(
     skill = await skill_repo.get_by_slug(slug)
     if not skill:
         raise HTTPException(status_code=404, detail="skill not found")
+    await _require_skill_read(skill, _coerce_user_uuid(auth.user_id))
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -4510,6 +4668,7 @@ async def list_skill_file_versions(
 
 @router.post(
     "/skills/{slug}/rollback/{version_number}",
+    response_model=VersionRollbackResult,
     summary="Rollback skill to a previous version (creates a new version with the old content)",
 )
 async def rollback_skill(
@@ -4533,6 +4692,7 @@ async def rollback_skill(
 
     skill_id = int(skill["id"])
     user_uuid = _coerce_user_uuid(auth.user_id)
+    await _require_skill_write(skill, user_uuid)
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -4577,6 +4737,7 @@ async def rollback_skill(
 
 @router.get(
     "/usage/summary",
+    response_model=AiLibraryUsageSummary,
     summary="Per-user token usage rollup (model + day breakdown)",
 )
 async def get_usage_summary(

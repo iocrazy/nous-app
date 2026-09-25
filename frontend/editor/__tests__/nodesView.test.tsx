@@ -11,7 +11,8 @@
 import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SceneDoc } from '../types';
-import type { ScriptChapter } from '../../types';
+import type { ScriptChapter } from '../../types/api';
+import { makeScriptChapter } from '../../tests/fixtures/scripts';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
@@ -87,18 +88,9 @@ const scene = (over: Partial<SceneDoc>): SceneDoc => ({
   ...over,
 });
 
-const chapter = (over: Partial<ScriptChapter> & { id: string }): ScriptChapter => ({
-  script_id: '1',
-  chapter_number: 1,
-  title: 'Act One',
-  position_x: 0,
-  position_y: 0,
-  data_json: {},
-  sort_order: 0,
-  created_at: '2026-01-01',
-  updated_at: '2026-01-01',
-  ...over,
-});
+// Chapters as `fetchScriptProject` returns them: numeric wire ids.
+const chapter = (over: Partial<ScriptChapter> & { id: number }): ScriptChapter =>
+  makeScriptChapter({ title: 'Act One', ...over });
 
 function findNode(type: string): Record<string, unknown> {
   const nodes = capturedProps.nodes as Array<Record<string, unknown>>;
@@ -123,7 +115,7 @@ describe('NodesView', () => {
     render(
       <NodesView
         scenes={[scene({ id: '200', chapter_id: '100' }), scene({ id: '201', chapter_id: null })]}
-        chapters={[chapter({ id: '100' })]}
+        chapters={[chapter({ id: 100 })]}
         onOpenScene={vi.fn()}
         scriptId="1"
         onReload={vi.fn()}
@@ -265,7 +257,7 @@ describe('NodesView', () => {
       render(
         <NodesView
           scenes={[]}
-          chapters={[chapter({ id: '100' })]}
+          chapters={[chapter({ id: 100 })]}
           onOpenScene={vi.fn()}
           scriptId="1"
           onReload={vi.fn()}
@@ -341,7 +333,7 @@ describe('NodesView', () => {
         render(
           <NodesView
             scenes={[scene({ id: '200' })]}
-            chapters={[chapter({ id: '100' })]}
+            chapters={[chapter({ id: 100 })]}
             onOpenScene={vi.fn()}
             scriptId="1"
             onReload={vi.fn()}

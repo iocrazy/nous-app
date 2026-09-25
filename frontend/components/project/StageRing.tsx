@@ -9,7 +9,7 @@
  */
 
 import React from 'react';
-import type { ProjectWorkflowBadge } from '../../types';
+import type { ProjectWorkflowBadge } from '../../types/api';
 
 interface RingStage {
   name: string;

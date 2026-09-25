@@ -44,7 +44,7 @@ import { useResourceSearch } from '../../../../hooks/useResourceSearch';
 import { attachFiles } from '../../../../services/assetsService';
 import type { AssetRowDetail, AttachFileBody } from '../../../../services/assetsService';
 import { getResourceCoverUrl } from '../../../../services/resourceService';
-import type { ResourceSearchResult } from '../../../../types';
+import type { ResourceSearchResult } from '../../../../types/api';
 import { slotLabelKey } from '../assetTypeMeta';
 import { loadoutForSlot } from './assetSheetModel';
 

@@ -2,9 +2,9 @@
 
 Covers the two mixed-repo leftovers migrated to the ORM session scopes:
 
-- ``UserSettingsRepository.delete`` — was ``client.table("user_settings")
-  .delete().eq("user_id", ...)``; now a Core DELETE inside the committing
-  ``write_scope()`` session.
+- ``UserSettingsRepository`` — its last ``client.table(...)`` call was the
+  ``delete`` behind ``DELETE /api/v1/settings``; that route had no caller and
+  was removed with the method (OpenAPI P5), so only the no-supabase pin stays.
 - ``MediaRepository.get_media_owner_map`` / ``get_media_resource_owner_map``
   — were ``client.table("resources").select(...)`` REST reads; now
   ``select(Resources.media_id, ...)`` on ``read_scope()`` with ``_bigint``
@@ -58,48 +58,7 @@ def _scope_cm(session):
     return _cm
 
 
-# ── UserSettingsRepository.delete ──────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_user_settings_delete_runs_core_delete_in_write_scope(monkeypatch):
-    """delete() issues ``DELETE FROM user_settings WHERE user_id = :uid`` via
-    the committing write_scope() session and invalidates the cache."""
-    from app.db import session as db_session
-    from app.repositories import user_settings_repository as mod
-    from app.repositories.user_settings_repository import UserSettingsRepository
-
-    session = _FakeSession()
-    monkeypatch.setattr(db_session, "write_scope", _scope_cm(session))
-
-    invalidated = []
-    monkeypatch.setattr(
-        mod.user_settings_cache, "invalidate", lambda uid: invalidated.append(uid)
-    )
-
-    ok = await UserSettingsRepository().delete("user-1")
-
-    assert ok is True
-    assert len(session.statements) == 1
-    sql = str(session.statements[0])
-    assert sql.startswith("DELETE FROM") and "user_settings" in sql
-    assert "user_id" in sql
-    params = session.statements[0].compile().params
-    assert list(params.values()) == ["user-1"]
-    assert invalidated == ["user-1"]
-
-
-@pytest.mark.asyncio
-async def test_user_settings_delete_returns_false_on_error(monkeypatch):
-    """A raising session → False (legacy contract: never raises)."""
-    from app.db import session as db_session
-    from app.repositories.user_settings_repository import UserSettingsRepository
-
-    monkeypatch.setattr(
-        db_session, "write_scope", _scope_cm(_FakeSession(raise_on_execute=True))
-    )
-
-    assert await UserSettingsRepository().delete("user-1") is False
+# ── UserSettingsRepository ─────────────────────────────────────────────────
 
 
 def test_user_settings_repo_has_no_supabase_client():

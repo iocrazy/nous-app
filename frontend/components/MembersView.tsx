@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { UserPlus, Trash2, Shield, User, Crown, Loader2, Search, Users } from 'lucide-react';
 import { Loading } from './common/Loading';
-import { TeamMember } from '../types';
+import type { TeamMember } from '../types/api';
 import { fetchTeamMembers, updateMemberRole, removeMember } from '../services/teamService';
-import { fetchUsageStats } from '../services/pointsService';
 import { InviteMembersModal } from './InviteMembersModal';
 import { UiSelect } from './ui';
 import { hasPermission } from '../utils/permissions';
@@ -14,14 +13,6 @@ interface MembersViewProps {
   teamName: string;
   currentUserId: string;
   permissions: string[];
-}
-
-interface MemberUsage {
-  user_id: string;
-  name: string | null;
-  email: string | null;
-  points_used: number;
-  monthly_limit: number | null;
 }
 
 export const MembersView: React.FC<MembersViewProps> = ({
@@ -35,24 +26,16 @@ export const MembersView: React.FC<MembersViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [memberUsages, setMemberUsages] = useState<MemberUsage[]>([]);
   const [updatingRoleFor, setUpdatingRoleFor] = useState<string | null>(null);
 
   const isOwner = hasPermission(permissions, 'member.manage');
-  const canViewStats = hasPermission(permissions, 'billing.view');
 
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [membersData, statsData] = await Promise.all([
-          fetchTeamMembers(teamId).catch(() => []),
-          fetchUsageStats(teamId).catch(() => null),
-        ]);
+        const membersData = await fetchTeamMembers(teamId).catch(() => []);
         setMembers(membersData);
-        if (statsData?.member_usage && Array.isArray(statsData.member_usage)) {
-          setMemberUsages(statsData.member_usage);
-        }
       } finally {
         setLoading(false);
       }
@@ -80,10 +63,6 @@ export const MembersView: React.FC<MembersViewProps> = ({
     } catch {
       // silently fail
     }
-  };
-
-  const getMemberUsage = (userId: string): MemberUsage | undefined => {
-    return memberUsages.find(u => u.user_id === userId);
   };
 
   const getRoleIcon = (role: string) => {
@@ -174,9 +153,6 @@ export const MembersView: React.FC<MembersViewProps> = ({
             <tr>
               <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Member</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Role</th>
-              {canViewStats && (
-                <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Monthly Usage</th>
-              )}
               <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Joined</th>
               {isOwner && (
                 <th className="px-4 py-3 text-right text-xs font-medium text-ink-500 uppercase">Actions</th>
@@ -187,7 +163,6 @@ export const MembersView: React.FC<MembersViewProps> = ({
             {filteredMembers.map((member) => {
               const isCurrentUser = member.user_id === currentUserId;
               const displayName = member.name || member.email || 'Unknown';
-              const usage = getMemberUsage(member.user_id);
               return (
                 <tr key={member.user_id} className="hover:bg-ink-800/30">
                   <td className="px-4 py-3">
@@ -235,24 +210,6 @@ export const MembersView: React.FC<MembersViewProps> = ({
                       </span>
                     )}
                   </td>
-                  {canViewStats && (
-                    <td className="px-4 py-3 text-sm text-ink-400">
-                      {usage ? (
-                        usage.monthly_limit !== null ? (
-                          <span>
-                            {usage.points_used.toLocaleString()} / {usage.monthly_limit.toLocaleString()} points used
-                          </span>
-                        ) : (
-                          <span>
-                            {usage.points_used.toLocaleString()} points used
-                            <span className="ml-1 text-ink-600">(Unlimited)</span>
-                          </span>
-                        )
-                      ) : (
-                        <span className="text-ink-600">--</span>
-                      )}
-                    </td>
-                  )}
                   <td className="px-4 py-3 text-sm text-ink-500">
                     {new Date(member.joined_at).toLocaleDateString()}
                   </td>
@@ -274,7 +231,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
             {filteredMembers.length === 0 && (
               <tr>
                 <td
-                  colSpan={isOwner ? (canViewStats ? 5 : 4) : (canViewStats ? 4 : 3)}
+                  colSpan={isOwner ? 4 : 3}
                   className="px-4 py-8 text-center text-ink-500"
                 >
                   {searchQuery ? t('members.noResults') : t('members.noMembers')}

@@ -14,7 +14,7 @@ import { useTranslation } from 'react-i18next';
 import type { UseFilterBarConfigReturn } from '../../hooks/useFilterBarConfig';
 import type { ChipId, SocialMetric } from '../resources/filter/types';
 import { SOCIAL_METRICS } from '../resources/filter/types';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 import { Pill } from '../DownloadsView/filterSheetUi';
 import {
   FACETS,
@@ -44,7 +44,7 @@ function toggleIn<T>(arr: readonly T[], v: T): T[] {
   return arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
 }
 function tagCount(t: Tag): number {
-  return t.media_count ?? t.video_count ?? 0;
+  return t.media_count ?? 0;
 }
 
 export function FacetPickerSheet({

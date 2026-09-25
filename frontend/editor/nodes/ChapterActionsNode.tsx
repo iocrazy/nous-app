@@ -21,7 +21,7 @@ import { expandChapter, createBranches } from '../../services/scriptService';
 import { convertToScenes } from '../sceneService';
 import type { ConvertPoll, PollPredicate } from '../useConvertPoll';
 import type { ChapterNodeData } from './sceneNodeMapper';
-import type { ScriptChapter } from '../../types';
+import type { ScriptChapter } from '../../types/api';
 
 /** How long an armed "Confirm?" stays live before auto-disarming. */
 const CONFIRM_WINDOW_MS = 3000;

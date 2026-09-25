@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize, SkipBack, SkipForward } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { FileVersion } from '../types';
+import type { FileVersion } from '../types/api';
 import Hls from 'hls.js';
 
 interface VersionCompareViewProps {

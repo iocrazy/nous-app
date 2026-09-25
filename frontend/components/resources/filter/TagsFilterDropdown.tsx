@@ -15,7 +15,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { Tag } from '../../../types';
+import type { Tag } from '../../../types/api';
 import { EagleTagBrowser } from '../../EagleTagPicker/EagleTagBrowser';
 import { useTagPreferences } from '../../EagleTagPicker/useTagPreferences';
 

@@ -477,7 +477,7 @@ async def test_ai_transcription_workflow_body_wraps_chain_in_user_scope():
 
     recorded: dict[str, object] = {}
 
-    async def _fake_load(_pid, _uid):
+    async def _fake_load(_pid, _uid, _rid=None):
         return {
             "audio_path": "a.wav",
             "resource_id": "res-1",

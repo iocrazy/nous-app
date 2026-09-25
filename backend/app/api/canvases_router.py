@@ -18,6 +18,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi.responses import Response
 from loguru import logger
 
 from app.core.deps import AuthDep
@@ -41,10 +42,28 @@ from app.schemas.canvas import (
     CanvasUpdate,
     CanvasZipRequest,
 )
+from app.schemas.canvas_responses import (
+    CanvasAck,
+    CanvasAssetRefsEnvelope,
+    CanvasGenerationCapability,
+    CanvasModelOption,
+    CanvasRow,
+    CanvasSummary,
+    ProjectTrashedCanvas,
+    TeamCanvasProject,
+    TeamTrashedCanvas,
+)
 from app.schemas.canvas_run import (
     CanvasPromptRunRequest,
     CanvasPromptRunResponse,
 )
+from app.schemas.canvas_task_responses import (
+    CanvasGenerationDispatch,
+    CanvasGenerationTask,
+    CanvasTimelineDispatch,
+)
+from app.schemas.envelope import Envelope
+from app.schemas.wire import binary_response
 from app.services.canvas import CanvasConflict, CanvasService
 from app.services.canvas.canvas_run_service import CanvasRunService
 from app.services.infra.unified_task_manager import get_task_manager
@@ -128,8 +147,12 @@ async def _gate_canvas_read(canvas_id: str, auth: AuthDep) -> str:
 # ============================================================
 
 
-@router.post("/canvases/assets/zip")
-async def download_canvas_assets_zip(body: CanvasZipRequest, auth: AuthDep):
+@router.post(
+    "/canvases/assets/zip",
+    response_class=Response,
+    responses=binary_response("The packed archive.", "application/zip"),
+)
+async def download_canvas_assets_zip(body: CanvasZipRequest, auth: AuthDep) -> Response:
     """Bundle several generated-media results into one archive (P2-7).
 
     Only whitelisted ``/api/v1/generated-media/{id}/(file|stream|cover)``
@@ -140,8 +163,6 @@ async def download_canvas_assets_zip(body: CanvasZipRequest, auth: AuthDep):
     """
     import io
     import zipfile
-
-    from fastapi.responses import Response
 
     from app.repositories.generated_media_repository import GeneratedMediaRepository
     from app.services.canvas.zip_assets import (
@@ -218,9 +239,17 @@ async def _read_media_bytes(row: dict):
 _GENERATION_MODEL_PUBLIC_FIELDS = (
     "name",
     "display_name",
+    # The label the admin AI Models card shows; the canvas pickers print the
+    # same string (2026-09-24). A model id, not a credential.
+    "actual_model",
     "type",
     "is_local",
     "sort_order",
+    # Lets the picker drop a failed row with the same predicate as Settings.
+    # generation-models already filters failed rows server-side
+    # (apply_readiness); text-models does not, so the client filter is the one
+    # that holds for both.
+    "last_test_status",
 )
 
 
@@ -260,7 +289,9 @@ async def _visible_generation_rows(
     return [{k: v for k, v in r.items() if k != "actual_provider"} for r in rows]
 
 
-@router.get("/canvases/generation-models")
+@router.get(
+    "/canvases/generation-models", response_model=Envelope[list[CanvasModelOption]]
+)
 async def list_generation_models(auth: AuthDep) -> dict:
     """Image/video rows from the nous_models catalog (public columns
     only — no api_key/base_url) for the composer's model picker."""
@@ -271,7 +302,10 @@ async def list_generation_models(auth: AuthDep) -> dict:
     return {"success": True, "data": data}
 
 
-@router.get("/canvases/generation-capabilities")
+@router.get(
+    "/canvases/generation-capabilities",
+    response_model=Envelope[dict[str, CanvasGenerationCapability]],
+)
 async def list_generation_capabilities(auth: AuthDep) -> dict:
     """Per-model knob capabilities, keyed by catalog row name.
 
@@ -315,7 +349,7 @@ async def list_generation_capabilities(auth: AuthDep) -> dict:
     return {"success": True, "data": data}
 
 
-@router.get("/canvases/text-models")
+@router.get("/canvases/text-models", response_model=Envelope[list[CanvasModelOption]])
 async def list_text_models(auth: AuthDep) -> dict:
     """Enabled ``llm`` rows from the nous_models catalog (public columns
     only — no api_key/base_url) for the prompt node's text-model picker.
@@ -333,7 +367,9 @@ async def list_text_models(auth: AuthDep) -> dict:
     return {"success": True, "data": data}
 
 
-@router.get("/canvases/generations/{task_id}")
+@router.get(
+    "/canvases/generations/{task_id}", response_model=Envelope[CanvasGenerationTask]
+)
 async def get_canvas_generation(task_id: str, auth: AuthDep) -> dict:
     """Poll one generation task. Reads task_tracking (the UI's single source
     of truth — route C); the durable result lands in metadata.result_url."""
@@ -365,7 +401,7 @@ async def get_canvas_generation(task_id: str, auth: AuthDep) -> dict:
     return {"success": True, "data": dict(row)}
 
 
-@router.delete("/canvases/generations/{task_id}")
+@router.delete("/canvases/generations/{task_id}", response_model=CanvasAck)
 async def cancel_canvas_generation(task_id: str, auth: AuthDep) -> dict:
     """Really cancel one generation task (P1-1). Stop used to only abandon the
     frontend poll while the DBOS task kept burning provider quota; here we ask
@@ -413,8 +449,10 @@ async def _is_team_member(team_id: str, user_id: str) -> bool:
     return member is not None
 
 
-@router.get("/canvases/team/{team_id}")
-async def list_team_canvases(team_id: str, auth: AuthDep) -> dict:
+@router.get(
+    "/canvases/team/{team_id}", response_model=Envelope[list[TeamCanvasProject]]
+)
+async def list_team_canvases(team_id: str, auth: AuthDep):
     """Every project in the team with its canvases embedded as summary
     columns — one query, replacing the canvas landing page's
     fetchProjects + per-project listCanvases N+1 fan-out."""
@@ -440,8 +478,11 @@ async def list_team_canvases(team_id: str, auth: AuthDep) -> dict:
     return {"success": True, "data": data}
 
 
-@router.get("/canvases/team/{team_id}/trash")
-async def list_team_canvas_trash(team_id: str, auth: AuthDep) -> dict:
+@router.get(
+    "/canvases/team/{team_id}/trash",
+    response_model=Envelope[list[TeamTrashedCanvas]],
+)
+async def list_team_canvas_trash(team_id: str, auth: AuthDep):
     """A team's trashed canvases (G9), newest-trashed first. Registered
     BEFORE /canvases/{canvas_id} — static segments must win the match."""
     if not await _is_team_member(team_id, auth.user_id):
@@ -494,8 +535,10 @@ def _storyboard_name(ep: dict, rank: int | None) -> str:
 @router.get(
     "/canvases/storyboard",
     summary="Get or create the episode's system storyboard canvas",
+    response_model=Envelope[CanvasRow],
+    response_model_exclude_unset=True,
 )
-async def get_or_create_storyboard_canvas(auth: AuthDep, episode_id: str) -> dict:
+async def get_or_create_storyboard_canvas(auth: AuthDep, episode_id: str):
     """GET /api/v1/canvases/storyboard?episode_id=<id> — idempotent
     get-or-create of the episode's system storyboard canvas (kind=
     'storyboard', shot-nodes-on-canvas spec 2026-08-11 §2).
@@ -560,7 +603,11 @@ async def get_or_create_storyboard_canvas(auth: AuthDep, episode_id: str) -> dic
 # ============================================================
 
 
-@router.get("/canvases/{canvas_id}")
+@router.get(
+    "/canvases/{canvas_id}",
+    response_model=Envelope[CanvasRow],
+    response_model_exclude_unset=True,
+)
 async def get_canvas(
     auth: AuthDep,
     canvas_id: str = Path(..., description="Snowflake canvas ID"),
@@ -588,7 +635,7 @@ async def get_canvas(
     return {"success": True, "data": _to_response(row, can_edit=access.can_write)}
 
 
-@router.get("/canvases/{canvas_id}/asset-refs")
+@router.get("/canvases/{canvas_id}/asset-refs", response_model=CanvasAssetRefsEnvelope)
 async def canvas_asset_refs(
     auth: AuthDep,
     canvas_id: str = Path(..., description="Snowflake canvas ID"),
@@ -600,16 +647,20 @@ async def canvas_asset_refs(
     parsing the node graph itself.
 
     ``_gate_canvas_read``, not the write gate: this is a pure read, and the
-    sibling ``GET /canvases/{id}/assets`` was shipped with the WRITE guard by
-    mistake for months (fixed 2026-08-12), locking viewers out of a read they
-    were entitled to. Same envelope shape as that sibling.
+    former sibling ``GET /canvases/{id}/assets`` (removed 2026-09-24, no
+    callers) was shipped with the WRITE guard by mistake for months (fixed
+    2026-08-12), locking viewers out of a read they were entitled to.
     """
     await _gate_canvas_read(canvas_id, auth)
     items = await CanvasAssetRefsRepository().list_for_canvas(canvas_id)
     return {"success": True, "data": items, "count": len(items)}
 
 
-@router.put("/canvases/{canvas_id}")
+@router.put(
+    "/canvases/{canvas_id}",
+    response_model=Envelope[CanvasRow],
+    response_model_exclude_unset=True,
+)
 async def update_canvas(
     auth: AuthDep,
     payload: CanvasUpdate,
@@ -632,7 +683,7 @@ async def update_canvas(
         raise HTTPException(status_code=500, detail="canvas save failed")
 
 
-@router.delete("/canvases/{canvas_id}")
+@router.delete("/canvases/{canvas_id}", response_model=CanvasAck)
 async def delete_canvas(
     auth: AuthDep,
     canvas_id: str = Path(..., description="Snowflake canvas ID"),
@@ -647,7 +698,7 @@ async def delete_canvas(
     return {"success": True}
 
 
-@router.post("/canvases/{canvas_id}/restore")
+@router.post("/canvases/{canvas_id}/restore", response_model=CanvasAck)
 async def restore_canvas(
     auth: AuthDep,
     canvas_id: str = Path(..., description="Snowflake canvas ID"),
@@ -660,7 +711,7 @@ async def restore_canvas(
     return {"success": True}
 
 
-@router.delete("/canvases/{canvas_id}/purge")
+@router.delete("/canvases/{canvas_id}/purge", response_model=CanvasAck)
 async def purge_canvas(
     auth: AuthDep,
     canvas_id: str = Path(..., description="Snowflake canvas ID"),
@@ -679,7 +730,9 @@ async def purge_canvas(
 # ============================================================
 
 
-@router.get("/projects/{project_id}/canvases")
+@router.get(
+    "/projects/{project_id}/canvases", response_model=Envelope[list[CanvasSummary]]
+)
 async def list_project_canvases(
     auth: AuthDep,
     project_id: str = Path(..., description="Snowflake project ID"),
@@ -694,7 +747,10 @@ async def list_project_canvases(
     return {"success": True, "data": [_to_response(r) for r in rows]}
 
 
-@router.get("/projects/{project_id}/canvases/trash")
+@router.get(
+    "/projects/{project_id}/canvases/trash",
+    response_model=Envelope[list[ProjectTrashedCanvas]],
+)
 async def list_project_canvas_trash(
     auth: AuthDep,
     project_id: str = Path(..., description="Snowflake project ID"),
@@ -754,7 +810,11 @@ async def _require_asset_in_project_scope(project_id: str, asset_id: str) -> Non
         raise HTTPException(status_code=404, detail="asset_not_found")
 
 
-@router.post("/projects/{project_id}/canvases")
+@router.post(
+    "/projects/{project_id}/canvases",
+    response_model=Envelope[CanvasRow],
+    response_model_exclude_unset=True,
+)
 async def create_project_canvas(
     auth: AuthDep,
     payload: CanvasCreate,
@@ -770,7 +830,10 @@ async def create_project_canvas(
     return {"success": True, "data": _to_response(row)}
 
 
-@router.post("/canvases/{canvas_id}/timeline-runs")
+@router.post(
+    "/canvases/{canvas_id}/timeline-runs",
+    response_model=Envelope[CanvasTimelineDispatch],
+)
 async def dispatch_timeline_run(
     auth: AuthDep,
     payload: CanvasTimelineRequest,
@@ -818,7 +881,9 @@ async def dispatch_timeline_run(
     return {"success": True, "data": {"task_id": wf_id}}
 
 
-@router.post("/canvases/{canvas_id}/generations")
+@router.post(
+    "/canvases/{canvas_id}/generations", response_model=CanvasGenerationDispatch
+)
 async def dispatch_canvas_generations(
     auth: AuthDep,
     payload: CanvasGenerationRequest,
@@ -899,7 +964,7 @@ async def dispatch_canvas_generations(
 # ============================================================
 
 
-@router.post("/canvases/runs/prompts")
+@router.post("/canvases/runs/prompts", response_model=Envelope[CanvasPromptRunResponse])
 async def run_canvas_prompt(
     auth: AuthDep,
     payload: CanvasPromptRunRequest,

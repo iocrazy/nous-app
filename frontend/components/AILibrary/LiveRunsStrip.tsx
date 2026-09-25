@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
-import type { LiveAgentRun } from '../../types';
+import type { LiveAgentRun } from '../../types/api';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { getAgentIcon } from './agentIcons';
 import { useToast } from '../Toast';

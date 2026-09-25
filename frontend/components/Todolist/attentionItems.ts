@@ -10,7 +10,7 @@
  */
 
 import type { NeedsInputItem } from '../../services/issuesService';
-import type { AILibraryApprovalRequest } from '../../types';
+import type { AILibraryApprovalRequest } from '../../types/api';
 import type { UiIssue } from './types';
 import { queuedChip, type CountT } from './issueChips';
 

@@ -17,7 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { Check, X, Clock, ListTodo, RefreshCw } from 'lucide-react';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useToast } from './Toast';
-import type { AILibraryCommitment } from '../types';
+import type { AILibraryCommitment } from '../types/api';
 
 interface CommitmentsPanelProps {
   status?: 'pending' | 'fulfilled' | 'cancelled' | 'failed' | 'expired';

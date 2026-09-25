@@ -7,14 +7,10 @@
  */
 import { useEffect, useState } from 'react';
 import { aiLibraryService } from '../../services/aiLibraryService';
-import type { AgentRunEvent } from '../../types';
+import type { AgentRunEvent, RunForkItem } from '../../types/api';
 
-export interface RunFork {
-  run_id: string;
-  at_seq: number;
-  created_at: string;
-  status: string;
-}
+/** A run forked from this one (`GET /ai-library/runs/{id}/forks`). */
+export type RunFork = RunForkItem;
 
 const LIVE_POLL_MS = 15_000;
 // Settled runs are read once per page life; a remount (group expand /
@@ -80,6 +76,7 @@ export function forkMarksFor(events: AgentRunEvent[], forks: RunFork[]): Record<
   const bySeq = new Map<number, AgentRunEvent>();
   for (const e of events) bySeq.set(e.seq, e);
   for (const f of forks) {
+    if (f.at_seq == null) continue;
     const ev = bySeq.get(f.at_seq);
     if (!ev || ev.event_type !== 'step_start') continue;
     const turn = ev.payload?.turn;

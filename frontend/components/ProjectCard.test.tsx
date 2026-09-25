@@ -12,7 +12,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ProjectCard } from './ProjectCard';
 import * as svc from '../services/projectsService';
-import type { Project, ProjectSuggestionItem } from '../types';
+import type { Project, ProjectSuggestionItem } from '../types/api';
+import { makeProject } from '../tests/fixtures/projects';
 
 // relativeTime pulls in the real i18n instance via formatDate — stub it so
 // this suite doesn't need initReactI18next.
@@ -36,22 +37,15 @@ vi.mock('react-i18next', () => ({
 // (harmless for suites that never render a suggestion row).
 vi.mock('./Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 
-const base: Project = {
-  id: '1',
+const base: Project = makeProject({
+  id: 1,
   name: 'Spring Campaign 2026',
   description: 'Short-form ad series',
   owner_id: 'u-owner',
-  team_id: null,
-  project_type: 'internal',
-  project_group: null,
-  announcement: null,
-  is_starred: false,
-  color_label: null,
-  archived_at: null,
   file_count: 128,
   created_at: '2026-06-01T00:00:00+00:00',
   updated_at: '2026-07-06T00:00:00+00:00',
-};
+});
 
 const noop = () => {};
 
@@ -111,6 +105,7 @@ describe('ProjectCard', () => {
       latest_activity: {
         kind: 'stage',
         label: 'Review',
+        actor: 'heygo',
         at: '2026-07-01T00:00:00',
         stalled: true,
       },

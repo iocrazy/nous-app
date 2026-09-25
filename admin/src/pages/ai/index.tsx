@@ -6,6 +6,14 @@ import {
 import { IconPlus, IconDelete, IconSync, IconEdit } from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
 import { JimengAuthCard } from './JimengAuthCard'
+import {
+  CONTEXT_WINDOW_PRESETS,
+  CUSTOM,
+  UNSET,
+  contextWindowFormValues,
+  contextWindowPatch,
+  validateContextWindow,
+} from './contextWindow'
 
 const { Title, Text } = Typography
 const FormItem = Form.Item
@@ -30,12 +38,14 @@ interface NousModel {
   // Persisted connectivity-test result (survives navigation).
   //   ok         reachable
   //   fail       probed and failed
+  //   idle       local nous-engine model authorized but not loaded right now;
+  //              it loads on the first request — NOT a fault (migration 503)
   //   not_probed the backend probe has no protocol for this model TYPE
   //              (image / video / tts) and checked nothing — NOT a fault
   //   null       never probed
   // Before migration 428 the unprobeable types were recorded as `fail`, which
   // is why this page carried three permanent red lights for healthy models.
-  last_test_status?: 'ok' | 'fail' | 'not_probed' | null
+  last_test_status?: 'ok' | 'fail' | 'idle' | 'not_probed' | null
   last_test_detail?: string | null
   last_tested_at?: string | null
   // Does RunRecorder have an ai_model_prices row to snapshot for this model?
@@ -187,15 +197,20 @@ function timeAgo(iso?: string | null): string {
 }
 
 // Provider health = aggregate of its models' persisted results: any fail → red,
-// else any ok → green, else any not_probed → neutral, else gray (untested).
+// else any ok → green, else any idle → gray "Not loaded", else any not_probed
+// → neutral, else pale (untested).
 //
 // `not_probed` ranks below `ok` on purpose: a provider with one working LLM and
-// one unprobeable image model is reachable, and its dot should say so.
+// one unprobeable image model is reachable, and its dot should say so. `idle`
+// is neither: an authorized-but-cold local model is healthy (it loads on the
+// first request), so it never drags the card red, but nothing is confirmed
+// loaded either, so it does not claim green.
 function aggregateStatus(
   models: NousModel[],
-): 'ok' | 'fail' | 'not_probed' | undefined {
+): 'ok' | 'fail' | 'idle' | 'not_probed' | undefined {
   if (models.some((m) => m.last_test_status === 'fail')) return 'fail'
   if (models.some((m) => m.last_test_status === 'ok')) return 'ok'
+  if (models.some((m) => m.last_test_status === 'idle')) return 'idle'
   if (models.some((m) => m.last_test_status === 'not_probed')) return 'not_probed'
   return undefined
 }
@@ -221,12 +236,20 @@ function failingModels(models: NousModel[]): NousModel[] {
 const DOT_COLORS: Record<string, string> = {
   ok: '#00b42a',
   fail: '#f53f3f',
+  idle: 'var(--color-text-3)',
   not_probed: 'var(--color-text-4)',
 }
 const DOT_LABELS: Record<string, string> = {
   ok: 'Reachable',
   fail: 'Failed',
+  idle: 'Not loaded',
   not_probed: 'Not probed',
+}
+// Replaces the persisted detail in the tooltip where the label alone would
+// read like a fault. The hourly poll writes `idle` from nous-engine's readiness
+// read, which never loads a model; the admin Test loads it for real.
+const DOT_HINTS: Record<string, string> = {
+  idle: 'Authorized on nous-engine; the model is not loaded right now and will load on the first request',
 }
 
 // "No price row" is its own tag, not a StatusDot state: the probe answers
@@ -285,32 +308,20 @@ function ContextWindowChip({ model }: { model: NousModel }) {
   )
 }
 
-// The column is int4; the backend rejects anything larger with a 422.
-const INT4_MAX = 2_147_483_647
-
-// Empty = no value (clear on save); otherwise a positive integer ≤ int4.
-function validateContextWindow(value: unknown, callback: (error?: string) => void) {
-  const raw = value === undefined || value === null ? '' : String(value).trim()
-  if (raw === '') return callback()
-  const n = Number(raw)
-  if (!Number.isInteger(n) || n <= 0) return callback('Must be a positive whole number of tokens')
-  if (n > INT4_MAX) return callback(`Must be at most ${INT4_MAX.toLocaleString('en-US')} tokens`)
-  callback()
-}
-
 function StatusDot({
   status,
   detail,
   at,
 }: {
-  status?: 'ok' | 'fail' | 'not_probed' | null
+  status?: 'ok' | 'fail' | 'idle' | 'not_probed' | null
   detail?: string | null
   at?: string | null
 }) {
   const color = (status && DOT_COLORS[status]) || 'var(--color-fill-3)'
   const label = (status && DOT_LABELS[status]) || 'Not tested'
   const ago = timeAgo(at)
-  const title = [label, detail || undefined, ago ? `tested ${ago}` : undefined]
+  const hint = status ? DOT_HINTS[status] : undefined
+  const title = [label, hint || detail || undefined, ago ? `tested ${ago}` : undefined]
     .filter(Boolean)
     .join(' · ')
   return (
@@ -360,6 +371,7 @@ export function AIModelsPage() {
   // provider's shared key/base_url ('provider', looped PUT over the group).
   const [editForm] = Form.useForm()
   const editType = Form.useWatch('type', editForm) as string | undefined
+  const editWindowChoice = Form.useWatch('context_window_choice', editForm) as string | undefined
   const [editModal, setEditModal] = useState<
     | { mode: 'model'; model: NousModel }
     | { mode: 'provider'; group: ProviderGroup }
@@ -761,7 +773,7 @@ export function AIModelsPage() {
       actual_provider: m.actual_provider,
       base_url: m.base_url || '',
       pricing_value: m.pricing_value,
-      context_window_tokens: m.context_window_tokens ?? '',
+      ...contextWindowFormValues(m.context_window_tokens),
       api_key: '', // blank = keep current
     })
   }
@@ -790,20 +802,6 @@ export function AIModelsPage() {
     }
   }
 
-  // >0 → set it; empty on a row that had a value → explicit clear (the PUT
-  // drops nulls, so NULL needs its own flag); empty on an unset row or a
-  // non-LLM type → leave the column alone.
-  const contextWindowPatch = (
-    m: NousModel,
-    values: Record<string, unknown>,
-  ): Record<string, unknown> => {
-    if (values.type !== 'llm') return {}
-    const raw = values.context_window_tokens
-    const n = raw === undefined || raw === null || String(raw).trim() === '' ? 0 : Number(raw)
-    if (n > 0) return { context_window_tokens: n }
-    return m.context_window_tokens ? { clear_context_window: true } : {}
-  }
-
   const handleEditSave = async () => {
     if (!editModal) return
     let values: Record<string, unknown>
@@ -826,7 +824,7 @@ export function AIModelsPage() {
         }
         // Only overwrite the key when the admin typed a new one.
         if ((values.api_key as string)?.trim()) patch.api_key = values.api_key
-        Object.assign(patch, contextWindowPatch(editModal.model, values))
+        Object.assign(patch, contextWindowPatch(editModal.model.context_window_tokens, values))
         await putModel(editModal.model.id, patch)
         Message.success('Model updated')
       } else {
@@ -1331,9 +1329,45 @@ export function AIModelsPage() {
               {editType === 'llm' && (
                 <FormItem
                   label="Context Window (tokens)"
+                  field="context_window_choice"
+                  extra="Pick Unset to fall back to the builtin table / global default. Takes effect on workers within 5 minutes. Match the provider's declared window; nous-engine rows should equal the engine's max_model_len."
+                >
+                  <Select
+                    placeholder="Unset (fallback)"
+                    renderFormat={(_option, value) =>
+                      value === CUSTOM
+                        ? 'Custom…'
+                        : value === UNSET || value === undefined
+                          ? 'Unset (fallback)'
+                          : `${CONTEXT_WINDOW_PRESETS.find((p) => String(p.tokens) === value)?.label ?? value} · ${Number(value).toLocaleString('en-US')}`
+                    }
+                  >
+                    {CONTEXT_WINDOW_PRESETS.map((p) => (
+                      <Select.Option key={p.tokens} value={String(p.tokens)}>
+                        {p.label}
+                        <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                          · {p.tokens.toLocaleString('en-US')}
+                        </Text>
+                      </Select.Option>
+                    ))}
+                    <Select.Option value={CUSTOM}>Custom…</Select.Option>
+                    <Select.Option value={UNSET}>
+                      Unset (fallback)
+                      <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                        · builtin table / global default
+                      </Text>
+                    </Select.Option>
+                  </Select>
+                </FormItem>
+              )}
+              {editType === 'llm' && editWindowChoice === CUSTOM && (
+                <FormItem
+                  label="Custom Window (tokens)"
                   field="context_window_tokens"
-                  rules={[{ validator: validateContextWindow }]}
-                  extra="Leave empty to fall back to the builtin table / global default. Takes effect on workers within 5 minutes."
+                  rules={[
+                    { required: true, message: 'Enter a token count, or pick Unset' },
+                    { validator: validateContextWindow },
+                  ]}
                 >
                   <Input type="number" min={1} step={1} placeholder="e.g. 131072" allowClear />
                 </FormItem>

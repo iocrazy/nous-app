@@ -211,10 +211,18 @@ async def probe_nous_models_step() -> dict[str, Any]:
     logic, no new table, no new scheduler. Each probe is a tiny ping
     (max_tokens=8 for chat); a failure is recorded, never raised.
 
-    Three buckets, not two: a type this poll may not dial is ``not_probed``
-    and belongs in neither. Counting it as failed is what kept three healthy
-    image/video models red on the admin page and produced a WARNING per model
-    per hour about nothing (2026-08-14).
+    Local nous-engine rows (``actual_provider='nous'``) are NOT pinged with an
+    inference here: the engine loads models on demand, so an hourly chat call
+    per row forced it to swap models on a shared card. The probe reads the
+    engine's ``GET /v1/models/{id}`` readiness instead, which loads nothing.
+
+    Four buckets: ``ok`` / ``fail`` / ``idle`` / ``not_probed``. ``idle`` is a
+    local model that is authorized but not loaded right now — healthy but cold,
+    it loads on the first real request — and a type this poll may not dial is
+    ``not_probed``. Neither is a failure. Counting ``not_probed`` as failed is
+    what kept three healthy image/video models red on the admin page and
+    produced a WARNING per model per hour about nothing (2026-08-14); ``idle``
+    as failed would repaint every cold 27B variant red the same way.
     """
     from app.repositories.nous_model_repository import get_nous_model_repository
     from app.services.ai.nous_model_health import (
@@ -226,7 +234,7 @@ async def probe_nous_models_step() -> dict[str, Any]:
     rows = await repo.list_all()
     enabled = [r for r in rows if r.get("is_enabled")]
 
-    counts = {"ok": 0, "fail": 0, "not_probed": 0}
+    counts = {"ok": 0, "fail": 0, "idle": 0, "not_probed": 0}
     for row in enabled:
         # Deliberately WITHOUT ``allow_costly``: this loop runs hourly over every
         # enabled model, and the image probe spends a real generation per call.
@@ -245,7 +253,7 @@ async def probe_nous_models_step() -> dict[str, Any]:
             # only trace left, and it named no model and no reason. The log is
             # now the second, independent place the reason survives.
             #
-            # ``not_probed`` deliberately logs NOTHING. It is a standing fact
+            # ``not_probed`` and ``idle`` deliberately log NOTHING. It is a standing fact
             # about the probe, not an event, and repeating it hourly is the
             # noise this change exists to remove.
             logger.warning(
@@ -258,6 +266,7 @@ async def probe_nous_models_step() -> dict[str, Any]:
         "total": len(enabled),
         "ok": counts["ok"],
         "failed": counts["fail"],
+        "idle": counts["idle"],
         "not_probed": counts["not_probed"],
     }
 

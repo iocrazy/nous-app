@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { ViewState, Project, ProjectFile, SidebarMode } from '../types';
+import { ViewState, SidebarMode } from '../types';
+import type { Project, ProjectFile } from '../types/api';
 import { fetchDashboardStats, DashboardStats } from '../services/dataService';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 

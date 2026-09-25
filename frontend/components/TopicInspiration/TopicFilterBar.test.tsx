@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, f?: string) => f ?? _k }),
@@ -21,6 +21,9 @@ const tag = (over: Partial<Tag>): Tag => ({
   type: 'user',
   origin: 'curated',
   created_at: '',
+  enabled: true,
+  media_count: 0,
+  prompt_trigger: false,
   ...over,
 });
 

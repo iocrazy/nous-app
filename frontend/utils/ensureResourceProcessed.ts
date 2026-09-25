@@ -26,7 +26,7 @@ import {
   triggerSummaryByResource,
   triggerTranscriptionByResource,
 } from '../services/aiService';
-import type { ResourceAITriggerResponse } from '../services/aiService';
+import type { SummarizeTriggerResponse, TranscribeTriggerResponse } from '../types/api';
 import { fetchResourceById } from '../services/resourceService';
 import {
   rememberPendingAudioRetry,
@@ -107,10 +107,12 @@ export interface EnsureResourceProcessedInput {
  * "treat it as a new dispatch" (an over-reported charge in a toast), never
  * to a wrong trigger.
  */
-export function isDedupedResponse(res: ResourceAITriggerResponse | undefined): boolean {
+export function isDedupedResponse(
+  res: TranscribeTriggerResponse | SummarizeTriggerResponse | undefined,
+): boolean {
   if (!res) return false;
   if (res.points_charged === 0) return true;
-  return /already in progress/i.test(res.message ?? '');
+  return /already in progress/i.test(res.message);
 }
 
 /** A status we were actually told. Empty string / null / undefined all

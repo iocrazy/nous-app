@@ -29,6 +29,19 @@ BASE = "/api/v1/ai-library"
 FAKE_USER_ID = str(uuid4())
 
 
+@pytest.fixture(autouse=True)
+def _caller_in_row_scope(monkeypatch):
+    """The agent/skill row-scope guard has its own tests
+    (``tests/api/test_ai_library_row_scope.py``); here every caller is in scope."""
+    import sys
+
+    monkeypatch.setattr(
+        sys.modules["app.api.ai_library_router"],
+        "_in_row_scope",
+        AsyncMock(return_value=True),
+    )
+
+
 async def _fake_auth() -> AuthContext:
     return AuthContext(user_id=FAKE_USER_ID, auth_type="jwt")
 
@@ -77,6 +90,19 @@ def _client_for(tables: dict[str, list]):
 
     client.table.side_effect = _table
     return client
+
+
+def _latest(run: dict) -> dict:
+    """The latest-run SELECT also reads the summaries and the error pair; the
+    14-day rows do not. Reusing a 14-day row as the latest one would hand the
+    route a shape it never gets (and ``AgentDashboardLatestRun`` rejects)."""
+    return {
+        **run,
+        "input_summary": None,
+        "output_summary": None,
+        "error_code": None,
+        "error_message": None,
+    }
 
 
 def _orm_read_scope(tables: dict[str, list]):
@@ -180,7 +206,7 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
             "own_cost_cents": "0.5",
         },
     ]
-    latest_run = runs_14d[0]
+    latest_run = _latest(runs_14d[0])
     # A4 (mig 200): agent_tasks merged into task_tracking with task_kind='agent_task'.
     # Mock data uses the new column shape (`phase` instead of `lifecycle_status`,
     # `dbos_workflow_id` as PK) so it travels through tt_row_to_task_shape() the
@@ -295,7 +321,8 @@ async def test_dashboard_coerces_bigint_run_ids_to_str(client: AsyncClient) -> N
     }
     scope = _orm_read_scope(
         {
-            "agent_runs": [[run_row], [run_row], [run_row]],  # 14d / latest / recent
+            # 14d / latest / recent
+            "agent_runs": [[run_row], [_latest(run_row)], [run_row]],
             "task_tracking": [[], []],
         }
     )
@@ -357,7 +384,7 @@ async def test_dashboard_costs_sum_own_cost_not_the_folded_column(
         _run("2", "10.0", "10.0"),
     ]
     scope = _orm_read_scope(
-        {"agent_runs": [runs, runs[:1], runs], "task_tracking": [[], []]}
+        {"agent_runs": [runs, [_latest(runs[0])], runs], "task_tracking": [[], []]}
     )
 
     with (

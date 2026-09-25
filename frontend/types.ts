@@ -1,3 +1,4 @@
+import type { CollectionRules, FormFieldDef, MusicRef, Tag, TopicRef, TranscriptSegment, UsageAggregate, UsagePerAgent, WorkflowNodeEvents } from './types/api';
 
 // The only import in this file, and deliberately `import type`: it is erased
 // at compile time (`isolatedModules`), so the app's leaf declaration file
@@ -132,16 +133,7 @@ export interface ParsedMedia {
 export type Video = ParsedMedia;
 
 // AI Transcript/Summary Data
-export interface TranscriptSegment {
-  start: number;
-  end: number;
-  text: string;
-  /** Speaker-diarization label (e.g. "S01"), present only for providers that
-   *  diarize (self-hosted moss-asr). Absent on old transcripts and the
-   *  OpenAI / Volcengine paths. */
-  speaker?: string;
-}
-
+// (TranscriptSegment is generated from the backend schema: see types/api.ts)
 export interface TranscriptData {
   text: string;
   segments: TranscriptSegment[];
@@ -161,24 +153,6 @@ export interface SummaryData {
 export type DouyinBase = ParsedMedia;
 
 export type ViewState = 'parser' | 'dashboard' | 'settings' | 'cleanup' | 'points' | 'mediatrack' | 'resources' | 'members' | 'billing' | 'todolist' | 'shared' | 'agents' | 'skills' | 'ailibrary' | 'chat' | 'distribution' | 'canvas';
-
-export interface ApiKey {
-  id: number;
-  key_id: string;        // Identifier for API calls
-  key_prefix: string;    // Display prefix like dk_xxxx...
-  key_value?: string;    // Masked display form (prefix + …). Full key is shown only once, at creation.
-  key_value_set?: boolean; // Whether a full key is stored for this record
-  name: string;
-  description?: string;
-  status: 'active' | 'revoked';
-  created_at: string;
-  updated_at: string;
-  expires_at: string | null;
-  last_used_at?: string | null;
-  usage_count?: number;
-  rate_limit?: number | null;
-  scopes: string[];
-}
 
 export interface UserSettings {
   downloadPath: string;
@@ -241,16 +215,6 @@ export interface Team {
   is_personal?: boolean;
   enabled_modules?: string[];
   created_at: string;
-}
-
-export interface TeamMember {
-  team_id: string;
-  user_id: string;
-  role: 'owner' | 'admin' | 'member';
-  joined_at: string;
-  // Joined from auth.users
-  email?: string;
-  name?: string;
 }
 
 // Sidebar modes
@@ -437,26 +401,6 @@ export interface ResourceItem {
   resource?: Resource;
 }
 
-// Resource version
-export interface ResourceVersion {
-  id: string;
-  resource_id: string;
-  version_number: number;
-  filename: string | null;
-  file_path: string | null;
-  file_size_bytes: number | null;
-  mime_type: string | null;
-  duration_seconds: number | null;
-  resolution: string | null;
-  thumbnail_path: string | null;
-  uploaded_by: string | null;
-  notes: string | null;
-  hls_path: string | null;
-  transcode_status: string | null;
-  transcode_at: string | null;
-  created_at: string;
-}
-
 // Notification types
 export interface Notification {
   id: string;
@@ -477,33 +421,6 @@ export interface UserNotification {
 }
 
 // Smart Organization Types
-
-// Tags
-export interface Tag {
-  id: string;  // UUID string from backend
-  name: string;
-  name_zh?: string | null;  // Chinese name for bilingual support
-  color: string | null;
-  icon: string | null;
-  /** Mig 468 retired 'system': every tag belongs to a user. 'time' is
-   *  still legal in the DB CHECK but has had zero rows for a long time. */
-  type: 'user' | 'time';
-  /** Stable automation key (mig 467). Present only on the tags the AI pipeline
-   *  and auto-classification key off; absent on ordinary tags. Read-only — the
-   *  display name is the user's to change, this is what keeps a rename from
-   *  silently switching the automation off. */
-  slug?: string | null;
-  group_name?: string | null;
-  group_id?: string | null;
-  enabled?: boolean;
-  prompt_trigger?: boolean;
-  sort_order?: number;
-  user_id?: string;
-  video_count?: number;
-  media_count?: number;
-  origin?: 'curated' | 'note';  // 'note' = shadow tag auto-created from note #tags
-  created_at: string;
-}
 
 // Smart Collections
 export interface SmartCollection {
@@ -528,34 +445,8 @@ export interface SmartCollection {
   updated_at?: string;
 }
 
-export interface CollectionCondition {
-  field: 'tag' | 'author' | 'date' | 'title' | 'description' | 'media_type' | 'view_count';
-  operator: 'equals' | 'contains' | 'starts_with' | 'in' | 'gt' | 'lt' | 'gte' | 'lte';
-  value: string | number | string[];
-}
-
-export interface CollectionRules {
-  match: 'all' | 'any';
-  conditions: CollectionCondition[];
-}
-
 // Cleanup
 export type CleanupReason = 'never_viewed' | 'duplicate_content' | 'old_unused' | 'large_file';
-
-export interface CleanupSuggestion {
-  media_id: number;
-  title: string;
-  cover_url: string | null;
-  author: string | null;
-  reason: CleanupReason;
-  reason_detail: string;
-  storage_size: number | null;
-  created_at: string;
-  last_viewed_at: string | null;
-  view_count: number;
-  similarity_to: number | null;
-  similarity_score: number | null;
-}
 
 // Search
 export interface SearchResult {
@@ -652,69 +543,10 @@ export interface ProviderHealthEntry {
   tested_at?: string;  // ISO-8601 UTC
 }
 
-/**
- * Per-module governance flags returned by GET /api/v1/ai/governance.
- * true = user may configure; false = admin-managed (hide the UI row).
- * Absent = true (default-open / fail-open).
- */
-export interface AIGovernanceFlags {
-  chat: boolean;
-  transcription: boolean;
-  translation: boolean;
-  visual_analysis: boolean;
-  caption: boolean;
-  classification: boolean;
-  summarization: boolean;
-  /** Global Nous master switch (default false). */
-  nous_enabled?: boolean;
-  /** Per-module Nous allow flags (default-on once nous_enabled). */
-  nous_modules?: Record<string, boolean>;
-}
-
-// Nous Platform Model (admin-configured, runs on the platform key)
-// Types mirror the DB CHECK constraint (migration 345).
-export type NousModelType = 'llm' | 'embedding' | 'tts' | 'asr' | 'image' | 'video';
-
-// NOTE: no ``description`` field — the public endpoint deliberately omits it
-// (admin-internal ops notes must not surface in the user-facing UI).
-export interface NousModelPublic {
-  name: string;
-  display_name: string;
-  type: NousModelType;
-  pricing_type: 'per_hour' | 'per_request' | 'per_token';
-  pricing_value: number;
-  /**
-   * Last hourly connectivity probe (backend scheduled_health). `null` /
-   * absent means never probed — which is neither healthy nor broken, so the
-   * UI must say nothing rather than assume. `not_probed` (backend migration
-   * 428) is the same non-claim for a different reason: the probe has no
-   * protocol for that model TYPE and checked nothing. Neither is a failure,
-   * and `buildModelHealth` keeps both out of the map.
-   *
-   * NOTE: the failure REASON TEXT (`last_test_detail`) is deliberately not part
-   * of this public payload — probe errors routinely embed the upstream host and
-   * private base_url. Users get the status plus the classified code below;
-   * admin gets the raw text.
-   */
-  last_test_status?: 'ok' | 'fail' | 'not_probed' | null;
-  last_tested_at?: string | null;
-  /**
-   * Closed-enum classification of the last FAILED probe (migration 427):
-   * `timeout` | `unreachable` | `auth` | `rate_limit` | `model_not_found` |
-   * `upstream_error` | `bad_response` | `other`. Typed as a plain string on
-   * purpose — the backend enum may grow before a frontend deploy catches up,
-   * and `healthReasonKey` already degrades gracefully on a value it doesn't
-   * know. `null` / absent = never probed, or probed before the column existed.
-   */
-  last_test_code?: string | null;
-  /**
-   * 由后端 `list_enabled` 派生(`nous_model_repository`:provider 属于
-   * codex-local / jimeng-local),true = 这一行不在平台上跑,而是在**用户自己
-   * 电脑**的 daemon 上。UI 据此提示本机链路的限制(纯文本、无工具调用)。
-   * 缺省/absent 一律按平台模型处理——没标就不是本机的。
-   */
-  is_local?: boolean;
-}
+// Nous Platform Model (admin-configured, runs on the platform key). The public
+// row is `NousModelPublic` in types/api (generated); its `type` mirrors the DB
+// CHECK constraint through the backend's `NousModelType` literal.
+export type NousModelType = import('./types/api').NousModelPublic['type'];
 
 // Points System Types
 export interface PointPackage {
@@ -725,33 +557,6 @@ export interface PointPackage {
   price_cents: number;
   currency: string;
   sort_order: number;
-}
-
-export interface TeamQuota {
-  team_id: string;
-  points_balance: number;
-  storage_limit_bytes: number;
-  storage_used_bytes: number;
-  storage_used_percent: number;
-}
-
-export interface PointTransaction {
-  id: string;
-  team_id: string;
-  user_id: string | null;
-  amount: number;
-  balance_after: number;
-  type: 'purchase' | 'consume' | 'refund' | 'gift' | 'admin_adjust';
-  reference_type: string | null;
-  reference_id: string | null;
-  description: string | null;
-  created_at: string;
-}
-
-export interface PointPricing {
-  action_type: string;
-  points_cost: number;
-  description: string | null;
 }
 
 export interface PaymentOrder {
@@ -769,65 +574,6 @@ export interface PaymentOrder {
   paid_at: string | null;
   expired_at: string;
   created_at: string;
-}
-
-export interface QuotaCheck {
-  allowed: boolean;
-  points_cost: number;
-  current_balance: number;
-  reason: string | null;
-}
-
-
-// Project types (MediaTrack)
-export interface Project {
-  id: string;
-  name: string;
-  description: string | null;
-  owner_id: string;
-  team_id: string | null;
-  project_type: 'internal' | 'external' | 'personal';
-  project_group: string | null;
-  announcement: string | null;
-  is_starred: boolean;
-  color_label: string | null;
-  archived_at: string | null;
-  file_count: number;
-  display_code?: string;
-  modules_enabled?: string[];
-  // Ideation (M1.5): the topics.id this project was created from (soft
-  // pointer, null for a from-scratch project).
-  topic_id?: string | null;
-  created_at: string;
-  updated_at: string;
-  // Card enrichment (Phase B B1) — batch-derived on the list endpoint;
-  // null/absent when the project has no members/history rows.
-  members_preview?: ProjectMembersPreview | null;
-  latest_activity?: ProjectCardActivity | null;
-  // Workflow badge (M2-W3-3) — batch-derived; null/absent for a No-workflow
-  // project (no instance nodes).
-  workflow_badge?: ProjectWorkflowBadge | null;
-  /** M4 Autopilot (mig 395, task O1): project-level master switch — the
-   * `autopilot_tick` engine no-ops entirely when this is false (spec §2 step
-   * 1). Real NOT NULL DEFAULT true column, written straight through by
-   * `PATCH /projects/{id}` (`ProjectUpdate.autopilot_enabled`, no name
-   * mapping unlike `archived`). Optional here (like `modules_enabled` above)
-   * so pre-mig-395 literals across the codebase keep compiling untouched —
-   * callers should default a missing value to `true`, the server's own
-   * default. */
-  autopilot_enabled?: boolean;
-}
-
-/** Project-card workflow badge (M2-W3-3). Null for No-workflow projects. */
-export interface ProjectWorkflowBadge {
-  /** Name of the node at the cursor; null when no cursor is set. */
-  current_node_name: string | null;
-  /** Count of non-skipped nodes. */
-  workflow_total: number;
-  /** 1-based index of the current node among non-skipped nodes; null when no cursor. */
-  workflow_position: number | null;
-  /** Running agent_runs on this project. */
-  agents_active: number;
 }
 
 // ── Ideation topic pool (M1.5) ───────────────────────────────────────────────
@@ -860,78 +606,7 @@ export interface Topic {
   updated_at: string;
 }
 
-export interface ProjectMembersPreview {
-  count: number;
-  members: { user_id: string; username: string }[];
-}
-
-export interface ProjectCardActivity {
-  kind: 'file' | 'stage';
-  actor?: string;
-  at?: string | null;
-  label?: string; // stage: the stage name
-  stalled?: boolean;
-}
-
-export interface ProjectMember {
-  // project_members has a composite PK (project_id, user_id) and NO id column;
-  // user_id is the member identifier used on the /members/{member_id} route.
-  project_id: string;
-  user_id: string;
-  role: 'manager' | 'editor' | 'viewer' | 'external';
-  invited_by: string | null;
-  email?: string;
-  joined_at: string;
-}
-
-export interface ProjectFolder {
-  id: string;
-  project_id: string;
-  parent_id: string | null;
-  name: string;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 export type ReviewStatus = 'pending_review' | 'in_review' | 'feedback_collected' | 'approved';
-
-export interface ProjectShare {
-  id: string;
-  project_file_id: string | null;
-  share_type: string;
-  share_code: string;
-  password: string | null;
-  expires_at: string | null;
-  is_active: boolean;
-  view_count: number;
-  created_at: string;
-}
-
-export interface FileVersion {
-  id: string;
-  file_id: string;
-  version_number: number;
-  filename: string | null;
-  file_path: string | null;
-  file_size_bytes: number | null;
-  mime_type: string | null;
-  duration_seconds: number | null;
-  resolution: string | null;
-  fps: number | null;
-  video_codec: string | null;
-  audio_codec: string | null;
-  video_bitrate_kbps: number | null;
-  audio_bitrate_kbps: number | null;
-  chorus_start_ms?: number | null;
-  audio_channels: number | null;
-  audio_sample_rate: number | null;
-  thumbnail_path: string | null;
-  cover_image_path: string | null;
-  uploaded_by: string | null;
-  notes: string | null;
-  created_at: string;
-}
 
 // Annotation / Drawing types
 export interface DrawingData {
@@ -949,77 +624,11 @@ export interface Stroke {
   text?: string;  // For text tool
 }
 
-export interface ReviewComment {
-  id: string;
-  file_id: string;
-  version_id: string | null;
-  author_id: string;
-  author_email?: string;
-  content: string;
-  timestamp_seconds: number | null;
-  drawing_data?: DrawingData | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ProjectFile {
-  id: string;
-  project_id: string;
-  filename: string;
-  file_type: string | null;
-  mime_type: string | null;
-  file_path: string | null;
-  file_size_bytes: number | null;
-  media_id: string | null;
-  duration_seconds: number | null;
-  resolution: string | null;
-  fps: number | null;
-  video_codec: string | null;
-  audio_codec: string | null;
-  video_bitrate_kbps: number | null;
-  audio_bitrate_kbps: number | null;
-  chorus_start_ms?: number | null;
-  audio_channels: number | null;
-  audio_sample_rate: number | null;
-  thumbnail_path: string | null;
-  cover_image_path: string | null;
-  uploaded_by: string | null;
-  notes: string | null;
-  is_trashed: boolean;
-  trashed_at: string | null;
-  review_status: ReviewStatus | null;
-  current_version: number;
-  created_at: string;
-  updated_at: string;
-  // Deliverable back-link (M2-W1): the mirror issue a file was filed from, plus
-  // its human identifier (MH-N) for the Files module's "from MH-xx" chip.
-  source_issue_id?: string | null;
-  source_issue_identifier?: string | null;
-}
-
-// Share types
+// The share types a user can pick when creating one (`ShareCreate.share_type`).
+// Share rows themselves are API shapes: `Share` etc. in `types/api.ts`.
 export type ShareType = 'link' | 'review' | 'presentation' | 'delivery';
-export type ShareStatus = 'active' | 'expired' | 'cancelled';
-
-export interface Share {
-  id: string;
-  resource_id: string | null;
-  project_file_id: string | null;
-  folder_id: string | null;
-  version_id: string | null;
-  share_type: ShareType;
-  shared_by: string;
-  share_name: string;
-  share_code: string;
-  password: string | null;
-  allow_download: boolean;
-  expires_at: string | null;
-  max_views: number | null;
-  view_count: number;
-  watermark: boolean;
-  status: ShareStatus;
-  created_at: string;
-}
+// The `status` filter of `GET /shares` (its query pattern).
+export type ShareStatus = 'active' | 'inactive' | 'expired' | 'cancelled';
 
 // ============================================
 // Storyboard Types
@@ -1041,72 +650,7 @@ export interface StoryboardProject {
   updated_at: string;
 }
 
-export interface ScriptProject {
-  id: string;
-  project_id: string;
-  team_id: string;
-  created_by: string;
-  name: string;
-  description?: string;
-  display_code?: string;
-  episode_id?: string | null;
-  settings_json?: Record<string, unknown>;
-  viewport_json?: { x: number; y: number; zoom: number };
-  status: 'active' | 'archived' | 'deleted';
-  /** Beats timeline target total runtime in seconds (M3); null/absent = unset. */
-  target_duration_sec?: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ScriptChapter {
-  id: string;
-  script_id: string;
-  parent_chapter_id?: string;
-  chapter_number?: number;
-  title?: string;
-  summary?: string;
-  content?: string;
-  branch_label?: string;
-  branch_type?: 'condition' | 'choice';
-  position_x: number;
-  position_y: number;
-  width?: number;
-  height?: number;
-  data_json: Record<string, unknown>;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ScriptProjectSummary {
-  id: string;
-  name: string;
-  display_code?: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
-  chapter_count?: number;
-  // Present at runtime (episodes_router / script_projects.episode_id) but
-  // was missing from this summary type — PR-10b workspace shell resolves
-  // "this episode's script" by filtering on it (see ProjectWorkspace).
-  episode_id?: string | null;
-}
-
 export type ProjectTab = 'files' | 'scripts' | 'storyboard' | 'output' | 'shares' | 'trash';
-
-/** A single row from the global ``project_stages`` catalog (Phase 5b SOP). */
-export interface ProjectStage {
-  /** Snowflake BIGINT serialised as string for JS-safe transport. */
-  id: string;
-  slug: string;
-  name: string;
-  sort_order: number;
-  /** Tool slugs recommended for this stage (advisory metadata from the catalog). */
-  tools_recommended: string[];
-  created_at?: string;
-  updated_at?: string;
-}
 
 // ============================================
 // Workflow templates + instances (Project Workflow M1, PR-C)
@@ -1124,35 +668,6 @@ export interface WorkflowMemberRef {
  * = the node owner reviews & completes; 'any_editor' = any manager/editor. */
 export type WorkflowCompletionPolicy = 'owner' | 'any_editor';
 
-/** Per-node built-in event toggles (M2 PR-D Events tab). Arrival/completion
- * mirror-issue behavior stays hardcoded (spec §4) — these three booleans only
- * gate notifications + the suggest-agent-run chip. */
-export interface WorkflowNodeEvents {
-  notify_on_arrival: boolean;
-  notify_on_complete: boolean;
-  suggest_agent_run: boolean;
-  /** M3 PR-H1/H3 (mig 389): arrival hook that pre-fills (never auto-launches)
-   * an agent run — flips the suggest chip into a solid "Run now" button once
-   * the hook has actually fired (see `ProjectStageNode.metadata.run_prepared_at`
-   * below). Optional (not `?:` on the other two booleans above) so pre-mig-389
-   * literals across the codebase keep compiling untouched; `normalizeEvents`
-   * (workflowService.ts) still fills a real `false` once data flows through it. */
-  prepare_agent_run?: boolean;
-  /** Reserved for a future "chain into another workflow on completion" hook
-   * (M3.5+) — never surfaced in the Events tab UI; always `null` today. */
-  on_complete_workflow?: string | null;
-  /** M4 Autopilot (mig 395, task O1/O2): template-layer config — when a node
-   * with an agent owner arrives (deps satisfied) with no manual start, the
-   * `autopilot_tick` engine begins it automatically (mirrors the manual
-   * "Start early" action). Copied verbatim into the instance at
-   * instantiation, then FROZEN there — not reachable from `ProjectNodePatch`
-   * (no `events` field there at all), same idiom as `completion_policy`.
-   * Optional (not `?:` on the first three booleans above) so pre-mig-395
-   * literals across the codebase keep compiling untouched; `normalizeEvents`
-   * (workflowService.ts) still fills a real `false` once data flows through it. */
-  auto_start?: boolean;
-}
-
 /** Six-type whitelist for a node's deliverable form field (mig 390, M3 PR-I
  * §2). Mirrors backend `FormFieldType` (schemas/workflow.py). */
 export type FormFieldType = 'text' | 'textarea' | 'number' | 'select' | 'checkbox' | 'date';
@@ -1165,19 +680,6 @@ export const FORM_FIELD_TYPES: FormFieldType[] = [
   'checkbox',
   'date',
 ];
-
-/** One field definition in a node's deliverable form (`form_schema`, mig 390).
- * `key` is server-generated (slugified from `label`, deduped within the node)
- * — the editor never invents or edits it; whatever rides in on a template
- * PATCH is harmlessly overwritten server-side. `options` only applies when
- * `type === 'select'` and must be non-empty there (backend 422s otherwise). */
-export interface FormFieldDef {
-  key: string;
-  label: string;
-  type: FormFieldType;
-  required: boolean;
-  options?: string[];
-}
 
 /** One node in a team workflow template (`workflow_template_nodes`). */
 export interface WorkflowTemplateNode {
@@ -1260,127 +762,6 @@ export interface StageLibraryItem {
   review_required: boolean;
 }
 
-export type WorkflowNodeStatus =
-  | 'pending'
-  | 'in_progress'
-  | 'in_review'
-  | 'done'
-  | 'skipped';
-
-/** A live workflow node on a project (`project_stage_nodes`). */
-export interface ProjectStageNode {
-  id: string;
-  project_id: string;
-  source_template_node_id: string | null;
-  legacy_stage_id: string | null;
-  name: string;
-  sort_order: number;
-  parallel_group: number | null;
-  status: WorkflowNodeStatus;
-  owner_user_id: string | null;
-  owner_agent_id: string | null;
-  planned_start: string | null;
-  planned_due: string | null;
-  review_required: boolean;
-  deliverable_required: boolean;
-  deliverable_label: string | null;
-  skipped: boolean;
-  /** Creative surface this node maps to (B1, mig 402) — copied-frozen at
-   * instantiation from the template. `'script' | 'storyboard' | 'renders'`
-   * name a real creative face; `null` (or absent, on legacy pre-mig-402
-   * instance rows) means a deliverable-only node (upload / version / review).
-   * Optional like `form_schema?` so existing `ProjectStageNode` literals keep
-   * compiling; `normalizeInstanceNode` fills a real value once data flows
-   * through it, defaulting missing → `null` (the most conservative degrade,
-   * spec §5③). Drives B5's episode view tabs + deliverable-node dashed border. */
-  surface?: 'script' | 'storyboard' | 'renders' | null;
-  // Deliverable folder link + filed-file count (M2-W1).
-  folder_id?: string | null;
-  deliverable_file_count?: number;
-  members: WorkflowMemberRef[];
-  completion_policy: WorkflowCompletionPolicy;
-  events: WorkflowNodeEvents;
-  /** Instance-node JSONB decoration (mig 389). Today the only key written is
-   * `run_prepared_at` — an ISO timestamp the `stage_hook_dispatch` workflow
-   * stamps when `events.prepare_agent_run` fires on arrival. Optional/tolerant
-   * of a missing key entirely (pre-mig-389 rows, or a node the hook never
-   * touched because it has no agent owner). */
-  metadata?: { run_prepared_at?: string };
-  /** Deliverable form fields (mig 390, M3 PR-I §2) — copied verbatim from the
-   * template node at instantiation (I2); frozen on the instance (not
-   * PATCH-able, see `ProjectNodePatch`). Optional (like `metadata` above) so
-   * pre-mig-390 literals across the codebase keep compiling untouched;
-   * `normalizeInstanceNode` (workflowService.ts) fills a real `[]` once data
-   * flows through it. */
-  form_schema?: FormFieldDef[];
-  /** Live values entered into this node's deliverable form (Stage Board,
-   * task I4) — instance-only, PATCH-able via `ProjectNodePatch.form_data`.
-   * Unknown keys (not present in this node's own `form_schema`) are dropped
-   * server-side on write. Optional/normalized the same way as `form_schema`. */
-  form_data?: Record<string, unknown>;
-  /** Dependency edges (mig 391, M3 PR-J) — REAL, stable instance node ids
-   * (contrast the template-side payload-index contract) this node depends
-   * on. Optional/normalized the same way as `form_schema`/`form_data` so a
-   * pre-mig-391 row never hands `undefined` to a consumer. */
-  depends_on?: string[];
-  /** Pre-work notes for whoever works this stage (mig 395, M4 Autopilot task
-   * O1/O2) — instance-only runtime text, writable any time before the node
-   * finishes (PATCH-able, see `ProjectNodePatch.brief`). Injected into an
-   * agent's task context on auto-start/dispatch/start-early alike; surfaced
-   * read-only once the node reaches `in_review` (pinned in the Stage Board's
-   * review context + the mirror issue) and permanently read-only once
-   * `done`/`skipped`. Optional/normalized the same way as `form_schema` above
-   * so a pre-mig-395 row never hands `undefined` to a consumer. */
-  brief?: string;
-}
-
-/** GET /projects/{id}/workflow payload. */
-export interface ProjectWorkflow {
-  has_workflow: boolean;
-  current_node_id: string | null;
-  agents_active: number;
-  nodes: ProjectStageNode[];
-}
-
-/** Minimal read-only issue reference used by the Stage Board (mirror issue /
- * sub-issue row) — a slice of the full `Issue` shape (services/issuesService.ts),
- * only what `GET .../board` actually projects. */
-export interface StageBoardIssueRef {
-  id: string;
-  identifier: string | null;
-  title: string | null;
-  status: string;
-  assignee: { user_id: string | null; agent_id: string | null };
-}
-
-/** The node's mirror issue, with its sub-issues inlined (Stage Board F1). */
-export interface StageBoardIssue extends StageBoardIssueRef {
-  sub_issues: StageBoardIssueRef[];
-}
-
-/** One file filed into the node's deliverable folder (Stage Board F1). */
-export interface StageBoardFile {
-  id: string;
-  filename: string | null;
-  size: number | null;
-  created_at: string | null;
-  /** Identifier of the issue the file was uploaded from, when known. */
-  source_issue_identifier: string | null;
-}
-
-/**
- * `GET /projects/{id}/workflow/nodes/{node_id}/board` payload (M2 PR-F F1) —
- * the Stage Board workspace module's single data source: the node's full row,
- * its mirror issue (or `null` — no mirror yet, or a legacy project whose
- * mirror predates the current origin-id format), and the files filed into its
- * deliverable folder.
- */
-export interface StageBoardData {
-  node: ProjectStageNode;
-  issue: StageBoardIssue | null;
-  files: StageBoardFile[];
-}
-
 /** POST body to add a node to a live instance (M2-W3-1). Exactly one of
  * `source_stage_id` (from the node bank) or `name` (blank). */
 export interface ProjectNodeCreate {
@@ -1426,211 +807,6 @@ export type AdvanceBlockedReason =
   | 'FORM_INCOMPLETE'
   | 'NO_NEXT'
   | 'DEPS_PENDING';
-
-/** A node named in an advance preview (closing / creating list). */
-export interface AdvanceNodeRef {
-  node_id: string;
-  name: string;
-  assignee_user_id: string | null;
-  assignee_agent_id: string | null;
-  due_date: string | null;
-}
-
-/** Server-computed advance ruling (shared by preview + execute, #1400). */
-export interface AdvancePreview {
-  direction: 'forward' | 'back';
-  will_advance: boolean;
-  blocked_reason: AdvanceBlockedReason | null;
-  closing: AdvanceNodeRef[];
-  creating: AdvanceNodeRef[];
-  warnings: string[];
-  /** Required form-field LABELS (never keys) missing from the ACTIVE
-   * (current) group when `blocked_reason === 'FORM_INCOMPLETE'` (mig 390,
-   * M3 PR-I §2) — Gate 3 checks the group that's about to close, not the
-   * target group Gate 5 (deps) checks. Empty for every other ruling. */
-  missing_fields: string[];
-  /** Names of target-group nodes whose dependencies aren't yet done/skipped
-   * when `blocked_reason === 'DEPS_PENDING'` (mig 391, M3 PR-J). Server-ruled
-   * — the confirm dialog renders this verbatim, never a local derivation.
-   * Empty for every other ruling. */
-  waiting_on: string[];
-}
-
-/**
- * Per-episode progress row from `GET /api/v1/projects/{id}/episodes/progress`
- * (PR-10b workspace shell, spec G12) — script/scene/shot counts plus a
- * server-derived pipeline status. `status` is one of
- * planned/drafting/boarding/boarded/rendered (see episode_repository.py
- * `_derive_episode_status`); kept as `string` here so the frontend degrades
- * gracefully instead of throwing on a future status value.
- */
-export interface EpisodeProgress {
-  episode_id: string;
-  title: string;
-  sort_order: number;
-  /** 集负责人 (Task 6, mig — Episodes.owner_id). null = unassigned. Drives
-   * Task 9's `canEditConfig` (project owner OR this episode's owner may
-   * edit that episode's node config in place). */
-  owner_id?: string | null;
-  script_count: number;
-  scene_count: number;
-  shots_total: number;
-  shots_done: number;
-  renders_count: number;
-  status: string;
-  /** B4 真数据(2026-08-08):每集工作流节点计数与 agent 提问数。optional —
-   * fetchEpisodesProgress 原样透传,旧后端/测试桩缺省时消费方回退旧近似
-   * (进度条回落 status 五段阶梯、"等你回答"回落 planned 计数)。 */
-  workflow?: EpisodeWorkflowRollup;
-  /** B4 判据当前值(派生,可与节点 status 合法不一致=产物被删的信号)。 */
-  surface_state?: EpisodeSurfaceState;
-}
-
-/** 每集工作流汇总(episode_repository.progress_by_project 的 workflow 键)。 */
-export interface EpisodeWorkflowRollup {
-  nodes_total: number;
-  nodes_done: number;
-  /** BIGINT 走字符串防精度丢失;无游标时为 null。 */
-  current_node_id: string | null;
-  needs_input_count: number;
-}
-
-/** surface 完成判据的当前派生值(script/storyboard 两档, spec §5)。 */
-export interface EpisodeSurfaceState {
-  script: boolean;
-  storyboard: boolean;
-}
-
-/**
- * Project-level ASSETS "main library" rows from
- * `GET /api/v1/projects/{id}/entities` (PR-10b, spec G13) — characters and
- * locations are derived from script cues/scene headers, never hand-authored,
- * so there's no separate write path here.
- */
-export interface ProjectEntityCharacter {
-  name: string;
-  cue_count: number;
-  episode_ids: string[];
-}
-
-export interface ProjectEntityLocation {
-  name: string;
-  scene_count: number;
-  episode_ids: string[];
-}
-
-export interface ProjectEntities {
-  characters: ProjectEntityCharacter[];
-  locations: ProjectEntityLocation[];
-}
-
-/**
- * A single `generated_media` row from `GET /api/v1/projects/{id}/renders`
- * (PR-10b, spec G12 Renders module) — image frames and shot videos produced
- * for the project's episodes. No `cover`/`stream` URL field on the row
- * itself; the frontend builds `/api/v1/generated-media/{id}/cover` (image)
- * or `/api/v1/generated-media/{id}/stream` (video) from `id` + `media_kind`.
- */
-export interface RenderItem {
-  id: string;
-  media_kind: 'image' | 'video' | string;
-  mime: string | null;
-  origin_kind: string;
-  node_id: string | null;
-  created_at: string;
-}
-
-export interface RenderItemPage {
-  items: RenderItem[];
-  next_cursor: string | null;
-}
-
-/** Aggregate shot-frame progress for the storyboard stage suggestion (Phase B B3). */
-export interface StoryboardProgress {
-  total: number;
-  done: number;
-  empty: number;
-  generating: number;
-  failed: number;
-  script_count: number;
-  scene_count: number;
-}
-
-/** The action a work-queue suggestion CTA performs: fire the one-click batch, or navigate a tab. */
-export interface SuggestionAction {
-  type: 'generate_missing_frames' | 'navigate';
-  label_key: string;
-  tab?: ProjectTab | null;
-  count?: number | null;
-}
-
-/**
- * One row of the batch "what's next" feed for the homepage work queue
- * (PR-9, G7) — `GET /api/v1/projects/suggestions`. Carries the per-project
- * `kind`/`progress`/`action` next-step hint plus the project identity + stall
- * flag + latest activity needed to render a queue row without a second
- * per-project fetch.
- */
-export interface ProjectSuggestionItem {
-  project_id: string;
-  name: string;
-  stage_slug: string | null;
-  kind: string;
-  progress?: StoryboardProgress | null;
-  action?: SuggestionAction | null;
-  stalled: boolean;
-  latest_activity?: ProjectCardActivity | null;
-}
-
-/** One recently-edited script or canvas for the Projects "Recent" view. */
-export interface RecentItem {
-  kind: 'script' | 'canvas';
-  id: string;
-  name: string;
-  project_id: string;
-  project_name: string;
-  // The item's OWN project's team (null for a personal project with no
-  // team) — the Recent view is owner-scoped across every team the caller
-  // belongs to, so navigation MUST use this field, never the current page's
-  // teamId (see ProjectsPage.handleRecentSelect).
-  team_id: string | null;
-  updated_at: string | null;
-}
-
-export type ScriptAssetType = 'worldview' | 'character' | 'location' | 'prop' | 'plot_point';
-
-export interface ScriptAsset {
-  id: string;
-  script_id: string;
-  asset_type: ScriptAssetType;
-  name: string;
-  content?: string;
-  data_json: Record<string, unknown>;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Skill {
-  id: string;
-  team_id?: string;
-  project_id?: string;
-  name: string;
-  description?: string;
-  content_md?: string;
-  category?: string;
-  icon: string;
-  output_format?: string;
-  trigger_keywords: string[];
-  is_public: boolean;
-  status: string;
-  created_by?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-/** @deprecated Use Skill instead */
-export type StyleTemplate = Skill;
 
 export interface StoryboardNode {
   id: string;
@@ -1710,7 +886,6 @@ export interface ProjectSummary {
 //
 // Naming: prefixed `AILibrary*` to avoid collision with:
 //   - legacy `AIAgent` in `services/aiService.ts` (chat agent — different shape)
-//   - existing top-level `Skill` interface above (style templates — different shape)
 //
 // BIGINT precision note: backend returns `skills.id` as JSON number. For Phase 1
 // these are small serial-like values well below 2^53, so `number` is safe.
@@ -1986,61 +1161,6 @@ export interface AgentRunTaskRef {
   task_type?: string | null;
 }
 
-/** One currently-running run in the Workforce live strip. */
-export interface LiveAgentRun {
-  id: string;
-  agent_id: string;
-  status: 'running';
-  trigger: string;
-  model?: string | null;
-  started_at: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  cost_cents?: number | null;
-  input_summary?: string | null;
-  task_id?: string | null;
-  agent_slug?: string | null;
-  agent_name?: string | null;
-  agent_icon?: string | null;
-}
-
-/** One transcript event of a run (agent_run_transcript_events, mig 397; mig 285 had aimed for the old agent_run_events name). */
-/** Every event type the backend CHECK allows (mig 285 / 436 / 443 / 453).
- * The union is open-ended on purpose: `foldEvents` ignores what it does not
- * know, so a new backend type never breaks an old client. */
-export type AgentRunEventType =
-  | 'user'
-  | 'assistant'
-  | 'tool_call'
-  | 'error'
-  | 'system'
-  | 'capability_denied'
-  | 'llm_retry'
-  | 'todo_write'
-  | 'compaction_start'
-  | 'compaction_summary'
-  | 'compaction_end'
-  | 'turn_end'
-  | 'step_start'
-  | 'step_end'
-  | 'inbox_claimed'
-  | 'deliverable'
-  | 'budget_check'
-  | (string & {});
-
-export interface AgentRunEvent {
-  seq: number;
-  // 'capability_denied': Task 5 (Agent 权限页梳理立项) — the capability gate's
-  // abort, recorded once per tool per turn (backend/app/services/ai/runner/
-  // agent_runner.py). payload: { tool: string, reason: string }.
-  event_type: AgentRunEventType;
-  payload: Record<string, unknown>;
-  created_at: string;
-  /** mig 453 step coordinates; null on rows written before them. */
-  turn?: number | null;
-  step?: number | null;
-}
-
 /** Full detail view — adds summaries, metadata, snapshots, and cancel state. */
 export interface AgentRunDetail extends AgentRunListItem {
   session_id?: string | null;
@@ -2081,176 +1201,11 @@ export interface AgentRunListResponse {
   offset: number;
 }
 
-// ─── Per-agent Dashboard aggregate ─────────────────────────────────────────
-// Backed by GET /api/v1/ai-library/agents/{slug}/dashboard. Paperclip-style
-// 14-day overview, scoped to the authenticated user.
-
-export interface DailyCount {
-  date: string; // YYYY-MM-DD
-  count: number;
-}
-
-export interface DailySuccessRate {
-  date: string;
-  success: number;
-  total: number;
-}
-
-export interface DashboardCosts {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  total_cost_cents: number;
-  run_count: number;
-}
-
-export interface DashboardRecentTask {
-  id: string;
-  lifecycle_status: string;
-  created_at: string;
-  started_at?: string | null;
-  ended_at?: string | null;
-  title?: string | null;
-  error_code?: string | null;
-  error_message?: string | null;
-}
-
-export interface DashboardRecentRun {
-  id: string;
-  status: string;
-  trigger: string;
-  model?: string | null;
-  started_at: string;
-  ended_at?: string | null;
-  prompt_tokens: number;
-  completion_tokens: number;
-  cost_cents?: number | null;
-}
-
-/** GET /ai-library/agents/{slug}/usage — "Used by" card data. */
-export interface AgentUsageModuleRef {
-  /** Team-scoped route segment (resources / projects / canvas / parser / issues). */
-  module_key: string;
-  /** i18n sub-label key: aiLibrary.agents.usage.feature.<feature_key>. */
-  feature_key: string;
-}
-
-export interface AgentUsage {
-  modules: AgentUsageModuleRef[];
-  trigger_counts: { trigger: string; feature_key: string; count: number }[];
-  conversation_count: number;
-  routine_count: number;
-  window_days: number;
-}
-
-export interface AgentDashboard {
-  agent: {
-    id: string;
-    slug: string;
-    name: string;
-    icon?: string | null;
-    model?: string | null;
-    persistent: boolean;
-    paused_reason?: string | null;
-  };
-  /** Most recent run, regardless of window. Null when never invoked. */
-  latest_run: AgentRunDetail | null;
-  /** 14 entries, oldest first; gaps filled with count=0. */
-  run_activity_14d: DailyCount[];
-  /** lifecycle_status → count, last 14d. May omit zero buckets. */
-  tasks_by_status_14d: Record<string, number>;
-  /** 14 entries with daily success/total counts. */
-  success_rate_14d: DailySuccessRate[];
-  /** Sums + total cost over the 14-day window. */
-  costs_14d: DashboardCosts;
-  recent_tasks: DashboardRecentTask[];
-  recent_runs: DashboardRecentRun[];
-}
-
 // ─── AI Usage aggregates ───────────────────────────────────────────────────
 // Mirror of backend/app/schemas/agent_runs.py (UsagePerAgent, UsageAggregate).
 // Fed by GET /api/v1/ai-library/usage?scope=&month=[&team_id=&project_id=].
 
 export type UsageScope = 'user' | 'team' | 'project';
-
-export interface UsagePerAgent {
-  agent_id: string; // UUID
-  agent_slug?: string | null;
-  agent_name?: string | null;
-  run_count: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  /** Fractional cents — same convention as agent_runs.cost_cents. */
-  cost_cents: number;
-  failed_count: number;
-}
-
-export interface UsageAggregate {
-  scope: UsageScope;
-  /** YYYY-MM (calendar month, aggregated in UTC). */
-  month: string;
-  total_runs: number;
-  total_tokens: number;
-  total_cost_cents: number;
-  per_agent: UsagePerAgent[];
-}
-
-// Row-level usage detail — GET /api/v1/ai-library/usage/runs (caller-scoped).
-export interface UsageRunItem {
-  id: string;
-  agent_id: string | null;
-  agent_slug?: string | null;
-  agent_name?: string | null;
-  model: string | null;
-  provider: string | null;
-  status: string;
-  trigger: string | null;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  /** Fractional cents — same convention as agent_runs.cost_cents. */
-  cost_cents: number;
-  duration_ms: number | null;
-  started_at: string | null;
-  error_code: string | null;
-}
-
-export interface UsageRunsPage {
-  items: UsageRunItem[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-// Daily rollup grouped by model or agent — GET /api/v1/ai-library/usage/daily.
-export interface UsageDailyRow {
-  date: string;
-  /** Group key: model name, or agent uuid when group_by=agent. */
-  key: string | null;
-  /** Display label (agent name resolved server-side; = key for models). */
-  label: string | null;
-  requests: number;
-  failed_requests: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  cost_cents: number;
-}
-
-export type UsageGroupBy = 'model' | 'agent';
-
-export interface UsageDailySummary {
-  days: number;
-  /** Set when the window is a calendar month (YYYY-MM) instead of last-N-days. */
-  month: string | null;
-  group_by: UsageGroupBy;
-  total_requests: number;
-  total_failed: number;
-  total_tokens: number;
-  total_cost_cents: number;
-  daily: UsageDailyRow[];
-}
 
 /**
  * One run's money line — `GET /api/v1/ai-library/runs/costs` (3c §4.2).
@@ -2351,72 +1306,6 @@ export interface CreateChatSessionPayload {
   context_id?: string;
 }
 
-/** Phase 3: per-user token usage summary (driven by ai_usage_logs). */
-export interface AILibraryUsageSummary {
-  window_start: string;
-  window_end: string;
-  overall: {
-    total_tokens: number;
-    cost_points: number;
-    run_count: number;
-  };
-  by_model: Array<{
-    model: string;
-    total_tokens: number;
-    cost_points: number;
-    run_count: number;
-  }>;
-  by_day: Array<{
-    date: string;
-    total_tokens: number;
-    cost_points: number;
-    run_count: number;
-  }>;
-}
-
-/** Phase 3: AI Library version history item (agent / skill / skill_file).
- *  List view shape — only metadata. Full body via the detail endpoint. */
-export interface AILibraryVersionItem {
-  id: string;
-  version_number: number;
-  notes: string | null;
-  created_by: string | null;
-  created_at: string | null;
-  /** agent-only */
-  model?: string | null;
-  temperature?: number | null;
-  max_tokens?: number | null;
-  /** skill_file-only */
-  path?: string;
-  file_type?: string;
-}
-
-/** G1: Approval request row from agent_approval_requests (mig 198).
- *  Surfaced to the user when an agent hook returns await_approval.
- *  All times ISO strings. payload is hook-defined JSON. */
-export interface AILibraryApprovalRequest {
-  id: string;
-  agent_id: string;
-  session_id: string | null;
-  run_id: string | null;
-  hook_name: string;
-  reason: string;
-  payload: Record<string, unknown>;
-  created_at: string | null;
-  expires_at: string | null;
-}
-
-/** A: AI Library MCP server registration row.
- *  bearer_token is never returned — only has_bearer_token boolean. */
-export interface AILibraryMCPServer {
-  id: string;
-  name: string;
-  url: string;
-  description: string | null;
-  enabled: boolean;
-  has_bearer_token?: boolean;
-}
-
 /** O5: AI Library memory row, as returned by GET /memories. */
 export interface AILibraryMemory {
   id: string;
@@ -2437,71 +1326,6 @@ export interface AILibraryMemory {
   updated_at: string | null;
 }
 
-/** O4: AI Library commitment (followup) row, as returned by GET /commitments. */
-export interface AILibraryCommitment {
-  id: number;
-  agent_id: string;
-  session_id: string | null;
-  description: string;
-  trigger_type: 'time' | 'event' | 'next_session' | null;
-  trigger_at: string | null;
-  trigger_event: string | null;
-  status: 'pending' | 'fulfilled' | 'cancelled' | 'failed' | 'expired';
-  created_at: string | null;
-  fulfilled_at: string | null;
-  expires_at: string | null;
-}
-
-/**
- * One Skill / Delegate dispatch the LLM made during a chat turn.
- * Mirrors backend ``ChatToolCall``. Returned at the top level of
- * ``ChatResponse`` (live turn) AND folded into the assistant message's
- * ``metadata_json.tool_calls`` so refetched history keeps it.
- */
-export interface ChatToolCall {
-  /** 'Skill' | 'Delegate' (open string in case the runner adds more). */
-  name: string;
-  /** 1-indexed loop tick within the turn. */
-  iteration: number;
-  /** Raw arg payload the agent runner saw. */
-  args: Record<string, unknown>;
-  /** Raw result payload the dispatched tool returned. */
-  result: Record<string, unknown>;
-  /**
-   * The SAME normalised failure code the transcript's `tool_call` event
-   * carries — backend computes `tool_error_code(result)` once per dispatch and
-   * puts it on both. `null`/absent means success.
-   *
-   * Reading `result` alone is NOT equivalent: the code also folds in a
-   * non-`ok` `outcome` and the bare presence of an `error` key, and neither of
-   * those shapes carries `ok: false`. Judge with `judgeToolOk`, never by hand.
-   *
-   * Optional because assistant messages persisted before the backend added it
-   * replay without the key — absent reads as "no code", not as a failure.
-   */
-  error_code?: string | null;
-}
-
-/**
- * One attachment the backend could not resolve for a chat turn (G2).
- * Mirrors backend ``AttachmentFailure`` — ``index`` is 0-based into the
- * binary (non-``resource_ref``) attachments sent with that turn.
- */
-export interface ChatAttachmentFailure {
-  index: number;
-  kind: string;
-  reason: string;
-}
-
-export interface ChatResponse {
-  message: AIChatMessage;
-  usage: { prompt_tokens?: number; completion_tokens?: number };
-  run_id?: string | null;
-  tool_calls?: ChatToolCall[];
-  /** Empty/absent on success — non-empty means some attachments degraded
-   *  to text-only. Surfaced to the user via AttachmentFailureBanner. */
-  attachment_failures?: ChatAttachmentFailure[];
-}
 
 /** Reference attachment for chat composer @-mention.
  *  Body shape mirrors the backend `resource_ref` resolver expectation.
@@ -2614,30 +1438,6 @@ export type ResourceProcessingStatus =
   | 'failed'
   | 'skipped';
 
-/** Search result row from GET /api/v1/resources/search */
-export type ResourceSearchResult = {
-  id: string;
-  name: string;
-  kind: 'video' | 'image' | 'doc' | 'audio' | 'pdf';
-  mime: string | null;
-  size: number | null;
-  scope: { type: 'personal' | 'team'; id: string };
-  updated_at: string;
-  /** Relative path (`/api/v1/resources/{id}/cover`) or null when the
-   *  resource has no cover — prefix with the API base before use. */
-  thumbnail_url: string | null;
-  /** AI processing state mirrored from `resources`. Optional because
-   *  older callers build this shape by hand; the API always sends both. */
-  transcript_status?: ResourceProcessingStatus | null;
-  summary_status?: ResourceProcessingStatus | null;
-};
-
-export type ResourceSearchResponse = {
-  results: ResourceSearchResult[];
-  counts: { all: number; video: number; image: number; doc: number; audio: number; pdf: number };
-  next_cursor: string | null;
-};
-
 export interface Channel {
   id: string;
   team_id: string;
@@ -2677,34 +1477,6 @@ export interface ChatMessage {
   parent_id?: string | null;
   edited_at: string | null;
   deleted_at: string | null;
-  created_at: string;
-}
-
-export interface SocialAccount {
-  id: string; // Snowflake BIGINT, serialized as string by backend (JS 2^53 precision)
-  scope_type: 'user' | 'team';
-  scope_id: string;
-  platform: 'douyin' | 'kuaishou' | 'xiaohongshu';
-  // The identity key the account is upserted on. One authoritative source per
-  // platform (a cookie: douyin uid_tt / bilibili DedeUserID) — never the
-  // on-screen handle, which is what bound one account into two rows on
-  // 2026-08-09. Not user-visible; show `username` / `platform_handle`.
-  platform_user_id: string;
-  // The platform's public account name (抖音号 / 小红书号), mig 414. Display
-  // only and free to change — it takes no part in identity. null = the console
-  // did not render it on the last scrape.
-  platform_handle?: string | null;
-  username: string;
-  avatar_url: string | null;
-  token_expires_at: string | null;
-  // How the account is bound (mig 401). 'oauth' = open-platform token;
-  // 'session' = browser session, the only channel that can publish unattended.
-  auth_type: 'oauth' | 'session';
-  // Both 'expired' (oauth token) and 'needs_relogin' (dead browser session)
-  // are actionable — anything counting "needs attention" must include both.
-  status: 'active' | 'expired' | 'needs_relogin';
-  // Last successful session validation; null = never checked (session accounts only).
-  session_checked_at?: string | null;
   created_at: string;
 }
 
@@ -2774,42 +1546,6 @@ export interface SessionLoginState {
   } & Record<string, unknown>;
 }
 
-export interface PublishTaskAccount {
-  id: string;
-  account_id: string;
-  username: string;
-  avatar_url: string | null;
-  // Mirrors publish_task_accounts.channel (mig 403). A 'session' row never
-  // reaches 'pending_share' — that state only exists for the H5 phone handoff.
-  channel: 'official' | 'h5' | 'session';
-  status: 'pending' | 'pending_share' | 'publishing' | 'success' | 'failed' | 'cancelled';
-  error_message: string | null;
-  published_url: string | null;
-  platform_item_id: string | null;
-  published_at: string | null;
-  /**
-   * Did the platform confirm this post is actually live? (`publish_readback`)
-   *
-   * `status: 'success'` only means OUR upload finished — for the session
-   * channel the platform still has to accept it, which a scheduled read-back
-   * checks minutes later. Until this field existed the two were indistinguishable
-   * on screen, so a post awaiting confirmation and one confirmed live both read
-   * "Published".
-   *
-   * `null` = not checked yet (the starting point of `pending`), NOT "no check
-   * needed" — only `not_supported` means that.
-   *
-   * ⚠️ `not_live` ("we looked, it is not up") and `pending` ("this round could
-   * not tell us") must stay distinguishable all the way to the pixels. Folding
-   * them together renders a crashed container as "the platform rejected your
-   * post" — see the module docstring of `publish_readback.py`.
-   */
-  verify_state?: 'pending' | 'verified' | 'not_live' | 'not_supported' | 'abandoned' | null;
-  /** Typed reason (`[rejected] …`, `[under_review] …`, `[verification_abandoned] …`).
-   *  The bracketed code is the contract; the prose after it is written for logs. */
-  verify_detail?: string | null;
-}
-
 /**
  * Douyin 自主声明 — the six options the platform offers, in the platform's own
  * wording. These strings are the WIRE values (and what the DB stores): the
@@ -2827,80 +1563,6 @@ export type SelfDeclaration =
   | '内容含营销推广信息'
   | '虚构演绎，仅供娱乐'
   | '无需添加自主声明';
-
-/**
- * A topic name bound to the platform's own topic ENTITY (Douyin challenge
- * `cid`), captured at the moment the user picked it out of the suggestions.
- *
- * Parallel to `topics` (the plain names), never a replacement: hand-typed
- * topics have no id and simply do not appear here. The publish path does not
- * read this yet — it is stored because the cid exists only at pick time and
- * cannot be reconstructed afterwards.
- */
-export interface TopicRef {
-  name: string;
-  topic_id: string;
-  /** Cumulative play count as shown when the user picked it. */
-  view_count: number;
-}
-
-export interface PublishTask {
-  id: string;
-  content_type: 'video' | 'images' | 'article';
-  title: string;
-  description: string | null;
-  topics: string[];
-  topic_refs?: TopicRef[];
-  visibility: 'public' | 'friends' | 'private';
-  distribution_mode: 'broadcast' | 'one_to_one';
-  status: 'pending' | 'publishing' | 'pending_share' | 'success' | 'partial' | 'failed';
-  created_at: string;
-  /** Platform-side scheduled publish time (ISO). null = published immediately. */
-  scheduled_at: string | null;
-  /**
-   * Can that schedule still be honoured RIGHT NOW? Derived server-side.
-   *
-   * - `none` — not a scheduled batch
-   * - `pending` — still inside the window; re-running it as scheduled can work
-   * - `unreachable` — the time has passed (or is too close to finish the
-   *   upload), so re-running it as scheduled is guaranteed to be rejected
-   *
-   * Computed by the backend because the threshold (`SCHEDULE_MIN_LEAD`) is the
-   * backend's constant. Subtracting a lead the frontend guessed at would be a
-   * second copy of the rule with nothing keeping it in step.
-   */
-  schedule_state: 'none' | 'pending' | 'unreachable';
-  /** null = the declaration control was left untouched. Distinct from
-   *  '无需添加自主声明', which is the user explicitly declaring nothing. */
-  self_declaration: SelfDeclaration | null;
-  collection_name: string | null;
-  /** Douyin 选择音乐 — the track name that was searched for at publish time.
-   *  null = the music control was left untouched, i.e. the platform default
-   *  (原声), which is what every post published before this field existed got. */
-  music_name: string | null;
-  /** The picked track's identity, when the user chose one from the platform's
-   *  catalogue rather than typing a name. null = the typed-name path (or no
-   *  music at all). */
-  music_ref: MusicRef | null;
-  accounts: PublishTaskAccount[];
-}
-
-/**
- * A track's identity as the platform states it (mig 429).
- *
- * `duration` is SECONDS and `user_count` is the raw integer — formatting is
- * the UI's job. Both ride along because they are the fingerprint the browser
- * aligns dialog rows against: same title, different author or length, is a
- * different upload.
- */
-export interface MusicRef {
-  music_id: string;
-  music_name: string;
-  music_author: string;
-  duration: number;
-  user_count: number;
-  cover_url: string;
-}
 
 export interface PublishRequest {
   /**

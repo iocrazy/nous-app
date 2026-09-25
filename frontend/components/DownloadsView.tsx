@@ -1130,7 +1130,9 @@ export const DownloadsView: React.FC = () => {
       .replace(/[\\/:*?"<>|]/g, '_')
       .trim()
       .slice(0, 100);
-    await downloadFile(url, `${audioBaseName}_audio.m4a`, {
+    // `/media/download/*` needs the Bearer header; plain `downloadFile` sent
+    // none, so this menu item was always a 401.
+    await downloadWithAuth(url, `${audioBaseName}_audio.m4a`, {
       onSuccess: (f) => addToast(`Downloaded: ${f}`, 'success'),
       onError: (msg) => addToast(`Download failed (${msg})`, 'error'),
     });

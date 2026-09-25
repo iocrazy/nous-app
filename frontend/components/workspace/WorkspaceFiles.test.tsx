@@ -11,7 +11,9 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { WorkspaceFiles } from './WorkspaceFiles';
-import type { EpisodeProgress, ProjectFile, ProjectFolder, RenderItem } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
+import { makeEpisodeProgress } from '../../tests/fixtures/episodes';
+import type { GeneratedMediaRow, ProjectFile, ProjectFolder } from '../../types/api';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -42,8 +44,10 @@ vi.mock('../../services/projectsService', () => mockService);
 
 function file(over: Partial<ProjectFile>): ProjectFile {
   return {
-    id: 'f',
-    project_id: 'p1',
+    id: 9000,
+    project_id: 501,
+    folder_id: null,
+    source_issue_id: null,
     filename: 'file',
     file_type: null,
     mime_type: null,
@@ -75,8 +79,8 @@ function file(over: Partial<ProjectFile>): ProjectFile {
 
 function folder(over: Partial<ProjectFolder>): ProjectFolder {
   return {
-    id: 'fold',
-    project_id: 'p1',
+    id: 8000,
+    project_id: 501,
     parent_id: null,
     name: 'Folder',
     created_by: null,
@@ -86,10 +90,10 @@ function folder(over: Partial<ProjectFolder>): ProjectFolder {
   };
 }
 
-const FOLDERS: ProjectFolder[] = [folder({ id: 'f1', name: 'References' })];
+const FOLDERS: ProjectFolder[] = [folder({ id: 8001, name: 'References' })];
 const FILES: ProjectFile[] = [
-  file({ id: 'file1', filename: 'shot.png', file_type: 'image' }),
-  file({ id: 'file2', filename: 'doc.pdf', file_type: 'document' }),
+  file({ id: 9001, filename: 'shot.png', file_type: 'image' }),
+  file({ id: 9002, filename: 'doc.pdf', file_type: 'document' }),
 ];
 // generated_media ids are Snowflake BIGINTs stringified on the way out
 // (`_normalize` in generated_media_repository) — NOT the tidy 'r1' this
@@ -99,12 +103,41 @@ const FILES: ProjectFile[] = [
 const R_IMAGE = '7412093847562137600';
 const R_VIDEO = '7412093847562137601';
 const R_MORE = '7412093847562137602';
-const RENDERS: RenderItem[] = [
-  { id: R_IMAGE, media_kind: 'image', mime: 'image/png', origin_kind: 'shot_generate', node_id: 's1', created_at: '2026-07-08T00:00:00Z' },
-  { id: R_VIDEO, media_kind: 'video', mime: 'video/mp4', origin_kind: 'shot_video', node_id: 's2', created_at: '2026-07-08T00:00:00Z' },
+function renderRow(over: Partial<GeneratedMediaRow>): GeneratedMediaRow {
+  return {
+    id: R_IMAGE,
+    media_kind: 'image',
+    mime: 'image/png',
+    origin_kind: 'shot_generate',
+    node_id: null,
+    created_at: '2026-07-08T00:00:00Z',
+    agent_id: null,
+    canvas_id: null,
+    conversation_id: null,
+    cost_cents: null,
+    creator_id: 'u1',
+    derivation_kind: null,
+    file_path: 'sb://generated/x',
+    file_size_bytes: null,
+    model: null,
+    origin_run_id: null,
+    params: {},
+    parent_resource_id: null,
+    promoted_resource_id: null,
+    prompt: null,
+    provider: null,
+    review_state: 'inbox',
+    scope_id: '601',
+    source_asset_id: null,
+    ...over,
+  };
+}
+const RENDERS: GeneratedMediaRow[] = [
+  renderRow({ id: R_IMAGE, media_kind: 'image', mime: 'image/png', origin_kind: 'shot_generate', node_id: 's1' }),
+  renderRow({ id: R_VIDEO, media_kind: 'video', mime: 'video/mp4', origin_kind: 'shot_video', node_id: 's2' }),
 ];
 
-const EPISODE: EpisodeProgress = {
+const EPISODE: EpisodeProgress = makeEpisodeProgress({
   episode_id: '1',
   title: 'Ep 1 — Pilot',
   sort_order: 10,
@@ -114,14 +147,14 @@ const EPISODE: EpisodeProgress = {
   shots_done: 9,
   renders_count: 2,
   status: 'boarding',
-};
+});
 
 beforeEach(() => {
   addToast.mockClear();
   mockService.fetchProjectFolders.mockReset().mockResolvedValue(FOLDERS);
   mockService.fetchProjectFiles.mockReset().mockResolvedValue(FILES);
   mockService.fetchProjectRenders.mockReset().mockResolvedValue({ items: RENDERS, next_cursor: null });
-  mockService.uploadFile.mockReset().mockResolvedValue(file({ id: 'file3' }));
+  mockService.uploadFile.mockReset().mockResolvedValue(file({ id: 9003 }));
 });
 
 afterEach(() => cleanup());
@@ -130,43 +163,43 @@ describe('WorkspaceFiles', () => {
   it('"All" chip merges folders + files + renders', async () => {
     render(<WorkspaceFiles projectId="p1" currentEpisode={null} />);
 
-    expect(await screen.findByTestId('ws-files-item-folder-f1')).toBeTruthy();
-    expect(screen.getByTestId('ws-files-item-file-file1')).toBeTruthy();
-    expect(screen.getByTestId('ws-files-item-file-file2')).toBeTruthy();
+    expect(await screen.findByTestId('ws-files-item-folder-8001')).toBeTruthy();
+    expect(screen.getByTestId('ws-files-item-file-9001')).toBeTruthy();
+    expect(screen.getByTestId('ws-files-item-file-9002')).toBeTruthy();
     expect(screen.getByTestId(`ws-files-item-render-${R_IMAGE}`)).toBeTruthy();
     expect(screen.getByTestId(`ws-files-item-render-${R_VIDEO}`)).toBeTruthy();
   });
 
   it('"Media" chip shows only image/video files', async () => {
     render(<WorkspaceFiles projectId="p1" currentEpisode={null} />);
-    await screen.findByTestId('ws-files-item-file-file1');
+    await screen.findByTestId('ws-files-item-file-9001');
 
     fireEvent.click(screen.getByTestId('ws-files-chip-media'));
 
-    expect(screen.getByTestId('ws-files-item-file-file1')).toBeTruthy();
-    expect(screen.queryByTestId('ws-files-item-file-file2')).toBeNull();
-    expect(screen.queryByTestId('ws-files-item-folder-f1')).toBeNull();
+    expect(screen.getByTestId('ws-files-item-file-9001')).toBeTruthy();
+    expect(screen.queryByTestId('ws-files-item-file-9002')).toBeNull();
+    expect(screen.queryByTestId('ws-files-item-folder-8001')).toBeNull();
   });
 
   it('"Docs" chip shows only non-media files', async () => {
     render(<WorkspaceFiles projectId="p1" currentEpisode={null} />);
-    await screen.findByTestId('ws-files-item-file-file1');
+    await screen.findByTestId('ws-files-item-file-9001');
 
     fireEvent.click(screen.getByTestId('ws-files-chip-docs'));
 
-    expect(screen.getByTestId('ws-files-item-file-file2')).toBeTruthy();
-    expect(screen.queryByTestId('ws-files-item-file-file1')).toBeNull();
+    expect(screen.getByTestId('ws-files-item-file-9002')).toBeTruthy();
+    expect(screen.queryByTestId('ws-files-item-file-9001')).toBeNull();
   });
 
   it('"Renders" chip consumes the /renders endpoint exclusively', async () => {
     render(<WorkspaceFiles projectId="p1" currentEpisode={EPISODE} />);
-    await screen.findByTestId('ws-files-item-file-file1');
+    await screen.findByTestId('ws-files-item-file-9001');
 
     fireEvent.click(screen.getByTestId('ws-files-chip-renders'));
 
     expect(screen.getByTestId(`ws-files-item-render-${R_IMAGE}`)).toBeTruthy();
     expect(screen.getByTestId(`ws-files-item-render-${R_VIDEO}`)).toBeTruthy();
-    expect(screen.queryByTestId('ws-files-item-file-file1')).toBeNull();
+    expect(screen.queryByTestId('ws-files-item-file-9001')).toBeNull();
   });
 
   it('current-episode toggle re-fetches renders scoped to the episode', async () => {
@@ -197,19 +230,19 @@ describe('WorkspaceFiles', () => {
 
   it('double-clicking a folder navigates in and updates the breadcrumb', async () => {
     render(<WorkspaceFiles projectId="p1" currentEpisode={null} />);
-    const folderItem = await screen.findByTestId('ws-files-item-folder-f1');
+    const folderItem = await screen.findByTestId('ws-files-item-folder-8001');
 
     fireEvent.doubleClick(folderItem);
 
-    await waitFor(() => expect(screen.getByTestId('ws-files-breadcrumb-f1')).toHaveTextContent('References'));
+    await waitFor(() => expect(screen.getByTestId('ws-files-breadcrumb-8001')).toHaveTextContent('References'));
     await waitFor(() =>
-      expect(mockService.fetchProjectFiles).toHaveBeenCalledWith('p1', false, 'f1'),
+      expect(mockService.fetchProjectFiles).toHaveBeenCalledWith('p1', false, '8001'),
     );
   });
 
   it('renders pager appends the next page and hides once the cursor is exhausted', async () => {
-    const MORE: RenderItem[] = [
-      { id: R_MORE, media_kind: 'image', mime: 'image/png', origin_kind: 'shot_generate', node_id: 's3', created_at: '2026-07-09T00:00:00Z' },
+    const MORE: GeneratedMediaRow[] = [
+      renderRow({ id: R_MORE, node_id: 's3', created_at: '2026-07-09T00:00:00Z' }),
     ];
     mockService.fetchProjectRenders
       .mockReset()
@@ -240,7 +273,7 @@ describe('WorkspaceFiles', () => {
 
   it('double-clicking a file opens the FileInfoPanel preview drawer, backdrop closes it', async () => {
     render(<WorkspaceFiles projectId="p1" currentEpisode={null} />);
-    const fileItem = await screen.findByTestId('ws-files-item-file-file1');
+    const fileItem = await screen.findByTestId('ws-files-item-file-9001');
 
     expect(screen.queryByTestId('ws-files-preview')).toBeNull();
     fireEvent.doubleClick(fileItem);

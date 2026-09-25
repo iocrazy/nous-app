@@ -1,6 +1,7 @@
 // frontend/services/topicService.ts
 import { getAuthHeaders, parseShareLink } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import type { TopicScriptChapter, TopicScriptResponse } from '../types/api';
 
 export interface Hotspot {
   id: string;
@@ -208,12 +209,13 @@ export async function setSourceHidden(id: string, hide: boolean): Promise<void> 
 }
 
 // generate-script returns the script_ai outline (a list of chapter objects), not a string.
-export async function generateScript(id: string): Promise<unknown> {
+export async function generateScript(id: string): Promise<TopicScriptChapter[]> {
   const resp = await fetch(`${base()}/${id}/generate-script`, {
     method: 'POST',
     headers: await getAuthHeaders(),
   });
-  return (await jsonOrThrow(resp)).script;
+  const body: TopicScriptResponse = await jsonOrThrow(resp);
+  return body.script;
 }
 
 // 解析下载: NO new backend endpoint — reuse the existing, battle-tested parser

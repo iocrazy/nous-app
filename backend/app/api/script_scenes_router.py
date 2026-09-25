@@ -7,7 +7,11 @@ Endpoints:
   PATCH  /scenes/{scene_id}               — verify_scene_access
   DELETE /scenes/{scene_id}               — verify_scene_access
   POST /scenes/{scene_id}/elements/ops    — verify_scene_access
+  POST /scenes/{scene_id}/copilot-ops     — verify_scene_access
   POST /scenes/{scene_id}/move            — verify_scene_access
+
+``POST /scripts/{script_id}/scenes/after-lock`` was removed in OpenAPI P6: it
+never had a caller (the repository's ``create_after_lock`` stays).
 
 The GET routes use the *_read_access variants (team membership OR an
 explicit project_members row on the parent project — 2026-08-12 fix); the
@@ -25,6 +29,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+from app.api.row_guard import require_row
+from app.api.script_chapter_guard import require_chapter_of_script
 from app.core.config import settings
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
@@ -38,13 +44,22 @@ from app.repositories.script_scene_repository import (
     VersionConflict,
     get_script_scene_repository,
 )
+from app.schemas.envelope import Envelope
 from app.schemas.script import (
     CopilotOpsRequest,
     SceneCreate,
-    SceneCreateAfterLock,
     SceneMetaUpdate,
     SceneMoveRequest,
     SceneOpsRequest,
+)
+from app.schemas.script_scene_responses import (
+    ScriptSceneCopilotOps,
+    ScriptSceneDeleteResult,
+    ScriptSceneNumbered,
+    ScriptSceneOpsResult,
+    ScriptScenePatched,
+    ScriptSceneResponse,
+    ScriptSceneVersionConflict,
 )
 from app.services.script.scene_ops import OpError, apply_ops
 
@@ -100,7 +115,9 @@ def _to_response_list(scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [_to_response(s) for s in scenes]
 
 
-@router.get("/scripts/{script_id}/scenes")
+@router.get(
+    "/scripts/{script_id}/scenes", response_model=Envelope[List[ScriptSceneNumbered]]
+)
 async def list_scenes(
     script_id: str,
     auth: AuthDep,
@@ -115,7 +132,9 @@ async def list_scenes(
         raise HTTPException(status_code=500, detail="Failed to list scenes")
 
 
-@router.post("/scripts/{script_id}/scenes")
+@router.post(
+    "/scripts/{script_id}/scenes", response_model=Envelope[ScriptSceneResponse]
+)
 async def create_scene(
     script_id: str,
     auth: AuthDep,
@@ -123,50 +142,21 @@ async def create_scene(
     _guard: None = Depends(verify_script_access),
 ) -> Dict[str, Any]:
     """Create a scene under a script. sort_order auto-assigns to MAX+STEP
-    within the (script_id, chapter_id) group when omitted."""
+    within the (script_id, chapter_id) group when omitted. A ``chapter_id``
+    must be a chapter of this script (404 otherwise)."""
+    if body.chapter_id is not None:
+        await require_chapter_of_script(body.chapter_id, script_id)
     try:
         data = body.model_dump(exclude_none=True)
         data["script_id"] = script_id
         scene = await get_script_scene_repository().create(data)
-        return {"success": True, "data": _to_response(scene)}
     except Exception as exc:
         logger.error(f"[Scenes] create for script {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create scene")
+    return {"success": True, "data": _to_response(require_row(scene))}
 
 
-@router.post("/scripts/{script_id}/scenes/after-lock")
-async def create_scene_after_lock(
-    script_id: str,
-    auth: AuthDep,
-    body: SceneCreateAfterLock,
-    _guard: None = Depends(verify_script_access),
-) -> Dict[str, Any]:
-    """Create a scene in an ALREADY-LOCKED script (agent-layer spec §4.2
-    "锁定后插入"): positions it (bisecting between ``before_scene_id`` /
-    ``after_scene_id``, or appended at the tail when neither is given) and
-    assigns its ``scene_number`` — a letter suffix for a genuine insert
-    between two locked scenes, or the next plain integer for a tail append.
-    404 if the script's numbering isn't locked yet (use the plain create
-    endpoint pre-lock)."""
-    try:
-        data = body.model_dump(
-            exclude_none=True, exclude={"before_scene_id", "after_scene_id"}
-        )
-        data["script_id"] = script_id
-        scene = await get_script_scene_repository().create_after_lock(
-            data,
-            before_scene_id=body.before_scene_id,
-            after_scene_id=body.after_scene_id,
-        )
-        return {"success": True, "data": _to_response(scene)}
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        logger.error(f"[Scenes] create_after_lock for script {script_id} failed: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to create scene")
-
-
-@router.get("/scenes/{scene_id}")
+@router.get("/scenes/{scene_id}", response_model=Envelope[ScriptSceneNumbered])
 async def get_scene(
     scene_id: str,
     auth: AuthDep,
@@ -175,17 +165,17 @@ async def get_scene(
     """Get a single scene by id."""
     try:
         scene = await get_script_scene_repository().get_by_id(scene_id)
-        if scene is None:
-            raise HTTPException(status_code=404, detail="Scene not found")
-        return {"success": True, "data": _to_response(scene)}
-    except HTTPException:
-        raise
     except Exception as exc:
         logger.error(f"[Scenes] get {scene_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to get scene")
+    return {"success": True, "data": _to_response(require_row(scene))}
 
 
-@router.patch("/scenes/{scene_id}")
+@router.patch(
+    "/scenes/{scene_id}",
+    response_model=Envelope[ScriptScenePatched],
+    response_model_exclude_unset=True,
+)
 async def update_scene(
     scene_id: str,
     auth: AuthDep,
@@ -197,17 +187,13 @@ async def update_scene(
         scene = await get_script_scene_repository().update_meta(
             scene_id, body.model_dump(exclude_none=True)
         )
-        if scene is None:
-            raise HTTPException(status_code=404, detail="Scene not found")
-        return {"success": True, "data": _to_response(scene)}
-    except HTTPException:
-        raise
     except Exception as exc:
         logger.error(f"[Scenes] update {scene_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to update scene")
+    return {"success": True, "data": _to_response(require_row(scene))}
 
 
-@router.delete("/scenes/{scene_id}")
+@router.delete("/scenes/{scene_id}", response_model=Envelope[ScriptSceneDeleteResult])
 async def delete_scene(
     scene_id: str,
     auth: AuthDep,
@@ -227,7 +213,11 @@ async def delete_scene(
         raise HTTPException(status_code=500, detail="Failed to delete scene")
 
 
-@router.post("/scenes/{scene_id}/elements/ops")
+@router.post(
+    "/scenes/{scene_id}/elements/ops",
+    response_model=Envelope[ScriptSceneOpsResult],
+    responses={409: {"model": ScriptSceneVersionConflict}},
+)
 async def apply_element_ops(
     scene_id: str,
     auth: AuthDep,
@@ -347,7 +337,11 @@ def _copilot_cap_violation(ops: List[Dict[str, Any]]) -> Optional[tuple]:
     return None
 
 
-@router.post("/scenes/{scene_id}/copilot-ops")
+@router.post(
+    "/scenes/{scene_id}/copilot-ops",
+    response_model=Envelope[ScriptSceneCopilotOps],
+    response_model_exclude_unset=True,
+)
 async def copilot_ops(
     scene_id: str,
     auth: AuthDep,
@@ -413,7 +407,23 @@ async def copilot_ops(
                 status_code=502, detail="Copilot could not generate edits"
             )
 
-        ops = _replace_placeholder_ids(generated.get("ops") or [])
+        raw_ops = generated.get("ops") if isinstance(generated, dict) else None
+        if isinstance(generated, dict) and raw_ops is None:
+            raw_ops = []
+        if not isinstance(raw_ops, list) or not all(
+            isinstance(op, dict) for op in raw_ops
+        ):
+            # Malformed model output is a protocol error like a failed dry-run:
+            # one retry with the reason, then a typed 422 (it used to be a 500).
+            last_error = OpError("invalid_op", "every op must be a JSON object")
+            error_context = f"{last_error.code}: {last_error.message}"
+            logger.warning(
+                f"[Copilot] scene {scene_id} returned non-object ops; "
+                f"attempt {_attempt + 1}/2"
+            )
+            continue
+
+        ops = _replace_placeholder_ids(raw_ops)
         # Untrusted-output hardening (before dry-run): strip payloads to the
         # whitelist, then enforce the hard batch caps.
         ops = _whitelist_op_payloads(ops)
@@ -459,7 +469,7 @@ async def copilot_ops(
     )
 
 
-@router.post("/scenes/{scene_id}/move")
+@router.post("/scenes/{scene_id}/move", response_model=Envelope[ScriptSceneResponse])
 async def move_scene(
     scene_id: str,
     auth: AuthDep,
@@ -467,16 +477,21 @@ async def move_scene(
     _guard: None = Depends(verify_scene_access),
 ) -> Dict[str, Any]:
     """Reorder (and optionally reparent) a scene. ``chapter_id`` omitted keeps
-    the current chapter; supplied (incl. null) reparents."""
+    the current chapter; supplied (incl. null) reparents — a non-null one must
+    be a chapter of the scene's own script (404 otherwise)."""
+    chapter_id = body.chapter_id if "chapter_id" in body.model_fields_set else UNSET
+    repo = get_script_scene_repository()
+    if chapter_id is not UNSET and chapter_id is not None:
+        current = require_row(await repo.get_by_id(scene_id))
+        await require_chapter_of_script(chapter_id, current.get("script_id"))
     try:
-        chapter_id = body.chapter_id if "chapter_id" in body.model_fields_set else UNSET
-        scene = await get_script_scene_repository().move_scene(
+        scene = await repo.move_scene(
             scene_id,
             chapter_id=chapter_id,
             before_scene_id=body.before_scene_id,
             after_scene_id=body.after_scene_id,
         )
-        return {"success": True, "data": _to_response(scene)}
     except Exception as exc:
         logger.error(f"[Scenes] move {scene_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to move scene")
+    return {"success": True, "data": _to_response(require_row(scene))}

@@ -25,7 +25,7 @@ import { createInstance, type i18n as I18n } from 'i18next';
 
 import enJson from '../../public/locales/en.json';
 import { EpisodeNodeCard } from './EpisodeNodeCard';
-import type { ProjectStageNode } from '../../types';
+import type { ProjectStageNode } from '../../types/api';
 import type { PersonOption } from '../workflow/OwnerPicker';
 
 function makeI18n(): I18n {

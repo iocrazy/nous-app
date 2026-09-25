@@ -367,9 +367,14 @@ def _patch_agent_as(
     captured: dict,
     *,
     is_team_owner: bool = False,
+    is_team_member: bool = False,
     is_admin: bool = False,
 ):
-    """PATCH with the real authorization gate in play; only DB lookups stubbed."""
+    """PATCH with the real authorization gates in play; only DB lookups stubbed.
+
+    Two gates run: the agent's row scope (creator / team member / project
+    member / admin may edit it at all) and, for grants, the chat-permission
+    gate (creator / team owner / admin)."""
     app, repo = _client_with_repo(existing, captured)
     with (
         _patch("app.api.ai_library_router._repos", return_value=(repo, None)),
@@ -380,6 +385,10 @@ def _patch_agent_as(
         _patch(
             "app.api.ai_library_router._is_team_owner",
             new=AsyncMock(return_value=is_team_owner),
+        ),
+        _patch(
+            "app.api.ai_library_router._user_is_team_member",
+            new=AsyncMock(return_value=is_team_member or is_team_owner),
         ),
         _patch(
             "app.api.ai_library_router._user_is_admin",
@@ -432,6 +441,7 @@ def test_team_member_who_is_not_team_owner_cannot_grant():
         {"capabilities": {"delete": True}},
         captured,
         is_team_owner=False,
+        is_team_member=True,
     )
     assert resp.status_code == 403
     assert captured == {}

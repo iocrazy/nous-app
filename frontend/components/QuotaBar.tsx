@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchPointsBalance } from '../services/pointsService';
-import { TeamQuota } from '../types';
+import type { PointsBalance } from '../types/api';
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -13,7 +13,7 @@ function formatBytes(bytes: number): string {
 
 export const QuotaBar: React.FC = () => {
   const { t } = useTranslation();
-  const [quota, setQuota] = useState<TeamQuota | null>(null);
+  const [quota, setQuota] = useState<PointsBalance | null>(null);
 
   useEffect(() => {
     fetchPointsBalance()

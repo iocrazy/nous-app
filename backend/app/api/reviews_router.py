@@ -26,7 +26,7 @@ class AnnotationInput(BaseModel):
     data: Dict[str, Any]
 
 
-class CreateCommentRequest(BaseModel):
+class CreateReviewCommentRequest(BaseModel):
     resource_id: str
     version_id: Optional[str] = None
     content: str = Field(..., min_length=1, max_length=5000)
@@ -52,7 +52,7 @@ class SetReviewStatusRequest(BaseModel):
 
 
 @router.post("/comments")
-async def create_comment(body: CreateCommentRequest, auth: AuthDep):
+async def create_comment(body: CreateReviewCommentRequest, auth: AuthDep):
     """Create a review comment with optional annotations."""
     try:
         svc = ReviewService()

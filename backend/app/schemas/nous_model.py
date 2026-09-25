@@ -151,6 +151,10 @@ class NousModelTestResponse(BaseModel):
     # "checked and failed", and the admin page needs it to render a neutral
     # badge instead of a red one.
     not_probed: bool = False
+    # True when a local nous-engine model is authorized but not loaded right
+    # now (engine readiness 503). Only the hourly poll's passive read produces
+    # it; the admin Test does a real call, which loads the model instead.
+    idle: bool = False
     detail: str = ""
     error: Optional[str] = None
     dims: Optional[int] = None

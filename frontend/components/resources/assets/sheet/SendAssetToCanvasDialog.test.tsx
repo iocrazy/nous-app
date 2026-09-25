@@ -11,9 +11,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Canvas } from '../../../../features/canvas-core/types';
+import type { Canvas, CanvasSummary } from '../../../../features/canvas-core/types';
 import type { AssetRowDetail } from '../../../../services/assetsService';
-import type { Project } from '../../../../types';
+import type { Project } from '../../../../types/api';
+import { makeProject } from '../../../../tests/fixtures/projects';
 
 const listCanvases = vi.fn();
 const createCanvas = vi.fn();
@@ -79,22 +80,15 @@ const detail: AssetRowDetail = {
   used_in: { canvases: [], storyboards: [] },
 };
 
-const project: Project = {
-  id: PROJECT_ID,
+const project: Project = makeProject({
+  // Wire shape: the projects list sends Snowflake ids as JSON numbers.
+  id: Number(PROJECT_ID),
   name: 'Bamboo Sea',
-  description: null,
-  owner_id: 'u1',
-  team_id: SCOPE,
-  project_type: 'internal',
-  project_group: null,
-  announcement: null,
-  is_starred: false,
-  color_label: null,
-  archived_at: null,
-  file_count: 0,
+  // The dialog never reads team_id; any in-range Snowflake will do.
+  team_id: 337610660408222,
   created_at: '2026-09-01T00:00:00+00:00',
   updated_at: '2026-09-01T00:00:00+00:00',
-};
+});
 
 const canvasRow = (over: Partial<Canvas> = {}): Canvas => ({
   id: CANVAS_ID,
@@ -110,8 +104,17 @@ const canvasRow = (over: Partial<Canvas> = {}): Canvas => ({
   created_at: '2026-09-01T00:00:00+00:00',
   updated_at: '2026-09-02T10:00:00+00:00',
   created_by: null,
+  episode_id: null,
+  asset_id: null,
+  deleted_at: null,
   ...over,
 });
+
+// `listCanvases` resolves summary rows (no node graph), not documents.
+const canvasSummary = (over: Partial<CanvasSummary> = {}): CanvasSummary => {
+  const { id, project_id, name, kind, created_at, updated_at } = canvasRow();
+  return { id, project_id, name, kind, created_at, updated_at, node_count: 0, ...over };
+};
 
 const onDone = vi.fn();
 const onClose = vi.fn();
@@ -137,7 +140,7 @@ async function pickProjectAndCanvas() {
 }
 
 beforeEach(() => {
-  listCanvases.mockReset().mockResolvedValue([canvasRow()]);
+  listCanvases.mockReset().mockResolvedValue([canvasSummary()]);
   createCanvas.mockReset();
   sendAssetToCanvas
     .mockReset()
@@ -175,8 +178,8 @@ describe('SendAssetToCanvasDialog', () => {
 
   it('hides a retired classic canvas, which has no renderer to land on', async () => {
     listCanvases.mockResolvedValue([
-      canvasRow({ id: '1', name: 'Old', kind: 'classic' }),
-      canvasRow({ id: '2', name: 'Live', kind: 'smart' }),
+      canvasSummary({ id: '1', name: 'Old', kind: 'classic' }),
+      canvasSummary({ id: '2', name: 'Live', kind: 'smart' }),
     ]);
     renderDialog();
     fireEvent.click(screen.getByTestId('send-asset-project-option'));

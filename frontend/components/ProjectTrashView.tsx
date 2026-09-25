@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, RotateCcw, AlertTriangle } from 'lucide-react';
-import { ProjectFile } from '../types';
+import type { ProjectFile } from '../types/api';
 import { fetchProjectFiles, updateFile, deleteFile } from '../services/projectsService';
 import {
   listProjectCanvasTrash,
   restoreCanvas,
   purgeCanvas,
-  type TrashedCanvas,
+  type ProjectTrashedCanvas,
 } from '../features/canvas-core/services/canvasService';
 import { Frame } from 'lucide-react';
 
@@ -19,7 +19,7 @@ interface ProjectTrashViewProps {
 export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, onCountChange }) => {
   const { t } = useTranslation();
   const [trashedFiles, setTrashedFiles] = useState<ProjectFile[]>([]);
-  const [trashedCanvases, setTrashedCanvases] = useState<TrashedCanvas[]>([]);
+  const [trashedCanvases, setTrashedCanvases] = useState<ProjectTrashedCanvas[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadTrashed = async () => {
@@ -29,7 +29,7 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
         fetchProjectFiles(projectId, true),
         listProjectCanvasTrash(projectId).catch((err) => {
           console.error('Failed to load trashed canvases:', err);
-          return [] as TrashedCanvas[];
+          return [] as ProjectTrashedCanvas[];
         }),
       ]);
       const trashed = files.filter(f => f.is_trashed);
@@ -45,7 +45,7 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
 
   useEffect(() => { loadTrashed(); }, [projectId]);
 
-  const handleRestoreCanvas = async (canvas: TrashedCanvas) => {
+  const handleRestoreCanvas = async (canvas: ProjectTrashedCanvas) => {
     try {
       await restoreCanvas(canvas.id);
       loadTrashed();
@@ -54,7 +54,7 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
     }
   };
 
-  const handlePurgeCanvas = async (canvas: TrashedCanvas) => {
+  const handlePurgeCanvas = async (canvas: ProjectTrashedCanvas) => {
     if (!window.confirm(t('projects.trash.confirmPermanentDelete',
       `Permanently delete "${canvas.name}"? This cannot be undone.`))) return;
     try {
@@ -67,7 +67,7 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
 
   const handleRestore = async (file: ProjectFile) => {
     try {
-      await updateFile(projectId, file.id, { is_trashed: false });
+      await updateFile(projectId, String(file.id), { is_trashed: false });
       loadTrashed();
     } catch (err) {
       console.error('Failed to restore file:', err);
@@ -78,7 +78,7 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
     if (!window.confirm(t('projects.trash.confirmPermanentDelete',
       `Permanently delete "${file.filename}"? This cannot be undone.`))) return;
     try {
-      await deleteFile(projectId, file.id);
+      await deleteFile(projectId, String(file.id));
       loadTrashed();
     } catch (err) {
       console.error('Failed to permanently delete file:', err);

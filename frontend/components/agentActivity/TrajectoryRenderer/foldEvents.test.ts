@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentRunEvent } from '../../../types';
+import type { AgentRunEvent } from '../../../types/api';
 import { foldEvents, liveStep } from './foldEvents';
 
 let seq = 0;
@@ -103,7 +103,7 @@ describe('foldEvents — steps do not stack', () => {
 
   it('does not crash on garbage', () => {
     expect(foldEvents([] as AgentRunEvent[])).toEqual([]);
-    expect(foldEvents([{ seq: 1, event_type: 'tool_call', payload: null as unknown as Record<string, unknown>, created_at: '' }])).toHaveLength(1);
+    expect(foldEvents([{ seq: 1, event_type: 'tool_call', payload: null as unknown as Record<string, unknown>, created_at: '', turn: null, step: null }])).toHaveLength(1);
     expect(foldEvents([null as unknown as AgentRunEvent])).toEqual([]);
   });
 });

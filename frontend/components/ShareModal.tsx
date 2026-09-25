@@ -15,7 +15,8 @@ import {
 import { useTranslation } from 'react-i18next';
 import { DateTimePopover } from './common/DateTimePopover';
 import { createShare } from '../services/sharesService';
-import { Share, ShareType } from '../types';
+import { ShareType } from '../types';
+import type { Share } from '../types/api';
 
 interface ShareModalProps {
   isOpen: boolean;

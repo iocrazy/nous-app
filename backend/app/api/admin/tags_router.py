@@ -16,11 +16,11 @@ router = APIRouter()
 # ============================================
 
 
-class TagGroupCreate(BaseModel):
+class AdminTagGroupCreate(BaseModel):
     name: str
 
 
-class TagGroupUpdate(BaseModel):
+class AdminTagGroupUpdate(BaseModel):
     name: Optional[str] = None
     sort_order: Optional[int] = None
 
@@ -29,7 +29,7 @@ class TagGroupReorder(BaseModel):
     ids: List[str]
 
 
-class TagCreate(BaseModel):
+class AdminTagCreate(BaseModel):
     name: str
     name_zh: Optional[str] = None
     color: Optional[str] = "#6366f1"
@@ -37,7 +37,7 @@ class TagCreate(BaseModel):
     group_id: Optional[str] = None
 
 
-class TagUpdate(BaseModel):
+class AdminTagUpdate(BaseModel):
     name: Optional[str] = None
     name_zh: Optional[str] = None
     color: Optional[str] = None
@@ -92,7 +92,7 @@ async def list_groups(auth: AdminAuthDep):
 
 
 @router.post("/groups")
-async def create_group(body: TagGroupCreate, auth: AdminAuthDep):
+async def create_group(body: AdminTagGroupCreate, auth: AdminAuthDep):
     """Create a new tag group."""
     repo = get_admin_tags_repository()
     max_order = await repo.max_group_sort_order()
@@ -103,7 +103,7 @@ async def create_group(body: TagGroupCreate, auth: AdminAuthDep):
 
 
 @router.patch("/groups/{group_id}")
-async def update_group(group_id: str, body: TagGroupUpdate, auth: AdminAuthDep):
+async def update_group(group_id: str, body: AdminTagGroupUpdate, auth: AdminAuthDep):
     """Update a tag group."""
     update_data = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update_data:
@@ -179,7 +179,7 @@ async def list_tags(
 
 
 @router.post("")
-async def create_tag(body: TagCreate, auth: AdminAuthDep):
+async def create_tag(body: AdminTagCreate, auth: AdminAuthDep):
     """Create a new system tag."""
     insert_data: dict = {
         "name": body.name,
@@ -202,7 +202,7 @@ async def create_tag(body: TagCreate, auth: AdminAuthDep):
 
 
 @router.patch("/{tag_id}")
-async def update_tag(tag_id: str, body: TagUpdate, auth: AdminAuthDep):
+async def update_tag(tag_id: str, body: AdminTagUpdate, auth: AdminAuthDep):
     """Update a tag."""
     update_data: dict = {}
     for field in ["name", "name_zh", "color", "icon", "sort_order"]:

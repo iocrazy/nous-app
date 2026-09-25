@@ -6,9 +6,12 @@ Snowflake ids are strings at this boundary (bigIntSafeFetch discipline).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
+
+# Re-exported: the envelope lived here before it became shared.
+from app.schemas.envelope import Envelope  # noqa: F401
 
 # Snowflake ids ride as strings here (bigIntSafeFetch discipline), but the
 # service int()s them. Without this the first non-numeric body value is a
@@ -582,8 +585,6 @@ class GenerateSlotResponse(BaseModel):
 # emitting ``readiness`` now fails loudly instead of shipping a half row) and
 # what puts a real schema in the OpenAPI document the frontend types read off.
 
-T = TypeVar("T")
-
 
 class ResolveLegacyResponse(BaseModel):
     """GET /assets/resolve-legacy — the asset a pre-P3 canvas card became.
@@ -598,15 +599,6 @@ class ResolveLegacyResponse(BaseModel):
     """
 
     asset_id: Optional[str] = None
-
-
-class Envelope(BaseModel, Generic[T]):
-    """Success wrapper. ``success`` is always True here — a failure is an
-    :class:`ErrorEnvelope`, returned as a raw JSONResponse so it bypasses this
-    model rather than being coerced into it."""
-
-    success: bool = True
-    data: T
 
 
 class ErrorEnvelope(BaseModel):

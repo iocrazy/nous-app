@@ -23,7 +23,10 @@ from app.core.deps import get_auth
 # already-built dependency graph. `app.dependency_overrides[<this object>]`
 # is the correct override seam (same idiom as the `get_auth` override below).
 from app.core.scope_guards import verify_project_write_access
+from app.models import ProjectStageNodes
+from app.repositories.project_stage_nodes_repository import _node_row
 from app.schemas.workflow import WorkflowAlreadyInstantiated
+from tests.api.wire_parity import sample_orm
 
 # See test_workflow_templates_router.py for why this can't be a plain
 # `from app.api import projects_router as pr` — app/api/__init__.py rebinds
@@ -33,6 +36,13 @@ pr = importlib.import_module("app.api.projects_router")
 
 USER_ID = "11111111-1111-1111-1111-111111111111"
 OWNER_ID = "22222222-2222-2222-2222-222222222222"
+
+# What instantiation really returns: one full ``_node_row`` per node. The
+# route declares that shape, so a partial ``{"id", "name"}`` fixture would be
+# a ResponseValidationError 500 rather than a test of the gating.
+ATTACHED_NODES = [
+    _node_row(sample_orm(ProjectStageNodes, form_schema=[], status="pending"), [], [])
+]
 
 
 class _AuthStub:
@@ -179,7 +189,7 @@ async def test_attach_workflow_happy_path_team_project(app, monkeypatch):
         # race-safe branch (raises WorkflowAlreadyInstantiated instead of a
         # silent idempotent no-op) — never the create-path default.
         assert expect_fresh is True
-        return [{"id": "n1", "name": "Script"}]
+        return ATTACHED_NODES
 
     monkeypatch.setattr(
         "app.repositories.projects_repository.ProjectsRepository.get_project_by_id",
@@ -207,7 +217,7 @@ async def test_attach_workflow_happy_path_team_project(app, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["success"] is True
-    assert body["data"] == [{"id": "n1", "name": "Script"}]
+    assert body["data"] == ATTACHED_NODES
 
 
 @pytest.mark.asyncio
@@ -233,7 +243,7 @@ async def test_attach_workflow_personal_project_resolves_owner_personal_team(
         project_id, template_id, *, method=None, user_id=None, expect_fresh=False
     ):
         assert expect_fresh is True
-        return [{"id": "n1", "name": "Script"}]
+        return ATTACHED_NODES
 
     monkeypatch.setattr(
         "app.repositories.projects_repository.ProjectsRepository.get_project_by_id",
@@ -262,7 +272,7 @@ async def test_attach_workflow_personal_project_resolves_owner_personal_team(
             "/api/v1/projects/501/workflow", json={"template_id": "tpl-1"}
         )
     assert resp.status_code == 200
-    assert resp.json()["data"] == [{"id": "n1", "name": "Script"}]
+    assert resp.json()["data"] == ATTACHED_NODES
 
 
 @pytest.mark.asyncio

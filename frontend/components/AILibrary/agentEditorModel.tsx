@@ -9,7 +9,12 @@
 import React from 'react';
 
 import { suspectedNonChatKind } from '../../utils/nonChatModel';
-import type { AIProviderConfig, AISettings as AISettingsType } from '../../types';
+import { isPlatformModelAvailable } from '../../utils/platformModel';
+import type {
+  AIProviderConfig,
+  AISettings as AISettingsType,
+} from '../../types';
+import type { NousModelPublic } from '../../types/api';
 import { UiSelect } from '../ui';
 
 /**
@@ -47,15 +52,19 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
  * Providers page — the ONE management entry (2026-09-06). ``undefined`` config
  * = the user never touched the card = no restriction; ``enabled === false``
  * = nothing; otherwise drop the rows listed in ``disabled_models``.
+ *
+ * Rows whose last probe FAILED are dropped regardless of config (2026-09-24,
+ * utils/platformModel): the admin page shows them as broken, so the user side
+ * does not offer them. ``not_probed`` / never-probed rows stay.
  */
-export function visiblePlatformModels<T extends { name: string }>(
-  rows: T[],
-  nousConfig: AIProviderConfig | undefined,
-): T[] {
-  if (!nousConfig) return rows;
+export function visiblePlatformModels<
+  T extends { name: string; last_test_status?: NousModelPublic['last_test_status'] },
+>(rows: T[], nousConfig: AIProviderConfig | undefined): T[] {
+  const available = rows.filter(isPlatformModelAvailable);
+  if (!nousConfig) return available;
   if (nousConfig.enabled === false) return [];
   const disabled = new Set(nousConfig.disabled_models ?? []);
-  return rows.filter((m) => !disabled.has(m.name));
+  return available.filter((m) => !disabled.has(m.name));
 }
 
 /**
@@ -137,6 +146,10 @@ export function nonChatModelNotes(
  * still SELECTABLE: the health probe has produced a false negative in
  * production, so it advises rather than vetoes.
  *
+ * ``orphanLabels`` overrides the text of that leading stale option for a value
+ * the caller knows more about — a platform model hidden because its probe
+ * failed is "unavailable", not "provider not enabled".
+ *
  * ``noteLabels`` is the same shape for a NON-alarming remark — today, "this id
  * looks like an embedding/image model". It is a separate map rather than a
  * second kind of entry in ``unhealthyLabels`` so the DOM never claims a health
@@ -153,6 +166,7 @@ export function renderModelSelect(params: {
   noModelsLabel: string;
   unhealthyLabels?: Record<string, string>;
   noteLabels?: Record<string, string>;
+  orphanLabels?: Record<string, string>;
 }): React.ReactElement {
   const {
     value,
@@ -163,6 +177,7 @@ export function renderModelSelect(params: {
     noModelsLabel,
     unhealthyLabels,
     noteLabels,
+    orphanLabels,
   } = params;
   const knownModels = new Set(groups.flatMap((g) => g.models));
   const showOrphan = value !== '' && !knownModels.has(value);
@@ -175,8 +190,8 @@ export function renderModelSelect(params: {
       className="mt-1 w-full font-mono"
     >
       {showOrphan && (
-        <option value={value}>
-          {value} ({providerNotEnabledLabel})
+        <option value={value} data-orphan={orphanLabels?.[value] ? 'unavailable' : 'stale'}>
+          {orphanLabels?.[value] ?? `${value} (${providerNotEnabledLabel})`}
         </option>
       )}
       {groups.length === 0 && !showOrphan && (

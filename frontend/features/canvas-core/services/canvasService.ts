@@ -13,12 +13,26 @@ import type { GridLines } from '../editor/gridMath';
 import type { OutpaintPadding } from '../editor/outpaintMath';
 import type { CropRegion } from '../editor/types';
 import type {
+  CanvasDerivedImage,
+  CanvasDeriveResult,
+  ProjectTrashedCanvas,
+  TeamCanvasProject,
+  TeamTrashedCanvas,
+} from '../../../types/api';
+import type {
   Canvas,
   CanvasCreatePayload,
-  CanvasKind,
   CanvasSaveResult,
+  CanvasSummary,
   CanvasUpdatePayload,
 } from '../types';
+
+export type {
+  ProjectTrashedCanvas,
+  TeamCanvasProject,
+  TeamCanvasSummary,
+  TeamTrashedCanvas,
+} from '../../../types/api';
 
 interface Envelope<T> {
   success: boolean;
@@ -38,9 +52,11 @@ export async function getCanvas(canvasId: string): Promise<Canvas> {
   return readEnvelope<Canvas>(response);
 }
 
-export async function listCanvases(projectId: string): Promise<Canvas[]> {
+/** A project's live canvases as SUMMARY rows — no node graph (only
+ *  `node_count`). Open one with `getCanvas` to read its document. */
+export async function listCanvases(projectId: string): Promise<CanvasSummary[]> {
   const response = await apiFetch(`/api/v1/projects/${projectId}/canvases`);
-  return readEnvelope<Canvas[]>(response);
+  return readEnvelope<CanvasSummary[]>(response);
 }
 
 export async function createCanvas(
@@ -143,17 +159,9 @@ function pickCurrent(node: unknown): Canvas | null {
 // Canvas derive — any image the canvas shows (2026-09-10)
 // ============================================================
 
-/** One image a canvas derive produced: a durable generated-media item. */
-export interface CanvasDerivedImage {
-  /** generated_media id (snowflake, string on the wire). */
-  id: string;
-  /** Always `/api/v1/generated-media/{id}/cover`. */
-  url: string;
-  kind: 'image';
-  /** 0-based tile position for a grid derive; null otherwise. */
-  row: number | null;
-  col: number | null;
-}
+/** One image a canvas derive produced: a durable generated-media item
+ *  (`id` a Snowflake string; `row`/`col` set only for a grid tile). */
+export type { CanvasDerivedImage } from '../../../types/api';
 
 export interface CanvasDeriveOptions {
   /** The node the edit was made from — provenance on the registered row. */
@@ -182,7 +190,7 @@ async function postCanvasDerive(
     method: 'POST',
     json: payload,
   });
-  const data = await readEnvelope<{ images?: CanvasDerivedImage[] }>(response);
+  const data = await readEnvelope<Partial<CanvasDeriveResult>>(response);
   if (!Array.isArray(data.images) || data.images.length === 0) {
     throw new ApiError(`canvas derive-${op} returned no images`, response.status);
   }
@@ -244,19 +252,6 @@ export async function deriveCanvasOutpaint(
 // Team canvas tree (canvas nav N+1 fix)
 // ============================================================
 
-export interface TeamCanvasSummary {
-  id: string;
-  name: string;
-  kind: CanvasKind;
-  updated_at: string;
-}
-
-export interface TeamCanvasProject {
-  project_id: string;
-  project_name: string;
-  canvases: TeamCanvasSummary[];
-}
-
 /**
  * Every project in the team with its canvases as summary rows — ONE call,
  * replacing the landing page's fetchProjects + per-project listCanvases
@@ -269,29 +264,19 @@ export async function listTeamCanvases(teamId: string): Promise<TeamCanvasProjec
 
 // ---- Trash (Infinite parity G9) ------------------------------------------
 
-export interface TrashedCanvas {
-  id: string;
-  name: string;
-  kind: string;
-  updated_at: string | null;
-  deleted_at: string | null;
-  project_id: string;
-  project_name: string;
-}
-
 /** A team's trashed canvases, newest-trashed first. */
-export async function listTeamCanvasTrash(teamId: string): Promise<TrashedCanvas[]> {
+export async function listTeamCanvasTrash(teamId: string): Promise<TeamTrashedCanvas[]> {
   const response = await apiFetch(`/api/v1/canvases/team/${teamId}/trash`);
-  return readEnvelope<TrashedCanvas[]>(response);
+  return readEnvelope<TeamTrashedCanvas[]>(response);
 }
 
 /** A project's trashed canvases (workspace Trash module) — project-scoped
  *  so it works for personal projects without the team-id sentinel. */
 export async function listProjectCanvasTrash(
   projectId: string,
-): Promise<TrashedCanvas[]> {
+): Promise<ProjectTrashedCanvas[]> {
   const response = await apiFetch(`/api/v1/projects/${projectId}/canvases/trash`);
-  return readEnvelope<TrashedCanvas[]>(response);
+  return readEnvelope<ProjectTrashedCanvas[]>(response);
 }
 
 /** Bring a trashed canvas back to life. */

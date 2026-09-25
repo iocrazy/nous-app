@@ -27,6 +27,19 @@ from app.api.ai_library_router import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _caller_in_row_scope(monkeypatch):
+    """The agent/skill row-scope guard has its own tests
+    (``tests/api/test_ai_library_row_scope.py``); here every caller is in scope."""
+    import sys
+
+    monkeypatch.setattr(
+        sys.modules["app.api.ai_library_router"],
+        "_in_row_scope",
+        AsyncMock(return_value=True),
+    )
+
+
 def _fake_auth(user_id: str | None = None):
     auth = MagicMock()
     auth.user_id = user_id or str(uuid4())

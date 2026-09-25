@@ -11,11 +11,17 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from loguru import logger
 
-from app.core.deps import AuthDep, OptionalAuthDep
+from app.api.media_access_guard import require_media_access
+from app.core.deps import AuthContext, AuthDep, OptionalAuthDep
 from app.core.utils import Utils
+from app.schemas.media_download_responses import (
+    MediaLyricsResponse,
+    MediaSlidesResponse,
+)
+from app.schemas.wire import binary_response
 
 router = APIRouter()
 
@@ -215,13 +221,67 @@ async def _resolve_audio_source(media: dict, base_path: str) -> Optional[str]:
     return None
 
 
-@router.get("/{media_id}/slides", tags=TAGS_MEDIA_CONTENT)
-async def list_slides(media_id: str, auth: AuthDep):
+async def _media_caller(
+    auth: Optional[AuthContext], token: Optional[str]
+) -> Optional[str]:
+    """The caller of a file route that also accepts ``?token=`` (``<img>`` /
+    ``<audio>`` cannot send a Bearer header): the authenticated user, else the
+    user the signed media token was issued to. 401 when neither is present or
+    the token does not verify."""
+    from app.api.media_auth import validate_media_cookie
+
+    if auth:
+        return auth.user_id
+    if token:
+        user_id = await validate_media_cookie(token)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return user_id
+    raise HTTPException(status_code=401, detail="Authentication required")
+
+
+async def _require_slide_read(
+    media_id: str,
+    auth: Optional[AuthContext],
+    token: Optional[str],
+    share_token: Optional[str],
+) -> None:
+    """Read check for the album routes.
+
+    A ``share_token`` (share grant, or the bare code of a share without a
+    password — ``app/api/share_access.py``) opens exactly the media of the
+    resource it shares; anything else goes through the caller's own access.
+    The public share page needs this: it has no user, and these routes used
+    to demand one, so a shared album never loaded (it passed the share code
+    as ``?token=``, which only takes a signed media token)."""
+    from app.api.media_access_guard import share_token_grants
+
+    if share_token and await share_token_grants(share_token, media_id):
+        return
+    if auth is None and token is None and share_token:
+        raise HTTPException(status_code=404, detail="Media not found")
+    caller = await _media_caller(auth, token)
+    await require_media_access(media_id, caller)
+
+
+@router.get(
+    "/{media_id}/slides",
+    tags=TAGS_MEDIA_CONTENT,
+    response_model=MediaSlidesResponse,
+)
+async def list_slides(
+    media_id: str,
+    auth: OptionalAuthDep = None,
+    share_token: Optional[str] = None,
+):
     """
     List slide files for a carousel/image-text media item.
 
     - **media_id**: parsed_media Snowflake ID
+
+    Authentication: Bearer Token, API Key, or ?share_token= (share page)
     """
+    await _require_slide_read(media_id, auth, None, share_token)
     try:
         loc = await _resolve_album_location(media_id)
         if loc:
@@ -280,13 +340,24 @@ async def list_slides(media_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to list slides")
 
 
-@router.get("/{media_id}/slides/{filename}", tags=TAGS_MEDIA_CONTENT)
+@router.get(
+    "/{media_id}/slides/{filename}",
+    tags=TAGS_MEDIA_CONTENT,
+    response_class=Response,
+    responses=binary_response(
+        "One slide file, served inline",
+        "image/*",
+        "video/*",
+        "application/octet-stream",
+    ),
+)
 async def serve_slide_file(
     media_id: str,
     filename: str,
     request: Request,
     auth: OptionalAuthDep = None,
     token: str = None,
+    share_token: Optional[str] = None,
 ):
     """
     Serve a single slide file.
@@ -294,11 +365,10 @@ async def serve_slide_file(
     - **media_id**: parsed_media Snowflake ID
     - **filename**: Slide filename (e.g. 001.jpg, 002.mp4)
 
-    Authentication: Bearer Token, API Key, or ?token= query param
+    Authentication: Bearer Token, API Key, ?token= or ?share_token=
     """
     import mimetypes as _mt
 
-    from app.api.media_auth import validate_media_cookie
     from app.services.media.slide_paths import (
         InvalidSlideName,
         SlideNotFound,
@@ -307,17 +377,12 @@ async def serve_slide_file(
         validate_slide_name,
     )
 
-    if not auth and token:
-        if not await validate_media_cookie(token):
-            raise HTTPException(status_code=401, detail="Invalid token")
-    elif not auth:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
     try:
         validate_slide_name(filename)
     except InvalidSlideName:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
+    await _require_slide_read(media_id, auth, token, share_token)
     try:
         loc = await _resolve_album_location(media_id)
         if loc:
@@ -364,27 +429,27 @@ async def serve_slide_file(
         raise HTTPException(status_code=500, detail="Failed to serve slide file")
 
 
-@router.get("/{media_id}/audio", tags=TAGS_MEDIA_CONTENT)
+@router.get(
+    "/{media_id}/audio",
+    tags=TAGS_MEDIA_CONTENT,
+    response_class=Response,
+    responses=binary_response("The background audio, served inline", "audio/*"),
+)
 async def serve_audio_file(
     media_id: str,
     request: Request,
     auth: OptionalAuthDep = None,
     token: str = None,
+    share_token: Optional[str] = None,
 ):
     """
     Serve standalone background audio for carousel content.
 
     - **media_id**: parsed_media Snowflake ID
 
-    Authentication: Bearer Token, API Key, or ?token= query param
+    Authentication: Bearer Token, API Key, ?token= or ?share_token=
     """
-    from app.api.media_auth import validate_media_cookie
-
-    if not auth and token:
-        if not await validate_media_cookie(token):
-            raise HTTPException(status_code=401, detail="Invalid token")
-    elif not auth:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    await _require_slide_read(media_id, auth, token, share_token)
 
     try:
         media = await _get_media_row(media_id)
@@ -419,11 +484,30 @@ def extract_lyrics(row: dict) -> dict:
     metadata / lyrics, always returning the ``{"lrc", "lines"}`` shape.
     """
     meta = (row or {}).get("metadata") or {}
-    lyrics = meta.get("lyrics") or {}
-    return {"lrc": lyrics.get("lrc", ""), "lines": lyrics.get("lines", [])}
+    lyrics = meta.get("lyrics") if isinstance(meta, dict) else None
+    if not isinstance(lyrics, dict):
+        lyrics = {}
+    # A hand-edited historical row may hold null or a non-list here; read it as
+    # "no lyrics" rather than 500 the endpoint. Non-object lines are dropped
+    # for the same reason. The one writer never produces either shape.
+    lrc = lyrics.get("lrc")
+    lines = lyrics.get("lines")
+    return {
+        "lrc": lrc if isinstance(lrc, str) else "",
+        "lines": (
+            [ln for ln in lines if isinstance(ln, dict)]
+            if isinstance(lines, list)
+            else []
+        ),
+    }
 
 
-@router.get("/{media_id}/lyrics", tags=TAGS_MEDIA_CONTENT)
+@router.get(
+    "/{media_id}/lyrics",
+    tags=TAGS_MEDIA_CONTENT,
+    response_model=MediaLyricsResponse,
+    response_model_exclude_unset=True,
+)
 async def get_media_lyrics(media_id: str, auth: AuthDep):
     """
     Get persisted lyrics for a media item.
@@ -439,6 +523,7 @@ async def get_media_lyrics(media_id: str, auth: AuthDep):
         row = await MediaRepository().get_by_id(media_id)
         if row is None:
             raise HTTPException(status_code=404, detail="media not found")
+        await require_media_access(media_id, auth.user_id, "media not found")
         return extract_lyrics(row)
     except HTTPException:
         raise
@@ -447,7 +532,12 @@ async def get_media_lyrics(media_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to get lyrics")
 
 
-@router.post("/{media_id}/lyrics/fetch", tags=TAGS_MEDIA_CONTENT)
+@router.post(
+    "/{media_id}/lyrics/fetch",
+    tags=TAGS_MEDIA_CONTENT,
+    response_model=MediaLyricsResponse,
+    response_model_exclude_unset=True,
+)
 async def fetch_media_lyrics(media_id: str, auth: AuthDep):
     """Re-fetch lyrics from the source platform and persist into metadata.
 
@@ -463,6 +553,10 @@ async def fetch_media_lyrics(media_id: str, auth: AuthDep):
         fetch_and_persist_lyrics,
     )
 
+    # Checked before the fetch: the top-up spends the caller's Soda cookie and
+    # rewrites the shared row's metadata. A missing row passes here (no
+    # resource → allowed) and 404s below as before.
+    await require_media_access(media_id, auth.user_id, "media not found")
     try:
         return await fetch_and_persist_lyrics(media_id, auth.user_id)
     except LookupError:

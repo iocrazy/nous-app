@@ -8,11 +8,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ImageOff, Sparkles } from 'lucide-react';
 import Loading from '../common/Loading';
-import {
-  getGalleryItems,
-  getResourceMediaUrl,
-  type GalleryChildItem,
-} from '../../services/resourceService';
+import { getGalleryItems, getResourceMediaUrl } from '../../services/resourceService';
+import type { GalleryChild } from '../../types/api';
 import { ResourcePromptSection } from './ResourcePromptSection';
 
 interface GalleryViewerProps {
@@ -24,7 +21,7 @@ interface GalleryViewerProps {
 
 export const GalleryViewer: React.FC<GalleryViewerProps> = ({ galleryId, mediaToken }) => {
   const { t } = useTranslation();
-  const [items, setItems] = useState<GalleryChildItem[]>([]);
+  const [items, setItems] = useState<GalleryChild[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);

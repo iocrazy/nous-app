@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Play, Pause, RotateCcw, Layers } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ResourceVersion } from '../types';
+import type { ResourceVersion } from '../types/api';
 import { getVersionFileUrl } from '../services/resourceService';
 import { getSupabaseAccessToken } from '../supabaseClient';
 
@@ -35,8 +35,8 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
     const buildUrls = async () => {
       const token = await getSupabaseAccessToken().catch(() => null);
       if (cancelled) return;
-      setUrlA(getVersionFileUrl(resourceId, versionA.id, token || undefined));
-      setUrlB(getVersionFileUrl(resourceId, versionB.id, token || undefined));
+      setUrlA(getVersionFileUrl(resourceId, String(versionA.id), token || undefined));
+      setUrlB(getVersionFileUrl(resourceId, String(versionB.id), token || undefined));
     };
     buildUrls();
     return () => { cancelled = true; };

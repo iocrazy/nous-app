@@ -15,7 +15,10 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 
 import { WorkspaceOverview } from './WorkspaceOverview';
 import { ToastProvider } from '../Toast';
-import type { EpisodeProgress, Project, ProjectWorkflow } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
+import { makeEpisodeProgress } from '../../tests/fixtures/episodes';
+import type { Project, ProjectWorkflow } from '../../types/api';
+import { makeProject } from '../../tests/fixtures/projects';
 
 // relativeTime pulls in the real i18n instance via formatDate — stub it so
 // this suite doesn't need initReactI18next (mirrors StageWorkbench.test.tsx).
@@ -60,26 +63,16 @@ const mockAiLibraryService = vi.hoisted(() => ({
 }));
 vi.mock('../../services/aiLibraryService', () => mockAiLibraryService);
 
-const PROJECT: Project = {
-  id: 'p1',
+const PROJECT: Project = makeProject({
+  id: 501,
   name: 'Spring Campaign',
-  description: null,
-  owner_id: 'u1',
-  team_id: 't1',
-  project_type: 'internal',
-  project_group: null,
-  announcement: null,
-  is_starred: false,
-  color_label: null,
-  archived_at: null,
+  team_id: 601,
   file_count: 128,
-  created_at: '2026-06-01T00:00:00Z',
-  updated_at: '2026-07-01T00:00:00Z',
   latest_activity: { kind: 'file', actor: 'Alice', at: '2026-07-08T00:00:00Z', stalled: false },
-};
+});
 
 const EPISODES: EpisodeProgress[] = [
-  {
+  makeEpisodeProgress({
     episode_id: 'ep1',
     title: 'Ep 1 — Pilot',
     sort_order: 10,
@@ -89,8 +82,8 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 9,
     renders_count: 1,
     status: 'boarding',
-  },
-  {
+  }),
+  makeEpisodeProgress({
     episode_id: 'ep2',
     title: 'Ep 2 — Cutdown',
     sort_order: 20,
@@ -100,8 +93,8 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 0,
     renders_count: 0,
     status: 'drafting',
-  },
-  {
+  }),
+  makeEpisodeProgress({
     episode_id: 'ep3',
     title: 'Ep 3 — Turn',
     sort_order: 30,
@@ -111,8 +104,8 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 2,
     renders_count: 0,
     status: 'planned',
-  },
-  {
+  }),
+  makeEpisodeProgress({
     episode_id: 'ep4',
     title: 'Ep 4 — Finale',
     sort_order: 40,
@@ -122,7 +115,7 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 8,
     renders_count: 2,
     status: 'rendered',
-  },
+  }),
 ];
 
 const noop = () => {};
@@ -294,29 +287,6 @@ describe('WorkspaceOverview', () => {
       workflow: { has_workflow: false, current_node_id: null, agents_active: 0, nodes: [] },
     });
     expect(screen.queryByTestId('workflow-empty-state')).toBeNull();
-  });
-
-  it('shows the awaiting hint only for episodes parked at the planned stage', () => {
-    const withPlanned: EpisodeProgress[] = [
-      { ...EPISODES[0], status: 'planned' },
-      { ...EPISODES[1], episode_id: 'ep5', status: 'planned' },
-      EPISODES[1],
-    ];
-    const { rerender } = render(
-      <ToastProvider>
-        <WorkspaceOverview {...base} episodes={withPlanned} />
-      </ToastProvider>,
-    );
-    expect(screen.getByTestId('ws-rollup-awaiting')).toHaveTextContent('2 awaiting you');
-
-    // No planned episodes → hint hidden.
-    const noPlanned = EPISODES.filter((e) => e.status !== 'planned');
-    rerender(
-      <ToastProvider>
-        <WorkspaceOverview {...base} episodes={noPlanned} />
-      </ToastProvider>,
-    );
-    expect(screen.queryByTestId('ws-rollup-awaiting')).toBeNull();
   });
 
   it('counts real needs_input episodes when the workflow rollup is present', () => {

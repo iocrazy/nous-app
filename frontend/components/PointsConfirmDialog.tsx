@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { X, Coins, AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { checkQuota } from '../services/pointsService';
-import { QuotaCheck } from '../types';
+import type { PointsQuotaCheck } from '../types/api';
 
 interface PointsConfirmDialogProps {
   isOpen: boolean;
@@ -23,7 +23,7 @@ export const PointsConfirmDialog: React.FC<PointsConfirmDialogProps> = ({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { teamId } = useParams();
-  const [quotaInfo, setQuotaInfo] = useState<QuotaCheck | null>(null);
+  const [quotaInfo, setQuotaInfo] = useState<PointsQuotaCheck | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

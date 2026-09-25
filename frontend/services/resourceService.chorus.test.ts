@@ -12,7 +12,7 @@ describe('setResourceChorus', () => {
   it('PUTs the chorus ms and returns the updated resource', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { id: '1', chorus_start_ms: 42000 } }),
+      json: async () => ({ success: true, data: { id: 1, chorus_start_ms: 42000 } }),
     });
     vi.stubGlobal('fetch', fetchMock);
     const res = await setResourceChorus('1', 42000);
@@ -29,7 +29,7 @@ describe('setResourceChorus', () => {
   it('PUTs null to clear', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { id: '1', chorus_start_ms: null } }),
+      json: async () => ({ success: true, data: { id: 1, chorus_start_ms: null } }),
     });
     vi.stubGlobal('fetch', fetchMock);
     await setResourceChorus('1', null);

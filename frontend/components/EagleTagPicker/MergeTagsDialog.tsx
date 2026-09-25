@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 import { pickDefaultTarget } from './mergeTagsLogic';
 
 interface MergeTagsDialogProps {

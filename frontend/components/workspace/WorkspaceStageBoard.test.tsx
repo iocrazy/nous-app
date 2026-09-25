@@ -18,7 +18,8 @@ import enJson from '../../public/locales/en.json';
 import { WorkspaceStageBoard } from './WorkspaceStageBoard';
 import { ToastProvider } from '../Toast';
 import { ApiError } from '../../services/apiClient';
-import type { ProjectStageNode, ProjectWorkflow, StageBoardData } from '../../types';
+import type { ProjectStageNode, ProjectWorkflow, StageBoardData } from '../../types/api';
+import { makeStageNode } from '../../tests/fixtures/projects';
 
 function makeI18n(): I18n {
   const instance = createInstance();
@@ -75,7 +76,7 @@ const mockIssuesService = vi.hoisted(() => ({
 vi.mock('../../services/issuesService', () => mockIssuesService);
 
 function node(over: Partial<ProjectStageNode>): ProjectStageNode {
-  return {
+  return makeStageNode({
     id: '1',
     project_id: '10',
     source_template_node_id: null,
@@ -96,9 +97,9 @@ function node(over: Partial<ProjectStageNode>): ProjectStageNode {
     deliverable_file_count: 0,
     members: [],
     completion_policy: 'owner',
-    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false },
+    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false, prepare_agent_run: false, auto_start: false },
     ...over,
-  };
+  });
 }
 
 function board(over: Partial<StageBoardData> = {}): StageBoardData {
@@ -350,7 +351,7 @@ describe('WorkspaceStageBoard', () => {
       board({
         node: node({
           owner_agent_id: 'agent-uuid-1',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
         }),
       }),
     );
@@ -388,7 +389,7 @@ describe('WorkspaceStageBoard', () => {
       board({
         node: node({
           owner_agent_id: 'agent-unknown',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
         }),
       }),
     );
@@ -446,7 +447,7 @@ describe('WorkspaceStageBoard — Run now chip (M3 Task H3)', () => {
       board({
         node: node({
           owner_agent_id: 'agent-1',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
           metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
         }),
         issue,
@@ -462,7 +463,7 @@ describe('WorkspaceStageBoard — Run now chip (M3 Task H3)', () => {
       board({
         node: node({
           owner_agent_id: 'agent-1',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
         }),
         issue,
       }),
@@ -487,7 +488,7 @@ describe('WorkspaceStageBoard — Run now chip (M3 Task H3)', () => {
       board({
         node: node({
           owner_agent_id: 'agent-1',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
           metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
         }),
         issue,
@@ -517,7 +518,7 @@ describe('WorkspaceStageBoard — Run now chip (M3 Task H3)', () => {
       board({
         node: node({
           owner_agent_id: 'agent-1',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
           metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
         }),
         issue: null,

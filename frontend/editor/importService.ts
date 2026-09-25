@@ -3,23 +3,21 @@
  *
  * Talks to the async `POST /scripts/import-screenplay` endpoint, which creates
  * a NEW script from imported text and dispatches the `script_import` workflow.
- * (Distinct from the legacy `POST /scripts/import` multipart doc→chapters flow
- * used by the old editor — do not confuse the two.)
+ * (The legacy `POST /scripts/import` multipart doc→chapters route of the old
+ * editor had no caller left and was removed in OpenAPI P6.)
  */
 import { getAuthHeaders } from '../services/parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import { handleResponse } from '../utils/apiHelpers';
+import type { ScriptImportScreenplayDispatch } from '../types/api';
 
 /** Upper bound on imported text length (chars) — mirrors the backend 1MB gate. */
 export const MAX_IMPORT_CHARS = 1024 * 1024;
 
 export type ImportMode = 'fountain' | 'prose';
 
-export interface ImportScreenplayResult {
-  success: boolean;
-  script_id: string;
-  task_id: string;
-}
+/** `{ success, script_id, task_id }`: poll `task_id`, then open `script_id`. */
+export type ImportScreenplayResult = ScriptImportScreenplayDispatch;
 
 // Line-start tokens that mark a Fountain scene heading (mirrors the backend
 // parser's prefixes) — used only to auto-suggest the mode, never authoritative.

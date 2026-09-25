@@ -14,7 +14,7 @@ import {
 import { fetchAllTags, createTag } from '../../services/unifiedTagService';
 import { EagleTagPicker } from '../EagleTagPicker';
 import { isPipelineTag } from '../../utils/aiIntents';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 type Phase = 'collapsed' | 'input' | 'result';
 
@@ -114,17 +114,23 @@ export const FloatingParse: React.FC<{
           }),
         });
       } else {
-        const res = (await parseShareLink(text, {
+        const res = await parseShareLink(text, {
           video_bool: true,
           cover_bool: true,
           tag_ids: selectedTagIds,
           ...intents,
-        })) as { title?: string; videos?: Array<{ title?: string }> };
-        setResult({
-          kind: 'single',
-          title: res?.title || res?.videos?.[0]?.title || t('topic.parsed', 'Parsed'),
-          detail: t('topic.downloadDispatched', 'Download dispatched — see Task Center'),
         });
+        // The response carries no video fields (no title): the parse runs
+        // later as a task. Only a queued parse means a Task Center card.
+        let detail: string;
+        if ('task_id' in res) {
+          detail = t('topic.downloadDispatched', 'Download dispatched — see Task Center');
+        } else if (res.dedup_action === 'already_owned') {
+          detail = t('topic.alreadyInLibrary', 'Already in your library');
+        } else {
+          detail = t('topic.alreadyParsing', 'This link is already being parsed — no new task');
+        }
+        setResult({ kind: 'single', title: t('topic.parsed', 'Parsed'), detail });
       }
       setPhase('result');
     } catch (e) {
@@ -154,6 +160,11 @@ export const FloatingParse: React.FC<{
         kind: tr.kind ?? ('track' as const),
       }));
       const r = await downloadSodaTracks(items, result.title || undefined);
+      // `success: false` = not one track was queued; don't report "0 dispatched".
+      if (!r.success) {
+        addToast(t('topic.playlistNoneDispatched', 'No tracks could be dispatched'), 'error');
+        return;
+      }
       addToast(
         t('topic.playlistDispatched', '{{n}} tracks dispatched', { n: r.submitted }),
         'success',

@@ -78,7 +78,7 @@ import {
 import { useTaskManager } from '../../contexts/TaskManagerContext';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { fetchPendingSummary, type PendingSummaryEntry } from '../../services/agentInboxService';
-import type { AILibraryApprovalRequest } from '../../types';
+import type { AILibraryApprovalRequest } from '../../types/api';
 import {
   computeSubtaskCounts,
   dueBucket,

@@ -1,4 +1,4 @@
-import { SocialAccount } from '../../types';
+import type { SocialAccount } from '../../types/api';
 
 /**
  * Whether a bound account cannot publish right now and needs the user to

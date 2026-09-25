@@ -75,7 +75,7 @@ class IssueMessage(BaseModel):
     # `id` was a real UUID PK under the retired Supabase-backed ai_messages
     # store; under ConversationsAiStore (the sole store since Conversations
     # Phase 3 Task 6) it's public.messages.id, a BIGINT snowflake. Widened
-    # to str (mirrors MessageOut.id in schemas/ai_library_chat.py) so both
+    # to str (mirrors LibraryChatMessageOut.id in schemas/ai_library_chat.py) so both
     # shapes validate — the legacy path (issue_messages table, still a real
     # UUID PK) and optimistic rows (uuid.uuid4()) keep working unchanged.
     id: str

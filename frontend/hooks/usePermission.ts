@@ -8,9 +8,10 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { fetchEffectiveRole, EffectivePermission } from '../services/permissionService';
+import { fetchEffectiveRole } from '../services/permissionService';
+import type { ResourcePermissions } from '../types/api';
 
-interface UsePermissionResult extends EffectivePermission {
+interface UsePermissionResult extends ResourcePermissions {
   loading: boolean;
   canDo: (action: string) => boolean;
 }

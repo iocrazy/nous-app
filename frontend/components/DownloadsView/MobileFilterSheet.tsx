@@ -17,7 +17,7 @@ import { Filter, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { UseFilterBarConfigReturn } from '../../hooks/useFilterBarConfig';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 import type { ResourceFilterType } from '../resources/resourceFilters';
 import type {
   AspectBucketId,

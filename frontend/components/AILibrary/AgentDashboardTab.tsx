@@ -45,7 +45,7 @@ import {
 } from 'lucide-react';
 
 import { aiLibraryService } from '../../services/aiLibraryService';
-import type { AgentDashboard, AgentUsage } from '../../types';
+import type { AgentDashboard, AgentUsage } from '../../types/api';
 
 const POLL_MS = 15_000;
 

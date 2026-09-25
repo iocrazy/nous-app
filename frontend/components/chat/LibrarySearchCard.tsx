@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 
-import type { ChatToolCall } from '../../types';
+import type { ChatToolCall } from '../../types/api';
 import type { HitLayer, VectorLegOutcome } from '../../services/searchService';
 import { useTeamContext } from '../../contexts/TeamContext';
 import { HIT_LAYERS, hitLayerLabel, legDotClass } from '../DownloadsView/SearchLegsChips';

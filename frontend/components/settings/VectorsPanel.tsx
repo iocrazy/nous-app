@@ -18,7 +18,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { backfillEmbeddings, type BackfillResult } from '../../services/aiService';
+import { backfillEmbeddings } from '../../services/aiService';
+import type { BackfillResult } from '../../types/api';
 import { ApiError } from '../../services/apiClient';
 import {
   activateVectorSpace,

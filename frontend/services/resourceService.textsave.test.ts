@@ -21,11 +21,11 @@ describe('saveTextAsNewVersion', () => {
       const f = body.get('file') as File;
       expect(await f.text()).toBe('hello world');
       expect(f.name).toBe('notes.md');
-      return { ok: true, json: async () => ({ data: { id: 'v2' } }) } as Response;
+      return { ok: true, json: async () => ({ success: true, data: { id: 2 } }) } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);
     const r = await saveTextAsNewVersion('10', 'hello world', 'notes.md', 'text/markdown');
-    expect(r.id).toBe('v2');
+    expect(r.id).toBe(2);
   });
 });
 
@@ -36,11 +36,11 @@ describe('overwriteVersionContent', () => {
       expect(init.method).toBe('PUT');
       const f = (init.body as FormData).get('file') as File;
       expect(await f.text()).toBe('overwritten');
-      return { ok: true, json: async () => ({ data: { id: '77' } }) } as Response;
+      return { ok: true, json: async () => ({ success: true, data: { id: 77 } }) } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);
     const r = await overwriteVersionContent('10', '77', 'overwritten', 'a.txt', 'text/plain');
-    expect(r.id).toBe('77');
+    expect(r.id).toBe(77);
   });
 });
 
