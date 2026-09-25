@@ -338,7 +338,7 @@ async def test_skill_used_by_and_workforce_board_hide_deleted(orm_dsn, pg, user)
         mapped = await repo.map_binding_agents([skill])
         assert {a["slug"] for a in mapped[int(skill)]} == {kept_slug}
 
-        board = await get_workforce_board(_user=None)
+        board = await get_workforce_board(_auth=None)
         slugs = {a["slug"] for a in board["agents"]}
         assert kept_slug in slugs and doomed_slug not in slugs
     finally:
