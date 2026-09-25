@@ -12,7 +12,6 @@ This router exposes:
   * ``GET    /api/v1/flows``            — list user's flows
   * ``GET    /api/v1/flows/{id}``       — single flow with child tasks
   * ``POST   /api/v1/flows/{id}/cancel`` — cascade cancel children
-  * ``DELETE /api/v1/flows/{id}``       — delete row (children FK SET NULL)
 
 Tasks are attached by writing ``task_tracking.flow_id`` at creation
 time (callers do this via the existing ``UnifiedTaskManager.create``
@@ -28,7 +27,6 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
-from sqlalchemy import delete as sa_delete
 from sqlalchemy import insert, select
 from sqlalchemy import update as sa_update
 
@@ -75,6 +73,18 @@ class FlowResponse(BaseModel):
     created_at: str
     updated_at: str
     completed_at: Optional[str] = None
+
+
+class FlowCancelResult(BaseModel):
+    """``POST /flows/{id}/cancel``. The route is ``exclude_unset``: an already
+    finished flow answers ``{ok, noop, reason}``; ``cascade_cancel=false``
+    answers ``{ok, cascaded: 0, reason}``; a cascade answers
+    ``{ok, cascaded}``."""
+
+    ok: bool
+    noop: Optional[bool] = None
+    reason: Optional[str] = None
+    cascaded: Optional[int] = None
 
 
 class FlowDetailResponse(FlowResponse):
@@ -175,8 +185,12 @@ async def get_flow(flow_id: str, auth: AuthDep) -> FlowDetailResponse:
     )
 
 
-@router.post("/{flow_id}/cancel")
-async def cancel_flow(flow_id: str, auth: AuthDep) -> Dict[str, Any]:
+@router.post(
+    "/{flow_id}/cancel",
+    response_model=FlowCancelResult,
+    response_model_exclude_unset=True,
+)
+async def cancel_flow(flow_id: UUID, auth: AuthDep) -> Dict[str, Any]:
     """Cascade-cancel: set flow state=cancelled + cancel every non-terminal
     child's workflow. The aggregate trigger updates the parent counters as
     children flip to cancelled.
@@ -284,26 +298,6 @@ async def cancel_flow(flow_id: str, auth: AuthDep) -> Dict[str, Any]:
             )
 
     return {"ok": True, "cascaded": cancelled}
-
-
-@router.delete("/{flow_id}")
-async def delete_flow(flow_id: str, auth: AuthDep) -> Dict[str, Any]:
-    """Hard delete a flow row. Child task_tracking rows survive (FK is
-    ON DELETE SET NULL) so historical task records aren't lost."""
-    try:
-        async with write_scope() as session:
-            deleted = (
-                await session.execute(
-                    sa_delete(TaskFlows)
-                    .where(TaskFlows.id == flow_id)
-                    .where(TaskFlows.user_id == str(auth.user_id))
-                    .returning(TaskFlows.id)
-                )
-            ).all()
-    except Exception as exc:
-        logger.exception(f"flow delete failed: {exc}")
-        raise HTTPException(500, "delete failed")
-    return {"ok": True, "deleted": len(deleted)}
 
 
 __all__ = ["router"]

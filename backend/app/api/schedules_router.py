@@ -161,6 +161,21 @@ class ScheduleResponse(BaseModel):
     stale_after_minutes: int
 
 
+class ScheduleDeleteResult(BaseModel):
+    """``DELETE /schedules/{id}``: always ``deleted: 1`` — a miss is a 404."""
+
+    ok: bool
+    deleted: int
+
+
+class ScheduleFireNowResult(BaseModel):
+    """``POST /schedules/{id}/fire-now``: the master scheduler fires it on its
+    next tick (within a minute); nothing has run yet when this returns."""
+
+    ok: bool
+    queued_for_next_tick: bool
+
+
 def _validate_timezone(tz_name: str) -> Any:
     """Validate an IANA timezone name via ZoneInfo; 400 on unknown. Returns
     the resolved tzinfo so the caller can anchor the cron base to it."""
@@ -461,7 +476,7 @@ async def update_schedule(
     return ScheduleResponse(**_serialize_schedule(rows[0]))
 
 
-@router.delete("/{schedule_id}")
+@router.delete("/{schedule_id}", response_model=ScheduleDeleteResult)
 async def delete_schedule(schedule_id: UUID, auth: AuthDep) -> Dict[str, Any]:
     """Delete one of the caller's schedules.
 
@@ -486,7 +501,7 @@ async def delete_schedule(schedule_id: UUID, auth: AuthDep) -> Dict[str, Any]:
     return {"ok": True, "deleted": len(deleted)}
 
 
-@router.post("/{schedule_id}/fire-now")
+@router.post("/{schedule_id}/fire-now", response_model=ScheduleFireNowResult)
 async def fire_schedule_now(schedule_id: UUID, auth: AuthDep) -> Dict[str, Any]:
     """Manual one-shot trigger: set ``next_fire_at`` to now so the master
     scheduler fires it on its next tick (within a minute). Cleaner than
