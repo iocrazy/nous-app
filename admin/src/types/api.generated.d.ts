@@ -259,7 +259,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Alert Rule
-         * @description Delete an alert rule.
+         * @description Delete an alert rule (its history goes with it: FK cascade).
          */
         delete: operations["delete_alert_rule_api_v1_admin_alerts_rules__rule_id__delete"];
         options?: never;
@@ -508,7 +508,8 @@ export interface paths {
         put?: never;
         /**
          * Adjust Points
-         * @description Manually adjust points for a single team.
+         * @description Manually adjust points for a single team (positive adds, negative
+         *     deducts down to zero; zero is refused).
          */
         post: operations["adjust_points_api_v1_admin_credits_adjust_post"];
         delete?: never;
@@ -529,6 +530,11 @@ export interface paths {
         /**
          * Batch Gift
          * @description Gift points to multiple teams.
+         *
+         *     A team only counts as gifted when the points really landed: an unknown or
+         *     non-numeric team id is reported in ``errors`` instead of failing inside
+         *     the quota insert, and a non-positive amount is refused up front (it used
+         *     to count every team as gifted while ``add_points`` credited nothing).
          */
         post: operations["batch_gift_api_v1_admin_credits_batch_gift_post"];
         delete?: never;
@@ -658,6 +664,10 @@ export interface paths {
         /**
          * Delete Package
          * @description Delete a point package.
+         *
+         *     A package that orders point at cannot be deleted (``orders.package_id`` has
+         *     no ON DELETE): that is a 409 telling the admin to deactivate it instead,
+         *     not a 500. A package that is not there is a 404, not ``ok``.
          */
         delete: operations["delete_package_api_v1_admin_credits_packages__package_id__delete"];
         options?: never;
@@ -829,26 +839,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Admin Health
-         * @description Unauthenticated health check for admin API diagnostics.
-         */
-        get: operations["admin_health_api_v1_admin_health_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/admin/jimeng/login": {
         parameters: {
             query?: never;
@@ -864,7 +854,8 @@ export interface paths {
          *
          *     Launches ``dreamina login`` (which prints the material then keeps polling the
          *     device authorization, writing the token on success). Returns
-         *     ``{status:'pending', verification_uri, user_code, device_code, expires_at}``.
+         *     ``{status:'pending', verification_uri, user_code, expires_at}`` — never the
+         *     ``device_code`` (see ``_PUBLIC_MATERIAL_KEYS``).
          *     A new login supersedes any in-flight one (old process killed first). If the
          *     CLI is already logged in the process exits immediately → ``{status:'already'}``.
          *     504 if the material doesn't arrive within the window.
@@ -1183,7 +1174,8 @@ export interface paths {
         post?: never;
         /**
          * Delete Nous Model
-         * @description Delete a Nous model.
+         * @description Delete a Nous model. A non-numeric id or one that matches no row is a
+         *     typed 404 (it used to answer 200 "Deleted" for a missing row).
          */
         delete: operations["delete_nous_model_api_v1_admin_nous_models__model_id__delete"];
         options?: never;
@@ -1824,66 +1816,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/stats/storage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Storage Stats
-         * @description Get storage usage statistics.
-         */
-        get: operations["get_storage_stats_api_v1_admin_stats_storage_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/stats/users/growth": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get User Growth
-         * @description Get user registration growth over time.
-         */
-        get: operations["get_user_growth_api_v1_admin_stats_users_growth_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/stats/videos/stats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Video Stats
-         * @description Get video statistics over time.
-         */
-        get: operations["get_video_stats_api_v1_admin_stats_videos_stats_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/admin/storage-migration": {
         parameters: {
             query?: never;
@@ -2063,7 +1995,11 @@ export interface paths {
         post?: never;
         /**
          * Delete Table Preferences
-         * @description Delete saved table preferences for a specific table.
+         * @description Reset a table to its defaults: delete the CALLER's saved preferences.
+         *
+         *     Scoped to ``auth.user_id`` — one admin cannot clear another's. Idempotent:
+         *     resetting a table that was never customized is still a success (it is
+         *     already at its defaults), so a miss is not a 404 here.
          */
         delete: operations["delete_table_preferences_api_v1_admin_table_preferences__table_key__delete"];
         options?: never;
@@ -2086,7 +2022,13 @@ export interface paths {
         put?: never;
         /**
          * Create Tag
-         * @description Create a new system tag.
+         * @description Create a tag owned by the calling admin.
+         *
+         *     There are no system tags any more (mig 468 dropped ``type='system'`` from
+         *     ``tags_type_check`` and gave every user their own copy of the initial
+         *     set), so an admin-made tag is an ordinary ``user`` tag in the admin's own
+         *     library. This used to insert ``type='system', user_id=NULL``, which the
+         *     CHECK rejects: every create from the admin console was a 500.
          */
         post: operations["create_tag_api_v1_admin_tags_post"];
         delete?: never;
@@ -2107,6 +2049,9 @@ export interface paths {
         /**
          * Batch Action
          * @description Batch operations on tags: move, delete, or change color.
+         *
+         *     All-or-nothing: any unknown or non-numeric tag id (or an unknown target
+         *     group for ``move``) → typed 404 and no tag is touched.
          */
         post: operations["batch_action_api_v1_admin_tags_batch_post"];
         delete?: never;
@@ -2151,6 +2096,9 @@ export interface paths {
         /**
          * Reorder Groups
          * @description Bulk reorder groups. IDs list defines the new order.
+         *
+         *     Any unknown or non-numeric id → typed 404 and nothing is reordered (same
+         *     answer as the user-facing ``PUT /tags/groups/reorder``).
          */
         post: operations["reorder_groups_api_v1_admin_tags_groups_reorder_post"];
         delete?: never;
@@ -2194,7 +2142,8 @@ export interface paths {
         put?: never;
         /**
          * Reorder Tags
-         * @description Reorder tags within a group.
+         * @description Reorder tags within a group. Any unknown or non-numeric id → typed 404
+         *     and nothing is reordered.
          */
         post: operations["reorder_tags_api_v1_admin_tags_reorder_post"];
         delete?: never;
@@ -2850,27 +2799,6 @@ export interface paths {
          *     A teammate's shared row cannot be deleted by another team member.
          */
         delete: operations["delete_my_memory_api_v1_agent_memory__memory_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/ai-library/admin/lanes/snapshot": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Per-lane queue depth snapshot
-         * @description Returns current depth of each LaneQueue partition. Lets ops see
-         *     which lane is backed up (User vs Background vs Scheduled vs Subagent).
-         */
-        get: operations["admin_lane_snapshot_api_v1_ai_library_admin_lanes_snapshot_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -10641,35 +10569,10 @@ export interface paths {
          *     - **amount**: Points to adjust (positive to add, negative to deduct).
          *     - **description**: Reason for the adjustment.
          *
-         *     Authentication: Bearer Token or API Key (admin only)
+         *     Authentication: Bearer Token or API Key (platform admin only, via
+         *     ``get_admin_auth`` like every other ``/admin/`` route)
          */
         post: operations["admin_adjust_points_api_v1_points_admin_adjust_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/points/admin/overview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Admin Overview
-         * @description Admin: get system-wide points overview.
-         *
-         *     Returns aggregated statistics including total points in system,
-         *     total consumed, total purchased, active teams count, and total
-         *     transactions count.
-         *
-         *     Authentication: Bearer Token or API Key (admin only)
-         */
-        get: operations["admin_overview_api_v1_points_admin_overview_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -16490,6 +16393,89 @@ export interface components {
             /** User Id */
             user_id: string;
         };
+        /** AdminAgentBound */
+        AdminAgentBound: {
+            /** Agents */
+            agents: string[];
+            /** Lane Capacity */
+            lane_capacity: {
+                [key: string]: number;
+            };
+            /** Last Seen Age S */
+            last_seen_age_s: number;
+            /** Providers */
+            providers: string[];
+            /** Role */
+            role: string;
+            /** Started At */
+            started_at: number;
+            /** Version */
+            version: string | null;
+            /** Workflows */
+            workflows: string[];
+        };
+        /**
+         * AdminAgentMetrics
+         * @description Per-process harness snapshot. ``counters`` maps each canonical counter
+         *     to its count; typo'd names collected since start sit under ``_unknown``
+         *     as a nested ``{name: count}`` map.
+         */
+        AdminAgentMetrics: {
+            /** Bounds */
+            bounds: {
+                [key: string]: components["schemas"]["AdminAgentBound"];
+            };
+            /** Context Engines */
+            context_engines: string[];
+            /** Counters */
+            counters: {
+                [key: string]: number | {
+                    [key: string]: number;
+                };
+            };
+            /** Hooks Registered */
+            hooks_registered: string[];
+            /** Model Health */
+            model_health: {
+                [key: string]: components["schemas"]["AdminModelHealthEntry"];
+            };
+            /** Root Aborts */
+            root_aborts: {
+                [key: string]: components["schemas"]["AdminRootAbortEntry"];
+            };
+        };
+        /**
+         * AdminAgentOverrideCounts
+         * @description How many users / teams customized a preset (``agent_overrides``).
+         */
+        AdminAgentOverrideCounts: {
+            /** Team */
+            team: number;
+            /** User */
+            user: number;
+        };
+        /** AdminAgentTelemetry */
+        AdminAgentTelemetry: {
+            /** Daily Trend */
+            daily_trend: components["schemas"]["AdminTelemetryDailyPoint"][];
+            /** Failure Modes */
+            failure_modes: components["schemas"]["AdminTelemetryFailureMode"][];
+            overview: components["schemas"]["AdminTelemetryOverview"];
+            /** Status Breakdown */
+            status_breakdown: {
+                [key: string]: number;
+            };
+            /** Top Agents */
+            top_agents: components["schemas"]["AdminTelemetryTopAgent"][];
+            /** Top Users */
+            top_users: components["schemas"]["AdminTelemetryTopUser"][];
+            /** Window Days */
+            window_days: number;
+            /** Window End */
+            window_end: string;
+            /** Window Start */
+            window_start: string;
+        };
         /** AdminAgentUpdate */
         AdminAgentUpdate: {
             /** Agent Md */
@@ -16515,6 +16501,31 @@ export interface components {
             /** Temperature */
             temperature?: number | null;
         };
+        /** AdminAlertMuteResult */
+        AdminAlertMuteResult: {
+            /** Mute Until */
+            mute_until: string;
+            /** Ok */
+            ok: boolean;
+        };
+        /**
+         * AdminAlertOkResult
+         * @description ``{"ok": true}`` from delete / unmute / resolve.
+         */
+        AdminAlertOkResult: {
+            /** Ok */
+            ok: boolean;
+        };
+        /**
+         * AdminBatchGiftError
+         * @description A team the gift did not reach, and why.
+         */
+        AdminBatchGiftError: {
+            /** Error */
+            error: string;
+            /** Team Id */
+            team_id: string;
+        };
         /**
          * AdminBatchGiftRequest
          * @description Gift points to multiple teams at once.
@@ -16526,6 +16537,184 @@ export interface components {
             description?: string | null;
             /** Team Ids */
             team_ids: string[];
+        };
+        /** AdminBatchGiftResult */
+        AdminBatchGiftResult: {
+            /** Errors */
+            errors: components["schemas"]["AdminBatchGiftError"][];
+            /** Gifted Count */
+            gifted_count: number;
+            /** Ok */
+            ok: boolean;
+        };
+        /** AdminBoundaryAuditPage */
+        AdminBoundaryAuditPage: {
+            /** Items */
+            items: components["schemas"]["AdminBoundaryAuditRow"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** AdminBoundaryAuditRow */
+        AdminBoundaryAuditRow: {
+            /** Blocked At */
+            blocked_at: string | null;
+            /** Id */
+            id: number;
+            /** Layer */
+            layer: string;
+            /** Metadata Json */
+            metadata_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Raw Url */
+            raw_url: string | null;
+            /** Reason */
+            reason: string;
+            /** Request Id */
+            request_id: string | null;
+            /** Resolved Ip */
+            resolved_ip: string | null;
+            /** User Id */
+            user_id: number | null;
+        };
+        /** AdminBoundaryAuditSummary */
+        AdminBoundaryAuditSummary: {
+            /** By Layer */
+            by_layer: {
+                [key: string]: number;
+            };
+            /** By Reason */
+            by_reason: {
+                [key: string]: number;
+            };
+            /** Total 7D */
+            total_7d: number;
+        };
+        /**
+         * AdminCatalogAgentDetail
+         * @description ``PUT /admin/agents/{slug}``: the whole refreshed ``ai_agents`` row
+         *     (``SELECT *`` shape) plus its override counts.
+         *
+         *     ``team_id`` / ``project_id`` are Snowflake BIGINTs sent as JSON numbers.
+         */
+        AdminCatalogAgentDetail: {
+            /** Agent Group */
+            agent_group: string | null;
+            /** Agent Md */
+            agent_md: string | null;
+            /** Budget Per Run Cents */
+            budget_per_run_cents: number | null;
+            /** Capability Profile */
+            capability_profile: unknown;
+            /** Created At */
+            created_at: string | null;
+            /** Created By */
+            created_by: string | null;
+            /** Current Version */
+            current_version: number | null;
+            /** Deleted At */
+            deleted_at: string | null;
+            /** Description */
+            description: string | null;
+            /** Enabled */
+            enabled: boolean | null;
+            /** Fallback Models */
+            fallback_models: string[] | null;
+            /** Icon */
+            icon: string | null;
+            /** Id */
+            id: string | null;
+            /** Identity Md */
+            identity_md: string | null;
+            /** Is System Preset */
+            is_system_preset: boolean | null;
+            /** Max Concurrent Runs */
+            max_concurrent_runs: number | null;
+            /** Max Tokens */
+            max_tokens: number | null;
+            /** Memory Injection Top N */
+            memory_injection_top_n: number | null;
+            /** Model */
+            model: string | null;
+            /** Monthly Cost Cents Budget */
+            monthly_cost_cents_budget: number | null;
+            /** Monthly Token Budget */
+            monthly_token_budget: number | null;
+            /** Name */
+            name: string | null;
+            override_counts: components["schemas"]["AdminAgentOverrideCounts"];
+            /** Paused Reason */
+            paused_reason: string | null;
+            /** Persistent */
+            persistent: boolean | null;
+            /** Project Id */
+            project_id: number | null;
+            /** Seed Hash */
+            seed_hash: string | null;
+            /** Slug */
+            slug: string | null;
+            /** Sort Order */
+            sort_order: number | null;
+            /** Soul Md */
+            soul_md: string | null;
+            /** Team Id */
+            team_id: number | null;
+            /** Temperature */
+            temperature: number | null;
+            /** Timeout Sec */
+            timeout_sec: number | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** User Id */
+            user_id: string | null;
+        };
+        /**
+         * AdminCatalogAgentItem
+         * @description One ``GET /admin/agents`` row: a fixed projection of the preset.
+         */
+        AdminCatalogAgentItem: {
+            /** Agent Md */
+            agent_md: string | null;
+            /** Current Version */
+            current_version: number | null;
+            /** Description */
+            description: string | null;
+            /** Enabled */
+            enabled: boolean | null;
+            /** Fallback Models */
+            fallback_models: string[] | null;
+            /** Icon */
+            icon: string | null;
+            /** Id */
+            id: string | null;
+            /** Identity Md */
+            identity_md: string | null;
+            /** Max Tokens */
+            max_tokens: number | null;
+            /** Model */
+            model: string | null;
+            /** Name */
+            name: string | null;
+            override_counts: components["schemas"]["AdminAgentOverrideCounts"];
+            /** Slug */
+            slug: string | null;
+            /** Soul Md */
+            soul_md: string | null;
+            /** Temperature */
+            temperature: number | null;
+            /** Updated At */
+            updated_at: string | null;
+        };
+        /** AdminCatalogAgentList */
+        AdminCatalogAgentList: {
+            /** Items */
+            items: components["schemas"]["AdminCatalogAgentItem"][];
+            /** Total */
+            total: number;
         };
         /**
          * AdminConsumptionChartItem
@@ -16593,6 +16782,24 @@ export interface components {
             user_id?: string | null;
         };
         /**
+         * AdminCreditsOkResult
+         * @description Package delete.
+         */
+        AdminCreditsOkResult: {
+            /** Ok */
+            ok: boolean;
+        };
+        /**
+         * AdminCreditsOrderActionResult
+         * @description Manual order confirm / refund.
+         */
+        AdminCreditsOrderActionResult: {
+            /** Message */
+            message: string;
+            /** Ok */
+            ok: boolean;
+        };
+        /**
          * AdminCreditsStatsResponse
          * @description System-wide credits statistics for the admin dashboard.
          */
@@ -16634,6 +16841,80 @@ export interface components {
             total_revenue_cents: number;
         };
         /**
+         * AdminJimengLoginResponse
+         * @description ``status='already'`` carries nothing else. ``status='pending'`` carries
+         *     the device-flow material the operator needs to authorize: the link, the
+         *     code to type, and when the window closes. The ``device_code`` (what the
+         *     polling client redeems for a token) stays on the server.
+         */
+        AdminJimengLoginResponse: {
+            /** Expires At */
+            expires_at?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "already";
+            /** User Code */
+            user_code?: string | null;
+            /** Verification Uri */
+            verification_uri?: string | null;
+        };
+        /** AdminJimengLogoutResponse */
+        AdminJimengLogoutResponse: {
+            /** Logged In */
+            logged_in: boolean;
+        };
+        /**
+         * AdminJimengStatus
+         * @description ``credit`` only when the CLI printed one; ``error`` only when not
+         *     logged in and the provider classified why (an error code, never CLI
+         *     output).
+         */
+        AdminJimengStatus: {
+            /** Credit */
+            credit?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Logged In */
+            logged_in: boolean;
+        };
+        /**
+         * AdminMemoryDemoteResult
+         * @description ``demoted=false``: no memory row with that id, or the write failed.
+         */
+        AdminMemoryDemoteResult: {
+            /** Demoted */
+            demoted: boolean;
+        };
+        /**
+         * AdminMemoryPromotionApproveResult
+         * @description ``approved=false``: the proposal was not pending, the owner has left
+         *     the target team (it stays pending), or the write failed.
+         */
+        AdminMemoryPromotionApproveResult: {
+            /** Approved */
+            approved: boolean;
+        };
+        /**
+         * AdminMemoryPromotionRejectResult
+         * @description ``rejected=false``: no pending proposal with that id, or the write
+         *     failed.
+         */
+        AdminMemoryPromotionRejectResult: {
+            /** Rejected */
+            rejected: boolean;
+        };
+        /** AdminModelHealthEntry */
+        AdminModelHealthEntry: {
+            /** Cooldown Remaining S */
+            cooldown_remaining_s: number;
+            /** Health */
+            health: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
          * AdminModuleDefinition
          * @description Module definition for API response.
          */
@@ -16646,6 +16927,11 @@ export interface components {
             key: string;
             /** Name */
             name: string;
+        };
+        /** AdminNousModelDeleteResult */
+        AdminNousModelDeleteResult: {
+            /** Message */
+            message: string;
         };
         /**
          * AdminOrderListResponse
@@ -16730,6 +17016,52 @@ export interface components {
             sort_order: number;
         };
         /**
+         * AdminPointPackage
+         * @description One ``point_packages`` row.
+         */
+        AdminPointPackage: {
+            /** Created At */
+            created_at: string;
+            /** Currency */
+            currency: string;
+            /** Description */
+            description: string | null;
+            /** Id */
+            id: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Name */
+            name: string;
+            /** Points Amount */
+            points_amount: number;
+            /** Price Cents */
+            price_cents: number;
+            /** Sort Order */
+            sort_order: number;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * AdminPointPricing
+         * @description One ``point_pricing`` row.
+         */
+        AdminPointPricing: {
+            /** Action Type */
+            action_type: string;
+            /** Created At */
+            created_at: string;
+            /** Description */
+            description: string | null;
+            /** Id */
+            id: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Points Cost */
+            points_cost: number;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
          * AdminPointsAdjustRequest
          * @description Admin manual points adjustment for a single team.
          */
@@ -16745,6 +17077,16 @@ export interface components {
             team_id: string;
         };
         /**
+         * AdminPointsAdjustResult
+         * @description ``POST /admin/credits/adjust``: the team's balance after the change.
+         */
+        AdminPointsAdjustResult: {
+            /** New Balance */
+            new_balance: number;
+            /** Ok */
+            ok: boolean;
+        };
+        /**
          * AdminPricingUpdateRequest
          * @description Update pricing for a specific action_type.
          */
@@ -16753,6 +17095,18 @@ export interface components {
             description?: string | null;
             /** Points Cost */
             points_cost: number;
+        };
+        /** AdminQueueDepth */
+        AdminQueueDepth: {
+            /** Messages */
+            messages: number;
+            /** Name */
+            name: string;
+        };
+        /** AdminQueuesResponse */
+        AdminQueuesResponse: {
+            /** Queues */
+            queues: components["schemas"]["AdminQueueDepth"][];
         };
         /**
          * AdminRevenueChartItem
@@ -16772,6 +17126,15 @@ export interface components {
              */
             revenue_cents: number;
         };
+        /** AdminRootAbortEntry */
+        AdminRootAbortEntry: {
+            /** Child Count */
+            child_count: number;
+            /** Children */
+            children: string[];
+            /** Is Aborted */
+            is_aborted: boolean;
+        };
         /** AdminSearchResponse */
         AdminSearchResponse: {
             facets: components["schemas"]["Facets"];
@@ -16779,6 +17142,65 @@ export interface components {
             items: components["schemas"]["UnifiedLogEntry"][];
             /** Total */
             total: number;
+        };
+        /**
+         * AdminSecretsSelfhealSummary
+         * @description ``POST /admin/settings/encrypt-secrets``: rows rewritten per store.
+         *
+         *     Counts only — the sweep never puts a secret (plain or encrypted) into its
+         *     summary. A skipped run carries ``ok=false`` + ``reason`` and none of the
+         *     counters; the route drops unset keys so those stay absent on the wire.
+         */
+        AdminSecretsSelfhealSummary: {
+            /** Errors */
+            errors?: number | null;
+            /** Nous Models */
+            nous_models?: number | null;
+            /** Ok */
+            ok: boolean;
+            /** Platform Ai Providers */
+            platform_ai_providers?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /** System Settings */
+            system_settings?: number | null;
+            /** User Mcp Servers */
+            user_mcp_servers?: number | null;
+            /** User Settings Ai Providers */
+            user_settings_ai_providers?: number | null;
+        };
+        /** AdminSeedCounters */
+        AdminSeedCounters: {
+            /** Agents */
+            agents: number;
+            /** Skill Files */
+            skill_files: number;
+            /** Skills */
+            skills: number;
+        };
+        /** AdminSeedLoadError */
+        AdminSeedLoadError: {
+            /** Error */
+            error: {
+                [key: string]: unknown;
+            };
+            /** Scope */
+            scope: string;
+            /** Slug */
+            slug: string;
+        };
+        /** AdminSeedReloadResponse */
+        AdminSeedReloadResponse: {
+            /** Agent Skill Bindings */
+            agent_skill_bindings: number;
+            /** Agents */
+            agents: number;
+            /** Errors */
+            errors: components["schemas"]["AdminSeedLoadError"][];
+            /** Skills */
+            skills: number;
+            skipped: components["schemas"]["AdminSeedCounters"];
+            upserted: components["schemas"]["AdminSeedCounters"];
         };
         /** AdminSourceCreate */
         AdminSourceCreate: {
@@ -16896,6 +17318,151 @@ export interface components {
              */
             total_videos: number;
         };
+        /** AdminStorageAsset */
+        AdminStorageAsset: {
+            /** Key */
+            key: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "video" | "cover" | "thumbnail" | "sprite" | "hls";
+            /** Present In Db */
+            present_in_db: boolean;
+            /** Size Bytes */
+            size_bytes: number | null;
+        };
+        /**
+         * AdminStorageAudit
+         * @description Newest storage_audit run. ``status`` is the task_tracking phase, or
+         *     ``none`` when no scan has ever run; ``missing_truncated`` is absent in
+         *     that ``none`` case (route uses ``response_model_exclude_unset``).
+         */
+        AdminStorageAudit: {
+            /** Errors */
+            errors: number;
+            /** Missing */
+            missing: components["schemas"]["AdminStorageAuditMissing"][];
+            /**
+             * Missing Truncated
+             * @default false
+             */
+            missing_truncated: boolean;
+            /** Scanned */
+            scanned: number;
+            /** Scanned At */
+            scanned_at: string | null;
+            /** Status */
+            status: string;
+        };
+        /** AdminStorageAuditMissing */
+        AdminStorageAuditMissing: {
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Media Id */
+            media_id: string | null;
+            /** Resource Id */
+            resource_id: string | null;
+        };
+        /** AdminStorageDeepVerifyDispatch */
+        AdminStorageDeepVerifyDispatch: {
+            /** Already Running */
+            already_running: boolean;
+            /** Workflow Id */
+            workflow_id: string;
+        };
+        /**
+         * AdminStorageLastScan
+         * @description Summary of the newest completed storage_audit run.
+         */
+        AdminStorageLastScan: {
+            /** At */
+            at: string | null;
+            /** Errors */
+            errors: number;
+            /** Missing */
+            missing: number;
+            /** Scanned */
+            scanned: number;
+        };
+        /** AdminStorageMediaDetail */
+        AdminStorageMediaDetail: {
+            /** Assets */
+            assets: components["schemas"]["AdminStorageAsset"][];
+            /** Scope Id */
+            scope_id: string | null;
+        };
+        /** AdminStorageMediaStatusList */
+        AdminStorageMediaStatusList: {
+            /** Rows */
+            rows: components["schemas"]["AdminStorageMediaStatusRow"][];
+        };
+        /** AdminStorageMediaStatusRow */
+        AdminStorageMediaStatusRow: {
+            /** Cover Ok */
+            cover_ok: boolean;
+            /** Hls Ok */
+            hls_ok: boolean;
+            /** Media Id */
+            media_id: string;
+            /** Scope Id */
+            scope_id: string | null;
+            /**
+             * Storage Status
+             * @enum {string}
+             */
+            storage_status: "ok" | "no_video" | "fs_residue";
+            /** Thumbnail Ok */
+            thumbnail_ok: boolean;
+            /** Video Key */
+            video_key: string | null;
+            /** Video Size */
+            video_size: number | null;
+        };
+        /** AdminStorageMediaVerify */
+        AdminStorageMediaVerify: {
+            /** Results */
+            results: components["schemas"]["AdminStorageVerifyResult"][];
+        };
+        /** AdminStorageStats */
+        AdminStorageStats: {
+            /** Broken */
+            broken: number | null;
+            /** Fs Residue */
+            fs_residue: number;
+            /** Hls Ready */
+            hls_ready: number;
+            last_scan: components["schemas"]["AdminStorageLastScan"] | null;
+            /** Orphans */
+            orphans: number;
+            videos: components["schemas"]["AdminStorageVideoTotals"];
+        };
+        /** AdminStorageVerifyResult */
+        AdminStorageVerifyResult: {
+            /** Exists */
+            exists: boolean | null;
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "video" | "cover" | "thumbnail" | "sprite" | "hls";
+        };
+        /** AdminStorageVideoTotals */
+        AdminStorageVideoTotals: {
+            /** Count */
+            count: number;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /** AdminTablePreferenceResetResult */
+        AdminTablePreferenceResetResult: {
+            /** Ok */
+            ok: boolean;
+        };
         /**
          * AdminTablePreferenceResponse
          * @description Stored table preferences for a user + table_key.
@@ -16938,6 +17505,16 @@ export interface components {
             /** Visible Columns */
             visible_columns?: string[] | null;
         };
+        /** AdminTagBatchResult */
+        AdminTagBatchResult: {
+            /** Message */
+            message: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** AdminTagCreate */
         AdminTagCreate: {
             /**
@@ -16959,12 +17536,162 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** AdminTagGroupListItem */
+        AdminTagGroupListItem: {
+            /** Created At */
+            created_at: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Sort Order */
+            sort_order: number | null;
+            /** Tag Count */
+            tag_count: number;
+        };
+        /** AdminTagGroupListResponse */
+        AdminTagGroupListResponse: {
+            /** Groups */
+            groups: components["schemas"]["AdminTagGroupListItem"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Total Tags */
+            total_tags: number;
+            /** Uncategorized Count */
+            uncategorized_count: number;
+        };
+        /** AdminTagGroupResponse */
+        AdminTagGroupResponse: {
+            group: components["schemas"]["AdminTagGroupRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * AdminTagGroupRow
+         * @description One ``tag_groups`` row, ``SELECT *`` shape.
+         */
+        AdminTagGroupRow: {
+            /** Created At */
+            created_at: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Sort Order */
+            sort_order: number | null;
+        };
         /** AdminTagGroupUpdate */
         AdminTagGroupUpdate: {
             /** Name */
             name?: string | null;
             /** Sort Order */
             sort_order?: number | null;
+        };
+        /** AdminTagListItem */
+        AdminTagListItem: {
+            /** Color */
+            color: string | null;
+            /** Created At */
+            created_at: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Group Id */
+            group_id: number | null;
+            /** Group Name */
+            group_name: string | null;
+            /** Icon */
+            icon: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Name Zh */
+            name_zh: string | null;
+            /** Origin */
+            origin: string;
+            /** Prompt Trigger */
+            prompt_trigger: boolean;
+            /** Scope Id */
+            scope_id: number | null;
+            /** Slug */
+            slug: string | null;
+            /** Sort Order */
+            sort_order: number | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "user" | "time";
+            /** Usage Count */
+            usage_count: number;
+            /** User Id */
+            user_id: string | null;
+        };
+        /** AdminTagListResponse */
+        AdminTagListResponse: {
+            /** Items */
+            items: components["schemas"]["AdminTagListItem"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Total */
+            total: number;
+        };
+        /** AdminTagResponse */
+        AdminTagResponse: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            tag: components["schemas"]["AdminTagRow"];
+        };
+        /**
+         * AdminTagRow
+         * @description One ``tags`` row, ``SELECT *`` shape.
+         */
+        AdminTagRow: {
+            /** Color */
+            color: string | null;
+            /** Created At */
+            created_at: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Group Id */
+            group_id: number | null;
+            /** Icon */
+            icon: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Name Zh */
+            name_zh: string | null;
+            /** Origin */
+            origin: string;
+            /** Prompt Trigger */
+            prompt_trigger: boolean;
+            /** Scope Id */
+            scope_id: number | null;
+            /** Slug */
+            slug: string | null;
+            /** Sort Order */
+            sort_order: number | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "user" | "time";
+            /** User Id */
+            user_id: string | null;
         };
         /** AdminTagUpdate */
         AdminTagUpdate: {
@@ -16980,6 +17707,27 @@ export interface components {
             name_zh?: string | null;
             /** Sort Order */
             sort_order?: number | null;
+        };
+        /**
+         * AdminTagsOk
+         * @description Body of the writes that return nothing but success.
+         */
+        AdminTagsOk: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * AdminTaskActionResponse
+         * @description Cancel and retry both answer ``{message, task_id}``.
+         */
+        AdminTaskActionResponse: {
+            /** Message */
+            message: string;
+            /** Task Id */
+            task_id: string;
         };
         /**
          * AdminTaskListResponse
@@ -17149,6 +17897,18 @@ export interface components {
             team_id: string;
         };
         /**
+         * AdminTeamPointsAdjustResult
+         * @description ``POST /points/admin/adjust`` (the user app's Billing page).
+         */
+        AdminTeamPointsAdjustResult: {
+            /** Message */
+            message: string;
+            /** New Balance */
+            new_balance: number;
+            /** Success */
+            success: boolean;
+        };
+        /**
          * AdminTeamResponse
          * @description Admin team response with full details.
          */
@@ -17193,6 +17953,63 @@ export interface components {
              */
             points_balance: number;
         };
+        /** AdminTelemetryDailyPoint */
+        AdminTelemetryDailyPoint: {
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Cost Cents */
+            cost_cents: number;
+            /** Date */
+            date: string;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Runs */
+            runs: number;
+        };
+        /** AdminTelemetryFailureMode */
+        AdminTelemetryFailureMode: {
+            /** Count */
+            count: number;
+            /** Error Code */
+            error_code: string;
+        };
+        /** AdminTelemetryOverview */
+        AdminTelemetryOverview: {
+            /** Total Completion Tokens */
+            total_completion_tokens: number;
+            /** Total Cost Cents */
+            total_cost_cents: number;
+            /** Total Prompt Tokens */
+            total_prompt_tokens: number;
+            /** Total Runs */
+            total_runs: number;
+            /** Unique Agents */
+            unique_agents: number;
+            /** Unique Users */
+            unique_users: number;
+        };
+        /** AdminTelemetryTopAgent */
+        AdminTelemetryTopAgent: {
+            /** Agent Id */
+            agent_id: string;
+            /** Cost Cents */
+            cost_cents: number;
+            /** Run Count */
+            run_count: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /** AdminTelemetryTopUser */
+        AdminTelemetryTopUser: {
+            /** Cost Cents */
+            cost_cents: number;
+            /** Run Count */
+            run_count: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /** User Id */
+            user_id: string;
+        };
         /**
          * AdminTopTeamItem
          * @description Team entry for the top-consumers ranking.
@@ -17208,6 +18025,17 @@ export interface components {
              */
             total_consumed: number;
         };
+        /** AdminTranscodeBatchResponse */
+        AdminTranscodeBatchResponse: {
+            /** Has More */
+            has_more: boolean;
+            /** Message */
+            message: string;
+            /** Queued */
+            queued: number;
+            /** Total Found */
+            total_found: number;
+        };
         /**
          * AdminTranscodeListResponse
          * @description Paginated list of transcode versions.
@@ -17221,6 +18049,13 @@ export interface components {
             page_size: number;
             /** Total */
             total: number;
+        };
+        /** AdminTranscodeRetryResponse */
+        AdminTranscodeRetryResponse: {
+            /** Message */
+            message: string;
+            /** Version Id */
+            version_id: string;
         };
         /**
          * AdminTranscodeSettingsResponse
@@ -17675,6 +18510,30 @@ export interface components {
              * @default 0
              */
             total_storage_bytes: number;
+        };
+        /** AdminWorkerInfo */
+        AdminWorkerInfo: {
+            /** Active */
+            active: number;
+            /** Concurrency */
+            concurrency: number | null;
+            /** Name */
+            name: string;
+            /** Processed */
+            processed: number | null;
+            /** Status */
+            status: string;
+            /** Uptime */
+            uptime: number | null;
+        };
+        /** AdminWorkersResponse */
+        AdminWorkersResponse: {
+            /** Online */
+            online: number;
+            /** Total */
+            total: number;
+            /** Workers */
+            workers: components["schemas"]["AdminWorkerInfo"][];
         };
         /**
          * AdvanceNodeRef
@@ -37366,9 +38225,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminAgentMetrics"];
                 };
             };
             /** @description Validation Error */
@@ -37394,13 +38251,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Prometheus exposition format 0.0.4 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "text/plain": string;
                 };
             };
             /** @description Validation Error */
@@ -37432,9 +38289,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminCatalogAgentList"];
                 };
             };
             /** @description Validation Error */
@@ -37472,9 +38327,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminCatalogAgentDetail"];
                 };
             };
             /** @description Validation Error */
@@ -37687,7 +38540,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminAlertOkResult"];
                 };
             };
             /** @description Validation Error */
@@ -37789,7 +38642,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminAlertOkResult"];
                 };
             };
             /** @description Validation Error */
@@ -37863,7 +38716,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminAlertMuteResult"];
                 };
             };
             /** @description Validation Error */
@@ -37897,7 +38750,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminAlertOkResult"];
                 };
             };
             /** @description Validation Error */
@@ -38086,9 +38939,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminBoundaryAuditPage"];
                 };
             };
             /** @description Validation Error */
@@ -38120,9 +38971,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminBoundaryAuditSummary"];
                 };
             };
             /** @description Validation Error */
@@ -38139,7 +38988,10 @@ export interface operations {
     get_celery_queues_api_v1_admin_celery_queues_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -38151,7 +39003,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminQueuesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -38159,7 +39020,10 @@ export interface operations {
     get_celery_workers_api_v1_admin_celery_workers_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -38171,7 +39035,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminWorkersResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -38198,7 +39071,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminPointsAdjustResult"];
                 };
             };
             /** @description Validation Error */
@@ -38234,7 +39107,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminBatchGiftResult"];
                 };
             };
             /** @description Validation Error */
@@ -38340,7 +39213,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminCreditsOrderActionResult"];
                 };
             };
             /** @description Validation Error */
@@ -38374,7 +39247,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminCreditsOrderActionResult"];
                 };
             };
             /** @description Validation Error */
@@ -38406,7 +39279,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminPointPackage"][];
                 };
             };
             /** @description Validation Error */
@@ -38442,7 +39315,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminPointPackage"];
                 };
             };
             /** @description Validation Error */
@@ -38480,7 +39353,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminPointPackage"];
                 };
             };
             /** @description Validation Error */
@@ -38514,7 +39387,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminCreditsOkResult"];
                 };
             };
             /** @description Validation Error */
@@ -38546,7 +39419,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminPointPricing"][];
                 };
             };
             /** @description Validation Error */
@@ -38584,7 +39457,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminPointPricing"];
                 };
             };
             /** @description Validation Error */
@@ -38808,26 +39681,6 @@ export interface operations {
             };
         };
     };
-    admin_health_api_v1_admin_health_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
     jimeng_login_api_v1_admin_jimeng_login_post: {
         parameters: {
             query?: never;
@@ -38846,9 +39699,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminJimengLoginResponse"];
                 };
             };
             /** @description Validation Error */
@@ -38880,9 +39731,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminJimengLogoutResponse"];
                 };
             };
             /** @description Validation Error */
@@ -38914,9 +39763,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminJimengStatus"];
                 };
             };
             /** @description Validation Error */
@@ -39427,7 +40274,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminNousModelDeleteResult"];
                 };
             };
             /** @description Validation Error */
@@ -39739,7 +40586,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminSecretsSelfhealSummary"];
                 };
             };
             /** @description Validation Error */
@@ -40079,7 +40926,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminMemoryPromotionApproveResult"];
                 };
             };
             /** @description Validation Error */
@@ -40113,7 +40960,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminMemoryPromotionRejectResult"];
                 };
             };
             /** @description Validation Error */
@@ -40215,7 +41062,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminMemoryDemoteResult"];
                 };
             };
             /** @description Validation Error */
@@ -40675,106 +41522,6 @@ export interface operations {
             };
         };
     };
-    get_storage_stats_api_v1_admin_stats_storage_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_user_growth_api_v1_admin_stats_users_growth_get: {
-        parameters: {
-            query?: {
-                days?: number;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_video_stats_api_v1_admin_stats_videos_stats_get: {
-        parameters: {
-            query?: {
-                days?: number;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     dispatch_storage_migration_api_v1_admin_storage_migration_post: {
         parameters: {
             query?: never;
@@ -40829,7 +41576,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminStorageAudit"];
                 };
             };
             /** @description Validation Error */
@@ -40863,7 +41610,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminStorageMediaStatusList"];
                 };
             };
             /** @description Validation Error */
@@ -40897,7 +41644,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminStorageMediaDetail"];
                 };
             };
             /** @description Validation Error */
@@ -40931,7 +41678,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminStorageMediaVerify"];
                 };
             };
             /** @description Validation Error */
@@ -40963,7 +41710,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminStorageStats"];
                 };
             };
             /** @description Validation Error */
@@ -40995,7 +41742,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminStorageDeepVerifyDispatch"];
                 };
             };
             /** @description Validation Error */
@@ -41101,7 +41848,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTablePreferenceResetResult"];
                 };
             };
             /** @description Validation Error */
@@ -41141,7 +41888,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTagListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -41177,7 +41924,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTagResponse"];
                 };
             };
             /** @description Validation Error */
@@ -41213,7 +41960,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTagBatchResult"];
                 };
             };
             /** @description Validation Error */
@@ -41245,7 +41992,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTagGroupListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -41281,7 +42028,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTagGroupResponse"];
                 };
             };
             /** @description Validation Error */
@@ -41317,7 +42064,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTagsOk"];
                 };
             };
             /** @description Validation Error */
@@ -41351,7 +42098,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTagsOk"];
                 };
             };
             /** @description Validation Error */
@@ -41389,7 +42136,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTagGroupResponse"];
                 };
             };
             /** @description Validation Error */
@@ -41425,7 +42172,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTagsOk"];
                 };
             };
             /** @description Validation Error */
@@ -41459,7 +42206,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTagsOk"];
                 };
             };
             /** @description Validation Error */
@@ -41497,7 +42244,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTagResponse"];
                 };
             };
             /** @description Validation Error */
@@ -41603,7 +42350,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTaskActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -41637,7 +42384,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTaskActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -42169,7 +42916,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTranscodeBatchResponse"];
                 };
             };
             /** @description Validation Error */
@@ -42303,7 +43050,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTranscodeRetryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -42747,40 +43494,6 @@ export interface operations {
             };
         };
     };
-    admin_lane_snapshot_api_v1_ai_library_admin_lanes_snapshot_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     reload_seeds_api_v1_ai_library_admin_reload_seeds_post: {
         parameters: {
             query?: never;
@@ -42799,9 +43512,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminSeedReloadResponse"];
                 };
             };
             /** @description Validation Error */
@@ -42835,9 +43546,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AdminAgentTelemetry"];
                 };
             };
             /** @description Validation Error */
@@ -57113,39 +57822,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    admin_overview_api_v1_points_admin_overview_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AdminTeamPointsAdjustResult"];
                 };
             };
             /** @description Validation Error */
