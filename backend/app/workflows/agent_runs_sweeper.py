@@ -104,6 +104,11 @@ async def mark_heartbeat_lost_step() -> int:
 
 
 INBOX_ORPHAN_SECONDS = 24 * 3600
+#: Slack past the needs_input gate's TTL before a parked issue's items become
+#: expirable (FH3 T1): the gate's own timeout, the turn that follows it and a
+#: sweeper tick all land after ``since + TTL``, and an item must not be thrown
+#: away in the minute the answer turn was about to claim it.
+PARKED_EXPIRY_GRACE_SECONDS = 3600
 RECONCILE_GRACE_SECONDS = 10 * 60
 
 
@@ -177,15 +182,29 @@ async def reap_stale_workforce_tasks_step() -> dict[str, int]:
 async def expire_orphan_inbox_step() -> int:
     """Mark unclaimed agent_run_inbox items older than a day as expired
     (spec §1-③: an item whose run ended before the next step boundary is an
-    orphan; it is never deleted, so the thread still shows it was sent)."""
+    orphan; it is never deleted, so the thread still shows it was sent).
+
+    Not orphans: items on a paused issue (phase 2a) and items on an issue
+    parked on the needs_input gate while the gate still waits (FH3 T1)."""
+    from app.core.config import settings
     from app.repositories.agent_run_inbox_repository import (
         get_agent_run_inbox_repository,
     )
 
-    older_than = datetime.now(timezone.utc) - timedelta(seconds=INBOX_ORPHAN_SECONDS)
+    now = datetime.now(timezone.utc)
+    older_than = now - timedelta(seconds=INBOX_ORPHAN_SECONDS)
+    # FH3 T1: an issue parked on the needs_input gate keeps its items until the
+    # gate itself gives up; a marker older than that is a dead workflow's.
+    parked_floor = now - timedelta(
+        hours=settings.NEEDS_INPUT_RECV_TTL_HOURS,
+        seconds=PARKED_EXPIRY_GRACE_SECONDS,
+    )
     # Phase 2a: items queued on a PAUSED issue wait for resume — never orphans.
     return await get_agent_run_inbox_repository().expire_stale(
-        older_than=older_than, skip_paused_issues=True
+        older_than=older_than,
+        skip_paused_issues=True,
+        skip_parked_issues=True,
+        parked_floor=parked_floor,
     )
 
 
@@ -196,7 +215,7 @@ INBOX_DRAIN_LIMIT = 20
 
 @DBOS.step()
 async def scan_idle_inbox_step() -> list[dict[str, Any]]:
-    """SELECT ONLY. Returns the drain orders the WORKFLOW body must dispatch.
+    """Never dispatches. Returns the drain orders the WORKFLOW body must dispatch.
 
     Items are claimed at STEP boundaries only (``InboxClaimHook``). Between a
     run's last boundary and its row going terminal there is a window with no
@@ -224,6 +243,17 @@ async def scan_idle_inbox_step() -> list[dict[str, Any]]:
     records the same rule, and Task 5's wake-up dispatch is split for it). The
     body half is ``_drain_one_issue``.
 
+    It does WRITE in one case (FH3 T1), which is why this says "never
+    dispatches" rather than "select only" — the rule was always about
+    ``start_workflow``. An issue waiting on a person (``in_review`` /
+    ``needs_followup``, not parked on the gate) has the wake-ups the AGENT
+    scheduled for itself expired here, with a WARN: ``deliver_or_dispatch``
+    reads such an issue as idle and would buy a billed turn on them — the turn
+    ``_fire_issue_wakeup``'s ``issue_not_active`` guard exists to refuse, which
+    a wake-up queued while the issue was parked went around. What a person or
+    a sub-agent sent still dispatches. If nothing else is pending the target
+    yields a marker order ``{issue_id, inactive_expired}`` the body counts.
+
     An order carries only what the dispatch needs. The step's return value is
     checkpointed into ``dbos.operation_outputs`` every minute, forever.
     """
@@ -243,14 +273,21 @@ async def scan_idle_inbox_step() -> list[dict[str, Any]]:
     for target in targets:
         issue_id = int(target["target_id"])
         try:
+            inactive_expired = await _expire_agent_items_if_inactive(repo, issue_id)
             item = await repo.oldest_pending_for_target(
                 target_kind="issue", target_id=issue_id
             )
         except Exception as err:  # noqa: BLE001 — one issue must not sink the scan
+            # Also the answer to a failed activity read or expiry: neither has
+            # proved the issue active, and a wrong guess costs a billed turn.
             logger.exception(f"[sweeper] idle-drain scan failed for {issue_id}: {err}")
             continue
         if item is None:
-            # claimed between the two reads — nothing stranded after all
+            if inactive_expired:
+                orders.append(
+                    {"issue_id": issue_id, "inactive_expired": inactive_expired}
+                )
+            # else: claimed between the two reads — nothing stranded after all
             continue
         orders.append(
             {
@@ -261,6 +298,36 @@ async def scan_idle_inbox_step() -> list[dict[str, Any]]:
             }
         )
     return orders
+
+
+async def _expire_agent_items_if_inactive(repo: Any, issue_id: int) -> int:
+    """FH3 T1 (E2): on an issue waiting on a person and not parked on the gate,
+    expire the pending items the agent scheduled for itself; return how many.
+
+    Called from inside ``scan_idle_inbox_step`` — a write, never a dispatch.
+    Errors propagate: the scan skips the target for this tick rather than
+    dispatch on a guess. A parked issue is left alone (its answer turn claims
+    the items); a missing issue is left to ``deliver_or_dispatch``, which
+    already refuses it.
+    """
+    from app.repositories.user_schedules_repository import (
+        AGENT_WAKEUP_INACTIVE_STATUSES,
+        ISSUE_NOT_ACTIVE,
+    )
+    from app.services.issues.execution_state import is_parked_on_input
+
+    issue = await repo.issue_activity(issue_id)
+    if (
+        not issue
+        or issue.get("status") not in AGENT_WAKEUP_INACTIVE_STATUSES
+        or is_parked_on_input(issue)
+    ):
+        return 0
+    return int(
+        await repo.expire_agent_items_for_target(
+            target_kind="issue", target_id=issue_id, reason=ISSUE_NOT_ACTIVE
+        )
+    )
 
 
 async def _drain_one_issue(order: dict[str, Any], counters: dict[str, int]) -> None:
@@ -547,8 +614,13 @@ async def agent_runs_sweeper_workflow(
     # Scan BEFORE expiring: an item that is both stranded and a day old should
     # get its turn rather than be thrown away by the step running beside it.
     # The dispatch itself happens HERE, in the body — never inside a step.
-    drain = {"dispatched": 0, "busy": 0, "failed": 0}
+    drain = {"dispatched": 0, "busy": 0, "failed": 0, "inactive": 0}
     for order in await scan_idle_inbox_step():
+        if order.get("inactive_expired"):
+            # FH3 T1: only the agent's own wake-ups were pending on an issue
+            # waiting on a person; the scan expired them. Nothing to dispatch.
+            drain["inactive"] += 1
+            continue
         await _drain_one_issue(order, drain)
     expired_inbox = await expire_orphan_inbox_step()
     reconciled = await reconcile_issue_execution_state_step()
@@ -579,6 +651,7 @@ async def agent_runs_sweeper_workflow(
             f"budget_transitions={transitions} "
             f"inbox_drained={drain['dispatched']} inbox_busy={drain['busy']} "
             f"inbox_drain_failed={drain['failed']} "
+            f"inbox_inactive={drain['inactive']} "
             f"expired_inbox={expired_inbox} reconciled_issues={reconciled} "
             f"forced_tree_settles={forced_settles} "
             f"preempted_waits_released={preempted_waits} "
