@@ -13,9 +13,9 @@ Spec: docs/superpowers/specs/2026-09-24-openapi-typed-frontend-design.md
 
 from __future__ import annotations
 
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.schemas.wire import WireDatetime
 
@@ -77,7 +77,17 @@ class IssueRollupBudget(BaseModel):
     budget_cents: Optional[int]
     spent_cents: float
     pct: Optional[int]
-    state: str
+    state: Literal["ok", "warn", "over"]
+
+
+class IssueRollupOrigin(BaseModel):
+    """``origin_resolvers.resolve_origin``: ``kind`` + ``origin_id`` always,
+    plus whatever the kind's resolver adds (passed through)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    kind: str
+    origin_id: Optional[Union[str, int]]
 
 
 class IssueRollup(BaseModel):
@@ -86,7 +96,7 @@ class IssueRollup(BaseModel):
 
     issue_id: str
     status: Optional[str]
-    phase: str
+    phase: Literal["paused", "waiting_input", "running", "blocked", "done", "idle"]
     paused_at: Optional[IssueRollupInstant]
     current_run: Optional[IssueRollupCurrentRun]
     runs: list[IssueRollupRun]
@@ -94,7 +104,7 @@ class IssueRollup(BaseModel):
     inbox_pending: int
     efficiency: IssueRollupEfficiency
     budget: IssueRollupBudget
-    origin: dict[str, Any]
+    origin: IssueRollupOrigin
     execution_state: dict[str, Any]
     computed_at: WireDatetime
 

@@ -22,7 +22,7 @@ ROLLUP = compute_rollup(
     [],
     [],
     0,
-    {"kind": "manual"},
+    {"kind": "manual", "origin_id": None},
     spent_cents=0.0,
     tree_cost_cents={},
 )
