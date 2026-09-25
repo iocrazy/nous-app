@@ -6,18 +6,19 @@ that's been routed to a DBOS workflow. Both pipes can run side-by-side
 during the shadow window.
 
 Endpoints:
-    GET    /api/v1/workflows/runs                   — list the user's runs
     GET    /api/v1/workflows/{workflow_id}/status   — one-shot status
     GET    /api/v1/workflows/{workflow_id}/events   — SSE stream
     POST   /api/v1/workflows/{workflow_id}/cancel   — request cancel
     POST   /api/v1/workflows/{workflow_id}/resume   — resume after pause
+    POST   /api/v1/workflows/{workflow_id}/restart  — fork a fresh run
     GET    /api/v1/workflows/{workflow_id}/steps    — step list snapshot
 
-The run list lives at /runs, NOT at the bare prefix: GET /api/v1/workflows
-belongs to workflow_templates_router (team workflow templates). A bare
-``@router.get("")`` here shadowed that list for as long as both were
-registered (FastAPI resolves collisions by registration order, silently) —
-guarded against regression by tests/test_route_uniqueness.py.
+There is no run list here: listing the user's tasks is the Task Center's job
+(``/api/v1/task-manager/tasks``, reading ``task_tracking``). A ``/runs`` list
+that duplicated it had no caller and was removed (OpenAPI P9). GET
+/api/v1/workflows itself belongs to workflow_templates_router; the two routers
+share the prefix, so their paths must stay disjoint —
+tests/test_route_uniqueness.py fails on any collision.
 
 Every per-id endpoint first checks the caller owns the workflow
 (``app/api/workflow_access.py``); DBOS itself has no notion of users.
@@ -31,11 +32,19 @@ import time
 from typing import Any, AsyncIterator, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from app.api.workflow_access import require_workflow_access
+from app.api.workflow_access import require_workflow_access, workflow_not_found
 from app.core.deps import AuthDep
+from app.schemas.workflow_responses import (
+    DbosWorkflowCancelResult,
+    DbosWorkflowRestartResult,
+    DbosWorkflowResumeResult,
+    DbosWorkflowSnapshot,
+    DbosWorkflowSteps,
+)
 from app.services.infra import dbos_orchestrator
 
 router = APIRouter(prefix="/workflows", tags=["DBOS Workflows"])
@@ -281,40 +290,41 @@ async def _get_steps(workflow_id: str) -> list[dict[str, Any]]:
         return []
 
 
-@router.get("/{workflow_id}/status")
+@router.get("/{workflow_id}/status", response_model=DbosWorkflowSnapshot)
 async def get_workflow_status(
     workflow_id: str,
     auth: AuthDep,
-) -> dict[str, Any]:
-    """One-shot status snapshot. Use the SSE endpoint for live updates."""
+) -> Any:
+    """One-shot status snapshot. Use the SSE endpoint for live updates.
+
+    ``input`` / ``output`` are arbitrary workflow values, so the snapshot is
+    encoded here (as FastAPI did for the bare dict) before the model sees it:
+    Pydantic would render a nested datetime differently, and cannot serialize
+    an arbitrary object at all."""
     await require_workflow_access(workflow_id, auth.user_id)
     snap = await _get_status(workflow_id)
     if snap is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"workflow_id={workflow_id} unknown to DBOS",
-        )
-    return snap
+        raise workflow_not_found()
+    return jsonable_encoder(snap)
 
 
-@router.get("/{workflow_id}/steps")
+@router.get("/{workflow_id}/steps", response_model=DbosWorkflowSteps)
 async def get_workflow_steps(
     workflow_id: str,
     auth: AuthDep,
-) -> dict[str, Any]:
+) -> Any:
     """Step list snapshot. Frontend uses this to render per-step
     progress timelines (e.g. parse → save → auto_tag → dispatch)."""
     await require_workflow_access(workflow_id, auth.user_id)
     snap = await _get_status(workflow_id)
     if snap is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"workflow_id={workflow_id} unknown to DBOS",
-        )
-    return {"workflow_id": workflow_id, "steps": await _get_steps(workflow_id)}
+        raise workflow_not_found()
+    return jsonable_encoder(
+        {"workflow_id": workflow_id, "steps": await _get_steps(workflow_id)}
+    )
 
 
-@router.post("/{workflow_id}/cancel")
+@router.post("/{workflow_id}/cancel", response_model=DbosWorkflowCancelResult)
 async def cancel_workflow(
     workflow_id: str,
     auth: AuthDep,
@@ -333,7 +343,7 @@ async def cancel_workflow(
     return {"status": "cancel_requested", "workflow_id": workflow_id}
 
 
-@router.post("/{workflow_id}/resume")
+@router.post("/{workflow_id}/resume", response_model=DbosWorkflowResumeResult)
 async def resume_workflow(
     workflow_id: str,
     auth: AuthDep,
@@ -351,7 +361,11 @@ async def resume_workflow(
     return {"status": "resumed", "workflow_id": workflow_id}
 
 
-@router.post("/{workflow_id}/restart", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/{workflow_id}/restart",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=DbosWorkflowRestartResult,
+)
 async def restart_workflow(
     workflow_id: str,
     auth: AuthDep,
@@ -378,147 +392,6 @@ async def restart_workflow(
         "status": "restarted",
         "original_workflow_id": workflow_id,
         "new_workflow_id": new_handle.workflow_id,
-    }
-
-
-def _serialize_task_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Project a task_tracking row into the workflows list shape.
-
-    Renames the FK `dbos_workflow_id` to `workflow_id` so the wire
-    contract reads naturally — every consumer thinks in terms of
-    workflows, not tracking-row internals."""
-    return {
-        "workflow_id": row.get("dbos_workflow_id"),
-        "task_type": row.get("task_type"),
-        "task_kind": row.get("task_kind"),
-        "status": row.get("status"),
-        "phase": row.get("phase"),
-        "title": row.get("title"),
-        "subtitle": row.get("subtitle"),
-        "progress": row.get("progress"),
-        "error_msg": row.get("error_msg"),
-        "created_at": row.get("created_at"),
-        "started_at": row.get("started_at"),
-        "completed_at": row.get("completed_at"),
-        "updated_at": row.get("updated_at"),
-        "media_id": row.get("media_id"),
-        "resource_id": row.get("resource_id"),
-        "group_id": row.get("group_id"),
-    }
-
-
-def _jsonable_task_row(row: Any) -> dict[str, Any]:
-    """Coerce a task_tracking ORM mapping's scalars to the JSON-safe
-    primitives PostgREST previously returned: timestamptz → ISO-8601 str,
-    uuid ``group_id`` → str. Everything else (BIGINT/text/int) passes
-    through unchanged so ``_serialize_task_row`` sees the same shape."""
-    import uuid as _uuid
-
-    out: dict[str, Any] = {}
-    for key, value in row.items():
-        if hasattr(value, "isoformat"):
-            out[key] = value.isoformat()
-        elif isinstance(value, _uuid.UUID):
-            out[key] = str(value)
-        else:
-            out[key] = value
-    return out
-
-
-# DBOS status names some legacy callers may still pass on the query
-# string. task_tracking uses lowercase business statuses, so we
-# transparently map the old values across.
-_LEGACY_DBOS_STATUS_MAP = {
-    "PENDING": "pending",
-    "ENQUEUED": "pending",
-    "SUCCESS": "completed",
-    "ERROR": "failed",
-    "RETRIES_EXCEEDED": "failed",
-    "CANCELLED": "cancelled",
-}
-
-
-@router.get("/runs")
-async def list_workflows(
-    auth: AuthDep,
-    name: Optional[str] = Query(
-        None,
-        description="Filter by task_type (e.g. download / parse / ai_transcription)",
-    ),
-    workflow_status: Optional[str] = Query(
-        None,
-        description=(
-            "Status filter (task_tracking values): pending / processing / "
-            "completed / failed / cancelled / lost. Legacy DBOS names "
-            "(PENDING / SUCCESS / ERROR / ...) are still accepted and mapped."
-        ),
-    ),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    sort_desc: bool = Query(True, description="Newest first"),
-) -> dict[str, Any]:
-    """List the authenticated user's workflows from task_tracking.
-
-    Reads task_tracking (CLAUDE.md 路线 C rule 1 — task_tracking is the
-    UI source of truth). Previously this endpoint read dbos.workflow_status
-    directly, which could diverge from the trigger-mirrored task_tracking
-    state during the brief sync window — risking the same dual-source
-    inconsistency that motivated 路线 C ("Engine 108 queued but Settings
-    only 38 rows", 2026-05-05).
-
-    Per-workflow detail / control endpoints (/status, /events, /steps,
-    /cancel, /resume, /restart) still call DBOS directly because they
-    need execution-engine state (input/output, step list, cancel signals)
-    that task_tracking deliberately does NOT carry.
-    """
-    from sqlalchemy import select
-
-    from app.db.session import read_scope
-    from app.models import TaskTracking
-
-    stmt = select(
-        TaskTracking.dbos_workflow_id,
-        TaskTracking.task_type,
-        TaskTracking.task_kind,
-        TaskTracking.status,
-        TaskTracking.phase,
-        TaskTracking.title,
-        TaskTracking.subtitle,
-        TaskTracking.progress,
-        TaskTracking.error_msg,
-        TaskTracking.created_at,
-        TaskTracking.started_at,
-        TaskTracking.completed_at,
-        TaskTracking.updated_at,
-        TaskTracking.media_id,
-        TaskTracking.resource_id,
-        TaskTracking.group_id,
-    ).where(TaskTracking.user_id == str(auth.user_id))
-    if name:
-        stmt = stmt.where(TaskTracking.task_type == name)
-    if workflow_status:
-        normalized = _LEGACY_DBOS_STATUS_MAP.get(
-            workflow_status, workflow_status.lower()
-        )
-        stmt = stmt.where(TaskTracking.status == normalized)
-    order_col = (
-        TaskTracking.created_at.desc() if sort_desc else TaskTracking.created_at.asc()
-    )
-    stmt = stmt.order_by(order_col).offset(offset).limit(limit)
-
-    try:
-        async with read_scope() as session:
-            result = await session.execute(stmt)
-            rows = [_jsonable_task_row(m) for m in result.mappings().all()]
-    except Exception as e:
-        logger.warning(f"[workflows] list({str(auth.user_id)[:8]}): {e}")
-        raise HTTPException(500, detail=str(e))
-
-    return {
-        "workflows": [_serialize_task_row(r) for r in rows],
-        "total": len(rows),
-        "offset": offset,
-        "limit": limit,
     }
 
 
@@ -589,7 +462,22 @@ async def _sse_event_stream(
         await asyncio.sleep(_POLL_INTERVAL_SEC)
 
 
-@router.get("/{workflow_id}/events")
+@router.get(
+    "/{workflow_id}/events",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": (
+                "Server-Sent Events: `event: status` carries a "
+                "DbosWorkflowSnapshot (plus `steps`, a DbosWorkflowStep list, "
+                "when include_steps=true) on every change; then `event: done`, "
+                "`event: timeout` or `event: not_found`. `: ping` comments "
+                "keep proxies from closing an idle stream."
+            ),
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        }
+    },
+)
 async def stream_workflow_events(
     workflow_id: str,
     request: Request,
@@ -662,10 +550,7 @@ async def stream_workflow_events(
     await require_workflow_access(workflow_id, caller_id)
     snap = await _get_status(workflow_id)
     if snap is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"workflow_id={workflow_id} unknown to DBOS",
-        )
+        raise workflow_not_found()
 
     return StreamingResponse(
         _sse_event_stream(workflow_id, request, include_steps),
