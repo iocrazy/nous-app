@@ -47,7 +47,9 @@ from app.schemas.issue import (
     PausedIssueItem,
     PausedListResponse,
 )
+from app.schemas.issue_progress_responses import IssueScheduleList
 from app.schemas.outputs import IssueOutputsResponse
+from app.schemas.pipeline import PipelineRunListResponse
 from app.services.deliverables.lineage_view import group_by_object
 from app.services.issues.issue_reassign import note_reassignment
 from app.services.issues.issue_visibility import is_issue_visible
@@ -778,14 +780,14 @@ async def _running_root_run(runs, issue_id: int, conversation_id: Optional[int])
         )
 
 
-@router.get("/{issue_id}/pipeline-runs")
+@router.get("/{issue_id}/pipeline-runs", response_model=PipelineRunListResponse)
 async def list_issue_pipeline_runs(issue_id: int, auth: AuthDep):
     """List content-relay runs (W2b) whose parent is this issue, newest first,
     decorated with pipeline name / total steps / current agent for the UI strip.
     Visibility follows the same team boundary as the issue itself."""
     from app.api.pipelines_router import _enrich_run
     from app.repositories.pipeline_repository import pipeline_repository
-    from app.schemas.pipeline import PipelineRun, PipelineRunListResponse
+    from app.schemas.pipeline import PipelineRun
 
     existing = await issue_repository.get_by_id(issue_id)
     if not existing:
@@ -842,7 +844,7 @@ _RETIRED_SCHEDULE_WINDOW = timedelta(days=7)
 _ISSUE_SCHEDULES_LIMIT = 50
 
 
-@router.get("/{issue_id}/schedules")
+@router.get("/{issue_id}/schedules", response_model=IssueScheduleList)
 async def list_issue_schedules(issue_id: int, auth: AuthDep) -> dict:
     """Everything timed on this issue: the one-shot wake-ups pointing at it,
     plus the routine that created it.
@@ -914,7 +916,9 @@ async def list_issue_schedules(issue_id: int, auth: AuthDep) -> dict:
                 # A wake-up carries `text`; a routine carries the prompt it
                 # will run. Both answer "what will happen when this fires".
                 "text": (payload.get("text") or payload.get("prompt_md") or "")[:500],
-                "created_by": payload.get("created_by") or "user",
+                # str(): the payload is caller-written jsonb, and one odd
+                # value must not 500 the panel for everyone on the issue.
+                "created_by": str(payload.get("created_by") or "user"),
                 "enabled": bool(row["enabled"]),
                 # WHY it stopped. fired_once / issue_terminal / stale /
                 # dispatch_failed are four very different states that all
