@@ -25,6 +25,7 @@ import { LibrarySearchCard } from './LibrarySearchCard';
 import { getSupabaseClient } from '../../supabaseClient';
 import {
   workforceService,
+  asTaskLifecycle,
   TERMINAL_LIFECYCLES,
   type DelegateTaskLookup,
   type TaskLifecycle,
@@ -144,7 +145,7 @@ function useDelegateLiveStatus(
         const data = await workforceService.getTaskByInbox(inboxMessageId);
         if (cancelled) return;
         setState({
-          lifecycle: data.task?.lifecycle_status ?? null,
+          lifecycle: asTaskLifecycle(data.task?.lifecycle_status),
           data,
           loading: false,
         });

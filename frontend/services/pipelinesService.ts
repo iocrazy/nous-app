@@ -11,10 +11,13 @@
 
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
+import type { PipelineRun, PipelineRunList } from '../types/api';
+
+export type { PipelineRun } from '../types/api';
 
 // ── Types ──────────────────────────────────────────────────────────
 
-export type PipelineRunStatus = 'running' | 'completed' | 'halted' | 'cancelled';
+export type PipelineRunStatus = PipelineRun['status'];
 
 export interface PipelineStep {
   id: string;
@@ -58,27 +61,6 @@ export interface PipelineUpdatePayload {
   description?: string | null;
   enabled?: boolean;
   steps?: PipelineStepInput[];
-}
-
-export interface PipelineRun {
-  id: string;
-  pipeline_id: string;
-  parent_issue_id: string;
-  current_step: number;
-  status: PipelineRunStatus;
-  halted_reason: string | null;
-  started_by_user_id: string | null;
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-  // Decoration for the active-run strip.
-  pipeline_name: string | null;
-  total_steps: number | null;
-  current_agent_id: string | null;
-}
-
-interface PipelineRunListResponse {
-  items: PipelineRun[];
 }
 
 // ── HTTP ───────────────────────────────────────────────────────────
@@ -171,6 +153,6 @@ export async function listIssuePipelineRuns(
   const res = await fetch(`${getApiUrl()}/api/v1/issues/${issueId}/pipeline-runs`, {
     headers: await getAuthHeaders(),
   });
-  const body = await _json<PipelineRunListResponse>(res);
+  const body = await _json<PipelineRunList>(res);
   return body.items;
 }

@@ -601,3 +601,35 @@ export type DbosWorkflowCancelResult = Schemas['DbosWorkflowCancelResult'];
 export type DbosWorkflowResumeResult = Schemas['DbosWorkflowResumeResult'];
 export type DbosWorkflowRestartResult = Schemas['DbosWorkflowRestartResult'];
 // —— end P9 workflows ——
+// —— P9 workforce/tasks/issues ——
+/** `GET /workforce/board`. `recent_runs[].id` is an `agent_runs` Snowflake sent
+ * as a JSON **number**; `slug` / `name` are nullable columns. */
+export type WorkforceBoard = Schemas['WorkforceBoard'];
+export type WorkforceAgentEntry = Schemas['WorkforceBoardAgent'];
+export type WorkforceWorkerRow = Schemas['WorkforceWorkerRow'];
+export type WorkforceQueueCounts = Schemas['WorkforceQueueCounts'];
+export type WorkforceRecentRun = Schemas['WorkforceBoardRun'];
+export type WorkforceStateHistoryRow = Schemas['WorkforceStateHistoryRow'];
+/** `GET /workforce/agents/{slug}/detail` (platform admin only). */
+export type WorkforceAgentDetail = Schemas['WorkforceAgentDetail'];
+export type WorkforceInboxRow = Schemas['WorkforceInboxRow'];
+export type WorkforceOutboxRow = Schemas['WorkforceOutboxRow'];
+export type WorkforceDetailRun = Schemas['WorkforceDetailRun'];
+export type WorkforceInboxClearResult = Schemas['WorkforceInboxClearResult'];
+/** `GET /workforce/tasks/by-inbox/{id}`: `task` is null until the recipient
+ * picks the Delegate up; `outbox_response` is null until the task is terminal. */
+export type DelegateTaskLookup = Schemas['WorkforceDelegateTaskLookup'];
+export type DelegateTaskRow = Schemas['WorkforceDelegateTask'];
+export type DelegateOutboxResponse = Schemas['WorkforceDelegateOutboxResponse'];
+/** `GET /issues/{id}/progress` — computed from the runs, never from
+ * `execution_state` alone. */
+export type IssueProgress = Schemas['IssueRollup'];
+export type IssueProgressRun = Schemas['IssueRollupRun'];
+/** One row of `GET /issues/{id}/schedules`. */
+export type IssueScheduleItem = Schemas['IssueScheduleItem'];
+export type PipelineRun = Schemas['PipelineRun'];
+export type PipelineRunList = Schemas['PipelineRunListResponse'];
+/** `POST /flows/{id}/cancel`: only the keys of the branch taken are present. */
+export type FlowCancelResult = Schemas['FlowCancelResult'];
+export type ScheduleFireNowResult = Schemas['ScheduleFireNowResult'];
+// —— end P9 workforce/tasks/issues ——
