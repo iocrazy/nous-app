@@ -4341,6 +4341,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ai/analyze/backfill-shots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backfill Shots
+         * @description Index the caller's videos that have no frame vectors in the CURRENT
+         *     space (or were cut by an older algorithm): one ``index_shots`` task per
+         *     video under one flow (the Task Center's parent card).
+         *
+         *     ``dry_run`` reports the candidates with a shot / token estimate and
+         *     creates nothing — on a network provider the UI requires one before Run.
+         *     ``limit`` ≤ 50: each candidate is a task, not one embedding call.
+         */
+        post: operations["backfill_shots_api_v1_ai_analyze_backfill_shots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/analyze/index-shots/{resource_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Index Shots
+         * @description Index ONE video's shots as a Task Center task (the Shots tab's Index
+         *     This Video / Re-index). 202 with the task id; the tab follows the task.
+         *
+         *     Typed refusals: 404 (not visible), 422 ``not_a_video`` /
+         *     ``no_video_file``, 409 ``already_indexed`` (has frame vectors in the
+         *     current space; pass ``force`` to re-cut), 409 ``embedder_unconfigured`` /
+         *     ``provider_no_image``, 503 ``vector_store_missing``.
+         */
+        post: operations["index_shots_api_v1_ai_analyze_index_shots__resource_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ai/analyze/resource/{resource_id}": {
         parameters: {
             query?: never;
@@ -12752,6 +12804,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/resources/{resource_id}/frame": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Resource Frame
+         * @description A single frame cut on demand (Search Hit card, Shots hero). 422 when
+         *     ``ms`` is past the end of the video, 404 when the source is gone.
+         */
+        get: operations["get_resource_frame_api_v1_resources__resource_id__frame_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/resources/{resource_id}/gen-prompt/generate": {
         parameters: {
             query?: never;
@@ -12966,6 +13039,28 @@ export interface paths {
          *     ``generated_media.media_kind`` written for the row.
          */
         post: operations["save_resource_as_asset_api_v1_resources__resource_id__save_as_asset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/resources/{resource_id}/shots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Resource Shots
+         * @description The video's cut list and index facts. ``indexed=false`` + ``[]`` for a
+         *     video nobody has indexed; ``index.covered`` says whether the CURRENT
+         *     embedding space holds its frame vectors (after a space switch it may not).
+         */
+        get: operations["get_resource_shots_api_v1_resources__resource_id__shots_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -20994,6 +21089,62 @@ export interface components {
             /** Workflow Id */
             workflow_id: string;
         };
+        /** BackfillShotsBody */
+        BackfillShotsBody: {
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+        };
+        /**
+         * BackfillShotsResponse
+         * @description ``POST /ai/analyze/backfill-shots``.
+         *
+         *     ``dry_run``: ``candidates`` are the videos a real run would dispatch,
+         *     with the shot / token estimate; nothing is created. Real run: one parent
+         *     task (``parent_task_id``) and one ``index_shots`` child per candidate
+         *     (``dispatched``); ``skipped`` names candidates refused before dispatch
+         *     with a stable reason (``no_video_file`` / ``already_indexed`` /
+         *     ``dispatch_failed``). Process-wide refusals (``embedder_unconfigured`` /
+         *     ``provider_no_image`` / ``store_missing``) are a 409 instead.
+         */
+        BackfillShotsResponse: {
+            /** Candidates */
+            candidates: string[];
+            /** Dispatched */
+            dispatched: string[];
+            /** Dry Run */
+            dry_run: boolean;
+            /** Estimated Shots */
+            estimated_shots: number;
+            /** Estimated Tokens */
+            estimated_tokens: number;
+            /** Parent Task Id */
+            parent_task_id?: string | null;
+            /** Skipped */
+            skipped: components["schemas"]["BackfillShotsSkip"][];
+            /** Space Id */
+            space_id: string;
+            /** Stale */
+            stale: number;
+            /** Success */
+            success: boolean;
+            /** Total Pending */
+            total_pending: number;
+        };
+        /** BackfillShotsSkip */
+        BackfillShotsSkip: {
+            /** Reason */
+            reason: string;
+            /** Resource Id */
+            resource_id: string;
+        };
         /**
          * BatchAssetAiRequest
          * @description Body for POST /resources/ai/batch (batch caption / classify).
@@ -27222,6 +27373,26 @@ export interface components {
              * @enum {string}
              */
             target_kind: "conversation" | "issue";
+        };
+        /** IndexShotsBody */
+        IndexShotsBody: {
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
+        };
+        /**
+         * IndexShotsResponse
+         * @description ``POST /ai/analyze/index-shots/{resource_id}`` (202).
+         */
+        IndexShotsResponse: {
+            /** Resource Id */
+            resource_id: string;
+            /** Task Id */
+            task_id: string;
+            /** Workflow Id */
+            workflow_id: string;
         };
         /**
          * InspirationNoteActivityDay
@@ -36227,6 +36398,42 @@ export interface components {
             sort_order?: number | null;
         };
         /**
+         * ShotIndexInfo
+         * @description ``video_shot_indexes`` row + whether the CURRENT space holds vectors
+         *     for it (``covered``) and whether the cut is by an older algorithm.
+         */
+        ShotIndexInfo: {
+            /** Algo Version */
+            algo_version: string;
+            /** Covered */
+            covered: boolean;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Indexed At */
+            indexed_at?: string | null;
+            /** Shot Count */
+            shot_count: number;
+            /** Space Id */
+            space_id?: string | null;
+            /** Stale */
+            stale: boolean;
+        };
+        /** ShotOut */
+        ShotOut: {
+            /** Cut Score */
+            cut_score?: number | null;
+            /** End Ms */
+            end_ms: number;
+            /** Id */
+            id: string;
+            /** Rep Frame Ms */
+            rep_frame_ms: number;
+            /** Shot Index */
+            shot_index: number;
+            /** Start Ms */
+            start_ms: number;
+        };
+        /**
          * ShotUpdate
          * @description Request body for updating a shot's parameter tags / description. NEVER
          *     touches ``status`` or the image/thumbnail/video URLs — those flow through
@@ -36247,6 +36454,20 @@ export interface components {
             shot_number?: number | null;
             /** Shot Type */
             shot_type?: string | null;
+        };
+        /**
+         * ShotsResponse
+         * @description ``GET /resources/{id}/shots``. ``indexed=false`` with an empty list is
+         *     the normal answer for a video nobody has indexed — not a 404.
+         */
+        ShotsResponse: {
+            index?: components["schemas"]["ShotIndexInfo"] | null;
+            /** Indexed */
+            indexed: boolean;
+            /** Resource Id */
+            resource_id: string;
+            /** Shots */
+            shots?: components["schemas"]["ShotOut"][];
         };
         /**
          * SignInRequest
@@ -47637,6 +47858,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiBackfillEmbeddingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    backfill_shots_api_v1_ai_analyze_backfill_shots_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["BackfillShotsBody"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackfillShotsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    index_shots_api_v1_ai_analyze_index_shots__resource_id__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path: {
+                resource_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["IndexShotsBody"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexShotsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -63489,6 +63784,43 @@ export interface operations {
             };
         };
     };
+    get_resource_frame_api_v1_resources__resource_id__frame_get: {
+        parameters: {
+            query: {
+                /** @description Timestamp in milliseconds */
+                ms: number;
+            };
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path: {
+                resource_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One JPEG frame of the video at `ms`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     generate_gen_prompt_api_v1_resources__resource_id__gen_prompt_generate_post: {
         parameters: {
             query?: never;
@@ -63867,6 +64199,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_resource_shots_api_v1_resources__resource_id__shots_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path: {
+                resource_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -67,6 +67,9 @@ class ShotBackfillRow:
     resource_id: int
     media_id: int
     title: str
+    #: ``parsed_media.duration`` as stored (free text: seconds or H:M:S);
+    #: the endpoint parses it for the shot estimate.
+    duration: str | None = None
     reason: ShotPendingReason = "missing"
 
 
@@ -417,7 +420,12 @@ class VideoShotEmbeddingsRepository:
         reason = case((stale, "stale_algo"), else_="missing")
         base = (
             _video_resources_of(user_id)
-            .add_columns(Resources.media_id, ParsedMedia.title, reason.label("reason"))
+            .add_columns(
+                Resources.media_id,
+                ParsedMedia.title,
+                ParsedMedia.duration,
+                reason.label("reason"),
+            )
             .where(or_(~has_vector, stale))
         )
         total_stmt = select(func.count()).select_from(base.subquery())
@@ -439,7 +447,8 @@ class VideoShotEmbeddingsRepository:
                 resource_id=int(r[0]),
                 media_id=int(r[1]),
                 title=r[2] or "",
-                reason=r[3],
+                duration=r[3],
+                reason=r[4],
             )
             for r in rows
         ]

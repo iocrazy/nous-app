@@ -10,6 +10,8 @@ Supports both platform_id-based (legacy) and resource_id-based triggers.
 """
 
 import time
+import uuid
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
@@ -36,8 +38,15 @@ from app.schemas.ai_responses import (
     AiTranscribeTriggerResponse,
 )
 from app.schemas.search import SpaceInfo
+from app.schemas.shots import (
+    BackfillShotsBody,
+    BackfillShotsResponse,
+    IndexShotsBody,
+    IndexShotsResponse,
+)
 from app.services.billing import transcription_billing
 from app.services.billing.points_service import PointsService
+from app.services.library.shot_index import ShotIndexError
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
@@ -1860,3 +1869,255 @@ async def get_summary(platform_id: str, auth: AuthDep, _scope: ScopedRequestDep)
         llm_provider=summary.get("llm_provider"),
         created_at=summary.get("created_at"),
     )
+
+
+# ── Shot index (PR 3, spec §6) ──────────────────────────────────────────────
+
+
+def _duration_seconds(value: Any) -> Optional[float]:
+    """``parsed_media.duration`` is free text: ``"192"``, ``"192.5"`` or
+    ``"3:12"`` / ``"0:03:12"``. None when it says nothing usable."""
+    if value is None:
+        return None
+    text_value = str(value).strip()
+    if not text_value:
+        return None
+    try:
+        return float(text_value)
+    except ValueError:
+        pass
+    parts = text_value.split(":")
+    if not 2 <= len(parts) <= 3:
+        return None
+    try:
+        nums = [float(p) for p in parts]
+    except ValueError:
+        return None
+    seconds = 0.0
+    for n in nums:
+        seconds = seconds * 60 + n
+    return seconds
+
+
+def _shot_index_http_error(e: ShotIndexError) -> HTTPException:
+    """Process-wide refusals of the shot index as typed HTTP errors."""
+    if e.reason == "store_missing":
+        return HTTPException(
+            status_code=503,
+            detail={
+                "code": "vector_store_missing",
+                "message": "The shot index is not ready yet (a database update "
+                "is still rolling out). Try again shortly.",
+            },
+        )
+    messages = {
+        "embedder_unconfigured": _EMBEDDER_UNCONFIGURED["message"],
+        "provider_no_image": "The current embedding model cannot take images; "
+        "pick an image-capable model (Settings → AI → Vectors) to index shots.",
+    }
+    return HTTPException(
+        status_code=409,
+        detail={"code": e.reason, "message": messages.get(e.reason, str(e))},
+    )
+
+
+async def _dispatch_index_shots(
+    *, user_id: str, resource_id: str, title: str, flow_id: Optional[str]
+) -> str:
+    """Create the ``index_shots`` task row and start its workflow; the row is
+    failed (``DISPATCH_ERROR``) when the start itself fails so nothing sits
+    queued forever. Returns the workflow id (= task id)."""
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.index_shots import TASK_TYPE as INDEX_SHOTS_TASK_TYPE
+    from app.workflows.index_shots import index_shots_workflow
+
+    manager = get_task_manager()
+    wf_id = str(uuid.uuid4())
+    await manager.create(
+        user_id=user_id,
+        task_type=INDEX_SHOTS_TASK_TYPE,
+        title=f"Index shots · {title}"[:200],
+        subtitle="Queued",
+        resource_id=str(resource_id),
+        dbos_workflow_id=wf_id,
+        flow_id=flow_id,
+        metadata={"shots": {"resource_id": str(resource_id)}},
+    )
+    try:
+        await start_workflow_routed(
+            INDEX_SHOTS_TASK_TYPE,
+            dbos_workflow_callable=index_shots_workflow,
+            dbos_workflow_kwargs={"resource_id": str(resource_id), "user_id": user_id},
+            workflow_id=wf_id,
+        )
+    except Exception as e:
+        try:
+            await manager.fail(
+                wf_id, f"Dispatch failed: {str(e)[:180]}", error_code="DISPATCH_ERROR"
+            )
+        except Exception as fail_err:  # noqa: BLE001
+            logger.error(f"index-shots: could not fail orphan task {wf_id}: {fail_err}")
+        raise
+    return wf_id
+
+
+@router.post(
+    "/analyze/index-shots/{resource_id}",
+    response_model=IndexShotsResponse,
+    status_code=202,
+)
+async def index_shots(
+    resource_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+    body: IndexShotsBody | None = None,
+):
+    """Index ONE video's shots as a Task Center task (the Shots tab's Index
+    This Video / Re-index). 202 with the task id; the tab follows the task.
+
+    Typed refusals: 404 (not visible), 422 ``not_a_video`` /
+    ``no_video_file``, 409 ``already_indexed`` (has frame vectors in the
+    current space; pass ``force`` to re-cut), 409 ``embedder_unconfigured`` /
+    ``provider_no_image``, 503 ``vector_store_missing``.
+    """
+    from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
+    from app.services.distribution.cover_frames import (
+        CoverFrameError,
+        load_source_video,
+    )
+    from app.services.library.shot_index import (
+        ShotIndexError,
+        resolve_space_and_embedder,
+    )
+
+    opts = body or IndexShotsBody()
+    try:
+        source = await load_source_video(ResourcesRepository(), resource_id)
+    except CoverFrameError as e:
+        if e.status_code == 404:
+            raise HTTPException(status_code=404, detail="Resource not found") from e
+        code = "no_video_file" if "no file" in (e.detail or "") else "not_a_video"
+        raise HTTPException(
+            status_code=422, detail={"code": code, "message": e.detail}
+        ) from e
+    try:
+        space, _ = await resolve_space_and_embedder()
+    except ShotIndexError as e:
+        raise _shot_index_http_error(e) from e
+    if not opts.force:
+        from app.api.resources_shots_router import _resource_covered
+
+        try:
+            covered = await _resource_covered(int(resource_id), int(space["id"]))
+        except EmbeddingStoreMissing as e:
+            raise _shot_index_http_error(ShotIndexError("store_missing", str(e))) from e
+        if covered:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "already_indexed",
+                    "message": "This video is already indexed in the current space; "
+                    "use Re-index to cut it again.",
+                },
+            )
+    wf_id = await _dispatch_index_shots(
+        user_id=auth.user_id,
+        resource_id=resource_id,
+        title=source.filename,
+        flow_id=None,
+    )
+    return IndexShotsResponse(task_id=wf_id, workflow_id=wf_id, resource_id=resource_id)
+
+
+@router.post("/analyze/backfill-shots", response_model=BackfillShotsResponse)
+async def backfill_shots(
+    auth: AuthDep, _scope: ScopedRequestDep, body: BackfillShotsBody | None = None
+):
+    """Index the caller's videos that have no frame vectors in the CURRENT
+    space (or were cut by an older algorithm): one ``index_shots`` task per
+    video under one flow (the Task Center's parent card).
+
+    ``dry_run`` reports the candidates with a shot / token estimate and
+    creates nothing — on a network provider the UI requires one before Run.
+    ``limit`` ≤ 50: each candidate is a task, not one embedding call.
+    """
+    from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
+    from app.repositories.video_shots_repository import (
+        FRAME_KIND,
+        get_video_shot_embeddings_repository,
+    )
+    from app.services.infra.unified_task_manager import get_task_manager
+    from app.services.library.shot_cut import ALGO_VERSION
+    from app.services.library.shot_index import (
+        ShotIndexError,
+        estimate_shots,
+        estimate_tokens,
+        resolve_space_and_embedder,
+    )
+
+    opts = body or BackfillShotsBody()
+    try:
+        space, _ = await resolve_space_and_embedder()
+        rows, total = await get_video_shot_embeddings_repository().pending_for_user(
+            user_id=auth.user_id,
+            space_id=int(space["id"]),
+            kind=FRAME_KIND,
+            algo_version=ALGO_VERSION,
+            limit=opts.limit,
+        )
+    except ShotIndexError as e:
+        raise _shot_index_http_error(e) from e
+    except EmbeddingStoreMissing as e:
+        raise _shot_index_http_error(ShotIndexError("store_missing", str(e))) from e
+
+    shots_estimate = 0
+    for r in rows:
+        secs = _duration_seconds(r.duration)
+        # Unknown length: assume a typical 4.5-minute download (60 shots).
+        shots_estimate += estimate_shots(int(secs * 1000)) if secs else 60
+    base = {
+        "success": True,
+        "space_id": str(space["id"]),
+        "total_pending": total,
+        "stale": sum(1 for r in rows if r.reason == "stale_algo"),
+        "candidates": [str(r.resource_id) for r in rows],
+        "estimated_shots": shots_estimate,
+        "estimated_tokens": estimate_tokens(shots_estimate),
+    }
+    if opts.dry_run or not rows:
+        return {
+            **base,
+            "dry_run": opts.dry_run,
+            "parent_task_id": None,
+            "dispatched": [],
+            "skipped": [],
+        }
+
+    flow_id = await get_task_manager().create_flow(
+        user_id=auth.user_id,
+        name=f"Index shots · {len(rows)} video{'s' if len(rows) != 1 else ''}",
+    )
+    dispatched: list[str] = []
+    skipped: list[dict] = []
+    for r in rows:
+        try:
+            wf_id = await _dispatch_index_shots(
+                user_id=auth.user_id,
+                resource_id=str(r.resource_id),
+                title=r.title or str(r.resource_id),
+                flow_id=flow_id,
+            )
+            dispatched.append(wf_id)
+        except Exception as e:  # noqa: BLE001 — one bad dispatch, not the batch
+            logger.error(f"backfill-shots: dispatch {r.resource_id} failed: {e}")
+            skipped.append(
+                {"resource_id": str(r.resource_id), "reason": "dispatch_failed"}
+            )
+    return {
+        **base,
+        "dry_run": False,
+        "parent_task_id": flow_id,
+        "dispatched": dispatched,
+        "skipped": skipped,
+    }

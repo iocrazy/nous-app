@@ -12877,6 +12877,121 @@
         "title": "BackfillResponse",
         "type": "object"
       },
+      "BackfillShotsBody": {
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "BackfillShotsBody",
+        "type": "object"
+      },
+      "BackfillShotsResponse": {
+        "description": "``POST /ai/analyze/backfill-shots``.\n\n``dry_run``: ``candidates`` are the videos a real run would dispatch,\nwith the shot / token estimate; nothing is created. Real run: one parent\ntask (``parent_task_id``) and one ``index_shots`` child per candidate\n(``dispatched``); ``skipped`` names candidates refused before dispatch\nwith a stable reason (``no_video_file`` / ``already_indexed`` /\n``dispatch_failed``). Process-wide refusals (``embedder_unconfigured`` /\n``provider_no_image`` / ``store_missing``) are a 409 instead.",
+        "properties": {
+          "candidates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "dispatched": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dispatched",
+            "type": "array"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "estimated_shots": {
+            "title": "Estimated Shots",
+            "type": "integer"
+          },
+          "estimated_tokens": {
+            "title": "Estimated Tokens",
+            "type": "integer"
+          },
+          "parent_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Task Id"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/BackfillShotsSkip"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "space_id": {
+            "title": "Space Id",
+            "type": "string"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "integer"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "total_pending": {
+            "title": "Total Pending",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "success",
+          "dry_run",
+          "space_id",
+          "total_pending",
+          "stale",
+          "candidates",
+          "estimated_shots",
+          "estimated_tokens",
+          "dispatched",
+          "skipped"
+        ],
+        "title": "BackfillShotsResponse",
+        "type": "object"
+      },
+      "BackfillShotsSkip": {
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_id",
+          "reason"
+        ],
+        "title": "BackfillShotsSkip",
+        "type": "object"
+      },
       "BatchAssetAiRequest": {
         "description": "Body for POST /resources/ai/batch (batch caption / classify).",
         "properties": {
@@ -26721,6 +26836,41 @@
           "target_id"
         ],
         "title": "InboxPost",
+        "type": "object"
+      },
+      "IndexShotsBody": {
+        "properties": {
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          }
+        },
+        "title": "IndexShotsBody",
+        "type": "object"
+      },
+      "IndexShotsResponse": {
+        "description": "``POST /ai/analyze/index-shots/{resource_id}`` (202).",
+        "properties": {
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "workflow_id": {
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "workflow_id",
+          "resource_id"
+        ],
+        "title": "IndexShotsResponse",
         "type": "object"
       },
       "InspirationNoteActivityDay": {
@@ -52686,6 +52836,112 @@
         "title": "ShotCreate",
         "type": "object"
       },
+      "ShotIndexInfo": {
+        "description": "``video_shot_indexes`` row + whether the CURRENT space holds vectors\nfor it (``covered``) and whether the cut is by an older algorithm.",
+        "properties": {
+          "algo_version": {
+            "title": "Algo Version",
+            "type": "string"
+          },
+          "covered": {
+            "title": "Covered",
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "indexed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indexed At"
+          },
+          "shot_count": {
+            "title": "Shot Count",
+            "type": "integer"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "algo_version",
+          "shot_count",
+          "covered",
+          "stale"
+        ],
+        "title": "ShotIndexInfo",
+        "type": "object"
+      },
+      "ShotOut": {
+        "properties": {
+          "cut_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cut Score"
+          },
+          "end_ms": {
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "rep_frame_ms": {
+            "title": "Rep Frame Ms",
+            "type": "integer"
+          },
+          "shot_index": {
+            "title": "Shot Index",
+            "type": "integer"
+          },
+          "start_ms": {
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "shot_index",
+          "start_ms",
+          "end_ms",
+          "rep_frame_ms"
+        ],
+        "title": "ShotOut",
+        "type": "object"
+      },
       "ShotUpdate": {
         "description": "Request body for updating a shot's parameter tags / description. NEVER\ntouches ``status`` or the image/thumbnail/video URLs — those flow through\nthe generate workflow's ``update_status`` write lane.",
         "properties": {
@@ -52772,6 +53028,42 @@
           }
         },
         "title": "ShotUpdate",
+        "type": "object"
+      },
+      "ShotsResponse": {
+        "description": "``GET /resources/{id}/shots``. ``indexed=false`` with an empty list is\nthe normal answer for a video nobody has indexed — not a 404.",
+        "properties": {
+          "index": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShotIndexInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "indexed": {
+            "title": "Indexed",
+            "type": "boolean"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "shots": {
+            "items": {
+              "$ref": "#/components/schemas/ShotOut"
+            },
+            "title": "Shots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "resource_id",
+          "indexed"
+        ],
+        "title": "ShotsResponse",
         "type": "object"
       },
       "SignInRequest": {
@@ -80985,6 +81277,183 @@
           }
         },
         "summary": "Backfill Embeddings",
+        "tags": [
+          "AI",
+          "AI"
+        ]
+      }
+    },
+    "/api/v1/ai/analyze/backfill-shots": {
+      "post": {
+        "description": "Index the caller's videos that have no frame vectors in the CURRENT\nspace (or were cut by an older algorithm): one ``index_shots`` task per\nvideo under one flow (the Task Center's parent card).\n\n``dry_run`` reports the candidates with a shot / token estimate and\ncreates nothing — on a network provider the UI requires one before Run.\n``limit`` ≤ 50: each candidate is a task, not one embedding call.",
+        "operationId": "backfill_shots_api_v1_ai_analyze_backfill_shots_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/BackfillShotsBody"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackfillShotsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Backfill Shots",
+        "tags": [
+          "AI",
+          "AI"
+        ]
+      }
+    },
+    "/api/v1/ai/analyze/index-shots/{resource_id}": {
+      "post": {
+        "description": "Index ONE video's shots as a Task Center task (the Shots tab's Index\nThis Video / Re-index). 202 with the task id; the tab follows the task.\n\nTyped refusals: 404 (not visible), 422 ``not_a_video`` /\n``no_video_file``, 409 ``already_indexed`` (has frame vectors in the\ncurrent space; pass ``force`` to re-cut), 409 ``embedder_unconfigured`` /\n``provider_no_image``, 503 ``vector_store_missing``.",
+        "operationId": "index_shots_api_v1_ai_analyze_index_shots__resource_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "resource_id",
+            "required": true,
+            "schema": {
+              "title": "Resource Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/IndexShotsBody"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexShotsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index Shots",
         "tags": [
           "AI",
           "AI"
@@ -115903,6 +116372,94 @@
         ]
       }
     },
+    "/api/v1/resources/{resource_id}/frame": {
+      "get": {
+        "description": "A single frame cut on demand (Search Hit card, Shots hero). 422 when\n``ms`` is past the end of the video, 404 when the source is gone.",
+        "operationId": "get_resource_frame_api_v1_resources__resource_id__frame_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "resource_id",
+            "required": true,
+            "schema": {
+              "title": "Resource Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Timestamp in milliseconds",
+            "in": "query",
+            "name": "ms",
+            "required": true,
+            "schema": {
+              "description": "Timestamp in milliseconds",
+              "minimum": 0,
+              "title": "Ms",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "One JPEG frame of the video at `ms`."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Resource Frame",
+        "tags": [
+          "Resources"
+        ]
+      }
+    },
     "/api/v1/resources/{resource_id}/gen-prompt/generate": {
       "post": {
         "description": "Reverse-engineer a bilingual generation prompt from the image.\n\nDispatches the ``caption_asset`` DBOS workflow with a pre-created\ntask_tracking row whose ``dbos_workflow_id`` MATCHES the dispatched\n``workflow_id`` (see ``_dispatch_asset_ai``). Returns the task id;\nthe workflow writes gen_prompt / gen_prompt_zh when it finishes.",
@@ -116703,6 +117260,81 @@
           "Resources",
           "resources",
           "assets"
+        ]
+      }
+    },
+    "/api/v1/resources/{resource_id}/shots": {
+      "get": {
+        "description": "The video's cut list and index facts. ``indexed=false`` + ``[]`` for a\nvideo nobody has indexed; ``index.covered`` says whether the CURRENT\nembedding space holds its frame vectors (after a space switch it may not).",
+        "operationId": "get_resource_shots_api_v1_resources__resource_id__shots_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "resource_id",
+            "required": true,
+            "schema": {
+              "title": "Resource Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShotsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Resource Shots",
+        "tags": [
+          "Resources"
         ]
       }
     },

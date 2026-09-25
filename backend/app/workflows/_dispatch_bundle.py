@@ -49,6 +49,7 @@ from app.workflows.download import (  # noqa: F401
     download_workflow,
 )
 from app.workflows.extract_audio import extract_audio_workflow  # noqa: F401
+from app.workflows.index_shots import index_shots_workflow  # noqa: F401
 from app.workflows.issue_lifecycle import (  # noqa: F401
     execute_issue,
     respond_to_issue_reply,

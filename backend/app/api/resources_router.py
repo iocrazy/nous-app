@@ -22,6 +22,7 @@ from app.api.resources_folders_router import router as folders_router
 from app.api.resources_gallery_router import router as gallery_router
 from app.api.resources_provenance_router import router as provenance_router
 from app.api.resources_search_router import router as search_router
+from app.api.resources_shots_router import router as shots_router
 from app.api.resources_upload_router import router as upload_router
 from app.api.resources_versions_router import router as versions_router
 
@@ -35,6 +36,7 @@ router = APIRouter()
 # resource id. FastAPI matches routes in registration order, so static
 # paths must win.
 router.include_router(search_router)
+router.include_router(shots_router)
 router.include_router(upload_router)
 router.include_router(folders_router)
 router.include_router(versions_router)
