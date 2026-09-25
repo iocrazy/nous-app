@@ -15,7 +15,7 @@ import {
 } from '@arco-design/web-react'
 import { IconEdit, IconSync } from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
-import type { CatalogAgent, CatalogAgentList } from '../../api/endpoints/agents'
+import type { CatalogAgent, CatalogAgentList, SeedReloadResult } from '../../api/endpoints/agents'
 
 const { Title, Text } = Typography
 const FormItem = Form.Item
@@ -142,16 +142,25 @@ export function AgentsCatalogPage() {
         method: 'POST',
         headers,
       })
-      const data = await res.json().catch(() => ({}))
-      if (res.ok) {
-        Message.success(
-          `Seeds reloaded — agents: ${data.agents ?? '?'}, skills: ${data.skills ?? '?'}`,
-        )
-        fetchAgents()
-      } else {
-        Message.error('Reload seeds failed')
+      if (!res.ok) {
+        Message.error(`Reload seeds failed (${res.status})`)
+        return
       }
-    } catch {
+      const data = (await res.json()) as SeedReloadResult
+      const summary = `agents: ${data.agents}, skills: ${data.skills}`
+      // A seed that failed to load is reported per item; it is not a
+      // clean reload even though the request succeeded.
+      if (data.errors.length > 0) {
+        Message.warning(
+          `Seeds reloaded with ${data.errors.length} error(s) — ${summary}. ` +
+            data.errors.map((e) => `${e.scope}/${e.slug}`).join(', '),
+        )
+      } else {
+        Message.success(`Seeds reloaded — ${summary}`)
+      }
+      fetchAgents()
+    } catch (err) {
+      console.error('[admin] reload seeds failed:', err)
       Message.error('Reload seeds failed')
     } finally {
       setReseeding(false)
