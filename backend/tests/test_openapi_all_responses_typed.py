@@ -1,17 +1,16 @@
-"""Ratchet: the number of JSON routes with no response schema only goes down.
+"""Contract gate: every JSON route declares its response schema. Zero tolerance.
 
 A route with no ``response_model`` (or a bare ``-> dict``) exports as ``{}``
 in ``backend/openapi.json``, and the frontend gets ``unknown`` for it: its
-shape lives only in a hand-written copy in ``frontend/types.ts``, which
-nothing checks against the backend. This test pins how many such routes
-exist, in both directions:
+shape lives only in a hand-written copy, which nothing checks against the
+backend.
 
-- **more than the snapshot** fails and lists the routes that are not in
-  the committed contract's untyped set: declare a ``response_model``;
-- **fewer than the snapshot** fails too, asking for the snapshot to be
-  lowered, so the progress is locked in and cannot be spent later.
-
-Same shape as the ORM index ratchet in ``tests/db/test_schema_drift.py``.
+This used to be a ratchet (a committed count that could only go down, P2 to
+P8 of the spec). P9 brought the count to zero, so the snapshot files are gone
+and the rule is absolute: any untyped JSON success response fails, and the
+failure lists the routes. Declare a ``response_model``, or, for a route that
+does not return JSON (a file, SSE, a third-party callback receipt), declare
+its real media type with ``response_class`` / ``responses=``.
 
 It reads the committed ``openapi.json``. The ``Export OpenAPI & diff`` CI
 step separately proves that file is current, so the two together cover the
@@ -29,48 +28,15 @@ import json
 
 import scripts.export_openapi as exporter
 
-SNAPSHOT = exporter.RATCHET_COUNT
-BASELINE_LIST = exporter.RATCHET_LIST
 
-
-def _current() -> list[str]:
+def test_every_json_route_declares_a_response_schema() -> None:
     schema = json.loads(exporter.DEFAULT_OUTPUT.read_text())
-    return exporter.untyped_operations(schema)
-
-
-def _baseline() -> set[str]:
-    lines = BASELINE_LIST.read_text().splitlines()
-    return {line for line in lines if line.strip() and not line.startswith("#")}
-
-
-def test_untyped_count_matches_snapshot() -> None:
-    current = _current()
-    allowed = int(SNAPSHOT.read_text().strip())
-    if len(current) > allowed:
-        new = sorted(set(current) - _baseline())
-        listing = "\n  ".join(new) or "(none by name: an operation was renamed?)"
-        raise AssertionError(
-            f"{len(current)} JSON routes have no response schema; the ratchet "
-            f"allows {allowed}. Declare a response_model on:\n  {listing}"
-        )
-    assert len(current) == allowed, (
-        f"Only {len(current)} JSON routes lack a response schema now (snapshot "
-        f"says {allowed}). Lock the progress in by rewriting "
-        "the snapshot: `uv run python scripts/export_openapi.py --write-ratchet`."
-    )
-
-
-def test_baseline_list_matches_count() -> None:
-    """The name list and the number move together, so a diff shows which
-    routes got typed, and the "new routes" hint above stays accurate."""
-    baseline, current = _baseline(), set(_current())
-    assert len(baseline) == int(SNAPSHOT.read_text().strip())
-    added, removed = sorted(current - baseline), sorted(baseline - current)
-    assert not added and not removed, (
-        "The untyped set changed (a route got typed while another lost its "
-        f"schema, or an operation was renamed).\nNewly untyped: {added}\n"
-        f"No longer untyped: {removed}\nType the new ones; then run "
-        "`uv run python scripts/export_openapi.py --write-ratchet`."
+    untyped = exporter.untyped_operations(schema)
+    listing = "\n  ".join(untyped)
+    assert not untyped, (
+        f"{len(untyped)} JSON route(s) have no response schema. Declare a "
+        "response_model (or the real non-JSON media type), then re-export "
+        f"with `uv run python scripts/export_openapi.py`:\n  {listing}"
     )
 
 
