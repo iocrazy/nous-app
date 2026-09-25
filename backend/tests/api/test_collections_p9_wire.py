@@ -9,7 +9,7 @@ is built in the route.
 
 Also pinned: ``refresh`` only touches a collection the caller owns — the
 lookup is ``WHERE id = :id AND user_id = :caller`` and a miss is 404 before
-any refresh runs.
+any refresh runs — and a non-numeric id is 404, not a 500 from ``int()``.
 """
 
 from __future__ import annotations
@@ -136,6 +136,14 @@ async def test_refresh_foreign_collection_is_404(client) -> None:
     _Db.results = [_Result([])]
     resp = await client.post(f"/api/v1/collections/{COLLECTION_ID}/refresh")
     assert resp.status_code == 404, resp.text
+    assert _Db.refreshed == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_non_numeric_id_is_404(client) -> None:
+    resp = await client.post("/api/v1/collections/not-an-id/refresh")
+    assert resp.status_code == 404, resp.text
+    assert _Db.statements == []
     assert _Db.refreshed == []
 
 
