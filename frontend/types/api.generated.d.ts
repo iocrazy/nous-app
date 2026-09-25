@@ -2257,29 +2257,20 @@ export interface paths {
         put?: never;
         /**
          * Cancel Task
-         * @description Cancel a pending or processing task.
+         * @description Request cancellation of a pending or processing task's workflow.
+         *
+         *     Goes through DBOS, the same native cancel the Task Center uses
+         *     (``POST /workflows/{id}/cancel``). ``task_tracking`` is NOT written here:
+         *     ``phase`` / ``status`` belong to the ``mirror_dbos_lifecycle_to_tracking``
+         *     trigger, which records CANCELLED once DBOS does (CLAUDE.md, 任务系统架构
+         *     纪律 §2). This used to PATCH the row to ``cancelled`` and never touch the
+         *     workflow — it kept running, and the trigger could flip the row back.
+         *
+         *     There is no admin retry: re-dispatching needs the owner's per-type dispatch
+         *     and request scope (``POST /task-manager/tasks/{id}/retry``). The old route
+         *     reset the row to ``pending`` and started nothing, so it was removed.
          */
         post: operations["cancel_task_api_v1_admin_tasks__task_id__cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/tasks/{task_id}/retry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Retry Task
-         * @description Retry a failed task by resetting its status.
-         */
-        post: operations["retry_task_api_v1_admin_tasks__task_id__retry_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -42425,40 +42416,6 @@ export interface operations {
         };
     };
     cancel_task_api_v1_admin_tasks__task_id__cancel_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminTaskActionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    retry_task_api_v1_admin_tasks__task_id__retry_post: {
         parameters: {
             query?: never;
             header?: {
