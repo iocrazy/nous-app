@@ -8,6 +8,8 @@
     max_connections; WARNING at 80%, ERROR at 95%. Informational only —
     see app/services/infra/pg_connection_monitor.py for why it must never
     gate readiness.
+  - nous_engine_sync     (every 1m)   — mirror nous-engine's /v1/models into
+    the platform catalog: revoked grants disabled, ready → ok/idle.
 
 The 30s cadence is preserved using 6-field cron ("*/30 * * * * *");
 DBOS croniter is initialized with second_at_beginning=True so seconds
@@ -320,3 +322,59 @@ async def nous_model_health_workflow(
             f"[nous_model_health] all {summary['ok']} probeable platform "
             f"models reachable (not_probed={skipped})"
         )
+
+
+@DBOS.step()
+async def sync_engine_catalog_step() -> dict[str, Any]:
+    """Mirror nous-engine's ``/v1/models`` into the catalog (every minute).
+
+    The same sync the hourly probe step runs first, on its own cadence so the
+    catalog follows the engine within a minute: a revoked grant disables its
+    row, a 401 disables the key's rows, and ``ready`` moves ok/idle as the
+    engine loads and unloads models (``nous_engine_sync`` module doc). One
+    list read per endpoint — the engine answers it from memory.
+
+    Never raises: a catalog read failure is a WARNING and counts as an error,
+    so a DB blip cannot turn a monitoring tick into a failed workflow.
+    """
+    from app.agent_framework.catalog_windows import refresh_catalog_windows
+    from app.repositories.nous_model_repository import get_nous_model_repository
+    from app.services.ai.nous_engine_sync import sync_all_engines
+
+    summary = {
+        "discovered": 0,
+        "created": 0,
+        "updated": 0,
+        "disabled": 0,
+        "ready_changed": 0,
+        "errors": 0,
+    }
+    try:
+        rows = await get_nous_model_repository().list_all()
+    except Exception as exc:  # noqa: BLE001 — counted and logged, never raised
+        logger.warning(f"[nous_engine_sync] catalog read failed: {exc!r}")
+        return {**summary, "errors": 1}
+    reports = [r for _, r in await sync_all_engines(rows)]
+    if any(r.created or r.updated for r in reports):
+        await refresh_catalog_windows()
+    return {
+        "discovered": sum(r.discovered for r in reports),
+        "created": sum(len(r.created) for r in reports),
+        "updated": sum(len(r.updated) for r in reports),
+        "disabled": sum(len(r.disabled) for r in reports),
+        "ready_changed": sum(r.ready_changed for r in reports),
+        "errors": sum(1 for r in reports if r.error),
+    }
+
+
+# Every minute: the engine unloads an idle model after an hour and a revoked
+# grant should stop routing within a minute, not at the next hourly probe.
+# Cost is one in-memory list read per engine endpoint; nothing is written
+# unless something changed. Its own workflow — nothing added to the hourly
+# body.
+@DBOS.scheduled("* * * * *")
+@DBOS.workflow()
+async def nous_engine_sync_workflow(
+    scheduled_time: datetime, actual_time: datetime
+) -> None:
+    await sync_engine_catalog_step()

@@ -230,8 +230,10 @@ async def sync_nous_engine_models(auth: AdminAuthDep):
 
     Same sync the hourly health step runs first (``nous_engine_sync``): every
     listed service without a row gets ``nous-<id>`` (credentials copied from
-    an existing engine row, zero price row), existing rows only take a newer
-    ``context_window``. Rows missing from the list are never disabled.
+    an existing engine row, zero price row), existing rows take a newer
+    ``context_window`` and follow ``ready`` (ok/idle); enabled platform rows
+    whose grant was revoked (missing from the list, or the key answered 401)
+    are disabled. Nothing is ever re-enabled.
 
     400 ``no_engine_row`` when no enabled ``actual_provider='nous'`` row exists
     to take the endpoint and key from. An engine that cannot be read is NOT a
@@ -258,7 +260,8 @@ async def sync_nous_engine_models(auth: AdminAuthDep):
     logger.info(
         f"[Admin] nous-engine sync: discovered={report.discovered} "
         f"created={len(report.created)} updated={len(report.updated)} "
-        f"skipped={len(report.skipped)} error={report.error!r}"
+        f"disabled={list(report.disabled)} skipped={len(report.skipped)} "
+        f"error={report.error!r}"
     )
     return NousEngineSyncResponse(
         discovered=report.discovered,
@@ -267,6 +270,9 @@ async def sync_nous_engine_models(auth: AdminAuthDep):
         skipped=[
             NousEngineSyncSkipped(id=s.id, reason=s.reason) for s in report.skipped
         ],
+        disabled=list(report.disabled),
+        ready_changed=report.ready_changed,
+        unauthorized=report.unauthorized,
         error=report.error,
     )
 

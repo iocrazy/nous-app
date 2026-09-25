@@ -1173,8 +1173,10 @@ export interface paths {
          *
          *     Same sync the hourly health step runs first (``nous_engine_sync``): every
          *     listed service without a row gets ``nous-<id>`` (credentials copied from
-         *     an existing engine row, zero price row), existing rows only take a newer
-         *     ``context_window``. Rows missing from the list are never disabled.
+         *     an existing engine row, zero price row), existing rows take a newer
+         *     ``context_window`` and follow ``ready`` (ok/idle); enabled platform rows
+         *     whose grant was revoked (missing from the list, or the key answered 401)
+         *     are disabled. Nothing is ever re-enabled.
          *
          *     400 ``no_engine_row`` when no enabled ``actual_provider='nous'`` row exists
          *     to take the endpoint and key from. An engine that cannot be read is NOT a
@@ -30132,20 +30134,31 @@ export interface components {
          * NousEngineSyncResponse
          * @description POST /admin/nous-models/sync-engine — merged over every engine endpoint.
          *
-         *     ``created`` / ``updated`` are catalog names. ``error`` is set when at least
-         *     one endpoint's ``/v1/models`` could not be read (the others still synced).
-         *     Rows missing from the engine list are never disabled: the list holds only
-         *     loaded services today.
+         *     ``created`` / ``updated`` / ``disabled`` are catalog names. The engine list
+         *     is read with ``include_unready=1`` and holds every AUTHORIZED service,
+         *     loaded or not, so an enabled platform row whose service is missing had its
+         *     grant revoked and is in ``disabled``. ``unauthorized`` means an endpoint
+         *     answered 401 (the key itself was revoked) and all its enabled platform rows
+         *     were disabled. Disabled rows are never re-enabled by a sync.
+         *     ``ready_changed`` counts rows whose ok/idle status followed the engine's
+         *     ``ready``. ``error`` is set when at least one endpoint's ``/v1/models``
+         *     could not be read (the others still synced).
          */
         NousEngineSyncResponse: {
             /** Created */
             created: string[];
+            /** Disabled */
+            disabled: string[];
             /** Discovered */
             discovered: number;
             /** Error */
             error?: string | null;
+            /** Ready Changed */
+            ready_changed: number;
             /** Skipped */
             skipped: components["schemas"]["NousEngineSyncSkipped"][];
+            /** Unauthorized */
+            unauthorized: boolean;
             /** Updated */
             updated: string[];
         };

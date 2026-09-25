@@ -26,7 +26,8 @@ from app.models import AiModelPrices, NousModels
 NOUS_ENGINE_PROVIDER = "nous"
 
 # Columns a sync reads from engine rows: identity, the credential/endpoint set
-# a new row copies, and the one field an existing row may have updated.
+# a new row copies, and the fields an existing row may have updated (window,
+# enabled flag, ready-driven ok/idle status).
 _ENGINE_ROW_COLS = (
     NousModels.id,
     NousModels.name,
@@ -41,7 +42,13 @@ _ENGINE_ROW_COLS = (
     NousModels.sort_order,
     NousModels.owner_user_id,
     NousModels.context_window_tokens,
+    NousModels.last_test_status,
 )
+
+# ``last_test_detail`` for a ready-driven status — the same strings the hourly
+# readiness probe writes (``nous_model_health._probe_nous_engine_readiness``),
+# so the admin sees one vocabulary whichever writer ran last.
+_READY_DETAIL = "loaded"
 
 
 class NousEngineSyncRepository:
@@ -120,6 +127,43 @@ class NousEngineSyncRepository:
                 update(NousModels)
                 .where(NousModels.id == int(row_id))
                 .values(context_window_tokens=tokens, updated_at=func.now())
+                .returning(NousModels.id)
+            )
+            return result.first() is not None
+
+    async def disable_rows(self, ids: Sequence[int]) -> List[str]:
+        """Disable the given rows in ONE transaction; returns the names that
+        were actually flipped (already-disabled rows are not re-written)."""
+        if not ids:
+            return []
+        async with write_scope() as session:
+            result = await session.execute(
+                update(NousModels)
+                .where(NousModels.id.in_([int(i) for i in ids]))
+                .where(NousModels.is_enabled.is_(True))
+                .values(is_enabled=False, updated_at=func.now())
+                .returning(NousModels.name)
+            )
+            return list(result.scalars().all())
+
+    async def record_ready(self, row_id: int, ready: bool) -> bool:
+        """Mirror the engine's ``ready`` into ``last_test_*``: ``ok``/``loaded``
+        or ``idle``/``authorized, not loaded``. Same write shape as
+        ``NousModelRepository.record_test_result`` — only the last_test_*
+        columns + ``last_tested_at``, ``code`` cleared, ``updated_at`` untouched
+        (a status reading is not an edit). True when a row matched."""
+        from app.services.ai.nous_model_health import _IDLE_DETAIL
+
+        async with write_scope() as session:
+            result = await session.execute(
+                update(NousModels)
+                .where(NousModels.id == int(row_id))
+                .values(
+                    last_test_status="ok" if ready else "idle",
+                    last_test_detail=_READY_DETAIL if ready else _IDLE_DETAIL,
+                    last_test_code=None,
+                    last_tested_at=func.now(),
+                )
                 .returning(NousModels.id)
             )
             return result.first() is not None
