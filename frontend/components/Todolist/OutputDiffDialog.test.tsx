@@ -78,7 +78,9 @@ const v = (version: number, parent: number | null): OutputLineage['versions'][nu
 const lineage: OutputLineage = { kind: 'script_shot', ref_id: '9', latest_version: 2, versions: [v(2, 1), v(1, null)], as_of_seq: '347786145852741' };
 
 const side = (version: number, text: string | null, extra: Partial<OutputDiff['from']> = {}): OutputDiff['from'] => ({
-  version, run_id: '347786145852739', issue_id: '5', created_at: '2026-09-10T01:00:00Z', model: 'qwen-max',
+  // The backend serializes every field, so `issue_key` is on the wire even when
+  // it is null (app/schemas/outputs.py::OutputDiffSide).
+  version, run_id: '347786145852739', issue_id: '5', issue_key: null, created_at: '2026-09-10T01:00:00Z', model: 'qwen-max',
   cost_cents: 0.42, title: `Shot #1 v${version}`, text, media: null, available: true, unavailable_reason: null, ...extra,
 });
 
@@ -178,6 +180,21 @@ describe('OutputDiffDialog', () => {
     fireEvent.click(await screen.findByTestId('output-version-cited'));
     expect(screen.queryAllByTestId('output-version-cited-row')).toHaveLength(0);
     expect(screen.getByTestId('output-version-cited-hidden').textContent).toContain('2');
+  });
+
+  it('a revert-written version has no run: the dialog still opens, without an Open Run button', async () => {
+    // A version written by a person (revert) carries `run_id: null` on the wire
+    // (OutputDiffSide.run_id is Optional). Reading `.slice` off it crashed the
+    // whole dialog exactly when the newest version was a revert.
+    getOutputDiff.mockResolvedValueOnce({
+      kind: 'script_shot', ref_id: '9', content_type: 'text',
+      from: side(1, 'the quick brown fox'),
+      to: side(2, 'the quick red fox', { run_id: null, model: null, cost_cents: null }),
+    } satisfies OutputDiff);
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff');
+    await waitFor(() => expect(screen.getByTestId('output-diff-to').textContent).toContain('red'));
+    expect(screen.queryByTestId('output-open-run')).toBeNull();
   });
 
   it('opens on the latest change and colours what moved', async () => {

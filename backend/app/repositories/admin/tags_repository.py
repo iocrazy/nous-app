@@ -107,6 +107,42 @@ def _bigint(value: Any) -> int:
     return int(str(value))
 
 
+def _maybe_bigint(value: Any) -> Optional[int]:
+    """``_bigint`` for ids the CALLER supplied (path params, request bodies):
+    a value that is not an integer names no row, so it is ``None`` rather
+    than a ``ValueError`` (which surfaced as a 500)."""
+    try:
+        return _bigint(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _bigints(values: list[Any]) -> Optional[list[int]]:
+    """All of ``values`` as ints, or ``None`` if any of them is not one."""
+    ids = [_maybe_bigint(v) for v in values]
+    return None if any(i is None for i in ids) else ids  # type: ignore[return-value]
+
+
+class AdminTagGroupNotFound(LookupError):
+    """A tag write named a ``group_id`` that is not a tag group."""
+
+
+async def _all_exist(session: Any, id_col: Any, ids: list[int]) -> bool:
+    """Every id in ``ids`` names a row (checked inside the write's own
+    transaction, before it writes anything)."""
+    found = set(
+        (await session.execute(select(id_col).where(id_col.in_(ids)))).scalars().all()
+    )
+    return found == set(ids)
+
+
+async def _require_group(session: Any, group_id: Any) -> int:
+    gid = _maybe_bigint(group_id)
+    if gid is None or not await _all_exist(session, TagGroups.id, [gid]):
+        raise AdminTagGroupNotFound(str(group_id))
+    return gid
+
+
 def _parity(value: Any) -> Any:
     """Strategy-C read-boundary coercion: uuid → str, datetime → ISO str. NULL /
     other types pass through unchanged. (No Enum columns on these tables.)"""
@@ -163,12 +199,15 @@ class AdminTagsRepository:
     async def update_group(
         self, group_id: str, changes: dict[str, Any]
     ) -> Optional[dict[str, Any]]:
+        gid = _maybe_bigint(group_id)
+        if gid is None:
+            return None
         if not changes:
             return await self._get_group(group_id)
         values = {_GROUP_N2A.get(k, k): v for k, v in changes.items()}
         stmt = (
             sa_update(TagGroups)
-            .where(TagGroups.id == _bigint(group_id))
+            .where(TagGroups.id == gid)
             .values(**values)
             .returning(TagGroups)
         )
@@ -178,32 +217,41 @@ class AdminTagsRepository:
         return _obj_dict(obj, _GROUP_N2A) if obj is not None else None
 
     async def _get_group(self, group_id: str) -> Optional[dict[str, Any]]:
-        stmt = select(TagGroups).where(TagGroups.id == _bigint(group_id)).limit(1)
+        gid = _maybe_bigint(group_id)
+        if gid is None:
+            return None
+        stmt = select(TagGroups).where(TagGroups.id == gid).limit(1)
         async with read_scope() as session:
             result = await session.execute(stmt)
             obj = result.scalars().first()
         return _obj_dict(obj, _GROUP_N2A) if obj is not None else None
 
     async def delete_group(self, group_id: str) -> bool:
-        stmt = (
-            sa_delete(TagGroups)
-            .where(TagGroups.id == _bigint(group_id))
-            .returning(TagGroups.id)
-        )
+        gid = _maybe_bigint(group_id)
+        if gid is None:
+            return False
+        stmt = sa_delete(TagGroups).where(TagGroups.id == gid).returning(TagGroups.id)
         async with write_scope() as session:
             result = await session.execute(stmt)
             return result.first() is not None
 
-    async def reorder_groups(self, group_ids: list[str]) -> None:
+    async def reorder_groups(self, group_ids: list[str]) -> bool:
+        """``False`` (and nothing written) if any id names no group."""
         if not group_ids:
-            return
+            return True
+        ids = _bigints(group_ids)
+        if ids is None:
+            return False
         async with write_scope() as session:
-            for idx, gid in enumerate(group_ids):
+            if not await _all_exist(session, TagGroups.id, ids):
+                return False
+            for idx, gid in enumerate(ids):
                 await session.execute(
                     sa_update(TagGroups)
-                    .where(TagGroups.id == _bigint(gid))
+                    .where(TagGroups.id == gid)
                     .values(sort_order=idx)
                 )
+        return True
 
     # ─── Tags ──────────────────────────────────────────────────────────
 
@@ -223,6 +271,10 @@ class AdminTagsRepository:
             TagGroups, Tags.group_id == TagGroups.id
         )
 
+        if group_id and group_id != "uncategorized" and _maybe_bigint(group_id) is None:
+            # Not an id, so no tag is in that group (was a ValueError → 500).
+            return [], 0
+
         if group_id == "uncategorized":
             base = base.where(Tags.group_id.is_(None))
         elif group_id:
@@ -233,7 +285,9 @@ class AdminTagsRepository:
             base = base.where(or_(Tags.name.ilike(pat), Tags.name_zh.ilike(pat)))
 
         if sort_by and sort_order:
-            sort_attr = getattr(Tags, sort_by, Tags.sort_order)
+            # Only mapped columns: ``getattr(Tags, "metadata")`` is the
+            # MetaData object and ``.desc()`` on it was a 500.
+            sort_attr = getattr(Tags, _TAG_N2A.get(sort_by, "sort_order"))
             order_cols = [sort_attr.desc() if sort_order == "desc" else sort_attr.asc()]
         else:
             order_cols = [Tags.sort_order.asc(), Tags.created_at.desc()]
@@ -291,11 +345,15 @@ class AdminTagsRepository:
         return counts
 
     async def create_tag(self, payload: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Raises :class:`AdminTagGroupNotFound` for an unknown ``group_id``."""
         values = {_TAG_N2A.get(k, k): v for k, v in payload.items()}
-        if values.get("group_id") is not None:
-            values["group_id"] = _bigint(values["group_id"])
-        stmt = sa_insert(Tags).values(**values).returning(Tags)
+        stmt_values = dict(values)
         async with write_scope() as session:
+            if values.get("group_id") is not None:
+                stmt_values["group_id"] = await _require_group(
+                    session, values["group_id"]
+                )
+            stmt = sa_insert(Tags).values(**stmt_values).returning(Tags)
             result = await session.execute(stmt)
             obj = result.scalars().first()
         return _obj_dict(obj, _TAG_N2A) if obj is not None else None
@@ -303,24 +361,29 @@ class AdminTagsRepository:
     async def update_tag(
         self, tag_id: str, changes: dict[str, Any]
     ) -> Optional[dict[str, Any]]:
+        """``None`` if ``tag_id`` names no tag; raises
+        :class:`AdminTagGroupNotFound` for an unknown ``group_id``."""
+        tid = _maybe_bigint(tag_id)
+        if tid is None:
+            return None
         if not changes:
             return await self._get_tag(tag_id)
         values = {_TAG_N2A.get(k, k): v for k, v in changes.items()}
-        if values.get("group_id") is not None:
-            values["group_id"] = _bigint(values["group_id"])
-        stmt = (
-            sa_update(Tags)
-            .where(Tags.id == _bigint(tag_id))
-            .values(**values)
-            .returning(Tags)
-        )
         async with write_scope() as session:
+            if values.get("group_id") is not None:
+                values["group_id"] = await _require_group(session, values["group_id"])
+            stmt = (
+                sa_update(Tags).where(Tags.id == tid).values(**values).returning(Tags)
+            )
             result = await session.execute(stmt)
             obj = result.scalars().first()
         return _obj_dict(obj, _TAG_N2A) if obj is not None else None
 
     async def _get_tag(self, tag_id: str) -> Optional[dict[str, Any]]:
-        stmt = select(Tags).where(Tags.id == _bigint(tag_id)).limit(1)
+        tid = _maybe_bigint(tag_id)
+        if tid is None:
+            return None
+        stmt = select(Tags).where(Tags.id == tid).limit(1)
         async with read_scope() as session:
             result = await session.execute(stmt)
             obj = result.scalars().first()
@@ -329,7 +392,9 @@ class AdminTagsRepository:
     async def delete_tag(self, tag_id: str) -> bool:
         """Delete a tag plus its resource_tags associations (verbatim legacy order:
         associations first, then the tag). Returns bool(tag deleted)."""
-        tid = _bigint(tag_id)
+        tid = _maybe_bigint(tag_id)
+        if tid is None:
+            return False
         async with write_scope() as session:
             await session.execute(
                 sa_delete(ResourceTags).where(ResourceTags.tag_id == tid)
@@ -340,49 +405,81 @@ class AdminTagsRepository:
             return result.first() is not None
 
     # ─── Batch ─────────────────────────────────────────────────────────
+    #
+    # Each returns ``False`` — having written nothing — when any tag id (or the
+    # target group of a move) names no row. The existence check runs inside the
+    # write's own transaction, so a batch is all-or-nothing: it used to update
+    # the ids that existed, skip the rest silently and answer "Moved N tags"
+    # with N counting the misses; a non-numeric id was a 500 mid-loop.
 
     async def batch_set_group(
         self, tag_ids: list[str], group_id: Optional[str]
-    ) -> None:
+    ) -> bool:
+        """Raises :class:`AdminTagGroupNotFound` for an unknown ``group_id``."""
         if not tag_ids:
-            return
-        gid = _bigint(group_id) if group_id is not None else None
+            return True
+        ids = _bigints(tag_ids)
+        if ids is None:
+            return False
         async with write_scope() as session:
-            for tid in tag_ids:
+            gid = (
+                await _require_group(session, group_id)
+                if group_id is not None
+                else None
+            )
+            if not await _all_exist(session, Tags.id, ids):
+                return False
+            for tid in ids:
                 await session.execute(
-                    sa_update(Tags).where(Tags.id == _bigint(tid)).values(group_id=gid)
+                    sa_update(Tags).where(Tags.id == tid).values(group_id=gid)
                 )
+        return True
 
-    async def batch_set_color(self, tag_ids: list[str], color: str) -> None:
+    async def batch_set_color(self, tag_ids: list[str], color: str) -> bool:
         if not tag_ids:
-            return
+            return True
+        ids = _bigints(tag_ids)
+        if ids is None:
+            return False
         async with write_scope() as session:
-            for tid in tag_ids:
+            if not await _all_exist(session, Tags.id, ids):
+                return False
+            for tid in ids:
                 await session.execute(
-                    sa_update(Tags).where(Tags.id == _bigint(tid)).values(color=color)
+                    sa_update(Tags).where(Tags.id == tid).values(color=color)
                 )
+        return True
 
-    async def batch_delete(self, tag_ids: list[str]) -> None:
+    async def batch_delete(self, tag_ids: list[str]) -> bool:
         if not tag_ids:
-            return
+            return True
+        ids = _bigints(tag_ids)
+        if ids is None:
+            return False
         async with write_scope() as session:
-            for tid in tag_ids:
-                bid = _bigint(tid)
+            if not await _all_exist(session, Tags.id, ids):
+                return False
+            for bid in ids:
                 await session.execute(
                     sa_delete(ResourceTags).where(ResourceTags.tag_id == bid)
                 )
                 await session.execute(sa_delete(Tags).where(Tags.id == bid))
+        return True
 
-    async def reorder_tags(self, tag_ids: list[str]) -> None:
+    async def reorder_tags(self, tag_ids: list[str]) -> bool:
         if not tag_ids:
-            return
+            return True
+        ids = _bigints(tag_ids)
+        if ids is None:
+            return False
         async with write_scope() as session:
-            for idx, tid in enumerate(tag_ids):
+            if not await _all_exist(session, Tags.id, ids):
+                return False
+            for idx, tid in enumerate(ids):
                 await session.execute(
-                    sa_update(Tags)
-                    .where(Tags.id == _bigint(tid))
-                    .values(sort_order=idx)
+                    sa_update(Tags).where(Tags.id == tid).values(sort_order=idx)
                 )
+        return True
 
 
 def get_admin_tags_repository() -> "AdminTagsRepository":

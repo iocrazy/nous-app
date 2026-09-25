@@ -213,17 +213,21 @@ async def test_delete_forwards_memory_id_and_user_id():
 
 
 @pytest.mark.asyncio
-async def test_delete_returns_false_when_not_owned():
-    """delete_user_memory returns False → response is {"deleted": False}."""
+async def test_delete_is_typed_404_when_not_owned():
+    """delete_user_memory returns False → typed 404, not ``{"deleted": False}``."""
+    from fastapi import HTTPException
+
     from app.api.agent_memory_user_router import delete_my_memory
 
     auth = _make_auth("user-abc")
     mock_delete = AsyncMock(return_value=False)
 
     with patch("app.api.agent_memory_user_router.delete_user_memory", mock_delete):
-        result = await delete_my_memory(memory_id=999, auth=auth)
+        with pytest.raises(HTTPException) as exc:
+            await delete_my_memory(memory_id=999, auth=auth)
 
-    assert result == {"deleted": False}
+    assert exc.value.status_code == 404
+    assert exc.value.detail["code"] == "not_found_or_out_of_scope"
 
 
 @pytest.mark.asyncio

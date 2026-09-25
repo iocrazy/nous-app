@@ -96,41 +96,6 @@ class ReviewService:
 
         return comments
 
-    async def get_comment(
-        self, comment_id: str, include_replies: bool = True
-    ) -> Optional[Dict[str, Any]]:
-        """Get a single comment with replies."""
-        comment = await self.repo.get_comment_by_id(comment_id)
-        if not comment:
-            return None
-
-        comment["annotations"] = await self.repo.get_annotations_by_comment(comment_id)
-        if include_replies:
-            comment["replies"] = await self.repo.get_replies(comment_id)
-            for reply in comment["replies"]:
-                reply["annotations"] = await self.repo.get_annotations_by_comment(
-                    reply["id"]
-                )
-
-        return comment
-
-    async def update_comment(
-        self, comment_id: str, user_id: str, updates: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Update a comment (only by author)."""
-        comment = await self.repo.get_comment_by_id(comment_id)
-        if not comment:
-            raise ValueError("Comment not found")
-        if comment["author_id"] != user_id:
-            raise PermissionError("Only the author can edit this comment")
-
-        allowed = {"content", "status"}
-        filtered = {k: v for k, v in updates.items() if k in allowed}
-        if not filtered:
-            return comment
-
-        return await self.repo.update_comment(comment_id, filtered)
-
     async def resolve_comment(
         self, comment_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -160,11 +125,6 @@ class ReviewService:
         result = await self.repo.delete_comment(comment_id)
         logger.info(f"Deleted review comment {comment_id}")
         return result
-
-    async def get_comment_count(
-        self, resource_id: str, version_id: Optional[str] = None
-    ) -> int:
-        return await self.repo.get_comment_count(resource_id, version_id)
 
     # ─── Review Status ──────────────────────────────────
 

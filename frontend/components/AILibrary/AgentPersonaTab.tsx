@@ -68,6 +68,12 @@ interface AgentPersonaTabProps {
    */
   unavailableModelLabels?: Record<string, string>;
   /**
+   * Localized reason per platform model that is `idle` on nous-engine
+   * (authorized, not loaded). Those options are shown but disabled; when the
+   * saved model is one of them the reason is also stated under the picker.
+   */
+  notLoadedModelLabels?: Record<string, string>;
+  /**
    * Platform model names that run on the USER's own machine (backend
    * `is_local`). Passed in rather than matched by name here — the display
    * name is admin-editable, and a hint keyed on a guessed string would go
@@ -93,6 +99,7 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
   unhealthyModelLabels,
   nonChatModelLabels,
   unavailableModelLabels,
+  notLoadedModelLabels,
   localModelNames,
   localSkillIds,
   allSkills,
@@ -122,6 +129,9 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
   // The saved model was hidden from the list (failed probe). Said out loud
   // rather than silently swapped: the user decides what to pick instead.
   const selectedUnavailable = Boolean(unavailableModelLabels?.[draft.model ?? '']);
+  // The saved model is idle on nous-engine: kept as the value, but a chat on
+  // it would get 503 "not loaded" until the engine loads it.
+  const selectedNotLoaded = notLoadedModelLabels?.[draft.model ?? ''];
 
   return (
     <div className="space-y-6">
@@ -275,7 +285,13 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
             unhealthyLabels: unhealthyModelLabels,
             noteLabels: nonChatModelLabels,
             orphanLabels: unavailableModelLabels,
+            notLoadedLabels: notLoadedModelLabels,
           })}
+          {selectedNotLoaded && (
+            <p className="mt-1 text-xs text-warn" data-testid="model-not-loaded-hint">
+              {selectedNotLoaded}
+            </p>
+          )}
           {/* The local Codex link is plain text — no tool calling — so the
               backend rejects a run whose agent has Skills or tools bound
               (`local_tools_unsupported`). Saying it here, at the moment the

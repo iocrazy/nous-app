@@ -1,8 +1,8 @@
 """Admin task-center repository — data access for the ``task_tracking`` table.
 
 ORM 2.0 (post-rollout cleanup): ``AdminTasksRepository`` is the SQLAlchemy 2.0
-implementation for the admin Task Center, which reads (and, for cancel / retry,
-WRITES) the ``task_tracking`` table. The legacy supabase-py REST path and its
+implementation for the admin Task Center, which READS the ``task_tracking``
+table (it has no write path). The legacy supabase-py REST path and its
 per-domain rollout flag have been retired; call sites go through
 ``get_admin_tasks_repository()`` (bottom of this file) which now unconditionally
 returns this repository.
@@ -11,26 +11,20 @@ MODEL: ``app.models.TaskTracking`` (table ``task_tracking``) — verified reflec
 The PK is ``dbos_workflow_id`` (text; equals dbos.workflow_status.workflow_uuid).
 The old ``id`` column was dropped in migration 180.
 
-★ task_tracking DISCIPLINE (CLAUDE.md route-C) — READ + WRITE present ★
-======================================================================
+★ task_tracking DISCIPLINE (CLAUDE.md route-C) — READ ONLY ★
+============================================================
 ``task_tracking`` is the UI source of truth. ``phase / status / progress /
 started_at / completed_at / error_msg`` are TRIGGER-OWNED for DBOS-workflow rows
 (``mirror_dbos_lifecycle_to_tracking`` mirrors them one-way from
-dbos.workflow_status); business code is NOT supposed to PATCH them directly.
+dbos.workflow_status); business code does not PATCH them.
 
-HOWEVER — the LEGACY admin repo's ``update()`` already wrote exactly those
-trigger-owned columns:
-  - cancel  → ``{"status": "cancelled", "phase": "cancelled"}``
-  - retry   → ``{"status": "pending", "phase": "queued", "progress": 0,
-                "error_msg": None, "error_code": None, "started_at": None,
-                "completed_at": None}``
-Per the migration's INERT discipline, this ORM implementation REPRODUCES the
-legacy behaviour BYTE-FOR-BYTE — it does NOT "fix" the discipline violation by
-filtering out trigger-owned columns (that would change observable behaviour). So
-``update()`` writes whatever ``changes`` dict it is handed, verbatim, via a
-generic UPDATE inside ``write_scope()`` (which COMMITS — the silent-rollback P0
-lesson). This pre-existing discipline violation is flagged as a CONCERN for
-follow-up; it is NOT introduced here and NOT repaired here.
+This repository used to carry a generic ``update()`` that the admin cancel and
+retry routes used to write exactly those columns (cancel → ``cancelled``, retry
+→ ``pending/queued`` with the error cleared) without touching the workflow. It
+was removed in P8: admin cancel now asks DBOS to cancel and lets the trigger
+record it, and the admin retry route (which re-dispatched nothing) is gone.
+``tests/api/admin/test_admin_tasks_no_status_writes.py`` pins that nothing here
+writes ``task_tracking`` again.
 
 ★ UUID AUDIT (admin reads-across-all-users; service_role scope) ★
 =================================================================
@@ -80,9 +74,9 @@ import uuid as _uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select
 
-from app.db.session import read_scope, write_scope
+from app.db.session import read_scope
 from app.models import TaskTracking
 from app.repositories._orm_helpers import _name_to_attr
 
@@ -223,25 +217,6 @@ class AdminTasksRepository:
             "status": row.status,
             "task_type": row.task_type,
         }
-
-    async def update(self, task_id: str, changes: dict[str, Any]) -> None:
-        """UPDATE task_tracking by ``dbos_workflow_id`` with the EXACT ``changes``
-        dict (verbatim — including trigger-owned columns; see the module docstring's
-        task_tracking-discipline CONCERN). COMMITS via write_scope(). Reproduces
-        the legacy ``.update(changes).eq("dbos_workflow_id", task_id)``."""
-        if not changes:
-            return
-        # Resolve attribute names so a renamed column (e.g. "metadata" →
-        # "metadata_") binds correctly; the legacy's keys are real DB column names.
-        values: Dict[str, Any] = {
-            _TASK_N2A.get(key, key): value for key, value in changes.items()
-        }
-        async with write_scope() as session:
-            await session.execute(
-                update(TaskTracking)
-                .where(TaskTracking.dbos_workflow_id == task_id)
-                .values(**values)
-            )
 
 
 def get_admin_tasks_repository() -> "AdminTasksRepository":

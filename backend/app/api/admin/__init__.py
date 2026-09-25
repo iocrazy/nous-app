@@ -40,69 +40,6 @@ from .videos_router import router as videos_router
 admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
-@admin_router.get("/health")
-async def admin_health():
-    """Unauthenticated health check for admin API diagnostics."""
-    from loguru import logger
-
-    checks: dict = {"status": "ok"}
-
-    # Check Supabase admin client initializes (auth/storage still use it)
-    try:
-        from app.db import get_async_supabase_admin
-
-        await get_async_supabase_admin()
-        checks["supabase_admin"] = "ok"
-    except Exception as e:
-        checks["supabase_admin"] = f"error: {type(e).__name__}: {e}"
-        checks["status"] = "degraded"
-
-    # Check user_profiles table access
-    try:
-        from sqlalchemy import func, select
-
-        from app.db.session import read_scope
-        from app.models import UserProfiles
-
-        async with read_scope() as session:
-            count = (
-                await session.execute(select(func.count(UserProfiles.id)))
-            ).scalar()
-        checks["user_profiles"] = f"ok (count={count})"
-    except Exception as e:
-        checks["user_profiles"] = f"error: {type(e).__name__}: {e}"
-        checks["status"] = "degraded"
-
-    # Check resource_versions table access
-    try:
-        from sqlalchemy import func, select
-
-        from app.db.session import read_scope
-        from app.models import ResourceVersions
-
-        async with read_scope() as session:
-            count = (
-                await session.execute(select(func.count(ResourceVersions.id)))
-            ).scalar()
-        checks["resource_versions"] = f"ok (count={count})"
-    except Exception as e:
-        checks["resource_versions"] = f"error: {type(e).__name__}: {e}"
-        checks["status"] = "degraded"
-
-    # Check JWT validation capability
-    try:
-        from app.db import get_async_supabase
-
-        await get_async_supabase()  # probe: verify the anon client initializes
-        checks["supabase_anon"] = "ok"
-    except Exception as e:
-        checks["supabase_anon"] = f"error: {type(e).__name__}: {e}"
-        checks["status"] = "degraded"
-
-    logger.info(f"[Admin Health] {checks}")
-    return checks
-
-
 admin_router.include_router(users_router, prefix="/users", tags=["Admin - Users"])
 admin_router.include_router(teams_router, prefix="/teams", tags=["Admin - Teams"])
 admin_router.include_router(videos_router, prefix="/videos", tags=["Admin - Videos"])

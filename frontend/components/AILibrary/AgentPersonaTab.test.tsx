@@ -14,7 +14,13 @@ import type { AILibraryAgent, AILibrarySkill } from '../../types';
 
 vi.mock('./MarkdownEditor', () => ({ MarkdownEditor: () => <div /> }));
 vi.mock('./AgentIconPicker', () => ({ AgentIconPicker: () => <div /> }));
-vi.mock('./agentEditorModel', () => ({ renderModelSelect: () => <div /> }));
+vi.mock('./agentEditorModel', () => ({
+  // Surfaces what the tab forwards; the option rendering itself is tested in
+  // agentEditorModel.test.tsx.
+  renderModelSelect: (p: { notLoadedLabels?: Record<string, string> }) => (
+    <div data-testid="model-select" data-not-loaded={JSON.stringify(p.notLoadedLabels ?? {})} />
+  ),
+}));
 
 // Interpolating stand-in for i18next: the health line reads its relative time
 // through t('common.time.minutesAgo', { count }), so a mock that drops
@@ -349,5 +355,28 @@ describe('AgentPersonaTab — saved model hidden as unavailable', () => {
     renderTab({ draft: { model: 'nous-broken-llm' }, modelHealth: health });
     expect(screen.getByTestId('model-health-warning')).toBeTruthy();
     expect(screen.queryByTestId('model-unavailable-hint')).toBeNull();
+  });
+});
+
+describe('AgentPersonaTab — saved model not loaded on nous-engine', () => {
+  const NOT_LOADED = { 'nous-qwen3-8-27b': 'Not loaded on nous-engine' };
+
+  it('forwards the not-loaded map to the picker', () => {
+    renderTab({ notLoadedModelLabels: NOT_LOADED });
+    expect(
+      JSON.parse(screen.getByTestId('model-select').getAttribute('data-not-loaded') ?? '{}'),
+    ).toEqual(NOT_LOADED);
+  });
+
+  it('states the reason under the picker when the saved model is idle', () => {
+    renderTab({ draft: { model: 'nous-qwen3-8-27b' }, notLoadedModelLabels: NOT_LOADED });
+    expect(screen.getByTestId('model-not-loaded-hint').textContent).toBe(
+      'Not loaded on nous-engine',
+    );
+  });
+
+  it('says nothing when the saved model is loaded', () => {
+    renderTab({ draft: { model: 'other' }, notLoadedModelLabels: NOT_LOADED });
+    expect(screen.queryByTestId('model-not-loaded-hint')).toBeNull();
   });
 });

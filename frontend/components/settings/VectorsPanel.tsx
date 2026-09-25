@@ -29,7 +29,7 @@ import {
   getVectorsStatus,
   type VectorsStatus,
 } from '../../services/searchService';
-import type { NousModelPublic } from '../../types';
+import type { NousModelPublic } from '../../types/api';
 import { AddSpacePicker, CandidateCard, Capabilities, SpaceRow } from './VectorSpaceCards';
 
 // Same ceiling as the backend (BackfillEmbeddingsBody.limit le=200).

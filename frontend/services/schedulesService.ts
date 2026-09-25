@@ -8,6 +8,9 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import { decodeErrorEnvelope } from './errorEnvelope';
+import type { IssueScheduleItem, ScheduleFireNowResult } from '../types/api';
+
+export type { IssueScheduleItem } from '../types/api';
 
 const base = (): string => `${getApiUrl()}/api/v1/schedules`;
 
@@ -36,21 +39,6 @@ export interface ScheduleResponse {
   pause_reason: string | null;
   skipped_count: number;
   stale_after_minutes: number;
-}
-
-/** One row of `GET /api/v1/issues/{id}/schedules` — the wake-ups pointing at
- *  an issue plus the routine that created it. Narrower than ScheduleResponse:
- *  that endpoint projects only what the panel draws. */
-export interface IssueScheduleItem {
-  id: string;
-  task_type: string;
-  fire_at: string | null;
-  cron_expr: string | null;
-  text: string;
-  created_by: string;
-  enabled: boolean;
-  /** Why a stopped row stopped (fired_once / issue_terminal / stale / …). */
-  pause_reason: string | null;
 }
 
 export interface ScheduleCreatePayload {
@@ -155,7 +143,7 @@ export async function listIssueSchedules(issueId: string): Promise<IssueSchedule
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/issues/${issueId}/schedules`, { headers });
   if (!res.ok) throw new Error(`Issue schedules API ${res.status}`);
-  return ((await res.json()) as { items?: IssueScheduleItem[] }).items ?? [];
+  return ((await res.json()) as { items: IssueScheduleItem[] }).items;
 }
 
 export const schedulesService = {
@@ -171,7 +159,9 @@ export const schedulesService = {
 
   remove: (id: string): Promise<void> => request(`/${id}`, { method: 'DELETE' }),
 
-  fireNow: (id: string): Promise<{ schedule_id: string; fired_at: string }> =>
+  /** Queued for the master scheduler's next tick; a disabled schedule is a
+   *  typed 409 `schedule_disabled` (resume it first). */
+  fireNow: (id: string): Promise<ScheduleFireNowResult> =>
     request(`/${id}/fire-now`, { method: 'POST' }),
 
   // Clear an auto-paused (or disabled) routine: re-enable, reset the

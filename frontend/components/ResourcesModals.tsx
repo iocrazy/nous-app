@@ -15,14 +15,15 @@ import { ShareModal } from './ShareModal';
 import { FolderPickerModal } from './FolderPickerModal';
 import { DuplicateFileAlert } from './DuplicateFileAlert';
 import type { SmartCollection, ResourceItem, Folder } from '../types';
+import type { SmartFolderRules } from '../services/resourceService';
 import type { DuplicateAlertState, BatchDupDecisionState } from '../hooks/useResourceUpload';
 
 interface ResourcesModalsProps {
   // Smart folder
   showSmartFolderEditor: boolean;
   editingSmartFolder: SmartCollection | null;
-  onCreateSmartFolder: (name: string, rules: any[]) => Promise<void>;
-  onEditSmartFolder: (name: string, rules: any[]) => Promise<void>;
+  onCreateSmartFolder: (name: string, rules: SmartFolderRules) => Promise<void>;
+  onEditSmartFolder: (name: string, rules: SmartFolderRules) => Promise<void>;
   onCloseSmartFolderEditor: () => void;
   onCloseEditingSmartFolder: () => void;
   // Share
@@ -92,7 +93,7 @@ export const ResourcesModals: React.FC<ResourcesModalsProps> = ({
       {editingSmartFolder && (
         <SmartFolderEditor
           initialName={editingSmartFolder.name}
-          initialRules={editingSmartFolder.smart_rules as any}
+          initialRules={editingSmartFolder.smart_rules}
           onSave={onEditSmartFolder}
           onClose={onCloseEditingSmartFolder}
         />

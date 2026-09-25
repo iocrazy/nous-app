@@ -17,8 +17,9 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { Node } from '@xyflow/react';
 
-/** Writer for one lane: receives the prefix-stripped id and rounded position. */
-export type LaneWriter = (id: string, pos: { x: number; y: number }) => Promise<void>;
+/** Writer for one lane: receives the prefix-stripped id and rounded position.
+ *  The resolved value is discarded; only a rejection matters (it is logged). */
+export type LaneWriter = (id: string, pos: { x: number; y: number }) => Promise<unknown>;
 
 export interface GroupDragPersistOptions {
   /** Map of node-id prefix → writer for that lane (e.g. `{ 'sc-': …, 'ch-': … }`). */

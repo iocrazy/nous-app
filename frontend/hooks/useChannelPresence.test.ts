@@ -88,7 +88,11 @@ describe('useChannelPresence', () => {
     ({ capturedHandlers, fakeChannel, fakeSupabase, setPresenceSnapshot } = buildFakes());
 
     // Wire the mock so getSupabaseClient() returns our fake.
-    vi.mocked(getSupabaseClient).mockReturnValue(fakeSupabase as ReturnType<typeof getSupabaseClient>);
+    // The fake implements only the two client methods the hook touches
+    // (`channel` / `removeChannel`), so it is a deliberate partial double.
+    vi.mocked(getSupabaseClient).mockReturnValue(
+      fakeSupabase as unknown as ReturnType<typeof getSupabaseClient>,
+    );
   });
 
   afterEach(() => {

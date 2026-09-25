@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+from uuid import UUID
 
 from fastapi import (
     APIRouter,
@@ -30,6 +31,18 @@ from app.schemas.conversation import (
     MessageOut,
     OwnerTransfer,
 )
+from app.schemas.conversation_responses import (
+    ConversationAgentAddedResponse,
+    ConversationAgentRemovedResponse,
+    ConversationAttachmentPromoteResponse,
+    ConversationAttachmentUploadResponse,
+    ConversationDissolveResponse,
+    ConversationMarkReadResponse,
+    ConversationMemberRemovedResponse,
+    ConversationMemberRoleResponse,
+    ConversationMembersAddedResponse,
+    ConversationOwnerTransferResponse,
+)
 from app.services.chat.chat_attachment_service import save_chat_image
 from app.services.conversation_service import get_conversation_service
 from app.services.library.promote_generated_media_service import (
@@ -44,6 +57,22 @@ router = APIRouter(
     tags=["Conversations"],
     dependencies=[Depends(require_module("ai-library"))],
 )
+
+
+def _require_uuid(value: str, detail: str) -> None:
+    """400 unless ``value`` is a UUID.
+
+    User and agent ids are UUID columns; a malformed id bound into those
+    queries raised a driver DataError, i.e. a 500. No member can have such an
+    id, so answer the way the service does for a non-member target.
+    """
+    try:
+        UUID(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+_NOT_A_MEMBER = "target user is not a member of this conversation"
 
 
 class MessageEdit(BaseModel):
@@ -99,8 +128,12 @@ async def create_conversation(payload: ConversationCreate, auth: AuthDep):
     return {**conv, "unread": 0}
 
 
-@router.post("/{conversation_id}/members")
+@router.post(
+    "/{conversation_id}/members", response_model=ConversationMembersAddedResponse
+)
 async def add_members(conversation_id: int, payload: MemberAdd, auth: AuthDep):
+    for target in payload.user_ids:
+        _require_uuid(target, "target user not in this team")
     svc = get_conversation_service()
     try:
         added = await svc.add_members(
@@ -128,9 +161,13 @@ async def list_members(conversation_id: int, auth: AuthDep):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
 
 
-@router.delete("/{conversation_id}/members/{member_user_id}")
+@router.delete(
+    "/{conversation_id}/members/{member_user_id}",
+    response_model=ConversationMemberRemovedResponse,
+)
 async def remove_member(conversation_id: int, member_user_id: str, auth: AuthDep):
     """Remove a member (admin/owner) or leave the group (self-target)."""
+    _require_uuid(member_user_id, _NOT_A_MEMBER)
     svc = get_conversation_service()
     try:
         return await svc.remove_member(
@@ -144,10 +181,14 @@ async def remove_member(conversation_id: int, member_user_id: str, auth: AuthDep
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
-@router.patch("/{conversation_id}/members/{member_user_id}/role")
+@router.patch(
+    "/{conversation_id}/members/{member_user_id}/role",
+    response_model=ConversationMemberRoleResponse,
+)
 async def set_member_role(
     conversation_id: int, member_user_id: str, payload: MemberRoleSet, auth: AuthDep
 ):
+    _require_uuid(member_user_id, _NOT_A_MEMBER)
     svc = get_conversation_service()
     try:
         return await svc.set_member_role(
@@ -162,8 +203,12 @@ async def set_member_role(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
-@router.post("/{conversation_id}/transfer-owner")
+@router.post(
+    "/{conversation_id}/transfer-owner",
+    response_model=ConversationOwnerTransferResponse,
+)
 async def transfer_owner(conversation_id: int, payload: OwnerTransfer, auth: AuthDep):
+    _require_uuid(payload.to_user_id, _NOT_A_MEMBER)
     svc = get_conversation_service()
     try:
         return await svc.transfer_ownership(
@@ -177,8 +222,12 @@ async def transfer_owner(conversation_id: int, payload: OwnerTransfer, auth: Aut
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
-@router.delete("/{conversation_id}/agents/{agent_id}")
+@router.delete(
+    "/{conversation_id}/agents/{agent_id}",
+    response_model=ConversationAgentRemovedResponse,
+)
 async def remove_agent(conversation_id: int, agent_id: str, auth: AuthDep):
+    _require_uuid(agent_id, "invalid agent id")
     svc = get_conversation_service()
     try:
         return await svc.remove_agent(
@@ -211,7 +260,7 @@ async def update_conversation(
     return {**row, "unread": 0}
 
 
-@router.delete("/{conversation_id}")
+@router.delete("/{conversation_id}", response_model=ConversationDissolveResponse)
 async def dissolve_conversation(conversation_id: int, auth: AuthDep):
     """Dissolve (archive) a group — owner only."""
     svc = get_conversation_service()
@@ -248,7 +297,7 @@ async def list_messages(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
-@router.post("/{conversation_id}/agents")
+@router.post("/{conversation_id}/agents", response_model=ConversationAgentAddedResponse)
 async def add_agent(conversation_id: int, payload: AgentAdd, auth: AuthDep):
     svc = get_conversation_service()
     try:
@@ -289,7 +338,7 @@ async def post_message(
     return msg
 
 
-@router.post("/{conversation_id}/read")
+@router.post("/{conversation_id}/read", response_model=ConversationMarkReadResponse)
 async def mark_read(conversation_id: int, payload: MarkReadIn, auth: AuthDep):
     svc = get_conversation_service()
     try:
@@ -352,12 +401,15 @@ class PromoteAttachmentBody(BaseModel):
     scope_id: int
 
 
-@router.post("/{conversation_id}/attachments")
+@router.post(
+    "/{conversation_id}/attachments",
+    response_model=ConversationAttachmentUploadResponse,
+)
 async def upload_attachment(
     conversation_id: int,
     auth: AuthDep,
     file: UploadFile,
-) -> dict:
+) -> dict[str, Any]:
     """Upload an image into the staged generated_media store for this conversation.
 
     Returns: {id, mime, file_size_bytes, url}
@@ -390,12 +442,15 @@ async def upload_attachment(
     }
 
 
-@router.post("/attachments/{attachment_id}/promote")
+@router.post(
+    "/attachments/{attachment_id}/promote",
+    response_model=ConversationAttachmentPromoteResponse,
+)
 async def promote_attachment(
     attachment_id: int,
     body: PromoteAttachmentBody,
     auth: AuthDep,
-) -> dict:
+) -> dict[str, Any]:
     """Promote a staged chat attachment into a first-class resource.
 
     Returns: {promoted_resource_id}

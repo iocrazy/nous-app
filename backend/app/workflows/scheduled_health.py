@@ -200,6 +200,28 @@ async def pg_connection_pressure_workflow(
     await sample_pg_connections_step()
 
 
+async def _sync_engine_catalog(rows: list[dict[str, Any]]) -> bool:
+    """Mirror nous-engine's ``/v1/models`` into the catalog before probing.
+
+    Plain async helper called from INSIDE ``probe_nous_models_step`` — not a
+    step, and the workflow body is untouched. Best-effort: any failure is a
+    WARNING and the probes run regardless. Returns True when rows changed
+    (the window cache is reloaded then, and the caller re-reads the catalog).
+    """
+    from app.agent_framework.catalog_windows import refresh_catalog_windows
+    from app.services.ai.nous_engine_sync import sync_all_engines
+
+    try:
+        results = await sync_all_engines(rows)
+    except Exception as exc:  # noqa: BLE001 — sync must never block probes
+        logger.warning(f"[nous_engine_sync] skipped this run: {exc!r}")
+        return False
+    changed = any(r.created or r.updated for _, r in results)
+    if changed:
+        await refresh_catalog_windows()
+    return changed
+
+
 @DBOS.step()
 async def probe_nous_models_step() -> dict[str, Any]:
     """Probe every ENABLED admin-configured platform (Nous) model and persist
@@ -232,6 +254,9 @@ async def probe_nous_models_step() -> dict[str, Any]:
 
     repo = get_nous_model_repository()
     rows = await repo.list_all()
+    if await _sync_engine_catalog(rows):
+        # Re-read so a service the engine just started serving is probed now.
+        rows = await repo.list_all()
     enabled = [r for r in rows if r.get("is_enabled")]
 
     counts = {"ok": 0, "fail": 0, "idle": 0, "not_probed": 0}

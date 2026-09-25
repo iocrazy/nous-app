@@ -41,6 +41,8 @@ TYPED_5XX_CODES: frozenset[str] = frozenset(
         "MODULE_DISABLED",  # module gate 503: code + module id from the registry
         "upscale_backend_failed",  # canvas 放大 502: provider row + upstream code
         "upscale_unavailable",  # canvas 放大 503: no enabled upscale backend
+        "storage_audit_dispatch_failed",  # admin 深扫 503: workflow not started
+        "boundary_audit_unavailable",  # admin boundary-audit 503: log unreadable
     }
 )
 

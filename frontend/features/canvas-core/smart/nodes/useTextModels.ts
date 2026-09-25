@@ -1,8 +1,9 @@
 // features/canvas-core/smart/nodes/useTextModels.ts
 //
 // Text (llm) model catalog for the prompt node's provider picker (P0-1).
-// Mirrors useGenerationModels: fetched once per session (module cache) since
-// the catalog changes via admin action, not mid-edit. Failures degrade to an
+// Mirrors useGenerationModels: one module-level cache shared by every picker,
+// refreshed when stale or on window focus (see staleCatalog — the rows carry
+// a probe status that changes without admin action). Failures degrade to an
 // empty list (the picker shows only the catalog-default option) and are logged
 // for the error funnel.
 //
@@ -11,38 +12,16 @@
 // picker uses, instead of a hardcoded constant that named `qwen-plus` /
 // `nous/storyboard` — models the platform doesn't actually carry.
 
-import { useEffect, useState } from 'react';
-
 import { listTextModels, type TextModel } from '../../services/canvasGenerationService';
+import { createStaleCatalog } from './staleCatalog';
 
-let cache: TextModel[] | null = null;
-let inflight: Promise<TextModel[]> | null = null;
+const catalog = createStaleCatalog<TextModel>(() => listTextModels(), 'useTextModels');
 
 /** Test hook: reset the module cache between cases. */
 export function _resetTextModelsCache(): void {
-  cache = null;
-  inflight = null;
+  catalog.reset();
 }
 
 export function useTextModels(): TextModel[] {
-  const [models, setModels] = useState<TextModel[]>(cache ?? []);
-
-  useEffect(() => {
-    if (cache) return undefined;
-    let live = true;
-    inflight = inflight ?? listTextModels();
-    inflight
-      .then((m) => {
-        cache = m;
-        if (live) setModels(m);
-      })
-      .catch((err: unknown) => {
-        console.error('[useTextModels] catalog fetch failed:', err);
-      });
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  return models;
+  return catalog.useRows();
 }

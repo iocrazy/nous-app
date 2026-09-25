@@ -795,3 +795,23 @@ describe('CoverStudioOverlay — rounds survive closing the dialog', () => {
     await waitFor(() => expect(svc.refineCoverDraft).toHaveBeenCalledWith(expect.objectContaining({ gridGenId: '500', sourceVideoId: '900' })));
   });
 });
+
+describe('CoverStudioOverlay — model not loaded on nous-engine', () => {
+  it('lists an idle image model disabled, with the reason', async () => {
+    svc.listGenerationModels.mockResolvedValue([
+      { name: 'codex-image', display_name: 'GPT Image', actual_model: 'gpt-image-2', type: 'image', last_test_status: 'ok' },
+      { name: 'nous-studio-image', display_name: 'Studio Image', actual_model: 'studio-image', type: 'image', last_test_status: 'idle' },
+    ]);
+    renderOverlay();
+    const mirror = screen.getByTestId('cover-model') as HTMLSelectElement;
+    await waitFor(() => {
+      expect(mirror.querySelector('option[value="nous-studio-image"]')).not.toBeNull();
+    });
+    const idle = mirror.querySelector('option[value="nous-studio-image"]') as HTMLOptionElement;
+    expect(idle.disabled).toBe(true);
+    expect(idle.dataset.description).toBe('Not loaded on nous-engine');
+    expect((mirror.querySelector('option[value="codex-image"]') as HTMLOptionElement).disabled).toBe(
+      false,
+    );
+  });
+});

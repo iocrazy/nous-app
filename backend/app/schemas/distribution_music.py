@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -57,3 +57,66 @@ class MusicSearchResponse(BaseModel):
     cached: bool = False
     #: 用谁的会话问到的。见 ``BrowseIdentityOut``。
     browsing_as: BrowseIdentityOut
+
+
+# --- 「选择音乐」 charts cache (P7) --------------------------------------------
+#
+# Mirrors ``MusicChartsRepository.list_charts`` / ``_track_payload`` and
+# ``music_charts.harvest_account_charts`` key for key. Wire test:
+# ``tests/api/test_distribution_p7_wire.py``.
+
+
+class DistributionMusicChartTrack(BaseModel):
+    """A cached chart track: the search ``MusicTrackOut`` vocabulary plus its
+    ``position``. ``user_count`` is ``None`` when the platform did not say
+    (zero is a real value)."""
+
+    music_id: str
+    title: str
+    author: str
+    duration: int
+    user_count: Optional[int]
+    cover_url: str
+    play_url: str
+    position: int
+
+
+class DistributionMusicChart(BaseModel):
+    """One cached tab. ``category_kind`` + ``category_id`` together are its
+    identity. ``ok=false`` still carries the tracks from the last good read;
+    ``fetched_at`` advances on success only, ``checked_at`` on every try."""
+
+    id: str
+    category_id: str
+    category_kind: str
+    category_name: str
+    position: int
+    ok: bool
+    error: str
+    cursor: str
+    has_more: bool
+    fetched_at: Optional[str]
+    checked_at: Optional[str]
+    tracks: list[DistributionMusicChartTrack]
+
+
+class DistributionMusicChartsPage(BaseModel):
+    charts: list[DistributionMusicChart]
+    last_success_at: Optional[str]
+    stale: bool
+    never_harvested: bool
+    ttl_hours: int
+
+
+class DistributionMusicHarvestResult(BaseModel):
+    """``POST /accounts/{id}/music/charts/refresh``. Always 200: a failure is
+    ``success=false`` with ``detail.reason`` (``account_busy``,
+    ``no_chart_read`` …), never an HTTP error. ``stored`` is the write
+    summary (``stored`` / ``kept`` / ``tracks``), empty when nothing was
+    written."""
+
+    success: bool
+    status: str
+    message: Optional[str]
+    detail: dict[str, Any]
+    stored: dict[str, int]

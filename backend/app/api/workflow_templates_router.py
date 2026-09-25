@@ -16,21 +16,29 @@ a non-member resolves to None → 403 on the team routes, 404 on the id routes
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.api.row_guard import NOT_FOUND_OR_OUT_OF_SCOPE
 from app.core.deps import AuthDep
 from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
 from app.repositories.team_repository import get_team_repository
 from app.repositories.workflow_templates_repository import (
     get_workflow_templates_repository,
 )
+from app.schemas.envelope import Envelope
 from app.schemas.workflow import (
     MAX_TEMPLATES_PER_TEAM,
     DepsBackwardOnly,
     TemplateCreate,
     TemplateUpdate,
+)
+from app.schemas.workflow_responses import (
+    WorkflowStageLibraryEntry,
+    WorkflowTemplateDeleted,
+    WorkflowTemplateDetail,
+    WorkflowTemplateSummary,
 )
 from app.services.workflow.template_seeder import ensure_seed_templates
 
@@ -69,10 +77,30 @@ def _node_to_dict(node) -> dict:
     }
 
 
+def _template_not_found() -> HTTPException:
+    """One answer for "no such template", "not your team" and "not an id"."""
+    return HTTPException(
+        status_code=404,
+        detail={
+            "code": NOT_FOUND_OR_OUT_OF_SCOPE,
+            "message": "The template does not exist or is outside your scope.",
+        },
+    )
+
+
+def _is_snowflake(value: str) -> bool:
+    """Snowflake ids are decimal digits; anything else would 500 in ``int()``."""
+    return value.isascii() and value.isdigit()
+
+
+def _not_a_member() -> HTTPException:
+    return HTTPException(status_code=403, detail="You are not a member of this team")
+
+
 # ── node bank (must precede /{template_id}) ─────────────────────────────────
 
 
-@router.get("/stage-library")
+@router.get("/stage-library", response_model=Envelope[List[WorkflowStageLibraryEntry]])
 async def list_stage_library(auth: AuthDep):
     """The 11-node workflow library (any authenticated user)."""
     repo = get_workflow_templates_repository()
@@ -82,7 +110,7 @@ async def list_stage_library(auth: AuthDep):
 # ── template collection ─────────────────────────────────────────────────────
 
 
-@router.get("")
+@router.get("", response_model=Envelope[List[WorkflowTemplateSummary]])
 async def list_templates(
     auth: AuthDep,
     team_id: Optional[str] = Query(
@@ -106,11 +134,11 @@ async def list_templates(
     show).
     """
     if team_id:
+        if not _is_snowflake(team_id):
+            raise _not_a_member()
         role = await resolve_effective_role(auth.user_id, team_id=team_id)
         if role is None:
-            raise HTTPException(
-                status_code=403, detail="You are not a member of this team"
-            )
+            raise _not_a_member()
         scope_team_id = team_id
     else:
         scope_team_id = await get_team_repository().get_personal_team_id(auth.user_id)
@@ -124,16 +152,18 @@ async def list_templates(
     return {"success": True, "data": templates}
 
 
-@router.post("")
+@router.post("", response_model=Envelope[WorkflowTemplateSummary])
 async def create_template(
     data: TemplateCreate,
     auth: AuthDep,
     team_id: str = Query(..., description="Team scope (snowflake id)"),
 ):
     """Create an empty named template (nodes are set via PATCH)."""
+    if not _is_snowflake(team_id):
+        raise _not_a_member()
     role = await resolve_effective_role(auth.user_id, team_id=team_id)
     if role is None:
-        raise HTTPException(status_code=403, detail="You are not a member of this team")
+        raise _not_a_member()
     if role not in WRITE_ROLES:
         raise HTTPException(status_code=403, detail="Insufficient role")
 
@@ -152,28 +182,31 @@ async def create_template(
 
 async def _resolve_template_role(template_id: str, user_id: str):
     """Return (team_id, role) for a template, raising 404 when the template is
-    missing OR the caller is not a member of its team (no existence leak)."""
+    missing OR the caller is not a member of its team (no existence leak).
+    A non-numeric id is the same 404 (it used to 500 in ``int()``)."""
+    if not _is_snowflake(template_id):
+        raise _template_not_found()
     repo = get_workflow_templates_repository()
     team_id = await repo.get_template_team_id(template_id)
     if team_id is None:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise _template_not_found()
     role = await resolve_effective_role(user_id, team_id=team_id)
     if role is None:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise _template_not_found()
     return team_id, role
 
 
-@router.get("/{template_id}")
+@router.get("/{template_id}", response_model=Envelope[WorkflowTemplateDetail])
 async def get_template(template_id: str, auth: AuthDep):
     team_id, _role = await _resolve_template_role(template_id, auth.user_id)
     repo = get_workflow_templates_repository()
     tpl = await repo.get_template(template_id, team_id)
     if tpl is None:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise _template_not_found()
     return {"success": True, "data": tpl}
 
 
-@router.patch("/{template_id}")
+@router.patch("/{template_id}", response_model=Envelope[WorkflowTemplateDetail])
 async def update_template(template_id: str, data: TemplateUpdate, auth: AuthDep):
     team_id, role = await _resolve_template_role(template_id, auth.user_id)
     if role not in WRITE_ROLES:
@@ -202,11 +235,11 @@ async def update_template(template_id: str, data: TemplateUpdate, auth: AuthDep)
             },
         ) from exc
     if tpl is None:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise _template_not_found()
     return {"success": True, "data": tpl}
 
 
-@router.delete("/{template_id}")
+@router.delete("/{template_id}", response_model=Envelope[WorkflowTemplateDeleted])
 async def delete_template(template_id: str, auth: AuthDep):
     team_id, role = await _resolve_template_role(template_id, auth.user_id)
     if role not in WRITE_ROLES:
@@ -215,5 +248,5 @@ async def delete_template(template_id: str, auth: AuthDep):
     repo = get_workflow_templates_repository()
     ok = await repo.delete_template(template_id, team_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise _template_not_found()
     return {"success": True, "data": {"deleted": True}}

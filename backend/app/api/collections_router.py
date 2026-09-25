@@ -1,20 +1,53 @@
 """API routes for Smart Collections."""
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.core.deps import AuthDep
 from app.repositories.collections_repository import get_collections_repository
 from app.schemas.collections import (
     CollectionCreate,
+    CollectionInitPresetsResult,
     CollectionListResponse,
     CollectionMediaResponse,
+    CollectionRefreshResult,
     CollectionResponse,
-    CollectionRules,
     CollectionUpdate,
 )
 from app.services.library.collections_service import CollectionsService
 
 router = APIRouter(prefix="/collections", tags=["Collections"])
+
+_DEFAULT_RULES = {"match": "all", "conditions": []}
+
+
+def _collection_out(row: dict[str, Any]) -> dict[str, Any]:
+    """Project a repository row onto ``CollectionResponse``.
+
+    Every ``smart_collections`` column except ``id``/``user_id``/``name``/
+    ``rules`` is nullable, and the repository returns the key with ``None``
+    rather than omitting it, so ``row.get(key, default)`` never applied the
+    default. NULLs fall back here instead, and a legacy row still returns 200.
+    """
+    created_at = row.get("created_at")
+    return {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "name": row["name"],
+        "icon": row.get("icon") or "📁",
+        "color": row.get("color"),
+        "description": row.get("description"),
+        "rules": row.get("rules") or _DEFAULT_RULES,
+        "media_count": row.get("cached_count") or 0,
+        "cached_at": row.get("cached_at"),
+        "is_preset": bool(row.get("is_preset")),
+        "is_active": row.get("is_active") is not False,
+        "sort_by": row.get("sort_by") or "created_at",
+        "sort_order": row.get("sort_order") or "desc",
+        "created_at": created_at,
+        "updated_at": row.get("updated_at") or created_at,
+    }
 
 
 @router.get("", response_model=CollectionListResponse)
@@ -34,28 +67,7 @@ async def list_collections(
         collections = [c for c in collections if not c.get("is_preset")]
 
     return CollectionListResponse(
-        collections=[
-            CollectionResponse(
-                id=c["id"],
-                user_id=c["user_id"],
-                name=c["name"],
-                icon=c.get("icon", "📁"),
-                color=c.get("color"),
-                description=c.get("description"),
-                rules=CollectionRules(
-                    **c.get("rules", {"match": "all", "conditions": []})
-                ),
-                media_count=c.get("cached_count", 0),
-                cached_at=c.get("cached_at"),
-                is_preset=c.get("is_preset", False),
-                is_active=c.get("is_active", True),
-                sort_by=c.get("sort_by", "created_at"),
-                sort_order=c.get("sort_order", "desc"),
-                created_at=c["created_at"],
-                updated_at=c.get("updated_at", c["created_at"]),
-            )
-            for c in collections
-        ],
+        collections=[_collection_out(c) for c in collections],
         total=len(collections),
     )
 
@@ -82,25 +94,7 @@ async def create_collection(
         sort_order=collection.sort_order,
     )
 
-    return CollectionResponse(
-        id=created["id"],
-        user_id=created["user_id"],
-        name=created["name"],
-        icon=created.get("icon", "📁"),
-        color=created.get("color"),
-        description=created.get("description"),
-        rules=CollectionRules(
-            **created.get("rules", {"match": "all", "conditions": []})
-        ),
-        media_count=created.get("cached_count", 0),
-        cached_at=created.get("cached_at"),
-        is_preset=created.get("is_preset", False),
-        is_active=created.get("is_active", True),
-        sort_by=created.get("sort_by", "created_at"),
-        sort_order=created.get("sort_order", "desc"),
-        created_at=created["created_at"],
-        updated_at=created.get("updated_at", created["created_at"]),
-    )
+    return _collection_out(created)
 
 
 @router.get("/{collection_id}", response_model=CollectionResponse)
@@ -117,25 +111,7 @@ async def get_collection(
             status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found"
         )
 
-    return CollectionResponse(
-        id=collection["id"],
-        user_id=collection["user_id"],
-        name=collection["name"],
-        icon=collection.get("icon", "📁"),
-        color=collection.get("color"),
-        description=collection.get("description"),
-        rules=CollectionRules(
-            **collection.get("rules", {"match": "all", "conditions": []})
-        ),
-        media_count=collection.get("cached_count", 0),
-        cached_at=collection.get("cached_at"),
-        is_preset=collection.get("is_preset", False),
-        is_active=collection.get("is_active", True),
-        sort_by=collection.get("sort_by", "created_at"),
-        sort_order=collection.get("sort_order", "desc"),
-        created_at=collection["created_at"],
-        updated_at=collection.get("updated_at", collection["created_at"]),
-    )
+    return _collection_out(collection)
 
 
 @router.put("/{collection_id}", response_model=CollectionResponse)
@@ -179,25 +155,7 @@ async def update_collection(
             detail="Failed to update collection",
         )
 
-    return CollectionResponse(
-        id=updated["id"],
-        user_id=updated["user_id"],
-        name=updated["name"],
-        icon=updated.get("icon", "📁"),
-        color=updated.get("color"),
-        description=updated.get("description"),
-        rules=CollectionRules(
-            **updated.get("rules", {"match": "all", "conditions": []})
-        ),
-        media_count=updated.get("cached_count", 0),
-        cached_at=updated.get("cached_at"),
-        is_preset=updated.get("is_preset", False),
-        is_active=updated.get("is_active", True),
-        sort_by=updated.get("sort_by", "created_at"),
-        sort_order=updated.get("sort_order", "desc"),
-        created_at=updated["created_at"],
-        updated_at=updated.get("updated_at", updated["created_at"]),
-    )
+    return _collection_out(updated)
 
 
 @router.delete("/{collection_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -272,7 +230,7 @@ async def get_collection_media(
     )
 
 
-@router.post("/{collection_id}/refresh")
+@router.post("/{collection_id}/refresh", response_model=CollectionRefreshResult)
 async def refresh_collection(
     auth: AuthDep,
     collection_id: str,
@@ -296,7 +254,11 @@ async def refresh_collection(
     }
 
 
-@router.post("/init-presets")
+@router.post(
+    "/init-presets",
+    response_model=CollectionInitPresetsResult,
+    response_model_exclude_unset=True,
+)
 async def initialize_preset_collections(auth: AuthDep):
     """
     Initialize preset collections for the current user.

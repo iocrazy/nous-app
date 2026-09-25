@@ -40,7 +40,6 @@ from app.api.row_guard import NOT_FOUND_OR_OUT_OF_SCOPE
 from app.api.share_access import (
     is_live,
     load_share,
-    password_matches,
     sign_share_grant,
     token_opens_share,
 )
@@ -56,6 +55,11 @@ from app.schemas.share_responses import (
     ShareVisitorView,
 )
 from app.schemas.shares import ShareAccessRequest, ShareCreate
+from app.services.library.share_passwords import (
+    has_password,
+    password_matches_async,
+    share_password_columns,
+)
 from app.services.modules.gate import require_module
 
 
@@ -101,11 +105,12 @@ def _build_share_url(share_code: str) -> str:
 
 
 def _enrich_share(share: dict) -> dict:
-    """Add computed fields (share_url) and strip password hash from response."""
+    """Add computed fields (share_url) and strip the password columns."""
     share["share_url"] = _build_share_url(share.get("share_code", ""))
-    # Never expose the actual password value; only indicate whether one is set
-    share["has_password"] = share.get("password") is not None
+    # Never expose the hash (or the legacy lock); only whether one is set.
+    share["has_password"] = has_password(share)
     share.pop("password", None)
+    share.pop("password_hash", None)
     return share
 
 
@@ -349,7 +354,7 @@ async def create_share(data: ShareCreate, auth: AuthDep):
             **ids,
         }
         if data.password:
-            insert_data["password"] = data.password
+            insert_data.update(share_password_columns(data.password))
         if data.expires_at:
             insert_data["expires_at"] = data.expires_at
         if data.max_views is not None:
@@ -704,14 +709,14 @@ async def access_share_by_code(
         await _require_open_share(share)
 
         # Check password
-        if share.get("password"):
+        if has_password(share):
             if not body.password:
                 raise HTTPException(
                     status_code=401,
                     detail="Password required",
                     headers={"X-Share-Password-Required": "true"},
                 )
-            if not password_matches(share["password"], body.password):
+            if not await password_matches_async(share["password_hash"], body.password):
                 raise HTTPException(status_code=401, detail="Incorrect password")
 
         # Increment view_count on the share
@@ -741,7 +746,7 @@ async def access_share_by_code(
             "version_id": share.get("version_id"),
             "created_at": share["created_at"],
             "access_token": sign_share_grant(
-                {"id": share["id"], "password": share.get("password")}
+                {"id": share["id"], "password_hash": share.get("password_hash")}
             ),
             **(await _resource_preview_meta(share.get("resource_id"))),
         }
@@ -792,7 +797,7 @@ async def _review_share_for_comments(
             status_code=400,
             detail=f"Cannot {action}: share has no associated resource",
         )
-    if share.get("password") and not await token_opens_share(share_token, share["id"]):
+    if has_password(share) and not await token_opens_share(share_token, share["id"]):
         raise HTTPException(
             status_code=401,
             detail="Password required",

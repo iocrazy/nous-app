@@ -68,16 +68,19 @@ PROBEABLE_TYPES = frozenset({"llm", "embedding", "asr"})
 # could be true for every user at once.
 LOCAL_ENGINE_PROVIDERS = frozenset({"codex-local", "jimeng-local"})
 
-# The self-hosted nous-engine gateway. It loads models ON DEMAND, and one GPU
-# card carries several interchangeable 27B variants (2026-09-24: qwen3-8-27b /
-# -orcarouter / -huihui). A scheduled real inference per row therefore forced
-# the engine to swap models every hour — the probe was the load.
+# The self-hosted nous-engine gateway. One GPU card carries several
+# interchangeable 27B variants (2026-09-24: qwen3-8-27b / -orcarouter /
+# -huihui), and which one is loaded is the engine's business. A scheduled real
+# inference per row forced the engine to swap models every hour — the probe was
+# the load.
 #
 # The engine exposes a readiness read that never loads anything:
 # ``GET {base_url}/models/{actual_model}`` (base_url already ends in ``/v1``).
 #   200 → authorized and loaded                        → ``ok``
-#   503 → authorized, not loaded (ModelNotReadyError)  → ``idle`` — NOT a fault;
-#         the first real request loads it
+#   503 → authorized, not loaded (ModelNotReadyError)  → ``idle`` — NOT a fault
+#         in the row, but NOT callable either: on 2026-09-24 10:00 a real chat
+#         to an ``inference``-type service answered 503 "not loaded" instead of
+#         loading on demand, so user pickers grey ``idle`` rows out
 #   404 → this key has no grant for it / no such model → ``fail`` model_not_found
 #   401/403 → bad key                                  → ``fail`` auth
 # ``GET /v1/models`` is no substitute: it lists only what is loaded right now,
@@ -89,7 +92,7 @@ LOCAL_ENGINE_PROVIDERS = frozenset({"codex-local", "jimeng-local"})
 # card is exactly the cost that flag exists to gate.
 NOUS_ENGINE_PROVIDER = "nous"
 _READINESS_TIMEOUT = 15.0
-_IDLE_DETAIL = "authorized, not loaded (loads on first request)"
+_IDLE_DETAIL = "authorized, not loaded"
 
 # Values ``nous_models.last_test_status`` may hold. Twin of the DB CHECK in
 # migration 503 (was 428) / ``models/ai.py`` — both sides must change together, and

@@ -42,7 +42,6 @@ const svc = vi.hoisted(() => ({
   deleteShot: vi.fn(),
   moveShot: vi.fn(),
   generateShot: vi.fn(),
-  generateShotVideo: vi.fn(),
   // Version history (P4) — VersionPanel loads these on mount
   listCommits: vi.fn().mockResolvedValue([]),
   createCommit: vi.fn(),

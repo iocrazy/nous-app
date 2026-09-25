@@ -22,7 +22,7 @@ import {
 } from '../services/smartCollectionService';
 
 interface SmartCollectionsSidebarProps {
-  activeCollectionId: string | null;
+  activeCollectionId: number | null;
   onSelectCollection: (collection: SmartCollection | null) => void;
   onCreateCollection?: () => void;
   isCollapsed?: boolean;
@@ -159,8 +159,8 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
                       <Icon size={14} />
                       <span>{collection.name}</span>
                     </div>
-                    {collection.video_count !== null && (
-                      <span className="text-xs text-ink-600">{collection.video_count}</span>
+                    {collection.media_count !== null && (
+                      <span className="text-xs text-ink-600">{collection.media_count}</span>
                     )}
                   </div>
                 </button>
@@ -217,7 +217,7 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
                     name={collection.name}
                     icon={Icon}
                     color={collection.color}
-                    videoCount={collection.video_count}
+                    videoCount={collection.media_count}
                     isActive={activeCollectionId === collection.id}
                     onClick={() => onSelectCollection(collection)}
                     isPreset
@@ -241,7 +241,7 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
                         name={collection.name}
                         icon={Icon}
                         color={collection.color}
-                        videoCount={collection.video_count}
+                        videoCount={collection.media_count}
                         isActive={activeCollectionId === collection.id}
                         onClick={() => onSelectCollection(collection)}
                       />

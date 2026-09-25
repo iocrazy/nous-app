@@ -18,6 +18,15 @@ import {
 const { Title, Text } = Typography
 const FormItem = Form.Item
 
+// POST /admin/nous-models/sync-engine (NousEngineSyncResponse).
+interface EngineSyncReport {
+  discovered: number
+  created: string[]
+  updated: string[]
+  skipped: { id: string; reason: string }[]
+  error: string | null
+}
+
 interface NousModel {
   id: string
   name: string
@@ -39,7 +48,7 @@ interface NousModel {
   //   ok         reachable
   //   fail       probed and failed
   //   idle       local nous-engine model authorized but not loaded right now;
-  //              it loads on the first request — NOT a fault (migration 503)
+  //              — NOT a fault, but not callable until loaded (migration 503)
   //   not_probed the backend probe has no protocol for this model TYPE
   //              (image / video / tts) and checked nothing — NOT a fault
   //   null       never probed
@@ -202,9 +211,9 @@ function timeAgo(iso?: string | null): string {
 //
 // `not_probed` ranks below `ok` on purpose: a provider with one working LLM and
 // one unprobeable image model is reachable, and its dot should say so. `idle`
-// is neither: an authorized-but-cold local model is healthy (it loads on the
-// first request), so it never drags the card red, but nothing is confirmed
-// loaded either, so it does not claim green.
+// is neither: an authorized-but-cold local model is not broken, so it never
+// drags the card red, but it is not loaded (and not callable) either, so it does
+// not claim green.
 function aggregateStatus(
   models: NousModel[],
 ): 'ok' | 'fail' | 'idle' | 'not_probed' | undefined {
@@ -249,7 +258,7 @@ const DOT_LABELS: Record<string, string> = {
 // read like a fault. The hourly poll writes `idle` from nous-engine's readiness
 // read, which never loads a model; the admin Test loads it for real.
 const DOT_HINTS: Record<string, string> = {
-  idle: 'Authorized on nous-engine; the model is not loaded right now and will load on the first request',
+  idle: 'Authorized on nous-engine; the model is not loaded right now',
 }
 
 // "No price row" is its own tag, not a StatusDot state: the probe answers
@@ -378,6 +387,7 @@ export function AIModelsPage() {
     | null
   >(null)
   const [editSaving, setEditSaving] = useState(false)
+  const [syncingEngine, setSyncingEngine] = useState(false)
 
   const apiBase = import.meta.env.VITE_API_URL || ''
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
@@ -395,6 +405,38 @@ export function AIModelsPage() {
   }, [token])
 
   useEffect(() => { fetchModels() }, [fetchModels])
+
+  // Mirror nous-engine's /v1/models into the catalog (same sync the hourly
+  // health poll runs first). Rows the engine does not list are never disabled:
+  // today it lists only LOADED services.
+  const handleSyncEngine = async () => {
+    setSyncingEngine(true)
+    try {
+      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/sync-engine`, {
+        method: 'POST',
+        headers,
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        // ErrorResponse shell: the typed reason lives in details.
+        Message.error(data?.details?.message || data?.error || `Sync failed (HTTP ${res.status})`)
+        return
+      }
+      const report = data as EngineSyncReport
+      const summary =
+        `Identified ${report.discovered} services · added ${report.created.length}` +
+        ` · updated ${report.updated.length}`
+      if (report.error && report.discovered === 0) Message.error(`Sync failed: ${report.error}`)
+      else if (report.error) Message.warning(`${summary} (${report.error})`)
+      else Message.success(summary)
+      fetchModels()
+    } catch (err) {
+      console.error('nous-engine sync failed', err)
+      Message.error('Sync failed')
+    } finally {
+      setSyncingEngine(false)
+    }
+  }
 
   useEffect(() => {
     // Best-effort: a failure leaves protocols=[] and the field falls back to
@@ -1057,6 +1099,16 @@ export function AIModelsPage() {
                   ))}
                 </div>
                 <Space>
+                  {g.provider === 'nous' && (
+                    <Button
+                      size="small"
+                      icon={<IconSync />}
+                      loading={syncingEngine}
+                      onClick={handleSyncEngine}
+                    >
+                      Sync from nous-engine
+                    </Button>
+                  )}
                   {(() => {
                     const k = `${g.provider}|${g.base_url}`
                     const prog = testProgress[k]

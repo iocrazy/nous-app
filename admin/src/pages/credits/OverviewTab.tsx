@@ -133,7 +133,15 @@ function BatchGiftModal({
           description: values.description || undefined,
         },
         {
-          onSuccess: () => {
+          onSuccess: (result) => {
+            if (result.errors.length > 0) {
+              // Some teams were not credited: say which, and keep the dialog open.
+              const failed = result.errors.map((e) => `${e.team_id} (${e.error})`).join(', ')
+              Message.warning(
+                `Gifted ${result.gifted_count} team(s); ${result.errors.length} failed: ${failed}`,
+              )
+              return
+            }
             Message.success('Points gifted successfully')
             form.resetFields()
             onClose()

@@ -1,7 +1,7 @@
 """script-AI DBOS workflows — async ports of the three inline script-AI
 endpoints (expand-chapter / create-branches).
 
-Each mirrors ``script_outline_workflow``:
+Each has the same shape (the retired ``script_outline_workflow`` set it):
     - the LLM call is its own retryable ``@DBOS.step`` (transient HTTP
       failures get one retry; the workflow_id memoizes the success)
     - persistence is a separate step so a half-written canvas doesn't
@@ -13,7 +13,7 @@ Each mirrors ``script_outline_workflow``:
 
 Task-tracking rows are created by the ENDPOINT (via ``mgr.create``) and
 mirrored by the migration-180 trigger — these workflows do NOT create
-their own task rows (same as ``script_outline_workflow``).
+their own task rows.
 
 Step names are globally unique (prefix ``script_ai_*``) — DBOS requires
 globally-unique step names.

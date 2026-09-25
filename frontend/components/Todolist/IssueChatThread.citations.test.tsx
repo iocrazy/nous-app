@@ -18,10 +18,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { IssueChatThread } from './IssueChatThread';
 import type { IssueMessage, IssueMessageAttachment } from '../../services/issueMessageService';
 
-vi.mock('../../services/issueMessageService', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../services/issueMessageService')>();
-  return { ...actual, simulateAgentRunComplete: vi.fn() };
-});
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 
 const CITATION: IssueMessageAttachment = {

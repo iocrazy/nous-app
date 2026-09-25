@@ -32,6 +32,11 @@ from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.admin_deps import AdminAuthDep
+from app.schemas.admin_ops import (
+    AdminJimengLoginResponse,
+    AdminJimengLogoutResponse,
+    AdminJimengStatus,
+)
 from app.services.media.parsers.video_providers.jimeng_cli import JimengCliProvider
 
 router = APIRouter()
@@ -48,6 +53,13 @@ _LOGOUT_TIMEOUT = 30.0
 # per line: verification_uri / user_code / device_code / poll_interval / expires_at.
 _MATERIAL_KEYS = ("verification_uri", "user_code", "device_code", "expires_at")
 _REQUIRED_KEYS = frozenset(_MATERIAL_KEYS)
+# What the operator needs to authorize: the link, the code to type, and when the
+# window closes. ``device_code`` is deliberately NOT here: in the OAuth device
+# flow it is the polling client's secret — whoever holds it can redeem the token
+# once the operator approves. The CLI keeps polling with it server-side; the
+# panel never used it, so sending it only parked it in the browser (network log,
+# query cache).
+_PUBLIC_MATERIAL_KEYS = ("verification_uri", "user_code", "expires_at")
 _LINE_RE = re.compile(r"^(\w+):\s*(.+)$")
 
 
@@ -189,7 +201,9 @@ async def _run_cli_once(args: list, timeout: float) -> tuple[Optional[int], str,
     return proc.returncode, out, err
 
 
-@router.get("/status")
+@router.get(
+    "/status", response_model=AdminJimengStatus, response_model_exclude_unset=True
+)
 async def jimeng_status(auth: AdminAuthDep) -> dict:
     """Login state + credit balance, via the provider's ``user_credit`` health.
 
@@ -204,13 +218,18 @@ async def jimeng_status(auth: AdminAuthDep) -> dict:
     return result
 
 
-@router.post("/login")
+@router.post(
+    "/login",
+    response_model=AdminJimengLoginResponse,
+    response_model_exclude_unset=True,
+)
 async def jimeng_login(auth: AdminAuthDep) -> dict:
     """Start the OAuth device flow and return the authorization material.
 
     Launches ``dreamina login`` (which prints the material then keeps polling the
     device authorization, writing the token on success). Returns
-    ``{status:'pending', verification_uri, user_code, device_code, expires_at}``.
+    ``{status:'pending', verification_uri, user_code, expires_at}`` — never the
+    ``device_code`` (see ``_PUBLIC_MATERIAL_KEYS``).
     A new login supersedes any in-flight one (old process killed first). If the
     CLI is already logged in the process exits immediately → ``{status:'already'}``.
     504 if the material doesn't arrive within the window."""
@@ -253,10 +272,13 @@ async def jimeng_login(auth: AdminAuthDep) -> dict:
         session.start()
         _current_login = session
         logger.info("[jimeng-auth] device-flow login started (admin panel)")
-        return {"status": "pending", **material}
+        return {
+            "status": "pending",
+            **{key: material[key] for key in _PUBLIC_MATERIAL_KEYS},
+        }
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=AdminJimengLogoutResponse)
 async def jimeng_logout(auth: AdminAuthDep) -> dict:
     """Clear the login session: kill any in-flight device flow + ``dreamina logout``."""
     global _current_login

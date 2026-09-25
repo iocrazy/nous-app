@@ -55,7 +55,7 @@ class _FakeScalars:
 
 class _FakeResult:
     """Supports ``.scalars().all()`` / ``.scalars().first()`` (model reads +
-    RETURNING) and ``.all()`` (the get_admin_overview / get_usage_stats 2-tuple
+    RETURNING) and ``.all()`` (the get_usage_stats 2-tuple
     ``(amount, type)`` rows)."""
 
     def __init__(self, scalar_rows: list[Any], all_rows: list[Any]) -> None:
@@ -539,22 +539,6 @@ async def test_get_usage_stats_native_int_aggregation(
     assert stats["total_purchased"] == 100
     assert stats["by_type"]["consume"] == -15
     assert stats["by_type"]["purchase"] == 100
-
-
-@pytest.mark.asyncio
-async def test_get_admin_overview_native_int_aggregation(
-    repo: PointsRepository, fake_session: _FakeSession
-) -> None:
-    # First execute (balances) reads via ``.scalars().all()``; second (txns)
-    # reads (amount, type) via ``.all()`` — the fake returns both on every call.
-    fake_session.scalar_rows = [100, 250]
-    fake_session.all_rows = [(-30, "consume"), (500, "purchase")]
-    overview = await repo.get_admin_overview()
-    assert overview["total_points_in_system"] == 350  # 100 + 250
-    assert overview["active_teams_count"] == 2
-    assert overview["total_consumed"] == 30
-    assert overview["total_purchased"] == 500
-    assert overview["total_transactions_count"] == 2
 
 
 # ─── factory (ORM-only, post-rollout) ───────────────────────────────

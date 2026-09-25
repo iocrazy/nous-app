@@ -1,30 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '../client'
+import type { Schema } from '../../types/api'
 
-export interface CeleryWorker {
-  name: string
-  status: string
-  active: number
-  processed: number
-  concurrency: number | null
-  uptime: number | null
-}
-
-export interface CeleryWorkersResponse {
-  online: number
-  total: number
-  workers: CeleryWorker[]
-  error?: string
-}
-
-export interface CeleryQueue {
-  name: string
-  messages: number
-}
-
-export interface CeleryQueuesResponse {
-  queues: CeleryQueue[]
-}
+// DBOS-backed since Celery was removed; the route names stayed.
+export type CeleryWorker = Schema<'AdminWorkerInfo'>
+export type CeleryWorkersResponse = Schema<'AdminWorkersResponse'>
+export type CeleryQueue = Schema<'AdminQueueDepth'>
+export type CeleryQueuesResponse = Schema<'AdminQueuesResponse'>
 
 export function useCeleryWorkers() {
   return useQuery({

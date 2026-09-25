@@ -9,121 +9,30 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 
+import type {
+  DelegateTaskLookup,
+  WorkforceAgentDetail,
+  WorkforceBoard,
+  WorkforceInboxClearResult,
+} from '../types/api';
+
+export type {
+  DelegateOutboxResponse,
+  DelegateTaskLookup,
+  DelegateTaskRow,
+  WorkforceAgentDetail,
+  WorkforceAgentEntry,
+  WorkforceBoard,
+  WorkforceDetailRun,
+  WorkforceInboxRow,
+  WorkforceOutboxRow,
+  WorkforceQueueCounts,
+  WorkforceRecentRun,
+  WorkforceStateHistoryRow,
+  WorkforceWorkerRow,
+} from '../types/api';
+
 const base = (): string => `${getApiUrl()}/api/v1/workforce`;
-
-export interface WorkforceWorkerRow {
-  agent_id: string;
-  state: 'idle' | 'working' | 'waiting_for_other' | 'blocked' | 'paused' | 'terminated' | string;
-  current_task_id: string | null;
-  state_changed_at: string;
-  heartbeat_at: string | null;
-}
-
-export interface WorkforceQueueCounts {
-  inbox_unread: number;
-  inbox_reading: number;
-  outbox_undelivered: number;
-}
-
-export interface WorkforceRecentRun {
-  id: string;
-  agent_id: string;
-  status: 'running' | 'completed' | 'failed' | 'cancelled' | string;
-  trigger: string;
-  started_at: string;
-  ended_at: string | null;
-  cost_cents: number | null;
-  prompt_tokens: number | null;
-  completion_tokens: number | null;
-  model: string | null;
-}
-
-export interface WorkforceAgentEntry {
-  id: string;
-  slug: string;
-  name: string;
-  icon: string | null;
-  model: string | null;
-  persistent: boolean;
-  paused_reason: string | null;
-  worker: WorkforceWorkerRow | null;
-  queue: WorkforceQueueCounts;
-  recent_runs: WorkforceRecentRun[];
-}
-
-export interface WorkforceStateHistoryRow {
-  agent_slug: string;
-  from_state: string | null;
-  to_state: string;
-  trigger: string;
-  task_id: string | null;
-  changed_at: string;
-}
-
-export interface WorkforceBoard {
-  agents: WorkforceAgentEntry[];
-  recent_state_history: WorkforceStateHistoryRow[];
-}
-
-export interface WorkforceInboxRow {
-  id: string;
-  sender_kind: string;
-  sender_user_id: string | null;
-  sender_agent_id: string | null;
-  message_type: string;
-  payload: Record<string, unknown> | null;
-  status: string;
-  priority: number | null;
-  created_at: string;
-  processed_at: string | null;
-  reply_to_message_id: string | null;
-  dedup_key: string | null;
-}
-
-export interface WorkforceOutboxRow {
-  id: string;
-  recipient_kind: string;
-  recipient_user_id: string | null;
-  recipient_agent_id: string | null;
-  message_type: string;
-  payload: Record<string, unknown> | null;
-  task_id: string | null;
-  delivered: boolean;
-  delivered_at: string | null;
-  created_at: string;
-}
-
-export interface WorkforceDetailRun {
-  id: string;
-  status: string;
-  trigger: string;
-  model: string | null;
-  provider: string | null;
-  started_at: string;
-  ended_at: string | null;
-  prompt_tokens: number | null;
-  completion_tokens: number | null;
-  cost_cents: number | null;
-  input_summary: string | null;
-  output_summary: string | null;
-  error_code: string | null;
-  error_message: string | null;
-}
-
-export interface WorkforceAgentDetail {
-  agent: {
-    id: string;
-    slug: string;
-    name: string;
-    icon: string | null;
-    model: string | null;
-    persistent: boolean;
-    paused_reason: string | null;
-  };
-  inbox: WorkforceInboxRow[];
-  outbox: WorkforceOutboxRow[];
-  runs: WorkforceDetailRun[];
-}
 
 async function postJson<T>(
   path: string,
@@ -173,7 +82,7 @@ export const workforceService = {
     await postJson(`/agents/${encodeURIComponent(slug)}/resume`);
   },
 
-  async clearInbox(slug: string): Promise<{ cleared: number }> {
+  async clearInbox(slug: string): Promise<WorkforceInboxClearResult> {
     return postJson(`/agents/${encodeURIComponent(slug)}/clear-inbox`);
   },
 
@@ -216,33 +125,22 @@ export type TaskLifecycle =
   | 'failed'
   | 'cancelled';
 
-export interface DelegateTaskRow {
-  id: string;
-  agent_id: string;
-  lifecycle_status: TaskLifecycle;
-  started_at: string | null;
-  ended_at: string | null;
-  error_code: string | null;
-  error_message: string | null;
-  created_at: string;
-  inbox_message_id: string;
-  result: Record<string, unknown> | null;
-}
+const TASK_LIFECYCLES: ReadonlySet<string> = new Set<TaskLifecycle>([
+  'queued',
+  'assigned',
+  'in_progress',
+  'waiting_for_other',
+  'blocked',
+  'done',
+  'failed',
+  'cancelled',
+]);
 
-export interface DelegateOutboxResponse {
-  id: string;
-  sender_agent_id: string;
-  message_type: string;
-  payload: Record<string, unknown>;
-  created_at: string;
-  delivered: boolean;
-  delivered_at: string | null;
-}
-
-export interface DelegateTaskLookup {
-  inbox_message_id: string;
-  task: DelegateTaskRow | null;
-  outbox_response: DelegateOutboxResponse | null;
+/** The wire types `lifecycle_status` as a plain string (it is the task row's
+ *  `phase`); narrow it here instead of casting at each use. An unknown value
+ *  reads as "no lifecycle yet". */
+export function asTaskLifecycle(value: string | null | undefined): TaskLifecycle | null {
+  return value != null && TASK_LIFECYCLES.has(value) ? (value as TaskLifecycle) : null;
 }
 
 /** Lifecycle states that won't change anymore — stop polling / unsub. */

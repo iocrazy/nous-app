@@ -9,9 +9,17 @@ Admin actions (I milestone):
   ``POST /api/v1/workforce/agents/{slug}/clear-inbox`` — bulk-dismiss
   ``POST /api/v1/workforce/tasks/{task_id}/cancel`` — request task cancel
 
-Auth: any logged-in user. The persistent agents are system presets
-(no user_id) and the dashboard data is aggregate, not user-private.
-This matches the Runs / Usage UIs today.
+Auth:
+  * ``/board`` — any logged-in user. The persistent agents are system
+    presets (no user_id) and the board is aggregate: counts, states, costs.
+  * ``/agents/{slug}/detail`` and every action — platform admin only. The
+    persistent agents are SHARED: pausing one stops it for every user
+    (RunRecorder refuses new runs), clearing its inbox drops every user's
+    queued Delegate, and the drawer shows raw inbox/outbox payloads and run
+    summaries — other users' prompts and answers. These used to accept any
+    logged-in user, while ``/ai-library/agents/{slug}/pause`` refuses presets
+    outright; the workforce route was the open side door.
+  * ``/healthz`` — open, for monitors (see its docstring).
 """
 
 from __future__ import annotations
@@ -20,14 +28,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import Text as SAText
-from sqlalchemy import cast, column, func, literal, select
+from sqlalchemy import cast, func, literal, select
 from sqlalchemy import update as sa_update
 
-from app.core.deps import get_current_user
+from app.core.admin_deps import AdminAuthDep
+from app.core.deps import AuthDep
 from app.db.session import read_scope, write_scope
 from app.models import (
     AgentInbox,
@@ -40,10 +49,20 @@ from app.models import (
 )
 from app.repositories._orm_helpers import _plain
 from app.repositories.agent_repository import get_agent_repository
+from app.repositories.agent_runs_repository import get_agent_runs_repository
 from app.repositories.agent_workforce_repository import (
     TASK_KIND_AGENT,
     get_agent_workforce_repository,
     tt_row_to_task_shape,
+)
+from app.schemas.workforce_responses import (
+    WorkforceAgentDetail,
+    WorkforceAgentPauseResult,
+    WorkforceBoard,
+    WorkforceDelegateTaskLookup,
+    WorkforceHealth,
+    WorkforceInboxClearResult,
+    WorkforceTaskCancelResult,
 )
 from app.services.infra.dbos_orchestrator import is_launched as dbos_is_launched
 from app.services.workforce.dbos_pool import DbosAgentWorkforcePool
@@ -131,9 +150,9 @@ async def _resolve_persistent_agent(slug: str) -> dict[str, Any]:
     return agent
 
 
-@router.get("/board")
+@router.get("/board", response_model=WorkforceBoard)
 async def get_workforce_board(
-    _user: Any = Depends(get_current_user),
+    _auth: AuthDep,
 ) -> dict[str, Any]:
     """Aggregate snapshot for the Workforce dashboard.
 
@@ -363,11 +382,11 @@ class PauseAgentBody(BaseModel):
     reason: Optional[str] = None  # caller-supplied; default 'manual'
 
 
-@router.post("/agents/{slug}/pause")
+@router.post("/agents/{slug}/pause", response_model=WorkforceAgentPauseResult)
 async def pause_agent(
     slug: str,
+    auth: AdminAuthDep,
     body: PauseAgentBody = PauseAgentBody(),
-    user: Any = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Set ``paused_reason`` so RunRecorder.start refuses new runs.
 
@@ -378,27 +397,29 @@ async def pause_agent(
     reason = (body.reason or "manual").strip()[:120]
     repo = get_agent_repository()
     await repo.update_fields(UUID(agent["id"]), {"paused_reason": reason})
-    logger.info(f"[workforce] agent '{slug}' paused (reason={reason}) by user")
+    logger.info(
+        f"[workforce] agent '{slug}' paused (reason={reason}) by admin={auth.user_id}"
+    )
     return {"slug": slug, "paused_reason": reason, "status": "paused"}
 
 
-@router.post("/agents/{slug}/resume")
+@router.post("/agents/{slug}/resume", response_model=WorkforceAgentPauseResult)
 async def resume_agent(
     slug: str,
-    user: Any = Depends(get_current_user),
+    auth: AdminAuthDep,
 ) -> dict[str, Any]:
     """Clear ``paused_reason`` so the agent accepts new runs again."""
     agent = await _resolve_persistent_agent(slug)
     repo = get_agent_repository()
     await repo.update_fields(UUID(agent["id"]), {"paused_reason": None})
-    logger.info(f"[workforce] agent '{slug}' resumed by user")
+    logger.info(f"[workforce] agent '{slug}' resumed by admin={auth.user_id}")
     return {"slug": slug, "paused_reason": None, "status": "resumed"}
 
 
-@router.post("/agents/{slug}/clear-inbox")
+@router.post("/agents/{slug}/clear-inbox", response_model=WorkforceInboxClearResult)
 async def clear_inbox(
     slug: str,
-    user: Any = Depends(get_current_user),
+    auth: AdminAuthDep,
 ) -> dict[str, Any]:
     """Bulk-dismiss every unread/reading inbox row for this agent.
 
@@ -425,7 +446,9 @@ async def clear_inbox(
     return {"slug": slug, "cleared": cleared}
 
 
-@router.get("/healthz")
+@router.get(
+    "/healthz", response_model=WorkforceHealth, response_model_exclude_unset=True
+)
 async def workforce_healthz() -> dict[str, Any]:
     """Operational health snapshot for the workforce runtime.
 
@@ -572,7 +595,9 @@ async def workforce_healthz() -> dict[str, Any]:
             if overall == "healthy":
                 overall = "degraded"
     except Exception as err:
-        response["supabase"] = {"reachable": False, "error": str(err)[:200]}
+        # The class name, not ``str(err)``: this endpoint is anonymous, and a
+        # driver's message carries hosts, ports and SQL.
+        response["supabase"] = {"reachable": False, "error": type(err).__name__}
         issues.append(f"supabase unreachable: {type(err).__name__}")
         overall = "down"
 
@@ -580,10 +605,10 @@ async def workforce_healthz() -> dict[str, Any]:
     return response
 
 
-@router.get("/agents/{slug}/detail")
+@router.get("/agents/{slug}/detail", response_model=WorkforceAgentDetail)
 async def get_agent_detail(
     slug: str,
-    user: Any = Depends(get_current_user),
+    auth: AdminAuthDep,
 ) -> dict[str, Any]:
     """Detail snapshot for one persistent agent — feeds the drawer view.
 
@@ -694,41 +719,89 @@ async def get_agent_detail(
     }
 
 
-@router.post("/tasks/{task_id}/cancel")
+_TERMINAL_LIFECYCLES = ("done", "failed", "cancelled")
+
+
+@router.post(
+    "/tasks/{task_id}/cancel",
+    response_model=WorkforceTaskCancelResult,
+    response_model_exclude_unset=True,
+)
 async def cancel_task(
     task_id: UUID,
-    user: Any = Depends(get_current_user),
+    auth: AdminAuthDep,
 ) -> dict[str, Any]:
-    """Mark an in-flight or queued task as cancelled.
+    """Cancel a queued task, or ask a running one to stop.
 
-    The DB transition is the source of truth — once
-    ``lifecycle_status='cancelled'``, the worker checks (and the
-    RunRecorder cancel poll) will refuse to keep going. Already-done
-    tasks are left alone.
+    ``task_tracking`` rows of kind ``agent_task`` are not mirrored from DBOS
+    (their ``dbos_workflow_id`` is the task id; the workflow that runs them is
+    ``workforce-<task>-<attempt>``), so their lifecycle belongs to the
+    workforce subsystem — the worker files ``done`` / ``cancelled`` itself.
+    This route used to write ``cancelled`` straight onto the row whatever its
+    phase: on a running task the turn went on, and the worker's closing write
+    turned the row back to ``done``. A cancel that does not stop anything.
+
+    * ``queued`` — nobody has claimed it, and ``claim_task`` only takes
+      ``queued`` rows, so a compare-and-set to ``cancelled`` through the
+      workforce repository is final.
+    * a run in flight — ``cancel_requested`` on that run, the same signal
+      ``POST /ai-library/runs/{id}/cancel`` sends. The runner stops at its next
+      step and the worker files the task ``cancelled``.
+    * claimed but no run yet — typed 409 ``task_not_cancellable_yet``; there
+      is nothing to signal for a moment.
+
+    Terminal tasks are a no-op.
     """
     workforce = get_agent_workforce_repository()
     task = await workforce.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail=f"task {task_id} not found")
-    if task.get("lifecycle_status") in ("done", "failed", "cancelled"):
+    lifecycle = task.get("lifecycle_status")
+    if lifecycle in _TERMINAL_LIFECYCLES:
+        return {
+            "task_id": str(task_id),
+            "lifecycle_status": lifecycle,
+            "note": "task already in terminal state — no-op",
+        }
+
+    if lifecycle == "queued" and await workforce.update_task_status(
+        task_id=task_id,
+        lifecycle_status="cancelled",
+        error_code="user_cancel",
+        error_message="Cancelled via workforce admin endpoint",
+        only_from=("queued",),
+    ):
+        logger.info(f"[workforce] task {task_id} cancelled by admin={auth.user_id}")
+        return {"task_id": str(task_id), "lifecycle_status": "cancelled"}
+
+    # Claimed between the read and the CAS, or already running: re-read so the
+    # run id is the one in flight now.
+    task = await workforce.get_task(task_id) or task
+    if task.get("lifecycle_status") in _TERMINAL_LIFECYCLES:
         return {
             "task_id": str(task_id),
             "lifecycle_status": task["lifecycle_status"],
             "note": "task already in terminal state — no-op",
         }
-    try:
-        await workforce.update_task_status(
-            task_id=task_id,
-            lifecycle_status="cancelled",
-            error_code="user_cancel",
-            error_message="Cancelled via workforce admin endpoint",
+    run_id = task.get("current_run_id")
+    if run_id and await get_agent_runs_repository().request_cancel(str(run_id)):
+        logger.info(
+            f"[workforce] task {task_id}: cancel requested on run {run_id} "
+            f"by admin={auth.user_id}"
         )
-    except Exception as err:
-        logger.exception(f"[workforce] cancel-task failed for {task_id}: {err}")
-        raise HTTPException(status_code=500, detail="cancel failed")
-
-    logger.info(f"[workforce] task {task_id} cancelled by user")
-    return {"task_id": str(task_id), "lifecycle_status": "cancelled"}
+        return {
+            "task_id": str(task_id),
+            "lifecycle_status": task.get("lifecycle_status"),
+            "note": "cancel requested — the task turns cancelled when its run stops",
+        }
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "task_not_cancellable_yet",
+            "message": "The task is being picked up and has no running run yet; "
+            "retry in a moment.",
+        },
+    )
 
 
 # ─── Delegate sub-task lookup ───────────────────────────────────────────
@@ -741,10 +814,12 @@ async def cancel_task(
 # on agent_tasks (filter by inbox_message_id) for live updates.
 
 
-@router.get("/tasks/by-inbox/{inbox_message_id}")
+@router.get(
+    "/tasks/by-inbox/{inbox_message_id}", response_model=WorkforceDelegateTaskLookup
+)
 async def get_task_by_inbox(
     inbox_message_id: UUID,
-    user: Any = Depends(get_current_user),
+    auth: AuthDep,
 ) -> dict[str, Any]:
     """Resolve an ``inbox_message_id`` (returned by the Delegate tool)
     to the sub-agent's task lifecycle + final outbox response.
@@ -792,9 +867,13 @@ async def get_task_by_inbox(
     # turns set sender_user_id; agent-to-agent delegates set
     # sender_agent_id and we don't expose those here (admin-only via
     # the workforce drawer).
+    #
+    # ``auth.user_id``, not the old ``get_current_user`` dict: that dependency
+    # returns ``{"id": ...}``, and ``getattr(dict, "id", dict)`` is the dict
+    # itself — so ``str(...)`` never equalled a uuid and EVERY real caller got
+    # 403 (the unit tests passed a SimpleNamespace and never saw it).
     sender_user_id = inbox.get("sender_user_id")
-    user_id_str = str(getattr(user, "id", user))
-    if not sender_user_id or str(sender_user_id) != user_id_str:
+    if not sender_user_id or str(sender_user_id) != str(auth.user_id):
         raise HTTPException(
             status_code=403,
             detail="not authorized to view this delegate task",
@@ -830,9 +909,8 @@ async def get_task_by_inbox(
         )
     task = tt_row_to_task_shape(_serialize_row(task_row) if task_row else None)
 
-    # Sub-agent's reply (if any). The sub-agent writes to outbox with
-    # ``reply_to_message_id`` pointing back at our inbox row, so we can
-    # find the response without a task→outbox join.
+    # Sub-agent's reply (if any): the outbox row the worker wrote for this
+    # task.
     outbox_response: Optional[dict[str, Any]] = None
     # ``cancelled`` too: a cancelled worker still delivers its partial answer
     # (agent_worker, framework hardening C3).
@@ -850,14 +928,13 @@ async def get_task_by_inbox(
                             AgentOutbox.delivered,
                             AgentOutbox.delivered_at,
                         )
-                        # NOTE: agent_outbox has no reply_to_message_id column
-                        # (it lives on agent_inbox — mig 159). This filter is a
-                        # pre-existing bug preserved byte-for-byte from the
-                        # supabase-py path: ``column(...)`` renders the same
-                        # unqualified predicate the old ``.eq(...)`` did, so the
-                        # runtime outcome is identical (works only if prod has
-                        # the column as drift; errors the same way otherwise).
-                        .where(column("reply_to_message_id") == str(inbox_message_id))
+                        # The worker files its answer with ``task_id`` set
+                        # (agent_worker: ``enqueue_outbox(..., task_id=...)``).
+                        # This used to filter on ``reply_to_message_id``, a
+                        # column agent_outbox does not have (it is agent_inbox's,
+                        # mig 159; schema_baseline agrees) — every terminal
+                        # lookup raised.
+                        .where(AgentOutbox.task_id == str(task["id"]))
                         .order_by(AgentOutbox.created_at.desc())
                         .limit(1)
                     )

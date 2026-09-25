@@ -47,6 +47,7 @@ import type {
 } from '../../../../services/assetsService';
 import { saveGenerationAsAsset } from '../../../../services/generatedService';
 import { useGenerationModels } from '../../../../features/canvas-core/smart/nodes/useGenerationModels';
+import { platformModelAvailability } from '../../../../utils/platformModel';
 import { slotLabelKey } from '../assetTypeMeta';
 import { loadoutForSlot } from './assetSheetModel';
 
@@ -479,11 +480,24 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
                   {/* The catalog default is a real choice, not a blank: the
                       run omits `model` and the server resolves it. */}
                   <option value="">{t('assets.gen.modelDefault', 'Catalog Default')}</option>
-                  {models.map((m) => (
-                    <option key={m.name} value={m.name}>
-                      {m.display_name}
-                    </option>
-                  ))}
+                  {/* Idle nous-engine rows (authorized, not loaded) are listed
+                      but not pickable. A native <option> has no second line,
+                      so the reason rides in the text and the title. */}
+                  {models.map((m) => {
+                    const notLoaded = platformModelAvailability(m).reason === 'not_loaded';
+                    return (
+                      <option
+                        key={m.name}
+                        value={m.name}
+                        disabled={notLoaded}
+                        title={notLoaded ? t('platformModel.notLoaded', 'Not loaded on nous-engine') : undefined}
+                      >
+                        {notLoaded
+                          ? `${m.display_name} ${t('platformModel.notLoadedSuffix', '(not loaded)')}`
+                          : m.display_name}
+                      </option>
+                    );
+                  })}
                   {/* The preview's model may not be in the enabled catalog
                       (an admin can disable a row after it became the default).
                       Keeping it as an option means the picker shows what will

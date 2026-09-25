@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { PointPackage } from '../types';
+import type { PointPackage } from '../types/api';
 import { BillingView } from '../components/BillingView';
 import { PaymentModal } from '../components/PaymentModal';
 import { useTeamContext } from '../contexts/TeamContext';
 
 export function BillingPage() {
-  const { selectedTeamId, userPermissions } = useTeamContext();
+  const { selectedTeamId } = useTeamContext();
   const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
 
   if (!selectedTeamId) {
@@ -21,7 +21,6 @@ export function BillingPage() {
     <>
       <BillingView
         teamId={selectedTeamId}
-        permissions={userPermissions}
         onBuyPackage={(pkg) => setSelectedPaymentPackage(pkg)}
       />
       {selectedPaymentPackage && (

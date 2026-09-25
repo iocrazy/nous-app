@@ -12,31 +12,24 @@ import { Coins, HelpCircle, Loader2, QrCode, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useOptionalAuth } from '../../contexts/AuthContext';
 import { apiFetch } from '../../services/apiClient';
+import type { JimengCliLoginResult, JimengCliStatus } from '../../types/api';
 
 const BTN_PRIMARY =
   'flex items-center gap-1.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-xs font-bold disabled:opacity-50';
 const BTN_SECONDARY =
   'flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-xs font-semibold text-content';
 
-interface JimengStatus {
-  available: boolean;
-  logged_in: boolean;
-  total_credit?: number | null;
-  vip_level?: string;
-  reason?: string;
-}
-
 export function JimengCliCard() {
   const { t } = useTranslation();
-  const [status, setStatus] = useState<JimengStatus | null>(null);
+  // Logging in re-points the SHARED server account, so the backend only lets
+  // a platform admin start it; everyone else just sees the status.
+  const isPlatformAdmin = useOptionalAuth()?.userProfile?.role === 'admin';
+  const [status, setStatus] = useState<JimengCliStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [loginInfo, setLoginInfo] = useState<{
-    verification_uri?: string;
-    user_code?: string | null;
-    already_logged_in?: boolean;
-  } | null>(null);
+  const [loginInfo, setLoginInfo] = useState<JimengCliLoginResult | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,7 +37,8 @@ export function JimengCliCard() {
     setLoading(true);
     try {
       const res = await apiFetch('/api/v1/jimeng-cli/status');
-      const body = (await res.json()) as { data?: JimengStatus };
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const body = (await res.json()) as { data?: JimengCliStatus };
       setStatus(body.data ?? null);
       setError(null);
     } catch (err) {
@@ -64,9 +58,10 @@ export function JimengCliCard() {
     setError(null);
     try {
       const res = await apiFetch('/api/v1/jimeng-cli/login', { method: 'POST' });
-      const body = (await res.json()) as { data?: typeof loginInfo };
+      if (!res.ok) throw new Error(`login ${res.status}`);
+      const body = (await res.json()) as { data?: JimengCliLoginResult };
       setLoginInfo(body.data ?? null);
-      if (body.data?.already_logged_in) void refresh();
+      if (body.data && 'already_logged_in' in body.data) void refresh();
     } catch (err) {
       console.error('[jimeng-cli] login failed:', err);
       setError(t('settings.localCli.errLogin'));
@@ -90,7 +85,7 @@ export function JimengCliCard() {
         )}
         {status?.logged_in && status.total_credit != null && (
           <span className="inline-flex items-center gap-1 text-xs text-content-2">
-            <Coins size={12} /> {t('settings.localCli.credits', { count: status.total_credit })}
+            <Coins size={12} /> {t('settings.localCli.credits', { count: Number(status.total_credit) })}
           </span>
         )}
       </div>
@@ -101,16 +96,18 @@ export function JimengCliCard() {
       {error && <div className="text-xs text-danger">{error}</div>}
 
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          data-testid="jimeng-login"
-          onClick={() => void startLogin()}
-          disabled={working}
-          className={BTN_PRIMARY}
-        >
-          {working ? <Loader2 size={12} className="animate-spin" /> : <QrCode size={12} />}
-          {t('settings.localCli.logIn')}
-        </button>
+        {isPlatformAdmin && (
+          <button
+            type="button"
+            data-testid="jimeng-login"
+            onClick={() => void startLogin()}
+            disabled={working}
+            className={BTN_PRIMARY}
+          >
+            {working ? <Loader2 size={12} className="animate-spin" /> : <QrCode size={12} />}
+            {t('settings.localCli.logIn')}
+          </button>
+        )}
         <button type="button" onClick={() => void refresh()} className={BTN_SECONDARY}>
           <RefreshCw size={12} /> {t('settings.localCli.checkCredits')}
         </button>
@@ -136,7 +133,7 @@ export function JimengCliCard() {
         </div>
       )}
 
-      {loginInfo && !loginInfo.already_logged_in && loginInfo.verification_uri && (
+      {loginInfo && 'verification_uri' in loginInfo && loginInfo.verification_uri && (
         <div className="rounded-xl border border-line p-3 text-xs">
           <div className="text-content-3">
             {t('settings.localCli.loginLink')}

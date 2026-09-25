@@ -7,6 +7,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PaymentOrder, PointPackage } from '../types/api';
 import {
   createOrder,
   fetchOrders,
@@ -35,9 +36,22 @@ beforeEach(() => {
 
 describe('paymentService', () => {
   it('fetchPackages unwraps envelope and returns data', async () => {
+    // Real wire shape (`PaymentPackageRow`): uuid id, ISO timestamps.
+    const pkg = (id: string, points: number, cents: number): PointPackage => ({
+      id,
+      name: `${points} pts`,
+      description: null,
+      points_amount: points,
+      price_cents: cents,
+      currency: 'CNY',
+      is_active: true,
+      sort_order: 0,
+      created_at: '2026-09-24T01:02:03.456789+00:00',
+      updated_at: '2026-09-24T01:02:03.456789+00:00',
+    });
     const packages = [
-      { id: 'p1', name: '100 pts', points: 100, price_cents: 100 },
-      { id: 'p2', name: '500 pts', points: 500, price_cents: 450 },
+      pkg('00000000-0000-0000-0000-000000000001', 100, 100),
+      pkg('00000000-0000-0000-0000-000000000002', 500, 450),
     ];
     stubResponse({ success: true, data: packages });
 
@@ -51,7 +65,24 @@ describe('paymentService', () => {
   });
 
   it('createOrder POSTs correct body and URL', async () => {
-    const order = { id: 'o1', payment_status: 'pending' };
+    // Real wire shape (`PaymentOrderRow`): Snowflake id / team_id are numbers.
+    const order: PaymentOrder = {
+      id: 1234567890123,
+      team_id: 42,
+      user_id: '00000000-0000-0000-0000-000000000042',
+      package_id: '00000000-0000-0000-0000-000000000001',
+      points_amount: 100,
+      amount_cents: 100,
+      currency: 'CNY',
+      payment_method: 'wechat',
+      payment_status: 'pending',
+      payment_url: 'https://payment.placeholder/wechat/MH1',
+      trade_no: 'MH1',
+      paid_at: null,
+      expired_at: '2026-09-24T01:32:03.456789+00:00',
+      created_at: '2026-09-24T01:02:03.456789+00:00',
+      updated_at: '2026-09-24T01:02:03.456789+00:00',
+    };
     const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -84,16 +115,17 @@ describe('paymentService', () => {
     stubResponse({
       success: true,
       data: {
+        order_id: 1234567890123,
         payment_status: 'paid',
         points_amount: 500,
-        paid_at: '2026-01-01T00:00:00Z',
+        paid_at: '2026-01-01T00:00:00+00:00',
       },
     });
 
     const status = await pollOrderStatus('o1');
     expect(status.payment_status).toBe('paid');
     expect(status.points_amount).toBe(500);
-    expect(status.paid_at).toBe('2026-01-01T00:00:00Z');
+    expect(status.paid_at).toBe('2026-01-01T00:00:00+00:00');
   });
 
   it('fetchOrders forwards team_id, limit, offset as query params', async () => {

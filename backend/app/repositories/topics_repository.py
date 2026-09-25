@@ -82,12 +82,6 @@ class TopicsRepository:
             rows = (await session.execute(query)).scalars().all()
             return [_topic_row(t) for t in rows]
 
-    async def get_topic(self, topic_id: str, team_id: str) -> Optional[Dict[str, Any]]:
-        """One topic scoped to its team, or None."""
-        async with read_scope() as session:
-            obj = await self._fetch(session, topic_id, team_id)
-            return _topic_row(obj) if obj is not None else None
-
     async def get_topic_team_id(self, topic_id: str) -> Optional[str]:
         """The owning ``team_id`` (str) for a topic, or None if it doesn't exist.
 

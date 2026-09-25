@@ -405,16 +405,20 @@ class NousModelRepository:
             return None
 
     async def delete(self, model_id: str) -> bool:
-        """Delete a Nous model."""
+        """Delete a Nous model. True iff a row was deleted; False when no row
+        has that id. A database error is logged and re-raised — reporting it as
+        "not found" would tell the admin the row is gone when it is not."""
         try:
             async with write_scope() as session:
-                await session.execute(
-                    delete(NousModels).where(NousModels.id == int(model_id))
+                result = await session.execute(
+                    delete(NousModels)
+                    .where(NousModels.id == int(model_id))
+                    .returning(NousModels.id)
                 )
-            return True
+                return result.scalars().first() is not None
         except Exception as e:
             logger.error(f"Failed to delete nous model {model_id}: {e}")
-            return False
+            raise
 
 
 def get_nous_model_repository() -> NousModelRepository:

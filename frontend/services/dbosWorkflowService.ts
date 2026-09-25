@@ -14,58 +14,17 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import { getSupabaseAccessToken } from '../supabaseClient';
+import type {
+  DbosWorkflowCancelResult,
+  DbosWorkflowRestartResult,
+  DbosWorkflowResumeResult,
+  DbosWorkflowSnapshot,
+  DbosWorkflowStatus,
+  DbosWorkflowSteps,
+} from '../types/api';
 
-// ── Types ──────────────────────────────────────────────────────────
-
-export type DbosWorkflowStatus =
-  | 'PENDING'
-  | 'ENQUEUED'
-  | 'RUNNING'
-  | 'SUCCESS'
-  | 'ERROR'
-  | 'CANCELLED'
-  | 'RETRIES_EXCEEDED'
-  | 'MAX_RECOVERY_ATTEMPTS_EXCEEDED'
-  | string; // forward-compat with new DBOS states
-
-export interface DbosWorkflowSnapshot {
-  workflow_id: string | null;
-  status: DbosWorkflowStatus | null;
-  name: string | null;
-  queue_name: string | null;
-  created_at: number | null; // unix ms
-  updated_at: number | null;
-  input?: unknown;
-  output?: unknown;
-  error: string | null;
-  executor_id: string | null;
-  app_version: string | null;
-  authenticated_user?: string | null;
-  steps?: DbosWorkflowStep[];
-}
-
-export interface ListWorkflowsResponse {
-  workflows: DbosWorkflowSnapshot[];
-  total: number;
-  offset: number;
-  limit: number;
-}
-
-export interface ListWorkflowsOptions {
-  name?: string; // workflow name filter (e.g. "parse_workflow")
-  status?: DbosWorkflowStatus;
-  limit?: number; // 1..200, default 50
-  offset?: number;
-  sortDesc?: boolean; // default true (newest first)
-}
-
-export interface DbosWorkflowStep {
-  function_id: number | null;
-  function_name: string | null;
-  output: unknown;
-  error: string | null;
-  child_workflow_id: string | null;
-}
+// Response shapes (`DbosWorkflowSnapshot` …) are aliased from the generated
+// OpenAPI schemas in `types/api.ts` (P9 workflows).
 
 export const TERMINAL_STATES: ReadonlySet<DbosWorkflowStatus> = new Set([
   'SUCCESS',
@@ -85,15 +44,13 @@ export async function getWorkflowStatus(id: string): Promise<DbosWorkflowSnapsho
   return res.json();
 }
 
-export async function getWorkflowSteps(
-  id: string
-): Promise<{ workflow_id: string; steps: DbosWorkflowStep[] }> {
+export async function getWorkflowSteps(id: string): Promise<DbosWorkflowSteps> {
   const res = await fetch(`${_base(id)}/steps`, { headers: await getAuthHeaders() });
   if (!res.ok) throw new Error(`steps ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
-export async function cancelWorkflow(id: string): Promise<{ status: string }> {
+export async function cancelWorkflow(id: string): Promise<DbosWorkflowCancelResult> {
   const res = await fetch(`${_base(id)}/cancel`, {
     method: 'POST',
     headers: await getAuthHeaders(),
@@ -102,7 +59,7 @@ export async function cancelWorkflow(id: string): Promise<{ status: string }> {
   return res.json();
 }
 
-export async function resumeWorkflow(id: string): Promise<{ status: string }> {
+export async function resumeWorkflow(id: string): Promise<DbosWorkflowResumeResult> {
   const res = await fetch(`${_base(id)}/resume`, {
     method: 'POST',
     headers: await getAuthHeaders(),
@@ -111,30 +68,12 @@ export async function resumeWorkflow(id: string): Promise<{ status: string }> {
   return res.json();
 }
 
-export async function restartWorkflow(
-  id: string
-): Promise<{ status: string; original_workflow_id: string; new_workflow_id: string }> {
+export async function restartWorkflow(id: string): Promise<DbosWorkflowRestartResult> {
   const res = await fetch(`${_base(id)}/restart`, {
     method: 'POST',
     headers: await getAuthHeaders(),
   });
   if (!res.ok) throw new Error(`restart ${res.status}: ${await res.text()}`);
-  return res.json();
-}
-
-export async function listWorkflows(
-  opts: ListWorkflowsOptions = {}
-): Promise<ListWorkflowsResponse> {
-  const params = new URLSearchParams();
-  if (opts.name) params.set('name', opts.name);
-  if (opts.status) params.set('workflow_status', opts.status);
-  if (opts.limit != null) params.set('limit', String(opts.limit));
-  if (opts.offset != null) params.set('offset', String(opts.offset));
-  if (opts.sortDesc != null) params.set('sort_desc', String(opts.sortDesc));
-  const qs = params.toString();
-  const url = `${getApiUrl()}/api/v1/workflows/runs${qs ? `?${qs}` : ''}`;
-  const res = await fetch(url, { headers: await getAuthHeaders() });
-  if (!res.ok) throw new Error(`list ${res.status}: ${await res.text()}`);
   return res.json();
 }
 

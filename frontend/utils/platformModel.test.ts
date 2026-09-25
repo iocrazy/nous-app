@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 
 import {
   isPlatformModelAvailable,
+  platformModelAvailability,
+  platformOptionAttrs,
   platformModelLabel,
   platformModelText,
 } from './platformModel';
@@ -58,5 +60,44 @@ describe('isPlatformModelAvailable', () => {
     expect(isPlatformModelAvailable({ last_test_status: 'not_probed' })).toBe(true);
     expect(isPlatformModelAvailable({ last_test_status: null })).toBe(true);
     expect(isPlatformModelAvailable({})).toBe(true);
+  });
+});
+
+describe('platformModelAvailability — idle rows stay visible but cannot be picked', () => {
+  it('ok, not_probed and never-probed rows are selectable', () => {
+    for (const status of ['ok', 'not_probed', null, undefined] as const) {
+      expect(platformModelAvailability({ last_test_status: status })).toEqual({
+        selectable: true,
+      });
+    }
+    expect(platformModelAvailability({})).toEqual({ selectable: true });
+  });
+
+  it('idle (authorized on nous-engine, not loaded) is not selectable', () => {
+    expect(platformModelAvailability({ last_test_status: 'idle' })).toEqual({
+      selectable: false,
+      reason: 'not_loaded',
+    });
+  });
+
+  it('fail is left to isPlatformModelAvailable (hidden upstream), not greyed here', () => {
+    expect(platformModelAvailability({ last_test_status: 'fail' })).toEqual({
+      selectable: true,
+    });
+    expect(isPlatformModelAvailable({ last_test_status: 'fail' })).toBe(false);
+  });
+});
+
+describe('platformOptionAttrs — the <option> props a UiSelect needs', () => {
+  it('disables an idle row and carries the caller-localized reason', () => {
+    expect(platformOptionAttrs({ last_test_status: 'idle' }, 'Not loaded on nous-engine')).toEqual({
+      disabled: true,
+      'data-availability': 'not_loaded',
+      'data-description': 'Not loaded on nous-engine',
+    });
+  });
+
+  it('leaves a selectable row untouched', () => {
+    expect(platformOptionAttrs({ last_test_status: 'ok' }, 'x')).toEqual({ disabled: false });
   });
 });

@@ -4,13 +4,9 @@ Proves the REST → ORM swap is invisible AND strategy-C parity for the admin
 dashboard aggregations:
 
   - COUNT(*) / distinct count → native int (the 5.3 trap)
-  - created_at (tstz) → ISO STR (CONSUMED — endpoints do created_at[:10])
-  - video_download_status Enum → bare .value str (CONSUMED — status == "completed")
 
-PLUS pins the RESOURCE-CENTRIC fix: completed_videos_by_user now counts per
-resources.creator_id where is_trashed is false (the old parsed_media.user_id was
-dropped in migration 083) and returns one row per resource with a ``user_id`` key
-(the row shape the /storage handler groups on).
+(The growth / video-status / per-user storage reads and their tests were
+deleted with the three unused ``/admin/stats`` routes they served, P8.)
 
     source /tmp/orm2_integration.env
     uv run pytest tests/integration/test_stats_repository_orm.py -v
@@ -67,30 +63,6 @@ async def cleanup_test_rows(integration_db_url):
         await conn.execute("DELETE FROM user_logs WHERE action LIKE $1", _PREFIX + "%")
     finally:
         await conn.close()
-
-
-@pytest.fixture
-async def cleanup_test_resources(integration_db_url):
-    seeded_resources: list[int] = []
-    yield seeded_resources
-    conn = await asyncpg.connect(integration_db_url)
-    try:
-        if seeded_resources:
-            await conn.execute(
-                "DELETE FROM resources WHERE id = ANY($1::bigint[])", seeded_resources
-            )
-    finally:
-        await conn.close()
-
-
-async def _seed_resource(conn, *, creator_id, is_trashed=False) -> int:
-    return await conn.fetchval(
-        "INSERT INTO resources (creator_id, source_type, filename, is_trashed) "
-        "VALUES ($1, 'web', $2, $3) RETURNING id",
-        creator_id,
-        f"{_PREFIX}{uuid.uuid4().hex[:10]}.mp4",
-        is_trashed,
-    )
 
 
 async def _real_user_id(conn):
@@ -162,68 +134,6 @@ async def test_distinct_active_users_native_int(
     count = await _repo().distinct_active_users_since(since)
     assert type(count) is int
     assert count >= 1  # 3 logs for ONE user → distinct == 1 (at least)
-
-
-async def test_video_status_history_parity(
-    integration_db_url, patched_engine, cleanup_test_rows
-):
-    """created_at → ISO str (sliceable); video_download_status Enum → bare str."""
-    since = datetime.now(timezone.utc) - timedelta(days=1)
-    conn = await asyncpg.connect(integration_db_url)
-    try:
-        seeded = cleanup_test_rows
-        seeded.append(await _seed_media(conn, status="completed"))
-    finally:
-        await conn.close()
-
-    rows = await _repo().video_status_history(since)
-    assert rows
-    r = rows[0]
-    assert type(r["created_at"]) is str
-    assert r["created_at"][:10]  # router slices this
-    # Enum unwrapped to bare str (router does status == "completed").
-    assert isinstance(r["video_download_status"], str)
-    assert "DownloadStatus." not in r["video_download_status"]
-    assert any(rr["video_download_status"] == "completed" for rr in rows)
-
-
-async def test_user_registrations_since_iso_created_at(
-    integration_db_url, patched_engine, cleanup_test_rows
-):
-    since = datetime.now(timezone.utc) - timedelta(days=365)
-    rows = await _repo().user_registrations_since(since)
-    # May be empty in a clean DB; if any, created_at must be sliceable ISO str.
-    for r in rows[:5]:
-        assert type(r["created_at"]) is str
-        assert r["created_at"][:10]
-
-
-async def test_completed_videos_by_user_resource_centric(
-    integration_db_url, patched_engine, cleanup_test_resources
-):
-    """RESOURCE-CENTRIC fix: parsed_media.user_id was dropped in migration 083, so
-    completed_videos_by_user now counts per resources.creator_id (is_trashed
-    false) and returns one row per resource with a ``user_id`` key — the exact
-    shape the /storage handler groups on. Trashed resources are excluded."""
-    conn = await asyncpg.connect(integration_db_url)
-    try:
-        creator_id = await _real_user_id(conn)
-        rid_active = await _seed_resource(conn, creator_id=creator_id)
-        rid_trashed = await _seed_resource(conn, creator_id=creator_id, is_trashed=True)
-        cleanup_test_resources.extend([rid_active, rid_trashed])
-    finally:
-        await conn.close()
-
-    rows = await _repo().completed_videos_by_user()
-
-    # Row shape: each row is {"user_id": <str>} (the /storage handler key).
-    assert all(set(r.keys()) == {"user_id"} for r in rows)
-    assert all(type(r["user_id"]) is str for r in rows)
-    # The active resource's owner appears; the trashed one is excluded (so its
-    # creator only shows up via the active row, not the trashed one).
-    owner = str(creator_id)
-    active_count = sum(1 for r in rows if r["user_id"] == owner)
-    assert active_count >= 1
 
 
 # ─── Factory (ORM-only, post-rollout) ───────────────────────────────────

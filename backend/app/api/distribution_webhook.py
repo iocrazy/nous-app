@@ -24,7 +24,14 @@ from app.repositories.publish_tasks_repository import (
     PublishTasksRepository,
     aggregate_task_status,
 )
-from app.services.distribution.credentials import get_douyin_credentials
+from app.schemas.distribution import (
+    DistributionWebhookAck,
+    DistributionWebhookChallenge,
+)
+from app.services.distribution.credentials import (
+    CredentialsNotConfigured,
+    get_douyin_credentials,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +41,14 @@ publish_repo = PublishTasksRepository()
 
 def verify_douyin_signature(client_secret: str, body: str, provided: str) -> bool:
     """SHA1(client_secret + raw_body) — the media-router prototype's scheme.
-    Constant-time compare to avoid a timing oracle."""
+    Constant-time compare to avoid a timing oracle.
+
+    An empty secret never verifies: SHA1("" + body) is computable by anyone,
+    so a blank ``client_secret`` in ``system_settings`` would otherwise turn
+    this into an open door for flipping publish records to ``success``.
+    """
+    if not client_secret or not provided:
+        return False
     expected = hashlib.sha1((client_secret + body).encode()).hexdigest()
     return hmac.compare_digest(expected, provided or "")
 
@@ -56,26 +70,60 @@ async def _reaggregate_task_tracking(task_id: str) -> None:
         logger.warning(f"[webhook] reaggregate task {task_id} failed: {e}")
 
 
-@router.post("/webhook/douyin")
+def _json_object(text: str) -> dict:
+    """A signed body that is not a JSON object is a malformed request (400),
+    not a server error (it used to be a 500 from ``json.loads`` / ``.get``)."""
+    try:
+        value = json.loads(text)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Malformed webhook body")
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="Malformed webhook body")
+    return value
+
+
+@router.post(
+    "/webhook/douyin",
+    # Douyin's receipt shapes, verbatim: the challenge echo, else {"msg": "ok"}.
+    response_model=DistributionWebhookChallenge | DistributionWebhookAck,
+)
 async def douyin_webhook(request: Request):
     body_bytes = await request.body()
-    body_str = body_bytes.decode("utf-8")
-    creds = await get_douyin_credentials()
+    try:
+        creds = await get_douyin_credentials()
+    except CredentialsNotConfigured:
+        # Fail closed (was an unhandled 500): with no secret there is nothing
+        # to verify the caller against.
+        logger.warning("distribution webhook: douyin credentials not configured")
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    try:
+        body_str = body_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=403, detail="Invalid signature")
     provided = request.headers.get("x-douyin-signature", "")
     if not verify_douyin_signature(creds.client_secret, body_str, provided):
         logger.warning("distribution webhook: signature mismatch")
         raise HTTPException(status_code=403, detail="Invalid signature")
 
-    data = json.loads(body_str) if body_str else {}
+    data = _json_object(body_str) if body_str else {}
     event = data.get("event", "")
 
     if event == "verify_webhook":
-        return {"challenge": data.get("challenge", 0)}
+        # Douyin's documented body carries the challenge under ``content``;
+        # the top-level spot is what this handler always read, kept first.
+        if "challenge" in data:
+            return {"challenge": data["challenge"]}
+        content = data.get("content")
+        if isinstance(content, dict) and "challenge" in content:
+            return {"challenge": content["challenge"]}
+        return {"challenge": 0}
 
     if event == "create_video":
         content = data.get("content", "{}")
         if isinstance(content, str):
-            content = json.loads(content)
+            content = _json_object(content or "{}")
+        if not isinstance(content, dict):
+            content = {}
         share_id = content.get("share_id", "")
         item_id = content.get("item_id", "")
         if not share_id:

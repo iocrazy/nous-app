@@ -4,22 +4,15 @@
 // management. Design: docs/superpowers/specs/2026-08-23-codex-per-user-daemon-design.md
 
 import { apiFetch } from './apiClient';
+import type { CodexDaemonPairCode, CodexDevice } from '../types/api';
 
-export interface CodexDevice {
-  id: string;
-  device_name: string;
-  platform: string;
-  created_at: string | null;
-  last_seen_at: string | null;
-}
+export type { CodexDevice } from '../types/api';
 
 export const codexDaemonService = {
   /** Mint a one-shot pairing code (valid 10 minutes). */
-  async createPairCode(): Promise<{ code: string; expires_in_seconds: number }> {
+  async createPairCode(): Promise<CodexDaemonPairCode> {
     const res = await apiFetch('/api/v1/codex-daemon/pair-code', { method: 'POST' });
-    const body = (await res.json()) as {
-      data?: { code: string; expires_in_seconds: number };
-    };
+    const body = (await res.json()) as { data?: CodexDaemonPairCode };
     if (!body.data?.code) throw new Error('pair code request returned no code');
     return body.data;
   },

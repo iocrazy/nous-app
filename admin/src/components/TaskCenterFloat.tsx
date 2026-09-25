@@ -20,6 +20,7 @@ import {
 } from '@arco-design/web-react/icon'
 import { supabase } from '../auth/supabase'
 import { apiClient } from '../api/client'
+import type { AdminTaskActionResult } from '../api/endpoints/tasks'
 
 interface UnifiedTask {
   id: string
@@ -137,8 +138,8 @@ export function TaskCenterFloat() {
 
   const handleCancel = async (taskId: string) => {
     try {
-      await apiClient.post(`/api/v1/admin/tasks/${taskId}/cancel`)
-      Message.success('Task cancelled')
+      await apiClient.post<AdminTaskActionResult>(`/api/v1/admin/tasks/${taskId}/cancel`)
+      Message.success('Cancel requested')
     } catch (err) {
       Message.error((err as Error).message)
     }

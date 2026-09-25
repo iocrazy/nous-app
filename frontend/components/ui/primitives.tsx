@@ -85,6 +85,24 @@ interface UiSelectGroupItem {
 
 type UiSelectItem = UiSelectOptionItem | UiSelectGroupItem;
 
+/** Props UiSelect reads off its `<option>` children. React 19 types
+ *  `isValidElement` narrowing as `ReactElement<unknown>`, so the shape has
+ *  to be named explicitly. */
+interface UiSelectOptionChildProps {
+  value?: string | number;
+  children?: ReactNode;
+  disabled?: boolean;
+  'data-loaded'?: boolean | string;
+  'data-description'?: string;
+  'data-dot'?: string;
+}
+
+/** Props UiSelect reads off its `<optgroup>` children. */
+interface UiSelectOptgroupChildProps {
+  label?: string;
+  children?: ReactNode;
+}
+
 interface UiModalProps {
   isOpen: boolean;
   title: string;
@@ -258,7 +276,7 @@ export function UiSelect({
   );
   const parsedItems = useMemo<UiSelectItem[]>(() => {
     const toOption = (child: unknown): UiSelectOptionItem | null => {
-      if (!isValidElement(child) || child.type !== 'option') {
+      if (!isValidElement<UiSelectOptionChildProps>(child) || child.type !== 'option') {
         return null;
       }
 
@@ -277,7 +295,7 @@ export function UiSelect({
     };
 
     return Children.toArray(children).flatMap((child, index) => {
-      if (isValidElement(child) && child.type === 'optgroup') {
+      if (isValidElement<UiSelectOptgroupChildProps>(child) && child.type === 'optgroup') {
         const groupOptions = Children.toArray(child.props.children)
           .map(toOption)
           .filter((option): option is UiSelectOptionItem => option !== null);
@@ -318,6 +336,13 @@ export function UiSelect({
     parsedOptions.find((option) => option.value === selectedValue) ??
     parsedOptions.find((option) => !option.disabled) ??
     null;
+  // A saved value can point at an option that is disabled WITH a reason (a
+  // model that exists but cannot run right now). It stays the displayed value —
+  // never silently swapped — but dimmed, with the reason as the trigger title.
+  // Reason-less disabled options (placeholders) keep the plain look.
+  const selectedUnavailable = Boolean(
+    selectedOption?.disabled && selectedOption.value === selectedValue && selectedOption.description
+  );
   // Rich mode (nous parity): any option carrying a description / dot / load
   // state promotes the whole menu to two-line rows with a leading indicator.
   const hasLoadedInfo = parsedOptions.some((option) => option.loaded !== undefined);
@@ -518,6 +543,7 @@ export function UiSelect({
         aria-expanded={isOpen}
         aria-controls={listboxIdRef.current}
         disabled={disabled}
+        title={selectedUnavailable ? String(selectedOption?.description) : undefined}
         className={`group inline-flex items-center justify-between text-left outline-none transition-[border-color,background-color,box-shadow,color] disabled:cursor-not-allowed disabled:opacity-55 ${
           triggerClassName ??
           'h-9 w-full rounded-[8px] border border-ink-700 bg-ink-800 px-3 text-sm font-medium text-content hover:border-ink-600 focus-visible:border-ink-500 focus-visible:shadow-[0_0_0_2px_color-mix(in_srgb,var(--content-3)_34%,transparent)]'
@@ -531,7 +557,13 @@ export function UiSelect({
         onBlur={(event) => onBlur?.(event as never)}
         onFocus={(event) => onFocus?.(event as never)}
       >
-        <span className="min-w-0 truncate pr-3">{selectedOption?.label ?? ''}</span>
+        <span
+          data-selected-label=""
+          data-unavailable={selectedUnavailable ? 'true' : undefined}
+          className={`min-w-0 truncate pr-3 ${selectedUnavailable ? 'opacity-60' : ''}`}
+        >
+          {selectedOption?.label ?? ''}
+        </span>
         <span className="flex h-4 w-4 shrink-0 items-center justify-center text-content-3 transition-colors group-hover:text-content group-focus-visible:text-accent">
           <ChevronDown
             className={`h-3.5 w-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`}
@@ -643,6 +675,7 @@ export function UiSelect({
                       role="option"
                       aria-selected={isSelected}
                       disabled={item.disabled}
+                      title={item.disabled && item.description ? String(item.description) : undefined}
                       className={`flex w-full items-start gap-2.5 rounded-[6px] px-2.5 py-2 text-left text-sm transition-colors ${
                         item.disabled
                           ? 'cursor-not-allowed opacity-40'

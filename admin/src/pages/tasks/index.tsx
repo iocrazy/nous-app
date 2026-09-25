@@ -28,7 +28,7 @@ import type { NotionColumnDef } from '../../components/notion-table'
 import { useNotionTable } from '../../hooks/useNotionTable'
 import { apiClient } from '../../api/client'
 import type { AdminTaskData } from '../../api/endpoints/tasks'
-import { useAdminTaskStats, useCancelTask, useRetryTask } from '../../api/endpoints/tasks'
+import { useAdminTaskStats, useCancelTask } from '../../api/endpoints/tasks'
 import { formatDateTime } from '../../utils/format'
 import { supabase } from '../../auth/supabase'
 
@@ -189,12 +189,10 @@ function ActionsCell({
   record,
   actionLoadingId,
   onCancel,
-  onRetry,
 }: {
   record: AdminTaskData
   actionLoadingId: string | null
   onCancel: (record: AdminTaskData) => void
-  onRetry: (record: AdminTaskData) => void
 }) {
   const isLoading = actionLoadingId === record.id
   const canCancel = record.status === 'pending' || record.status === 'processing'
@@ -215,14 +213,11 @@ function ActionsCell({
         </Tooltip>
       )}
       {canRetry && (
-        <Tooltip content="Retry">
-          <Button
-            type="text"
-            icon={<IconRefresh />}
-            size="small"
-            loading={isLoading}
-            onClick={() => onRetry(record)}
-          />
+        // Admin retry is intentionally unavailable: re-dispatching a task
+        // needs the owner's per-type dispatch, which only their Task Center
+        // retry has. The old admin route reset the row and started nothing.
+        <Tooltip content="Retry is not available here — the task owner can retry it from their Task Center">
+          <Button type="text" icon={<IconRefresh />} size="small" disabled />
         </Tooltip>
       )}
     </Space>
@@ -235,7 +230,6 @@ export function TaskCenter() {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const cancelTask = useCancelTask()
-  const retryTask = useRetryTask()
 
   // Supabase Realtime: auto-refresh on task_tracking changes (debounced)
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -268,20 +262,11 @@ export function TaskCenter() {
       onOk: () => {
         setActionLoadingId(record.id)
         cancelTask.mutate(record.id, {
-          onSuccess: () => Message.success('Task cancelled'),
+          onSuccess: () => Message.success('Cancel requested'),
           onError: (err) => Message.error(err.message),
           onSettled: () => setActionLoadingId(null),
         })
       },
-    })
-  }
-
-  const handleRetry = (record: AdminTaskData) => {
-    setActionLoadingId(record.id)
-    retryTask.mutate(record.id, {
-      onSuccess: () => Message.success('Task reset to pending'),
-      onError: (err) => Message.error(err.message),
-      onSettled: () => setActionLoadingId(null),
     })
   }
 
@@ -348,7 +333,7 @@ export function TaskCenter() {
           const isRunning = row.status === 'processing'
           return (
             <Typography.Text type={isRunning ? undefined : 'secondary'} style={{ fontSize: 12 }}>
-              {formatRuntime(row.started_at, row.completed_at)}
+              {formatRuntime(row.started_at ?? null, row.completed_at ?? null)}
             </Typography.Text>
           )
         },
@@ -380,7 +365,6 @@ export function TaskCenter() {
             record={row}
             actionLoadingId={actionLoadingId}
             onCancel={handleCancel}
-            onRetry={handleRetry}
           />
         ),
       },
@@ -458,11 +442,11 @@ export function TaskCenter() {
       )},
       { label: 'User', value: row.user_email || '-' },
       { label: 'Phase', value: row.phase || '-' },
-      { label: 'Runtime', value: formatRuntime(row.started_at, row.completed_at) },
+      { label: 'Runtime', value: formatRuntime(row.started_at ?? null, row.completed_at ?? null) },
       { label: 'Created', value: formatDateTime(row.created_at) },
       { label: 'Started', value: row.started_at ? formatDateTime(row.started_at) : '-' },
       { label: 'Completed', value: row.completed_at ? formatDateTime(row.completed_at) : '-' },
-      { label: 'Celery Task ID', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.celery_task_id || '-'}</span> },
+      { label: 'Workflow ID', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.dbos_workflow_id || '-'}</span> },
       { label: 'Resource ID', value: row.resource_id || '-' },
       { label: 'Media ID', value: row.media_id || '-' },
     ]

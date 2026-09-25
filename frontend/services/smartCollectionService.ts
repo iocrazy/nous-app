@@ -4,6 +4,12 @@
 
 import { apiClient } from './apiClient';
 import { ParsedMedia } from '../types';
+import type {
+  CollectionInitPresetsResult,
+  CollectionRefreshResult,
+  SmartCollectionMediaPage,
+  SmartCollectionRow,
+} from '../types/api';
 
 // Types
 export interface CollectionCondition {
@@ -32,21 +38,8 @@ export interface CollectionRules {
   conditions: CollectionCondition[];
 }
 
-export interface SmartCollection {
-  id: string; // UUID from backend
-  name: string;
-  description: string | null;
-  icon: string | null;
-  color: string | null;
-  rules: CollectionRules;
-  is_preset: boolean;
-  is_active: boolean;
-  sort_by: string;
-  sort_order: 'asc' | 'desc';
-  video_count: number;
-  created_at: string;
-  updated_at: string;
-}
+/** One ``smart_collections`` row. ``id`` is a Snowflake BIGINT: a JSON number. */
+export type SmartCollection = SmartCollectionRow;
 
 export interface SmartCollectionCreate {
   name: string;
@@ -69,14 +62,9 @@ export interface SmartCollectionUpdate {
   sort_order?: 'asc' | 'desc';
 }
 
-export interface SmartCollectionVideosResponse {
+export type SmartCollectionVideosResponse = Omit<SmartCollectionMediaPage, 'media'> & {
   media: ParsedMedia[];
-  total: number;
-  page: number;
-  page_size: number;
-  collection_id: string;
-  collection_name: string;
-}
+};
 
 export const fetchSmartCollections = async (): Promise<SmartCollection[]> => {
   const data = await apiClient.get<{ collections?: SmartCollection[] }>(
@@ -125,17 +113,15 @@ export const getSmartCollectionVideos = async (
 
 export const refreshSmartCollection = async (
   collectionId: string,
-): Promise<{ message: string; video_count: number }> =>
-  apiClient.post<{ message: string; video_count: number }>(
+): Promise<CollectionRefreshResult> =>
+  apiClient.post<CollectionRefreshResult>(
     `/api/v1/collections/${collectionId}/refresh`,
   );
 
-export const initPresetCollections = async (): Promise<SmartCollection[]> => {
-  const data = await apiClient.post<{ collections?: SmartCollection[] }>(
-    '/api/v1/collections/init-presets',
-  );
-  return data.collections || [];
-};
+/** `presets` is only present when this call created them; the endpoint never
+ *  returned full collection rows (the old `collections` read was always []). */
+export const initPresetCollections = async (): Promise<CollectionInitPresetsResult> =>
+  apiClient.post<CollectionInitPresetsResult>('/api/v1/collections/init-presets');
 
 // Helper function to build rules
 export const buildCollectionRules = (

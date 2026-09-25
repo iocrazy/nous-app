@@ -29,3 +29,13 @@ class UserMemoryListResponse(BaseModel):
     """Response envelope for the user-facing memory list endpoint."""
 
     items: List[UserMemoryItem]
+
+
+class AgentMemoryDeleteResponse(BaseModel):
+    """``DELETE /agent-memory/{memory_id}``: always ``{"deleted": true}``.
+
+    A row that is not there, or not the caller's, is a typed 404
+    (``not_found_or_out_of_scope``) rather than ``{"deleted": false}``.
+    """
+
+    deleted: bool

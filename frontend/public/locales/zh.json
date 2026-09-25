@@ -6145,5 +6145,9 @@
         "hint": "作为任务中心任务运行 · 可以继续浏览"
       }
     }
+  },
+  "platformModel": {
+    "notLoaded": "nous-engine 上未加载",
+    "notLoadedSuffix": "（未加载）"
   }
 }

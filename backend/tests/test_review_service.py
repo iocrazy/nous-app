@@ -63,13 +63,6 @@ class _FakeRepo:
         self.comments.pop(comment_id, None)
         return True
 
-    async def get_comment_count(
-        self, resource_id: str, version_id: Optional[str]
-    ) -> int:
-        return len(
-            [c for c in self.comments.values() if c.get("resource_id") == resource_id]
-        )
-
     async def upsert_review_status(self, data: dict[str, Any]) -> dict[str, Any]:
         self.upserts.append(data)
         return {"id": "rs-1", **data}
@@ -147,54 +140,6 @@ async def test_create_comment_preserves_zero_timecode(
         resource_id="r-1", author_id="u-1", content="x", timecode=0.0
     )
     assert "timecode" in fake.created_comments[0]
-
-
-# ─── update_comment ────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_update_comment_requires_author(
-    service: tuple[ReviewService, _FakeRepo],
-) -> None:
-    svc, fake = service
-    fake.comments["c-1"] = {"id": "c-1", "author_id": "u-owner", "content": "orig"}
-    with pytest.raises(PermissionError):
-        await svc.update_comment("c-1", "u-other", {"content": "x"})
-
-
-@pytest.mark.asyncio
-async def test_update_comment_raises_when_missing(
-    service: tuple[ReviewService, _FakeRepo],
-) -> None:
-    svc, _ = service
-    with pytest.raises(ValueError):
-        await svc.update_comment("missing", "u-1", {"content": "x"})
-
-
-@pytest.mark.asyncio
-async def test_update_comment_filters_fields(
-    service: tuple[ReviewService, _FakeRepo],
-) -> None:
-    svc, fake = service
-    fake.comments["c-1"] = {"id": "c-1", "author_id": "u-1", "content": "orig"}
-    await svc.update_comment(
-        "c-1",
-        "u-1",
-        {"content": "new", "author_id": "u-99", "secret_field": "x"},
-    )
-    _, updates = fake.updated_comments[0]
-    assert updates == {"content": "new"}
-
-
-@pytest.mark.asyncio
-async def test_update_comment_no_allowed_fields_returns_existing(
-    service: tuple[ReviewService, _FakeRepo],
-) -> None:
-    svc, fake = service
-    fake.comments["c-1"] = {"id": "c-1", "author_id": "u-1", "content": "orig"}
-    result = await svc.update_comment("c-1", "u-1", {"random": "x"})
-    assert result["content"] == "orig"
-    assert fake.updated_comments == []
 
 
 # ─── resolve/reopen ───────────────────────────────────────────────

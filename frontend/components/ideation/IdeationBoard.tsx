@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Lightbulb, Library, Plus, X } from 'lucide-react';
-import type { Topic, TopicStatus } from '../../types';
+import type {
+  IdeationTopic as Topic,
+  IdeationTopicStatus as TopicStatus,
+} from '../../types/api';
 import {
   createTopic,
   deleteTopic,

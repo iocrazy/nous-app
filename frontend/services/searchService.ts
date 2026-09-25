@@ -3,7 +3,7 @@
  */
 
 import { apiClient } from './apiClient';
-import type { NousModelPublic } from '../types';
+import type { NousModelPublic } from '../types/api';
 import type { SearchChipFilters } from './searchChipFilters';
 
 // Types

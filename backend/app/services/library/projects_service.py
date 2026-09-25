@@ -33,6 +33,7 @@ from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.services.infra.unified_task_manager import get_task_manager
 from app.services.library.media_storage import store_local_file
 from app.services.library.resources_service import _resolve_personal_team_id
+from app.services.library.share_passwords import share_password_columns
 from app.services.library.storage_errors import object_store_write_failed
 from app.services.library.storage_flag import unified_storage_enabled
 
@@ -1143,7 +1144,7 @@ class ProjectsService:
             "shared_by": user_id,
             "share_name": share_name,
             "share_code": share_code,
-            "password": data.get("password"),
+            **share_password_columns(data.get("password")),
             "allow_download": data.get("allow_download", True),
             "status": "active",
         }

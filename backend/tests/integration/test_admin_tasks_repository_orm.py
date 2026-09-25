@@ -10,11 +10,10 @@ parity:
   - metadata (renamed metadata_) → native dict keyed as "metadata"
   - progress / speed / total_bytes / cost_cents / COUNT → native int
   - or_ search (incl. metadata->>original_url ilike + digit media_id eq)
-  - update() WRITES verbatim (incl. trigger-owned columns) and COMMITS
+  - no write path (status columns are trigger-owned)
 
 Seeded rows use a synthetic dbos_workflow_id prefix and task_kind='agent_task'
-(so a direct status write is legitimate for the seed; the repo's update path is
-tested separately for the write contract).
+(so a direct status write is legitimate for the seed).
 
     source /tmp/orm2_integration.env
     uv run pytest tests/integration/test_admin_tasks_repository_orm.py -v
@@ -214,7 +213,7 @@ async def test_count_total_and_by_status_native_int(
     assert type(failed) is int and failed >= 1
 
 
-async def test_get_and_update_round_trip(
+async def test_get_round_trip(
     integration_db_url, patched_engine, cleanup_test_rows, seed_user
 ):
     conn = await asyncpg.connect(integration_db_url)
@@ -225,32 +224,9 @@ async def test_get_and_update_round_trip(
 
     got = await _repo().get(wid)
     assert got is not None and got["status"] == "failed"
-
-    # Reproduces the legacy admin retry write verbatim — incl. trigger-owned cols.
-    await _repo().update(
-        wid,
-        {
-            "status": "pending",
-            "phase": "queued",
-            "progress": 0,
-            "error_msg": None,
-            "error_code": None,
-            "started_at": None,
-            "completed_at": None,
-        },
-    )
-
-    conn = await asyncpg.connect(integration_db_url)
-    try:
-        row = await conn.fetchrow(
-            "SELECT status, phase, progress FROM task_tracking "
-            "WHERE dbos_workflow_id = $1",
-            wid,
-        )
-    finally:
-        await conn.close()
-    assert row["status"] == "pending" and row["phase"] == "queued"
-    assert row["progress"] == 0
+    # The repository is read-only: task_tracking status columns belong to the
+    # DBOS lifecycle trigger (CLAUDE.md route C).
+    assert not hasattr(_repo(), "update")
 
 
 async def test_get_absent_returns_none(integration_db_url, patched_engine):

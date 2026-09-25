@@ -5,7 +5,10 @@
 // the hotspots/signal-feed router). Named ideationService (not topicsService)
 // to avoid confusion with the singular topicService.ts, which is hotspots.
 
-import { Topic, TopicStatus } from '../types';
+import type {
+  IdeationTopic as Topic,
+  IdeationTopicStatus as TopicStatus,
+} from '../types/api';
 import { apiClient } from './apiClient';
 
 interface Envelope<T> {

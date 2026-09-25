@@ -10,7 +10,7 @@
  * EagleTagBrowser.enter.test.tsx).
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { Composer } from './Composer';
 
@@ -42,10 +42,10 @@ function pressEnter(textarea: HTMLTextAreaElement): void {
 }
 
 describe('Composer IME composition guard', () => {
-  let onSend: ReturnType<typeof vi.fn>;
+  let onSend: Mock<(text: string, mentionUserIds: string[]) => void>;
 
   beforeEach(() => {
-    onSend = vi.fn();
+    onSend = vi.fn<(text: string, mentionUserIds: string[]) => void>();
   });
 
   it('does NOT send when Enter commits an IME composition (dropdown closed)', () => {
@@ -62,7 +62,7 @@ describe('Composer IME composition guard', () => {
     textarea.value = '你好';
     pressEnter(textarea);
     expect(onSend).toHaveBeenCalledOnce();
-    const [text] = onSend.mock.calls[0] as [string, string[]];
+    const [text] = onSend.mock.calls[0];
     expect(text).toBe('你好');
   });
 

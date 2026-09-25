@@ -8,17 +8,23 @@
  */
 
 import { apiClient } from './apiClient';
-import { PointPackage, PaymentOrder } from '../types';
+import type {
+  PaymentOrder,
+  PaymentOrderResponse,
+  PaymentOrderStatus,
+  PaymentOrderStatusResponse,
+  PaymentOrdersResponse,
+  PaymentPackagesResponse,
+  PointPackage,
+} from '../types/api';
 
-interface Envelope<T> {
-  success: boolean;
-  message?: string;
-  data: T;
-}
-
-function unwrap<T>(result: Envelope<T>): T {
+/** Every `/payment/*` success body is `{ success: true, data }`; failures are
+ *  HTTP errors that `apiClient` throws. The `success` check is a guard, and a
+ *  non-standard `message` on such a body is surfaced when present. */
+function unwrap<T>(result: { success: boolean; data: T }): T {
   if (!result.success) {
-    throw new Error(result.message || 'Request failed');
+    const message = (result as { message?: string }).message;
+    throw new Error(message || 'Request failed');
   }
   return result.data;
 }
@@ -27,7 +33,7 @@ function unwrap<T>(result: Envelope<T>): T {
  * Fetch all available point packages for purchase.
  */
 export const fetchPackages = async (): Promise<PointPackage[]> => {
-  const result = await apiClient.get<Envelope<PointPackage[]>>(
+  const result = await apiClient.get<PaymentPackagesResponse>(
     '/api/v1/payment/packages',
   );
   return unwrap(result);
@@ -41,7 +47,7 @@ export const createOrder = async (
   paymentMethod: 'wechat' | 'alipay',
   teamId: string,
 ): Promise<PaymentOrder> => {
-  const result = await apiClient.post<Envelope<PaymentOrder>>(
+  const result = await apiClient.post<PaymentOrderResponse>(
     '/api/v1/payment/create-order',
     {
       package_id: packageId,
@@ -57,18 +63,10 @@ export const createOrder = async (
  */
 export const pollOrderStatus = async (
   orderId: string,
-): Promise<{
-  payment_status: string;
-  points_amount: number;
-  paid_at: string | null;
-}> => {
-  const result = await apiClient.get<
-    Envelope<{
-      payment_status: string;
-      points_amount: number;
-      paid_at: string | null;
-    }>
-  >(`/api/v1/payment/order/${orderId}/status`);
+): Promise<PaymentOrderStatus> => {
+  const result = await apiClient.get<PaymentOrderStatusResponse>(
+    `/api/v1/payment/order/${orderId}/status`,
+  );
   return unwrap(result);
 };
 
@@ -80,7 +78,7 @@ export const fetchOrders = async (
   limit: number = 20,
   offset: number = 0,
 ): Promise<PaymentOrder[]> => {
-  const result = await apiClient.get<Envelope<PaymentOrder[]>>(
+  const result = await apiClient.get<PaymentOrdersResponse>(
     '/api/v1/payment/orders',
     { query: { team_id: teamId, limit, offset } },
   );

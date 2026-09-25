@@ -95,7 +95,9 @@ export const FloatingParse: React.FC<{
         const pl = await getSodaPlaylist(text);
         setResult({
           kind: 'playlist',
-          title: pl.title || t('topic.playlist', 'Playlist'),
+          // The playlist endpoint returns no playlist name (SodaPlaylistResponse
+          // carries only id + tracks), so the label is always the generic one.
+          title: t('topic.playlist', 'Playlist'),
           detail: t('topic.tracksFound', '{{n}} tracks', { n: pl.tracks.length }),
           playlist: pl,
         });

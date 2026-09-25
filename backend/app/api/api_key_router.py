@@ -9,6 +9,7 @@ API 密钥管理路由
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.api_key_scopes import AVAILABLE_SCOPES
 from app.core.deps import AuthDep
 from app.repositories.api_key_repository import (
@@ -17,6 +18,7 @@ from app.repositories.api_key_repository import (
     reveal_full_key,
 )
 from app.schemas.api_key import (
+    ApiKeyActionResponse,
     ApiKeyCreate,
     ApiKeyCreateResponse,
     ApiKeyListResponse,
@@ -269,23 +271,20 @@ async def update_api_key(key_id: str, request: ApiKeyUpdate, auth: AuthDep):
         )
 
 
-@router.delete("/{key_id}")
+@router.delete("/{key_id}", response_model=ApiKeyActionResponse)
 async def delete_api_key(key_id: str, auth: AuthDep):
     """
     删除 API 密钥（硬删除）
     """
     repo = get_api_key_repository()
-    success = await repo.delete(key_id, auth.user_id)
-
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="密钥不存在或无权删除"
-        )
+    if not await repo.delete(key_id, auth.user_id):
+        # Unknown, or another user's key: one typed 404 for both.
+        require_row(None)
 
     return {"success": True, "message": "密钥已删除"}
 
 
-@router.post("/{key_id}/revoke")
+@router.post("/{key_id}/revoke", response_model=ApiKeyActionResponse)
 async def revoke_api_key(key_id: str, auth: AuthDep):
     """
     撤销 API 密钥（软删除）
@@ -293,11 +292,6 @@ async def revoke_api_key(key_id: str, auth: AuthDep):
     撤销后密钥将无法使用，但记录仍保留
     """
     repo = get_api_key_repository()
-    result = await repo.revoke(key_id, auth.user_id)
-
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="密钥不存在或无权撤销"
-        )
+    require_row(await repo.revoke(key_id, auth.user_id))
 
     return {"success": True, "message": "密钥已撤销"}

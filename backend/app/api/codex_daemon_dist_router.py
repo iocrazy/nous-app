@@ -18,8 +18,10 @@ import json
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import FileResponse
+
+from app.schemas.codex_daemon import CodexDaemonDistVersion
 
 router = APIRouter(prefix="/codex-daemon/dist", tags=["Codex Daemon"])
 
@@ -53,13 +55,26 @@ def _file(name: str) -> Path:
     return path
 
 
-@router.get("/version.json")
-async def dist_version() -> JSONResponse:
+@router.get("/version.json", response_model=CodexDaemonDistVersion)
+async def dist_version(response: Response) -> dict:
     pkg = json.loads(_file("package.json").read_text(encoding="utf-8"))
-    return JSONResponse({"version": str(pkg.get("version") or "")}, headers=_NO_CACHE)
+    response.headers.update(_NO_CACHE)
+    return {"version": str(pkg.get("version") or "")}
 
 
-@router.get("/{name}")
+@router.get(
+    "/{name}",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "One allowlisted daemon file, as text",
+            "content": {
+                ctype.split(";")[0]: {"schema": {"type": "string"}}
+                for ctype in _FILES.values()
+            },
+        }
+    },
+)
 async def dist_file(name: str) -> FileResponse:
     ctype = _FILES.get(name)
     if ctype is None:

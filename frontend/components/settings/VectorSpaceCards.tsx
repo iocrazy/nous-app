@@ -7,9 +7,8 @@
 
 import { useState, type ReactNode } from 'react';
 
-import type { BackfillResult } from '../../services/aiService';
+import type { BackfillResult, NousModelPublic } from '../../types/api';
 import type { VectorSpaceStatus } from '../../services/searchService';
-import type { NousModelPublic } from '../../types';
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string;
 

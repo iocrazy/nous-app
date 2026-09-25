@@ -10,6 +10,7 @@ from app.schemas.admin import (
     AdminTablePreferenceResponse,
     AdminTablePreferenceUpdate,
 )
+from app.schemas.admin_settings_catalog import AdminTablePreferenceResetResult
 
 router = APIRouter()
 
@@ -66,9 +67,13 @@ async def upsert_table_preferences(
     raise HTTPException(status_code=500, detail="Failed to save preferences")
 
 
-@router.delete("/{table_key}")
+@router.delete("/{table_key}", response_model=AdminTablePreferenceResetResult)
 async def delete_table_preferences(table_key: str, auth: AdminAuthDep):
-    """Delete saved table preferences for a specific table."""
+    """Reset a table to its defaults: delete the CALLER's saved preferences.
+
+    Scoped to ``auth.user_id`` — one admin cannot clear another's. Idempotent:
+    resetting a table that was never customized is still a success (it is
+    already at its defaults), so a miss is not a 404 here."""
     _validate_table_key(table_key)
     repo = get_admin_table_preferences_repository()
     await repo.delete(str(auth.user_id), table_key)

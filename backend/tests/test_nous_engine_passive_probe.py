@@ -118,7 +118,7 @@ async def test_503_means_authorized_but_not_loaded_and_is_idle() -> None:
         out = await probe_nous_model(_row())
     assert out["ok"] is False
     assert out["idle"] is True
-    assert out["detail"] == "authorized, not loaded (loads on first request)"
+    assert out["detail"] == "authorized, not loaded"
     assert out["code"] is None
     assert out["error"] is None
     assert probe_result_status(out) == "idle"
@@ -214,5 +214,5 @@ async def test_scheduled_step_counts_idle_in_its_own_bucket() -> None:
     assert summary["ok"] == 0
     args = repo.record_test_result.await_args.args
     assert args[1] == "idle"
-    assert args[2] == "authorized, not loaded (loads on first request)"
+    assert args[2] == "authorized, not loaded"
     assert repo.record_test_result.await_args.args[3] is None

@@ -89,6 +89,7 @@ from app.schemas.workflow import (
     WorkflowAlreadyInstantiated,
 )
 from app.services.library.projects_service import ProjectsService
+from app.services.library.share_passwords import has_password
 from app.services.modules.gate import require_module
 
 router = APIRouter(
@@ -1483,10 +1484,14 @@ async def restore_file(
 
 
 def _redact_share(share: dict) -> dict:
-    """The share without its plain-text ``password``, plus ``has_password``
+    """The share without its password columns, plus ``has_password``
     (same redaction as ``shares_router._enrich_share``). Returns a new dict."""
-    public = {key: value for key, value in share.items() if key != "password"}
-    public["has_password"] = share.get("password") is not None
+    public = {
+        key: value
+        for key, value in share.items()
+        if key not in ("password", "password_hash")
+    }
+    public["has_password"] = has_password(share)
     return public
 
 

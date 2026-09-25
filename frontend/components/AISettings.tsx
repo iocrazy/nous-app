@@ -48,6 +48,7 @@ import { relativeTime } from '../utils/taskDisplay';
 import { buildModelHealth, healthReasonKey } from '../utils/modelHealth';
 import {
   isPlatformModelAvailable,
+  platformModelAvailability,
   platformModelLabel,
   platformModelText,
 } from '../utils/platformModel';
@@ -299,6 +300,13 @@ const COLOR_MAP: Record<string, { bg: string; text: string; border: string; badg
 };
 
 type TaskTab = 'media' | 'storyboard';
+
+/** A task-picker option. `notLoaded` = localized reason it is shown but disabled. */
+interface PickerOption {
+  value: string;
+  label: string;
+  notLoaded?: string;
+}
 
 // Display order for the platform-models card: llm → asr → embedding → image,
 // with tts/video trailing. Unknown types fall to the end (99).
@@ -856,6 +864,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     [nousModels],
   );
 
+  // Idle on nous-engine (authorized, not loaded): the row is listed but the
+  // pickers disable it with this reason (utils/platformModel). A saved value
+  // that is idle stays selected — UiSelect dims it and titles the trigger.
+  const nousNotLoadedReason = (m: NousModelPublic): string | undefined =>
+    platformModelAvailability(m).reason === 'not_loaded'
+      ? t('platformModel.notLoaded')
+      : undefined;
+
   // A saved task assignment pointing at a platform row that is now hidden
   // (failed probe). The picker keeps it as an explicit "unavailable" option so
   // the value is never silently replaced by whatever the <select> shows first.
@@ -1097,8 +1113,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
 
   // Helper: build transcription task options (provider:model format).
   // Transcription doesn't use agent framework — it stays as provider:model.
-  const getTranscriptionOptions = (): { value: string; label: string }[] => {
-    const options: { value: string; label: string }[] = [];
+  const getTranscriptionOptions = (): PickerOption[] => {
+    const options: PickerOption[] = [];
     const enabledProviders = getEnabledProviders();
 
     for (const { key, name } of enabledProviders) {
@@ -1131,6 +1147,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
             name: platformModelText(model),
             pricing: pricingLabel,
           }) + (warning ? ` — ${warning}` : ''),
+        notLoaded: nousNotLoadedReason(model),
       });
     }
 
@@ -1239,6 +1256,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
               label:
                 t('aiSettings.platformLlmOption', { name: platformModelText(m) }) +
                 (warning ? ` — ${warning}` : ''),
+              notLoaded: nousNotLoadedReason(m),
             };
           })
       : [];
@@ -1287,7 +1305,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           {nousLlmOptions.length > 0 && (
             <optgroup label={t('aiSettings.groupPlatform')}>
               {nousLlmOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                <option
+                  key={opt.value}
+                  value={opt.value}
+                  disabled={Boolean(opt.notLoaded)}
+                  data-description={opt.notLoaded}
+                >
+                  {opt.label}
+                </option>
               ))}
             </optgroup>
           )}
@@ -1455,7 +1480,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
               className="min-w-[220px]"
             >
               {getTranscriptionOptions().map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                <option
+                  key={opt.value}
+                  value={opt.value}
+                  disabled={Boolean(opt.notLoaded)}
+                  data-description={opt.notLoaded}
+                >
+                  {opt.label}
+                </option>
               ))}
             </UiSelect>
             )}
@@ -1912,6 +1944,17 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                               <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-ink-800 text-ink-400">
                                 {m.type}
                               </span>
+                              {/* Still toggleable — the switch is a preference,
+                                  not a pick — but say it cannot run right now. */}
+                              {nousNotLoadedReason(m) && (
+                                <span
+                                  data-testid="platform-model-not-loaded"
+                                  title={nousNotLoadedReason(m)}
+                                  className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-ink-800 text-ink-500"
+                                >
+                                  {t('platformModel.notLoadedSuffix')}
+                                </span>
+                              )}
                             </div>
                             {renderToggle(modelEnabled, () => toggleNousModel(m.name))}
                           </div>

@@ -233,6 +233,11 @@ on:
       - 'backend/tests/db/test_migration_499_resource_embeddings_integration.py'
       - 'backend/app/repositories/resource_embeddings_repository.py'
       - 'backend/app/repositories/embedding_space_repository.py'
+      # mig 504：分享密码改 bcrypt。回填与 trigger 用 pgcrypto 的 crypt()，后端用
+      # Python 的 bcrypt 校验，两边要对同一段字节（72 字节截断）给出同一结论 ——
+      # 单测跑不到 pgcrypto，只有真库答得出。
+      - 'backend/tests/db/test_migration_504_share_password_hash_integration.py'
+      - 'backend/app/services/library/share_passwords.py'
       # ci_bootstrap.sql 的 auth.uid/role/jwt 桩与 gotrue 上游逐字一致 —— 上面每个
       # RLS 测试都站在这几个桩上，桩和生产不一样，那些测试绿了也不说明生产。
       - 'backend/tests/db/test_ci_bootstrap_auth_stubs_integration.py'
@@ -258,15 +263,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all forty-one, so it has to
+      # to it changes what "green" means for all forty-two, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the forty above was counted with this command, not derived
-      # from the thirty-nine it replaced):
+      # (the forty-two above was counted with this command, not derived
+      # from the forty-one it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -1061,6 +1066,17 @@ jobs:
           # anon / authenticated 没有 EXECUTE；再经真 ORM 引擎跑两个 repository
           # （upsert 原地替换、insert-or-ignore 的空间键、coverage 与缺行反连接）。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_499_resource_embeddings_integration.py -v
+
+      - name: Assert mig 504 hashed share passwords and pgcrypto agrees with the backend
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 回填把明文换成 bcrypt + 随机锁值、重跑不改哈希；trigger 把旧写法的明文
+          # 当场哈希、不碰新代码写的行；pgcrypto 与 Python bcrypt 互相认对方的哈希
+          # （含超过 72 字节的多字节密码）；anon / authenticated 不能执行 trigger 函数。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_504_share_password_hash_integration.py -v
 
       - name: Assert the CI auth.uid/role/jwt stubs behave exactly like gotrue's
         working-directory: backend

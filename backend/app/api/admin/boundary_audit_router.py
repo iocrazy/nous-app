@@ -12,12 +12,32 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
+from app.schemas.admin_observability import (
+    AdminBoundaryAuditPage,
+    AdminBoundaryAuditSummary,
+)
 
 router = APIRouter()
+
+BOUNDARY_AUDIT_UNAVAILABLE = "boundary_audit_unavailable"
+
+
+def _unavailable() -> HTTPException:
+    """A failed read is not "no blocks". Before P8 both routes answered a
+    database error with 200 and an empty list (plus an ``error`` string), the
+    same body as a quiet week — exactly the "empty output read as a negative
+    result" this viewer must never give an operator watching for attacks."""
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": BOUNDARY_AUDIT_UNAVAILABLE,
+            "message": "The boundary audit log could not be read.",
+        },
+    )
 
 
 def _serialize(row: Any) -> dict[str, Any]:
@@ -35,7 +55,7 @@ def _serialize(row: Any) -> dict[str, Any]:
     }
 
 
-@router.get("")
+@router.get("", response_model=AdminBoundaryAuditPage)
 async def list_boundary_audit(
     admin: AdminAuthDep,
     layer: Optional[str] = Query(
@@ -45,7 +65,7 @@ async def list_boundary_audit(
     reason: Optional[str] = Query(None, description="Filter by reason (exact match)"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
-) -> dict[str, Any]:
+) -> Any:
     """List recent boundary blocks (most recent first).
 
     Pagination via limit/offset. Filters by layer + reason are AND-combined.
@@ -89,17 +109,11 @@ async def list_boundary_audit(
         }
     except Exception as e:
         logger.error(f"[admin/boundary-audit] list failed: {e}")
-        return {
-            "items": [],
-            "total": 0,
-            "limit": limit,
-            "offset": offset,
-            "error": str(e),
-        }
+        raise _unavailable()
 
 
-@router.get("/summary")
-async def boundary_audit_summary(admin: AdminAuthDep) -> dict[str, Any]:
+@router.get("/summary", response_model=AdminBoundaryAuditSummary)
+async def boundary_audit_summary(admin: AdminAuthDep) -> Any:
     """Aggregated counts by layer + reason for the last 7 days.
 
     Used by the admin dashboard to spot surges in attack attempts."""
@@ -136,7 +150,7 @@ async def boundary_audit_summary(admin: AdminAuthDep) -> dict[str, Any]:
             ]
     except Exception as e:
         logger.error(f"[admin/boundary-audit] summary failed: {e}")
-        return {"by_layer": {}, "by_reason": {}, "total_7d": 0, "error": str(e)}
+        raise _unavailable()
 
     by_layer: dict[str, int] = {}
     by_reason: dict[str, int] = {}

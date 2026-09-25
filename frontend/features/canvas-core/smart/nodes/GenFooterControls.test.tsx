@@ -173,3 +173,42 @@ describe('GenFooterControls — model popover rows', () => {
     expect(screen.queryByText(/· local/)).toBeNull();
   });
 });
+
+describe('GenFooterControls — model not loaded on nous-engine', () => {
+  const WITH_IDLE = [
+    { name: 'codex-image', display_name: 'GPT Image (Codex)', last_test_status: 'ok' },
+    { name: 'nous-studio-image', display_name: 'Studio Image', last_test_status: 'idle' },
+  ];
+
+  function renderIdle(gen: Record<string, unknown>, onChange = vi.fn()) {
+    render(
+      <GenFooterControls
+        gen={{ kind: 'image', model: '', ratio: '1:1', count: 1, ...gen } as never}
+        models={WITH_IDLE as never}
+        onChange={onChange}
+      />,
+    );
+    return onChange;
+  }
+
+  it('lists the idle model disabled, with the reason, and ignores a click on it', () => {
+    const onChange = renderIdle({});
+    fireEvent.click(screen.getByTestId('pill-model'));
+    const row = screen.getByRole('button', { name: /Studio Image/ }) as HTMLButtonElement;
+    expect(row.disabled).toBe(true);
+    expect(row.getAttribute('title')).toBe('Not loaded on nous-engine');
+    expect(row.textContent).toContain('Not loaded on nous-engine');
+    fireEvent.click(row);
+    expect(onChange).not.toHaveBeenCalled();
+    expect((screen.getByRole('button', { name: /GPT Image/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it('keeps a saved idle model on the pill, titled with the reason', () => {
+    renderIdle({ model: 'nous-studio-image' });
+    const pill = screen.getByTestId('pill-model');
+    expect(pill.textContent).toContain('Studio Image');
+    expect(pill.getAttribute('title')).toBe('Not loaded on nous-engine');
+  });
+});

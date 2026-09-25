@@ -45,10 +45,13 @@ class _FakeScalars:
 
 
 class _FakeResult:
-    def __init__(self, session: "_FakeSession") -> None:
+    def __init__(self, session: "_FakeSession", existing: list[Any] | None = None):
         self._s = session
+        self._existing = existing
 
     def scalars(self) -> _FakeScalars:
+        if self._existing is not None:
+            return _FakeScalars(self._existing)
         return _FakeScalars(self._s.rows)
 
     def all(self) -> list[Any]:
@@ -68,9 +71,18 @@ class _FakeSession:
         self.tuples: list[Any] = []  # result.all()  (row tuples)
         self.scalar_value: Any = None  # session.scalar()
         self.first_value: Any = None  # result.first() (RETURNING id delete)
+        # Ids the existence checks (``SELECT <table>.id ... WHERE id IN``) find;
+        # None = every id asked about exists.
+        self.missing: set[int] = set()
 
     async def execute(self, stmt: Any) -> _FakeResult:
-        self.calls.append(_compile(stmt))
+        sql, binds = _compile(stmt)
+        self.calls.append((sql, binds))
+        if sql.startswith(
+            ("SELECT public.tags.id \n", "SELECT public.tag_groups.id \n")
+        ):
+            asked = [i for v in binds.values() for i in v]
+            return _FakeResult(self, [i for i in asked if i not in self.missing])
         return _FakeResult(self)
 
     async def scalar(self, stmt: Any) -> Any:
@@ -505,3 +517,87 @@ async def test_reorder_tags_noop_on_empty(
 ) -> None:
     await repo.reorder_tags([])
     assert fake_session.calls == []
+
+
+# ─── Unknown / non-numeric ids write nothing ───────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda r: r.reorder_groups(["10", "20"]),
+        lambda r: r.reorder_tags(["10", "20"]),
+        lambda r: r.batch_set_color(["10", "20"], "#fff"),
+        lambda r: r.batch_delete(["10", "20"]),
+        lambda r: r.batch_set_group(["10", "20"], None),
+    ],
+)
+async def test_list_write_with_an_unknown_id_is_false_and_writes_nothing(
+    repo: AdminTagsRepository, fake_session: _FakeSession, call: Any
+) -> None:
+    fake_session.missing = {20}
+    assert await call(repo) is False
+    assert not [s for s, _ in fake_session.calls if not s.startswith("SELECT")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda r: r.reorder_groups(["10", "x"]),
+        lambda r: r.reorder_tags(["10", "x"]),
+        lambda r: r.batch_set_color(["x"], "#fff"),
+        lambda r: r.batch_delete(["x"]),
+        lambda r: r.batch_set_group(["x"], None),
+        lambda r: r.delete_tag("x"),
+        lambda r: r.delete_group("x"),
+    ],
+)
+async def test_non_numeric_id_is_false_not_valueerror(
+    repo: AdminTagsRepository, fake_session: _FakeSession, call: Any
+) -> None:
+    assert await call(repo) is False
+    assert fake_session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_update_with_non_numeric_id_is_none(
+    repo: AdminTagsRepository, fake_session: _FakeSession
+) -> None:
+    assert await repo.update_tag("x", {"name": "n"}) is None
+    assert await repo.update_group("x", {"name": "n"}) is None
+    assert fake_session.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group_id", ["42", "not-a-group"])
+async def test_unknown_group_raises_and_writes_nothing(
+    repo: AdminTagsRepository, fake_session: _FakeSession, group_id: str
+) -> None:
+    fake_session.missing = {42}
+    with pytest.raises(mod.AdminTagGroupNotFound):
+        await repo.create_tag({"name": "n", "type": "user", "group_id": group_id})
+    with pytest.raises(mod.AdminTagGroupNotFound):
+        await repo.update_tag("5", {"group_id": group_id})
+    with pytest.raises(mod.AdminTagGroupNotFound):
+        await repo.batch_set_group(["5"], group_id)
+    assert not [s for s, _ in fake_session.calls if not s.startswith("SELECT")]
+
+
+@pytest.mark.asyncio
+async def test_list_tags_non_numeric_group_filter_is_empty_not_500(
+    repo: AdminTagsRepository, fake_session: _FakeSession
+) -> None:
+    assert await repo.list_tags(page=1, page_size=10, group_id="abc") == ([], 0)
+    assert fake_session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_list_tags_sort_by_a_non_column_falls_back(
+    repo: AdminTagsRepository, fake_session: _FakeSession
+) -> None:
+    fake_session.scalar_value = 0
+    await repo.list_tags(page=1, page_size=10, sort_by="metadata", sort_order="desc")
+    sql, _ = fake_session.calls[-1]
+    assert "ORDER BY public.tags.sort_order DESC" in sql

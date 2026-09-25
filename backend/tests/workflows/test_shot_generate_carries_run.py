@@ -7,6 +7,9 @@
 加宽的是**四个**站点（出图三个、出视频一个）。agent 工具那个手里早就有
 ``scope.run_id``，今天只写进了 task_tracking 的 metadata；漏掉任何一个，
 就是那条路的产出永远无 run 可挂。
+
+OpenAPI P7 退役了出视频 workflow 与它的派发路由；今天剩出图两个站点，
+本文件只测出图这条。
 """
 
 import ast
@@ -60,41 +63,6 @@ async def test_image_workflow_backfills_the_run_coordinates(monkeypatch):
     assert out["image_url"] == "/api/v1/generated-media/55/cover"
     origin = seen["origin"]
     assert (origin.run_id, origin.turn, origin.step) == (777, 1, 4)
-
-
-async def test_video_workflow_backfills_the_run_coordinates(monkeypatch):
-    import app.workflows.script_shot_video as wf
-
-    seen: dict = {}
-
-    async def _fake_register(**kwargs):
-        seen["origin"] = kwargs["origin"]
-        return {"id": 66}
-
-    monkeypatch.setattr(
-        "app.services.library.generated_media_service.register_generated_media",
-        _fake_register,
-    )
-
-    _stub_repos(monkeypatch)
-    monkeypatch.setattr(wf, "_resolve_scope_id", _fake_scope_id)
-    monkeypatch.setattr(wf, "reap_scratch_dir", lambda _p: None)
-
-    url = await _call_step(
-        wf.persist_video_generation,
-        shot_id="1",
-        local_path="/tmp/jimeng_x/out.mp4",
-        model="m",
-        provider="p",
-        user_id="u",
-        run_id=777,
-        turn=1,
-        step=9,
-    )
-
-    assert url == "/api/v1/generated-media/66/stream"
-    origin = seen["origin"]
-    assert (origin.run_id, origin.turn, origin.step) == (777, 1, 9)
 
 
 async def test_no_run_leaves_the_origin_honestly_empty(monkeypatch):
@@ -204,59 +172,6 @@ async def test_a_legacy_replay_without_attribution_still_drops_the_sentinel(
     assert (origin.provider, origin.model) == ("ark", None)
 
 
-async def test_video_persist_registers_the_resolved_provider_and_model(monkeypatch):
-    """出视频同族：请求侧的 model/provider 是**目录行名**（step 拿它当
-    ``resolve_video_provider`` 的 name），不是跑出来的那一行。"""
-    import app.workflows.script_shot_video as wf
-
-    seen: dict = {}
-
-    async def _fake_register(**kwargs):
-        seen["origin"] = kwargs["origin"]
-        return {"id": 67}
-
-    monkeypatch.setattr(
-        "app.services.library.generated_media_service.register_generated_media",
-        _fake_register,
-    )
-    _stub_repos(monkeypatch)
-    monkeypatch.setattr(wf, "_resolve_scope_id", _fake_scope_id)
-    monkeypatch.setattr(wf, "reap_scratch_dir", lambda _p: None)
-
-    await _call_step(
-        wf.persist_video_generation,
-        shot_id="1",
-        local_path="/tmp/jimeng_x/out.mp4",
-        model="nous-video",
-        provider=None,
-        user_id="u",
-        run_id=777,
-        turn=1,
-        step=9,
-        resolved_provider="jimeng-cli",
-        resolved_model="seedance2.0fast",
-    )
-    origin = seen["origin"]
-    assert (origin.provider, origin.model) == ("jimeng-cli", "seedance2.0fast")
-
-
-def test_a_legacy_video_string_checkpoint_still_persists():
-    """出视频 step 的旧 checkpoint 同样是裸 ``str``（那边的载荷是本地路径）。"""
-    import app.workflows.script_shot_generate as wf
-
-    # 第四格是层标记（积分 Task 2）。出视频这条路上恒 False —— 视频目录
-    # 没有 BYOK 层，冻结的旧 checkpoint 更不会有这个键。
-    assert wf._step_output("/tmp/jimeng_x/out.mp4", key="path") == (
-        "/tmp/jimeng_x/out.mp4",
-        None,
-        None,
-        False,
-    )
-    assert wf._step_output(
-        {"path": "/p", "provider": "jimeng-cli", "model": "m"}, key="path"
-    ) == ("/p", "jimeng-cli", "m", False)
-
-
 def test_a_legacy_string_checkpoint_still_persists():
     """DBOS 冻结的旧 step 返回值是裸 str——回放时必须照旧能走完。"""
     import app.workflows.script_shot_generate as wf
@@ -304,9 +219,9 @@ async def test_agent_tool_enqueue_carries_the_run_it_already_has(monkeypatch):
 #: 派发这两条 workflow 的调用，其 ``dbos_workflow_kwargs`` 必须带的三个键。
 _RUN_COORDINATES = ("run_id", "turn", "step")
 
-#: 只认这两条 workflow —— 同一个 router 里还有一个 breakdown workflow，
+#: 只认出图 workflow（出视频那条已于 OpenAPI P7 退役）—— 同一个 router 里还有一个 breakdown workflow，
 #: 按文件名扫会把它算进来。
-_WATCHED_WORKFLOWS = ("script_shot_generate_workflow", "script_shot_video_workflow")
+_WATCHED_WORKFLOWS = ("script_shot_generate_workflow",)
 
 
 class _EnqueueSite(NamedTuple):
@@ -376,11 +291,11 @@ def _scan_enqueue_sites() -> list[_EnqueueSite]:
 
 
 def test_every_shot_enqueue_site_passes_the_three_keys():
-    """三个站点全覆盖——而且是**扫出来的**，不是手数的。
+    """两个站点全覆盖——而且是**扫出来的**，不是手数的。
 
     OpenAPI P6 删掉了人手点的 ``/shots/{id}/generate``（#1797 之后没有调用方），
-    站点从四个降到三个：出图是 agent 的 ``GenerateShotImage`` 与项目的
-    ``generate-missing``，出视频是 ``/shots/{id}/generate-video``。
+    P7 退役了出视频的 ``/shots/{id}/generate-video`` 与它的 workflow，站点剩两个：
+    agent 的 ``GenerateShotImage`` 与项目的 ``generate-missing``。
 
     加宽站点这件事的失败模式就是漏掉一个，而漏掉的那个通常没有测试。
     新加第五个站点忘了带坐标，这条转红——无论那个站点的参数怎么排、
@@ -388,12 +303,11 @@ def test_every_shot_enqueue_site_passes_the_three_keys():
     """
     sites = _scan_enqueue_sites()
 
-    assert len(sites) == 3, f"expected 3 enqueue sites, found {len(sites)}: {sites}"
-    # 出图两个、出视频一个——数量对了但类型错了，说明扫到了别的 workflow。
+    assert len(sites) == 2, f"expected 2 enqueue sites, found {len(sites)}: {sites}"
+    # 数量对了但类型错了，说明扫到了别的 workflow。
     assert sorted(s.which for s in sites) == [
         "script_shot_generate_workflow",
         "script_shot_generate_workflow",
-        "script_shot_video_workflow",
     ]
     missing = [
         s.where
@@ -564,34 +478,6 @@ async def test_image_workflow_hands_the_run_coordinates_to_its_persist_step(
     assert (kwargs["resolved_provider"], kwargs["resolved_model"]) == ("ark", "m")
 
 
-async def test_video_workflow_hands_the_run_coordinates_to_its_persist_step(
-    monkeypatch,
-):
-    import app.workflows.script_shot_video as wf
-
-    generate = _StepSpy(
-        {"path": "/tmp/jimeng_x/out.mp4", "provider": "jimeng-cli", "model": "sd2"}
-    )
-    persist = _StepSpy("/api/v1/generated-media/66/stream")
-    done = _StepSpy(None)
-    monkeypatch.setattr(wf, "generate_shot_video_step", generate)
-    monkeypatch.setattr(wf, "persist_video_generation", persist)
-    monkeypatch.setattr(wf, "mark_shot_video_done", done)
-
-    out = await _body(wf.script_shot_video_workflow)(
-        "1", model="m", provider="p", user_id="u", run_id=777, turn=3, step=9
-    )
-
-    assert out["status"] == "success"
-    args, kwargs = persist.calls[0]
-    passed = dict(zip(_VIDEO_PERSIST_POSITIONAL, args)) | kwargs
-    assert (passed["run_id"], passed["turn"], passed["step"]) == (777, 3, 9)
-    assert (kwargs["resolved_provider"], kwargs["resolved_model"]) == (
-        "jimeng-cli",
-        "sd2",
-    )
-
-
 async def test_a_human_click_reaches_the_step_with_no_run_at_all(monkeypatch):
     """人手点的 /generate 没有 run。workflow 体把 None 原样传下去才对 ——
     回填成 0 或者省略键都会让登记口把一次人手生成记成某个 run 的产出。"""
@@ -622,16 +508,6 @@ _PERSIST_POSITIONAL = (
     "turn",
     "step",
 )
-_VIDEO_PERSIST_POSITIONAL = (
-    "shot_id",
-    "local_path",
-    "model",
-    "provider",
-    "user_id",
-    "run_id",
-    "turn",
-    "step",
-)
 
 
 def test_the_positional_map_matches_the_step_signature():
@@ -644,7 +520,6 @@ def test_the_positional_map_matches_the_step_signature():
     import inspect
 
     import app.workflows.script_shot_generate as img
-    import app.workflows.script_shot_video as vid
 
     def _positional(fn) -> tuple[str, ...]:
         params = inspect.signature(getattr(fn, "__wrapped__", fn)).parameters
@@ -657,9 +532,6 @@ def test_the_positional_map_matches_the_step_signature():
     assert _positional(img.persist_generation)[: len(_PERSIST_POSITIONAL)] == (
         _PERSIST_POSITIONAL
     )
-    assert _positional(vid.persist_video_generation)[
-        : len(_VIDEO_PERSIST_POSITIONAL)
-    ] == (_VIDEO_PERSIST_POSITIONAL)
 
 
 # --------------------------------------------------------------------------

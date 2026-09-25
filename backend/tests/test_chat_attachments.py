@@ -70,6 +70,53 @@ async def test_save_chat_image_raises_for_non_member():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_save_chat_image_outsider_cannot_probe_conversation_ids():
+    """A missing conversation and someone else's both answer "not a member".
+
+    The lookup used to run first, so an outsider got 400 "not found" for a
+    free id and 403 for a taken one.
+    """
+    from app.services.chat.chat_attachment_service import save_chat_image
+
+    fake_conv_repo = AsyncMock()
+    fake_conv_repo.get_conversation.return_value = None
+    fake_conv_repo.is_member.return_value = False
+
+    with pytest.raises(PermissionError, match="not a member"):
+        await save_chat_image(
+            conversation_id=404,
+            user_id="outsider",
+            file_bytes=b"\xff\xd8\xff",
+            filename="photo.jpg",
+            mime="image/jpeg",
+            conv_repo=fake_conv_repo,
+        )
+    fake_conv_repo.get_conversation.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_save_chat_image_member_of_vanished_conversation_gets_not_found():
+    """Same setup, caller IS a member: the lookup still runs and reports it."""
+    from app.services.chat.chat_attachment_service import save_chat_image
+
+    fake_conv_repo = AsyncMock()
+    fake_conv_repo.get_conversation.return_value = None
+    fake_conv_repo.is_member.return_value = True
+
+    with pytest.raises(ValueError, match="not found"):
+        await save_chat_image(
+            conversation_id=404,
+            user_id="member",
+            file_bytes=b"\xff\xd8\xff",
+            filename="photo.jpg",
+            mime="image/jpeg",
+            conv_repo=fake_conv_repo,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_save_chat_image_writes_file_and_calls_insert(tmp_path, monkeypatch):
     """Happy path: file written atomically + INSERT called with correct params."""
     import app.services.library.generated_media_service as gm_svc

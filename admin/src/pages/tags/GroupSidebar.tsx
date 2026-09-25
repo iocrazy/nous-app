@@ -107,7 +107,7 @@ function SortableGroupItem({
         })
       }}
     >
-      <Menu.Item key={group.id} onClick={onSelect}>
+      <Menu.Item key={String(group.id)} onClick={onSelect}>
         <span {...attributes} {...listeners} style={{ cursor: 'grab', marginRight: 6 }}>
           ⠿
         </span>
@@ -150,7 +150,7 @@ export function GroupSidebar({
     const reordered = [...groups]
     const [moved] = reordered.splice(oldIndex, 1)
     reordered.splice(newIndex, 0, moved)
-    onReorderGroups(reordered.map((g) => g.id))
+    onReorderGroups(reordered.map((g) => String(g.id)))
   }
 
   const handleCreateSubmit = () => {
@@ -216,9 +216,9 @@ export function GroupSidebar({
               <SortableGroupItem
                 key={group.id}
                 group={group}
-                onSelect={() => onSelect(group.id)}
-                onRename={(name) => onRenameGroup(group.id, name)}
-                onDelete={() => onDeleteGroup(group.id)}
+                onSelect={() => onSelect(String(group.id))}
+                onRename={(name) => onRenameGroup(String(group.id), name)}
+                onDelete={() => onDeleteGroup(String(group.id))}
               />
             ))}
           </Menu>

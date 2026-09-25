@@ -15,6 +15,7 @@ from app.api.admin.settings_validation import (
     SettingValidationError,
     validate_setting_value,
 )
+from app.api.row_guard import require_row
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.system_settings_repository import (
     get_system_settings_repository,
@@ -23,10 +24,13 @@ from app.repositories.nous_model_repository import (
     NousModelRepository,
     get_nous_model_repository,
 )
+from app.schemas.admin_settings_catalog import AdminNousModelDeleteResult
 from app.schemas.ai import TestConnectionResponse
 from app.schemas.nous_model import (
     CardLabelsResponse,
     CardLabelsUpdate,
+    NousEngineSyncResponse,
+    NousEngineSyncSkipped,
     NousModelCreate,
     NousModelProbeRequest,
     NousModelResponse,
@@ -38,6 +42,11 @@ from app.schemas.nous_model import (
 from app.services.ai.model_pricing_coverage import (
     load_priced_models,
     price_coverage_for,
+)
+from app.services.ai.nous_engine_sync import (
+    engine_endpoints,
+    merge_reports,
+    sync_all_engines,
 )
 
 # Shared probe — same implementation the scheduled health poll uses. Aliased to
@@ -215,6 +224,53 @@ async def probe_nous_models(body: NousModelProbeRequest, auth: AdminAuthDep):
     return TestConnectionResponse(**result)
 
 
+@router.post("/sync-engine", response_model=NousEngineSyncResponse)
+async def sync_nous_engine_models(auth: AdminAuthDep):
+    """Mirror nous-engine's ``/v1/models`` into the catalog now.
+
+    Same sync the hourly health step runs first (``nous_engine_sync``): every
+    listed service without a row gets ``nous-<id>`` (credentials copied from
+    an existing engine row, zero price row), existing rows only take a newer
+    ``context_window``. Rows missing from the list are never disabled.
+
+    400 ``no_engine_row`` when no enabled ``actual_provider='nous'`` row exists
+    to take the endpoint and key from. An engine that cannot be read is NOT a
+    5xx: the report comes back with ``error`` set (admin-only text, same as
+    the probe endpoints; a 5xx would be scrubbed by the error shell).
+    """
+    repo = get_nous_model_repository()
+    rows = await repo.list_all()
+    if not engine_endpoints(rows):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "no_engine_row",
+                "message": (
+                    "No enabled nous-engine model to take the endpoint and key "
+                    "from. Add one model on the nous provider first."
+                ),
+            },
+        )
+    results = await sync_all_engines(rows)
+    report = merge_reports([r for _, r in results])
+    if report.created or report.updated:
+        await refresh_catalog_windows()
+    logger.info(
+        f"[Admin] nous-engine sync: discovered={report.discovered} "
+        f"created={len(report.created)} updated={len(report.updated)} "
+        f"skipped={len(report.skipped)} error={report.error!r}"
+    )
+    return NousEngineSyncResponse(
+        discovered=report.discovered,
+        created=list(report.created),
+        updated=list(report.updated),
+        skipped=[
+            NousEngineSyncSkipped(id=s.id, reason=s.reason) for s in report.skipped
+        ],
+        error=report.error,
+    )
+
+
 async def _reject_name_collision(
     repo: NousModelRepository, name: str, own_id: str | None
 ) -> None:
@@ -310,13 +366,15 @@ async def update_nous_model(model_id: str, body: NousModelUpdate, auth: AdminAut
     return _to_response(row)
 
 
-@router.delete("/{model_id}")
+@router.delete("/{model_id}", response_model=AdminNousModelDeleteResult)
 async def delete_nous_model(model_id: str, auth: AdminAuthDep):
-    """Delete a Nous model."""
+    """Delete a Nous model. A non-numeric id or one that matches no row is a
+    typed 404 (it used to answer 200 "Deleted" for a missing row)."""
+    if not (model_id.isascii() and model_id.isdigit() and int(model_id) < 2**63):
+        require_row(None)
     repo = get_nous_model_repository()
-    ok = await repo.delete(model_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Model not found")
+    if not await repo.delete(model_id):
+        require_row(None)
     logger.info(f"[Admin] Deleted Nous model: {model_id}")
     await refresh_catalog_windows()
     return {"message": "Deleted"}

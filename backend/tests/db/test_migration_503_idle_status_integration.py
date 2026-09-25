@@ -101,7 +101,7 @@ async def test_record_test_result_persists_idle(orm_dsn, pg, model_id) -> None:
     from app.repositories.nous_model_repository import get_nous_model_repository
 
     repo = get_nous_model_repository()
-    detail = "authorized, not loaded (loads on first request)"
+    detail = "authorized, not loaded"
     saved = await repo.record_test_result(str(model_id), "idle", detail, None)
     assert saved is not None, "record_test_result swallowed a CHECK violation"
     row = await pg.fetchrow(

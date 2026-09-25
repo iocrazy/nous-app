@@ -4,6 +4,8 @@
 Review system API endpoints.
 
 Provides CRUD for review comments (with annotations) and review status.
+Every route is limited to resources the caller may read
+(``app/api/reviews_access.py``).
 """
 
 from typing import Any, Dict, List, Optional
@@ -12,7 +14,23 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.api.reviews_access import (
+    require_parent_on_resource,
+    require_review_comment,
+    require_review_resource,
+    require_version_of_resource,
+    review_not_found,
+)
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
+from app.schemas.review_responses import (
+    ReviewCommentCreatedResponse,
+    ReviewCommentDeleted,
+    ReviewCommentListResponse,
+    ReviewCommentResponse,
+    ReviewStatusListResponse,
+    ReviewStatusResponse,
+)
 from app.services.library.review_service import ReviewService
 
 router = APIRouter(prefix="/reviews")
@@ -36,11 +54,6 @@ class CreateReviewCommentRequest(BaseModel):
     annotations: Optional[List[AnnotationInput]] = None
 
 
-class UpdateCommentRequest(BaseModel):
-    content: Optional[str] = Field(None, min_length=1, max_length=5000)
-    status: Optional[str] = Field(None, pattern="^(open|resolved|wontfix)$")
-
-
 class SetReviewStatusRequest(BaseModel):
     resource_id: str
     version_id: Optional[str] = None
@@ -51,9 +64,14 @@ class SetReviewStatusRequest(BaseModel):
 # ─── Comment Endpoints ──────────────────────────────
 
 
-@router.post("/comments")
+@router.post("/comments", response_model=ReviewCommentCreatedResponse)
 async def create_comment(body: CreateReviewCommentRequest, auth: AuthDep):
     """Create a review comment with optional annotations."""
+    await require_review_resource(body.resource_id, auth.user_id)
+    if body.version_id:
+        await require_version_of_resource(body.version_id, body.resource_id)
+    if body.parent_id:
+        await require_parent_on_resource(body.parent_id, body.resource_id)
     try:
         svc = ReviewService()
         annotations = (
@@ -77,7 +95,7 @@ async def create_comment(body: CreateReviewCommentRequest, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to create comment")
 
 
-@router.get("/comments")
+@router.get("/comments", response_model=ReviewCommentListResponse)
 async def list_comments(
     auth: AuthDep,
     resource_id: str = Query(...),
@@ -85,6 +103,7 @@ async def list_comments(
     status: Optional[str] = Query(None, pattern="^(open|resolved|wontfix)$"),
 ):
     """List top-level comments for a resource, with replies and annotations."""
+    await require_review_resource(resource_id, auth.user_id)
     try:
         svc = ReviewService()
         comments = await svc.get_comments(
@@ -98,80 +117,48 @@ async def list_comments(
         raise HTTPException(status_code=500, detail="Failed to list comments")
 
 
-@router.get("/comments/{comment_id}")
-async def get_comment(comment_id: str, auth: AuthDep):
-    """Get a single comment with replies and annotations."""
-    try:
-        svc = ReviewService()
-        comment = await svc.get_comment(comment_id)
-        if not comment:
-            raise HTTPException(status_code=404, detail="Comment not found")
-        return {"success": True, "data": comment}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get comment: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get comment")
-
-
-@router.patch("/comments/{comment_id}")
-async def update_comment(comment_id: str, body: UpdateCommentRequest, auth: AuthDep):
-    """Update a comment's content or status."""
-    try:
-        svc = ReviewService()
-        updates = body.model_dump(exclude_none=True)
-        if not updates:
-            raise HTTPException(status_code=400, detail="No updates provided")
-        comment = await svc.update_comment(comment_id, auth.user_id, updates)
-        return {"success": True, "data": comment}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update comment: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update comment")
-
-
-@router.post("/comments/{comment_id}/resolve")
+@router.post("/comments/{comment_id}/resolve", response_model=ReviewCommentResponse)
 async def resolve_comment(comment_id: str, auth: AuthDep):
     """Mark a comment as resolved."""
+    await require_review_comment(comment_id, auth.user_id)
     try:
         svc = ReviewService()
         comment = await svc.resolve_comment(comment_id, auth.user_id)
-        return {"success": True, "data": comment}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError:
+        raise review_not_found("Comment not found")
     except Exception as e:
         logger.error(f"Failed to resolve comment: {e}")
         raise HTTPException(status_code=500, detail="Failed to resolve comment")
+    # None: the row went away between the guard and the write.
+    return {"success": True, "data": require_row(comment)}
 
 
-@router.post("/comments/{comment_id}/reopen")
+@router.post("/comments/{comment_id}/reopen", response_model=ReviewCommentResponse)
 async def reopen_comment(comment_id: str, auth: AuthDep):
     """Reopen a resolved comment."""
+    await require_review_comment(comment_id, auth.user_id)
     try:
         svc = ReviewService()
         comment = await svc.reopen_comment(comment_id, auth.user_id)
-        return {"success": True, "data": comment}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError:
+        raise review_not_found("Comment not found")
     except Exception as e:
         logger.error(f"Failed to reopen comment: {e}")
         raise HTTPException(status_code=500, detail="Failed to reopen comment")
+    # None: the row went away between the guard and the write.
+    return {"success": True, "data": require_row(comment)}
 
 
-@router.delete("/comments/{comment_id}")
+@router.delete("/comments/{comment_id}", response_model=ReviewCommentDeleted)
 async def delete_comment(comment_id: str, auth: AuthDep):
     """Delete a comment (cascades to replies and annotations)."""
+    await require_review_comment(comment_id, auth.user_id)
     try:
         svc = ReviewService()
         await svc.delete_comment(comment_id, auth.user_id)
         return {"success": True}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError:
+        raise review_not_found("Comment not found")
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
@@ -179,28 +166,15 @@ async def delete_comment(comment_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to delete comment")
 
 
-@router.get("/comments/count")
-async def get_comment_count(
-    auth: AuthDep,
-    resource_id: str = Query(...),
-    version_id: Optional[str] = Query(None),
-):
-    """Get the number of top-level comments for a resource."""
-    try:
-        svc = ReviewService()
-        count = await svc.get_comment_count(resource_id, version_id)
-        return {"success": True, "data": {"count": count}}
-    except Exception as e:
-        logger.error(f"Failed to get comment count: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get comment count")
-
-
 # ─── Review Status Endpoints ────────────────────────
 
 
-@router.post("/status")
+@router.post("/status", response_model=ReviewStatusResponse)
 async def set_review_status(body: SetReviewStatusRequest, auth: AuthDep):
     """Set or update review status (approve, reject, etc.)."""
+    await require_review_resource(body.resource_id, auth.user_id)
+    if body.version_id:
+        await require_version_of_resource(body.version_id, body.resource_id)
     try:
         svc = ReviewService()
         status = await svc.set_review_status(
@@ -218,13 +192,14 @@ async def set_review_status(body: SetReviewStatusRequest, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to set review status")
 
 
-@router.get("/status")
+@router.get("/status", response_model=ReviewStatusListResponse)
 async def get_review_statuses(
     auth: AuthDep,
     resource_id: str = Query(...),
     version_id: Optional[str] = Query(None),
 ):
     """Get all review statuses for a resource."""
+    await require_review_resource(resource_id, auth.user_id)
     try:
         svc = ReviewService()
         statuses = await svc.get_review_statuses(resource_id, version_id)

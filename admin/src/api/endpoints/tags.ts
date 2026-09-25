@@ -1,36 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../client'
+import type { Schema } from '../../types/api'
 
 // --- Types ---
+// Response shapes come from the backend models (app/schemas/admin_tags.py).
+// Ids are Snowflake BIGINTs sent as JSON numbers; request bodies and URL
+// params take them as strings, so convert with String() at that boundary.
 
-export interface TagGroup {
-  id: string
-  name: string
-  sort_order: number
-  tag_count: number
-  created_at: string
-}
-
-export interface TagData {
-  id: string
-  name: string
-  name_zh: string | null
-  color: string | null
-  icon: string | null
-  type: string
-  group_id: string | null
-  group_name: string | null
-  sort_order: number
-  usage_count: number
-  created_at: string
-}
-
-interface GroupsResponse {
-  success: boolean
-  groups: TagGroup[]
-  total_tags: number
-  uncategorized_count: number
-}
+export type TagGroup = Schema<'AdminTagGroupListItem'>
+export type TagData = Schema<'AdminTagListItem'>
+export type TagListResponse = Schema<'AdminTagListResponse'>
+type GroupsResponse = Schema<'AdminTagGroupListResponse'>
 
 // --- Tag Groups ---
 

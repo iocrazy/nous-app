@@ -9,6 +9,9 @@
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
 import { decodeErrorEnvelope } from './errorEnvelope';
+import type { IssueProgress } from '../types/api';
+
+export type { IssueProgress, IssueProgressRun } from '../types/api';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -389,60 +392,8 @@ export async function deleteIssue(issueId: number): Promise<void> {
 
 // ── issue.rollup (harness P4 §1-②) ──────────────────────────────────────────
 
-export type IssuePhase = 'paused' | 'waiting_input' | 'running' | 'blocked' | 'done' | 'idle';
-
-export interface IssueProgressRun {
-  id: string;
-  status: string;
-  started_at: string | null;
-  ended_at: string | null;
-  model: string | null;
-  error_code: string | null;
-  cost_cents: number;
-  ended: { reason: string } | null;
-  step: { done: number; total: number; label: string | null } | null;
-  /** 真扣掉的积分（point_transactions 的 consume 流水求和）。null = 没扣过
-   *  （BYOK / 急停关闭 / 零花费），不是扣了 0。 */
-  charged_points: number | null;
-}
-
-export interface IssueProgress {
-  issue_id: string;
-  status: string;
-  phase: IssuePhase;
-  paused_at: string | null;
-  current_run: {
-    id: string;
-    status: string;
-    started_at: string | null;
-    model: string | null;
-    /**
-     * The transcript sequence this run has reached — the watermark the turn
-     * signal dedupes on, so the polling edge and the WS `done` frame for one
-     * turn count as one event. A NUMBER (a per-run counter, not a Snowflake),
-     * and absent on a backend older than 3b Task 4b.
-     */
-    last_seq?: number | null;
-    /** `agent_runs.metadata_json.view` — read through runView.ts selectors. */
-    view: Record<string, unknown>;
-    cost: Record<string, unknown>;
-  } | null;
-  runs: IssueProgressRun[];
-  sub_issues: { total: number; done: number; items: { id: string; identifier: string | null; title: string | null; status: string | null }[] };
-  inbox_pending: number;
-  budget: { budget_cents: number | null; spent_cents: number; pct: number | null; state: 'ok' | 'warn' | 'over' };
-  /** 3c §3.3：计数是全体 run 求和，cost_per_deliverable_cents 的分子却是 root-only
-   *  的树总额——口径差异是后端故意的，前端只显示不重算。 */
-  efficiency: {
-    runs: number; steps: number; tool_calls: number; tool_errors: number;
-    deliverables: number; avg_run_ms: number | null;
-    cost_per_deliverable_cents: number | null;
-    turn_end_reasons: Record<string, number>;
-  };
-  origin: { kind: string; origin_id?: string | null; [k: string]: unknown };
-  execution_state: Record<string, unknown>;
-  computed_at: string;
-}
+/** The phase `GET /issues/{id}/progress` derives from the runs. */
+export type IssuePhase = IssueProgress['phase'];
 
 /** `GET /issues/{id}/progress` — computed from the runs, never from
  *  execution_state alone (the MH-1 drift). */

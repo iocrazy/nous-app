@@ -688,9 +688,9 @@ async def start_workflow_routed(
     from dbos import DBOS, DBOSContextSetAuth, SetWorkflowID
 
     kwargs = dbos_workflow_kwargs or {}
-    # Set authenticated_user on the DBOS workflow_status row so
-    # GET /api/v1/workflows/runs can filter by user. Requires user_id
-    # in workflow kwargs.
+    # Set authenticated_user on the DBOS workflow_status row (surfaced by
+    # GET /api/v1/workflows/{id}/status). Requires user_id in workflow
+    # kwargs.
     user_id = kwargs.get("user_id")
 
     # Gateway enqueue-only path (dormant): when a DBOSClient is wired, the

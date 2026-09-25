@@ -375,11 +375,12 @@ class ProjectFileCommentRow(BaseModel):
 
 
 class ProjectShareRow(BaseModel):
-    """One ``shares`` row, without its ``password``.
+    """One ``shares`` row, without its two password columns.
 
-    The column holds the password in plain text, and these two routes used to
-    return it to every project reader. ``has_password`` replaces it, the same
-    redaction ``shares_router._enrich_share`` already applies.
+    These two routes used to return the plain-text password to every project
+    reader. ``has_password`` replaces both ``password`` (a random lock since
+    mig 504) and ``password_hash``, the same redaction
+    ``shares_router._enrich_share`` applies.
     """
 
     id: int

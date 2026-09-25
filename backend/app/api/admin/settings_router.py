@@ -53,6 +53,12 @@ from app.schemas.admin import (
     TopicPrefilterConfigResponse,
     TopicScoringConfigResponse,
 )
+from app.schemas.admin_settings_catalog import (
+    AdminMemoryDemoteResult,
+    AdminMemoryPromotionApproveResult,
+    AdminMemoryPromotionRejectResult,
+    AdminSecretsSelfhealSummary,
+)
 from app.services.ai.memory import registry as memory_registry
 from app.services.ai.memory.graph_memory import STRUCTURED_OUTPUT_MODES
 from app.services.ai.memory.honcho_memory import HonchoMemoryConfig
@@ -760,7 +766,11 @@ async def update_platform_ai_providers_settings(
     return await _read_platform_providers_masked()
 
 
-@router.post("/encrypt-secrets")
+@router.post(
+    "/encrypt-secrets",
+    response_model=AdminSecretsSelfhealSummary,
+    response_model_exclude_unset=True,
+)
 async def encrypt_secrets(auth: AdminAuthDep):
     """Manually re-run the secret-at-rest self-heal sweep (same code path the
     startup task runs): re-encrypts plaintext / dev-keyed secrets in
@@ -1071,7 +1081,10 @@ async def list_memory_promotions(auth: AdminAuthDep, status: str = "pending"):
     return PromotionListResponse(items=items)
 
 
-@router.post("/memory/promotions/{proposal_id}/approve")
+@router.post(
+    "/memory/promotions/{proposal_id}/approve",
+    response_model=AdminMemoryPromotionApproveResult,
+)
 async def approve_memory_promotion(proposal_id: int, auth: AdminAuthDep):
     """Approve a promotion proposal — flips the memory row to shared (Phase C1).
 
@@ -1088,7 +1101,10 @@ async def approve_memory_promotion(proposal_id: int, auth: AdminAuthDep):
     return {"approved": approved}
 
 
-@router.post("/memory/promotions/{proposal_id}/reject")
+@router.post(
+    "/memory/promotions/{proposal_id}/reject",
+    response_model=AdminMemoryPromotionRejectResult,
+)
 async def reject_memory_promotion(proposal_id: int, auth: AdminAuthDep):
     """Reject a promotion proposal — the memory row stays private (Phase C1)."""
     rejected = await reject_proposal(proposal_id=proposal_id, reviewer_id=auth.user_id)
@@ -1101,7 +1117,7 @@ async def reject_memory_promotion(proposal_id: int, auth: AdminAuthDep):
     return {"rejected": rejected}
 
 
-@router.post("/memory/{memory_id}/demote")
+@router.post("/memory/{memory_id}/demote", response_model=AdminMemoryDemoteResult)
 async def demote_agent_memory(memory_id: int, auth: AdminAuthDep):
     """Revoke a shared memory — flip it back to private (Phase C1)."""
     demoted = await demote_memory(memory_id=memory_id)

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../client'
+import type { Schema } from '../../types/api'
 
 export interface SystemSetting {
   key: string
@@ -538,6 +539,14 @@ export interface PromotionListResponse { items: PromotionItem[] }
 
 const PROMOTIONS_URL = '/api/v1/admin/settings/memory/promotions'
 
+// A review write answers 200 with a boolean, and `false` means nothing
+// changed (not pending any more, owner left the team, unknown id, or the
+// write failed). The mutations below turn `false` into an error so the page
+// never shows "approved" for a no-op.
+export type PromotionApproveResult = Schema<'AdminMemoryPromotionApproveResult'>
+export type PromotionRejectResult = Schema<'AdminMemoryPromotionRejectResult'>
+export type MemoryDemoteResult = Schema<'AdminMemoryDemoteResult'>
+
 export function usePromotions(status: 'pending' | 'approved' | 'rejected' = 'pending') {
   return useQuery({
     queryKey: ['settings', 'promotions', status],
@@ -554,12 +563,18 @@ export function useApprovePromotion() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (proposalId: number) => {
-      const { data } = await apiClient.post<{ approved: boolean }>(
+      const { data } = await apiClient.post<PromotionApproveResult>(
         `${PROMOTIONS_URL}/${proposalId}/approve`,
       )
+      if (!data.approved) {
+        throw new Error(
+          'Not approved: the proposal is no longer pending or its owner has left the target team',
+        )
+      }
       return data
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'promotions'] }),
+    // Refetch on failure too: a no-op usually means the list is stale.
+    onSettled: () => qc.invalidateQueries({ queryKey: ['settings', 'promotions'] }),
   })
 }
 
@@ -567,12 +582,16 @@ export function useRejectPromotion() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (proposalId: number) => {
-      const { data } = await apiClient.post<{ rejected: boolean }>(
+      const { data } = await apiClient.post<PromotionRejectResult>(
         `${PROMOTIONS_URL}/${proposalId}/reject`,
       )
+      if (!data.rejected) {
+        throw new Error('Not rejected: the proposal is no longer pending')
+      }
       return data
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'promotions'] }),
+    // Refetch on failure too: a no-op usually means the list is stale.
+    onSettled: () => qc.invalidateQueries({ queryKey: ['settings', 'promotions'] }),
   })
 }
 
@@ -580,12 +599,16 @@ export function useDemoteMemory() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (memoryId: number) => {
-      const { data } = await apiClient.post<{ demoted: boolean }>(
+      const { data } = await apiClient.post<MemoryDemoteResult>(
         `/api/v1/admin/settings/memory/${memoryId}/demote`,
       )
+      if (!data.demoted) {
+        throw new Error('Not demoted: the memory no longer exists')
+      }
       return data
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'promotions'] }),
+    // Refetch on failure too: a no-op usually means the list is stale.
+    onSettled: () => qc.invalidateQueries({ queryKey: ['settings', 'promotions'] }),
   })
 }
 

@@ -101,7 +101,9 @@ jobs:
           # 2026-09-06 在 self-hosted 上关过它（那台机器本地已有缓存，走 5G
           # 上行做云端往返每 job 白烧约 0.36 GB）—— 迁回托管后该理由不成立。
           cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            admin/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -112,11 +114,11 @@ jobs:
       - name: ESLint (react-hooks gate)
         run: npm run lint
 
-      # Non-blocking: surfaces pre-existing type errors in PR output without
-      # breaking CI. Flip to a required step once the backlog is cleared.
+      # Blocking since the typed-frontend work cleared the backlog to zero
+      # (spec 2026-09-24 P-final). `vite build` below does NOT type-check, so
+      # this step is the only thing that runs tsc over frontend/.
       - name: TypeScript check
         run: npm run typecheck
-        continue-on-error: true
 
       - name: No zinc utilities (ink migration guard)
         run: bash scripts/check-no-zinc.sh
@@ -134,7 +136,30 @@ jobs:
             exit 1
           fi
 
-      - name: Build (includes TypeScript check)
+      # Plain `vite build`: it strips types without checking them.
+      - name: Build
+        run: npm run build
+
+      # 管理台（admin/）读同一份 backend/openapi.json 生成自己的类型。它没有
+      # 自己的 job，也没有任何测试；这里至少保证两件事：生成物不过期，以及
+      # `npm run build`（= tsc + vite build，这里的 tsc 是阻塞的）能过 ——
+      # 后端改了 admin 用到的 schema 而 admin 没跟上，就在这一步红。
+      # ci-changed-areas.sh 把 admin/** 与 backend/openapi.json 都映射到本 job。
+      - name: Install admin dependencies
+        working-directory: admin
+        run: npm ci
+
+      - name: Generate admin API types & diff
+        working-directory: admin
+        run: |
+          npm run gen:api
+          if ! git diff --exit-code -- src/types/api.generated.d.ts; then
+            echo "::error::admin/src/types/api.generated.d.ts is stale — run 'npm run gen:api' in admin/ and commit the result."
+            exit 1
+          fi
+
+      - name: Build admin (tsc + vite)
+        working-directory: admin
         run: npm run build
 
       # Phase S (S1) + P1 fix: vitest is now BLOCKING. 52/52 tests pass

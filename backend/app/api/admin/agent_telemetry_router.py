@@ -16,16 +16,24 @@ Read-only; no mutation endpoints.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Request
+from fastapi.responses import PlainTextResponse
 
 from app.core.admin_deps import AdminAuthDep
+from app.schemas.admin_observability import AdminAgentMetrics
 
 router = APIRouter()
+
+PROMETHEUS_MEDIA_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
 
 @router.get(
     "/agent-metrics/prometheus",
     summary="Prometheus text-format counters (for scrape)",
+    response_class=PlainTextResponse,
+    responses={200: {"description": "Prometheus exposition format 0.0.4"}},
 )
 async def agent_metrics_prometheus(request: Request, _auth: AdminAuthDep):
     """Phase K (K4): Prometheus expfmt 0.0.4 output of AgentMetrics.
@@ -41,17 +49,21 @@ async def agent_metrics_prometheus(request: Request, _auth: AdminAuthDep):
     if metrics is None:
         return Response(
             content="# agent_metrics not initialized\n",
-            media_type="text/plain; version=0.0.4; charset=utf-8",
+            media_type=PROMETHEUS_MEDIA_TYPE,
         )
     body = render_prometheus(metrics)
     return Response(
         content=body,
-        media_type="text/plain; version=0.0.4; charset=utf-8",
+        media_type=PROMETHEUS_MEDIA_TYPE,
     )
 
 
-@router.get("/agent-metrics", summary="Snapshot of agent harness counters")
-async def agent_metrics(request: Request, _auth: AdminAuthDep) -> dict:
+@router.get(
+    "/agent-metrics",
+    summary="Snapshot of agent harness counters",
+    response_model=AdminAgentMetrics,
+)
+async def agent_metrics(request: Request, _auth: AdminAuthDep) -> Any:
     """Return the in-process counter store + related registry snapshots.
 
     Per-process — multi-replica fleets see only this process's view.

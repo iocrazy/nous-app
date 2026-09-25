@@ -63,6 +63,13 @@ class _ScalarResult:
         return self._value
 
 
+class _RowcountResult:
+    """Fake UPDATE result: ``rowcount`` rows matched."""
+
+    def __init__(self, rowcount):
+        self.rowcount = rowcount
+
+
 class _MappingResult:
     def __init__(self, rows):
         self._rows = rows
@@ -260,7 +267,7 @@ async def test_reject_proposal_returns_true_and_binds_reviewer():
     """reject_proposal issues an UPDATE and returns True."""
     from app.repositories.agent_memory_promotion_repository import reject_proposal
 
-    session = _Session(_EmptyResult())
+    session = _Session(_RowcountResult(1))
 
     with patch(
         "app.repositories.agent_memory_promotion_repository.write_scope",
@@ -278,6 +285,22 @@ async def test_reject_proposal_returns_true_and_binds_reviewer():
     assert params["reviewer_id"] == "admin-uuid"
 
 
+@pytest.mark.asyncio
+async def test_reject_proposal_reports_a_miss():
+    """No pending proposal with that id (unknown, or already reviewed): the
+    UPDATE matches nothing and the admin must not be told it was rejected."""
+    from app.repositories.agent_memory_promotion_repository import reject_proposal
+
+    session = _Session(_RowcountResult(0))
+    with patch(
+        "app.repositories.agent_memory_promotion_repository.write_scope",
+        return_value=_Scope(session),
+    ):
+        ok = await reject_proposal(proposal_id=7, reviewer_id="admin-uuid")
+
+    assert ok is False
+
+
 # ---------------------------------------------------------------------------
 # demote_memory test
 # ---------------------------------------------------------------------------
@@ -288,7 +311,7 @@ async def test_demote_memory_binds_visibility_private():
     """demote_memory sets visibility='private' on the agent_memory row."""
     from app.repositories.agent_memory_promotion_repository import demote_memory
 
-    session = _Session(_EmptyResult())
+    session = _Session(_RowcountResult(1))
 
     with patch(
         "app.repositories.agent_memory_promotion_repository.write_scope",
@@ -418,3 +441,18 @@ async def test_approve_proposal_returns_false_when_owner_no_longer_member():
         assert not sql_stripped.startswith(
             "UPDATE"
         ), f"Unexpected mutating UPDATE issued after membership check returned False:\n{call['sql']}"
+
+
+@pytest.mark.asyncio
+async def test_demote_memory_reports_a_miss():
+    """No memory row with that id: nothing was demoted."""
+    from app.repositories.agent_memory_promotion_repository import demote_memory
+
+    session = _Session(_RowcountResult(0))
+    with patch(
+        "app.repositories.agent_memory_promotion_repository.write_scope",
+        return_value=_Scope(session),
+    ):
+        ok = await demote_memory(memory_id=55)
+
+    assert ok is False

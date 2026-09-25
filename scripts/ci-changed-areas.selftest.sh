@@ -74,6 +74,10 @@ expect "backend/openapi.json 触发 backend + frontend（前端类型由它生�
   "frontend=true backend=true browser=false rust=false codex_daemon=false" -- \
   backend/openapi.json backend/app/schemas/projects.py
 
+expect "只改 admin/ 只跑 frontend（管理台的生成物 diff 与 build 在那个 job）" \
+  "frontend=true backend=false browser=false rust=false codex_daemon=false" -- \
+  admin/src/api/endpoints/tags.ts admin/package.json
+
 expect "supabase/migrations 触发 backend（取号查重跑在那个 job）" \
   "frontend=false backend=true browser=false rust=false codex_daemon=false" -- \
   supabase/migrations/462_x.sql
@@ -91,7 +95,7 @@ expect "碰 .github/workflows 全跑" "$ALL" -- .github/workflows/ci.yml docs/x.
 expect "碰 scripts/（两个 job 直接调用）全跑" "$ALL" -- scripts/check-no-zinc.sh
 expect "根目录版本文件全跑" "$ALL" -- .nvmrc
 expect "根目录非 .md 文件全跑" "$ALL" -- Dockerfile
-expect "未知顶层目录全跑" "$ALL" -- admin/src/App.tsx
+expect "未知顶层目录全跑" "$ALL" -- deploy/gpu-server/up.sh
 
 # —— 脚本自己出问题时只许退化成全跑 ——
 expect "取清单的命令失败 → 全跑" "$ALL" -- __FAIL__
