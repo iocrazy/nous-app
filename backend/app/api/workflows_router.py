@@ -18,6 +18,9 @@ belongs to workflow_templates_router (team workflow templates). A bare
 ``@router.get("")`` here shadowed that list for as long as both were
 registered (FastAPI resolves collisions by registration order, silently) —
 guarded against regression by tests/test_route_uniqueness.py.
+
+Every per-id endpoint first checks the caller owns the workflow
+(``app/api/workflow_access.py``); DBOS itself has no notion of users.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
+from app.api.workflow_access import require_workflow_access
 from app.core.deps import AuthDep
 from app.services.infra import dbos_orchestrator
 
@@ -283,6 +287,7 @@ async def get_workflow_status(
     auth: AuthDep,
 ) -> dict[str, Any]:
     """One-shot status snapshot. Use the SSE endpoint for live updates."""
+    await require_workflow_access(workflow_id, auth.user_id)
     snap = await _get_status(workflow_id)
     if snap is None:
         raise HTTPException(
@@ -299,6 +304,7 @@ async def get_workflow_steps(
 ) -> dict[str, Any]:
     """Step list snapshot. Frontend uses this to render per-step
     progress timelines (e.g. parse → save → auto_tag → dispatch)."""
+    await require_workflow_access(workflow_id, auth.user_id)
     snap = await _get_status(workflow_id)
     if snap is None:
         raise HTTPException(
@@ -315,6 +321,7 @@ async def cancel_workflow(
 ) -> dict[str, Any]:
     """Request cancellation. DBOS marks the workflow CANCELLED and
     in-flight steps complete or raise depending on the runtime."""
+    await require_workflow_access(workflow_id, auth.user_id)
     if not dbos_orchestrator.is_enabled():
         raise HTTPException(503, detail="DBOS not enabled")
 
@@ -332,6 +339,7 @@ async def resume_workflow(
     auth: AuthDep,
 ) -> dict[str, Any]:
     """Resume a previously paused or cancelled workflow."""
+    await require_workflow_access(workflow_id, auth.user_id)
     if not dbos_orchestrator.is_enabled():
         raise HTTPException(503, detail="DBOS not enabled")
 
@@ -354,6 +362,7 @@ async def restart_workflow(
     Differs from /resume — resume re-runs a paused workflow under its
     existing id (replaying durable steps); restart forks a fresh id.
     """
+    await require_workflow_access(workflow_id, auth.user_id)
     if not dbos_orchestrator.is_enabled():
         raise HTTPException(503, detail="DBOS not enabled")
 
@@ -614,10 +623,8 @@ async def stream_workflow_events(
     if ticket:
         from app.api.ws_ticket_router import consume_ticket
 
-        if await consume_ticket(ticket):
-            # Authenticated via ticket; skip JWT validation chain.
-            pass
-        else:
+        caller_id = await consume_ticket(ticket)
+        if not caller_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired ticket",
@@ -641,7 +648,7 @@ async def stream_workflow_events(
                 detail="No auth: provide Authorization header or ?ticket=",
             )
         try:
-            await _validate_bearer_token(bearer)
+            caller_id = (await _validate_bearer_token(bearer)).user_id
         except HTTPException:
             raise
         except Exception as e:
@@ -650,8 +657,9 @@ async def stream_workflow_events(
                 detail=f"Invalid token: {e}",
             )
 
-    # Validate workflow exists before opening the stream so the client
+    # Ownership, then existence, before opening the stream so the client
     # gets a synchronous 404 instead of the SSE not_found event.
+    await require_workflow_access(workflow_id, caller_id)
     snap = await _get_status(workflow_id)
     if snap is None:
         raise HTTPException(
