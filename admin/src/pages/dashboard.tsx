@@ -78,7 +78,7 @@ function CeleryStatusCards() {
             {workersData?.workers && workersData.workers.length > 0 && (
               <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {workersData.workers.map((w) => (
-                  <Tooltip key={w.name} content={`Active: ${w.active} | Processed: ${w.processed}`}>
+                  <Tooltip key={w.name} content={`Active: ${w.active} | Processed: ${w.processed ?? '-'}`}>
                     <Tag size="small" color="green">
                       {w.name.replace('celery@', '')}
                       {w.active > 0 && <Badge count={w.active} dotStyle={{ fontSize: 10 }} style={{ marginLeft: 4 }} />}

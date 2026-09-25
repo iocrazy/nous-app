@@ -1,28 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../client'
+import type { Schema } from '../../types/api'
 
-export interface AdminTaskData {
-  id: string
-  user_id: string
-  user_email: string | null
-  task_type: string
-  status: string
-  phase: string | null
-  title: string
-  subtitle: string | null
-  progress: number
-  speed: number | null
-  total_bytes: number | null
-  error_msg: string | null
-  error_code: string | null
-  resource_id: string | null
-  media_id: string | null
-  celery_task_id: string | null
-  metadata: Record<string, unknown> | null
-  created_at: string
-  started_at: string | null
-  completed_at: string | null
-}
+export type AdminTaskData = Schema<'AdminTaskResponse'>
+type TaskListResponse = Schema<'AdminTaskListResponse'>
+export type TaskStatsData = Schema<'AdminTaskStatsResponse'>
+export type AdminTaskActionResult = Schema<'AdminTaskActionResponse'>
 
 interface TaskListParams {
   page?: number
@@ -32,22 +15,6 @@ interface TaskListParams {
   search?: string
   sortBy?: string
   sortOrder?: string
-}
-
-interface TaskListResponse {
-  items: AdminTaskData[]
-  total: number
-  page: number
-  page_size: number
-}
-
-export interface TaskStatsData {
-  total: number
-  pending: number
-  processing: number
-  completed: number
-  failed: number
-  cancelled: number
 }
 
 export function useAdminTaskStats() {
@@ -85,7 +52,9 @@ export function useCancelTask() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (taskId: string) => {
-      const { data } = await apiClient.post(`/api/v1/admin/tasks/${taskId}/cancel`)
+      const { data } = await apiClient.post<AdminTaskActionResult>(
+        `/api/v1/admin/tasks/${taskId}/cancel`,
+      )
       return data
     },
     onSuccess: () => {
@@ -98,7 +67,9 @@ export function useRetryTask() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (taskId: string) => {
-      const { data } = await apiClient.post(`/api/v1/admin/tasks/${taskId}/retry`)
+      const { data } = await apiClient.post<AdminTaskActionResult>(
+        `/api/v1/admin/tasks/${taskId}/retry`,
+      )
       return data
     },
     onSuccess: () => {

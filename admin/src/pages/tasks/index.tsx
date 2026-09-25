@@ -348,7 +348,7 @@ export function TaskCenter() {
           const isRunning = row.status === 'processing'
           return (
             <Typography.Text type={isRunning ? undefined : 'secondary'} style={{ fontSize: 12 }}>
-              {formatRuntime(row.started_at, row.completed_at)}
+              {formatRuntime(row.started_at ?? null, row.completed_at ?? null)}
             </Typography.Text>
           )
         },
@@ -458,11 +458,11 @@ export function TaskCenter() {
       )},
       { label: 'User', value: row.user_email || '-' },
       { label: 'Phase', value: row.phase || '-' },
-      { label: 'Runtime', value: formatRuntime(row.started_at, row.completed_at) },
+      { label: 'Runtime', value: formatRuntime(row.started_at ?? null, row.completed_at ?? null) },
       { label: 'Created', value: formatDateTime(row.created_at) },
       { label: 'Started', value: row.started_at ? formatDateTime(row.started_at) : '-' },
       { label: 'Completed', value: row.completed_at ? formatDateTime(row.completed_at) : '-' },
-      { label: 'Celery Task ID', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.celery_task_id || '-'}</span> },
+      { label: 'Workflow ID', value: <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.dbos_workflow_id || '-'}</span> },
       { label: 'Resource ID', value: row.resource_id || '-' },
       { label: 'Media ID', value: row.media_id || '-' },
     ]

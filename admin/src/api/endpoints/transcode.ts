@@ -1,24 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../client'
+import type { Schema } from '../../types/api'
 
-export interface TranscodeVersionData {
-  id: string
-  resource_id: string
-  version_number: number
-  filename: string | null
-  file_size_bytes: number
-  mime_type: string | null
-  transcode_status: string | null
-  hls_path: string | null
-  hls_tiers: Record<string, boolean> | null
-  transcode_at: string | null
-  created_at: string | null
-  video_title: string | null
-  cover_url: string | null
-  cover_download_path: string | null
-  source_platform: string | null
-  author: string | null
-}
+export type TranscodeVersionData = Schema<'AdminTranscodeVersionResponse'>
+type TranscodeListResponse = Schema<'AdminTranscodeListResponse'>
+export type TranscodeStatsData = Schema<'AdminTranscodeStatsResponse'>
+export type TranscodeRetryResult = Schema<'AdminTranscodeRetryResponse'>
+export type TranscodeBatchResult = Schema<'AdminTranscodeBatchResponse'>
 
 interface TranscodeListParams {
   page?: number
@@ -28,22 +16,6 @@ interface TranscodeListParams {
   search?: string
   sortBy?: string
   sortOrder?: string
-}
-
-interface TranscodeListResponse {
-  items: TranscodeVersionData[]
-  total: number
-  page: number
-  page_size: number
-}
-
-export interface TranscodeStatsData {
-  total_video_versions: number
-  completed: number
-  processing: number
-  failed: number
-  pending: number
-  not_transcoded: number
 }
 
 export function useTranscodeStats() {
@@ -81,7 +53,9 @@ export function useRetryTranscode() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (versionId: string) => {
-      const { data } = await apiClient.post(`/api/v1/admin/transcode/${versionId}/retry`)
+      const { data } = await apiClient.post<TranscodeRetryResult>(
+        `/api/v1/admin/transcode/${versionId}/retry`,
+      )
       return data
     },
     onSuccess: () => {
@@ -94,7 +68,7 @@ export function useBatchTranscode() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (action: 'retry_failed' | 'transcode_new') => {
-      const { data } = await apiClient.post('/api/v1/admin/transcode/batch', null, {
+      const { data } = await apiClient.post<TranscodeBatchResult>('/api/v1/admin/transcode/batch', null, {
         params: { action },
       })
       return data

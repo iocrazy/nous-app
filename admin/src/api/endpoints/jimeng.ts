@@ -1,23 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../client'
+import type { Schema } from '../../types/api'
 
 // Jimeng (即梦 / dreamina) CLI auth — device-flow login state managed from the
 // admin panel (backend: /api/v1/admin/jimeng/*). The login process runs in the
 // gateway container and the token lands on the shared volume the worker mounts.
 
-export interface JimengStatus {
-  logged_in: boolean
-  credit?: number
-  error?: string
-}
-
-export interface JimengLoginMaterial {
-  status: 'pending' | 'already'
-  verification_uri?: string
-  user_code?: string
-  device_code?: string
-  expires_at?: string
-}
+export type JimengStatus = Schema<'AdminJimengStatus'>
+export type JimengLoginMaterial = Schema<'AdminJimengLoginResponse'>
+export type JimengLogoutResult = Schema<'AdminJimengLogoutResponse'>
 
 /** Poll login state. Pass a refetchInterval (ms) to poll, or false/undefined for
  * a one-shot fetch — the panel polls fast while the login modal is open. */
@@ -47,7 +38,7 @@ export function useJimengLogout() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async () => {
-      const { data } = await apiClient.post('/api/v1/admin/jimeng/logout')
+      const { data } = await apiClient.post<JimengLogoutResult>('/api/v1/admin/jimeng/logout')
       return data
     },
     onSuccess: () => {
