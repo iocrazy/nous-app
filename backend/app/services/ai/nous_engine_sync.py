@@ -26,7 +26,7 @@ and image services are always ``true``). Without the parameter unloaded models
 are left out, which would read as a mass revocation.
 
 * A service whose grant was paused/deleted DISAPPEARS from that list. So on a
-  successful read (200 with a ``data`` list) every ENABLED platform row
+  successful read (200 with a NON-EMPTY ``data`` list) every ENABLED platform row
   (``owner_user_id IS NULL``) on this base_url whose ``actual_model`` is
   missing is disabled and reported in ``disabled``, one WARNING each. Rows an
   admin already disabled, rows on other base_urls and BYOK rows are not
@@ -36,6 +36,10 @@ are left out, which would read as a mass revocation.
   base_url is disabled and the report says ``unauthorized``. After that
   ``engine_endpoints`` no longer yields the base_url, so neither this sync nor
   the probe touches it until an admin enables one row with a new key.
+* 200 with an EMPTY list disables nothing (skipped ``empty_list_not_trusted``
+  + one WARNING): empty output is not a negative result — it may be an engine
+  fault, and a mass disable is costly to undo. Revoking every grant means
+  deleting the key, which takes the 401 path.
 * Any other failure (5xx, timeout, transport, malformed body) is only an
   ``error``: a probe that cannot reach the engine is not a revocation.
 * ``ready=false`` is NEVER read as revoked — it only means not loaded.
@@ -380,13 +384,7 @@ async def sync_engine_models(
                 f"[nous_engine_sync] writing service {service_id!r} failed: {exc!r}"
             )
             tally.skipped.append(SkippedService(str(service_id), "write_failed"))
-    listed = {e.get("id") for e in data if isinstance(e, Mapping)}
-    revoked = [
-        r for r in _platform_rows_on(rows, base_url) if r["actual_model"] not in listed
-    ]
-    disabled = await _disable(
-        repo, base_url, revoked, "service no longer authorized for this key"
-    )
+    disabled = await _disable_revoked(repo, base_url, rows, data, tally)
     return SyncReport(
         discovered=len(data),
         created=tuple(tally.created),
@@ -394,6 +392,34 @@ async def sync_engine_models(
         skipped=tuple(tally.skipped),
         disabled=disabled,
         ready_changed=tally.ready_changed,
+    )
+
+
+async def _disable_revoked(
+    repo: EngineSyncRepo,
+    base_url: str,
+    rows: Sequence[Mapping[str, Any]],
+    data: Sequence[Any],
+    tally: _Tally,
+) -> tuple[str, ...]:
+    """Disable enabled platform rows whose service left the list. An EMPTY
+    list is not trusted: it is as likely an engine fault as "everything
+    revoked", and a mass disable costs the admin a row-by-row restore (nothing
+    is re-enabled automatically). Revoking every grant is done by deleting
+    the key, which answers 401 and takes that path instead."""
+    if not data:
+        logger.warning(
+            f"[nous_engine_sync] {base_url}: engine listed no services — "
+            "empty list not trusted as a revocation, nothing disabled"
+        )
+        tally.skipped.append(SkippedService("<all>", "empty_list_not_trusted"))
+        return ()
+    listed = {e.get("id") for e in data if isinstance(e, Mapping)}
+    revoked = [
+        r for r in _platform_rows_on(rows, base_url) if r["actual_model"] not in listed
+    ]
+    return await _disable(
+        repo, base_url, revoked, "service no longer authorized for this key"
     )
 
 

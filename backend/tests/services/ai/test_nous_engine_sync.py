@@ -665,3 +665,25 @@ def test_merge_reports_carries_disabled_ready_and_unauthorized() -> None:
     assert merged.disabled == ("a", "b", "c")
     assert merged.ready_changed == 3
     assert merged.unauthorized is True
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_empty_list_is_not_trusted_as_mass_revocation(caplog_loguru) -> None:
+    """200 + ``data=[]`` could be an engine fault as easily as "all revoked";
+    disabling everything would cost the admin a row-by-row manual restore.
+    A real full revocation deletes the key and takes the 401 path."""
+    _mock_engine({"data": []})
+    repo = FakeRepo([_row(), _asr()])
+
+    report = await _sync(repo)
+
+    assert report.error is None
+    assert report.disabled == () and repo.disable_calls == []
+    assert all(r["is_enabled"] for r in repo.rows)
+    assert [(s.id, s.reason) for s in report.skipped] == [
+        ("<all>", "empty_list_not_trusted")
+    ]
+    assert any(
+        m.startswith("WARNING") and "empty" in m for m in caplog_loguru
+    ), caplog_loguru
