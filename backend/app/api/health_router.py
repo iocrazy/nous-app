@@ -27,6 +27,8 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
+from app.core.admin_deps import AdminAuthDep
+
 router = APIRouter()
 
 
@@ -94,8 +96,15 @@ def _aggregate_status(probes: dict[str, dict]) -> str:
 
 
 @router.get("/health/deep", summary="Per-subsystem deep health snapshot")
-async def health_deep(request: Request) -> dict[str, Any]:
-    """Run all subsystem probes in parallel + return aggregate report."""
+async def health_deep(request: Request, _admin: AdminAuthDep) -> dict[str, Any]:
+    """Run all subsystem probes in parallel + return aggregate report.
+
+    Platform admins only. The report carries raw client exception text from
+    the database / Redis probes, model names and in-process registry state,
+    and every call runs a database read -- none of which an anonymous caller
+    should get (same reasoning that removed the anonymous ``/admin/health``).
+    Container healthchecks and the deploy smoke use ``/api/v1/readyz``.
+    """
     probe_coros = {
         "dbos": _probe_dbos(),
         "supabase": _probe_supabase(),
