@@ -9,9 +9,17 @@ Admin actions (I milestone):
   ``POST /api/v1/workforce/agents/{slug}/clear-inbox`` — bulk-dismiss
   ``POST /api/v1/workforce/tasks/{task_id}/cancel`` — request task cancel
 
-Auth: any logged-in user. The persistent agents are system presets
-(no user_id) and the dashboard data is aggregate, not user-private.
-This matches the Runs / Usage UIs today.
+Auth:
+  * ``/board`` — any logged-in user. The persistent agents are system
+    presets (no user_id) and the board is aggregate: counts, states, costs.
+  * ``/agents/{slug}/detail`` and every action — platform admin only. The
+    persistent agents are SHARED: pausing one stops it for every user
+    (RunRecorder refuses new runs), clearing its inbox drops every user's
+    queued Delegate, and the drawer shows raw inbox/outbox payloads and run
+    summaries — other users' prompts and answers. These used to accept any
+    logged-in user, while ``/ai-library/agents/{slug}/pause`` refuses presets
+    outright; the workforce route was the open side door.
+  * ``/healthz`` — open, for monitors (see its docstring).
 """
 
 from __future__ import annotations
@@ -27,7 +35,8 @@ from sqlalchemy import Text as SAText
 from sqlalchemy import cast, column, func, literal, select
 from sqlalchemy import update as sa_update
 
-from app.core.deps import get_current_user
+from app.core.admin_deps import AdminAuthDep
+from app.core.deps import AuthDep, get_current_user
 from app.db.session import read_scope, write_scope
 from app.models import (
     AgentInbox,
@@ -133,7 +142,7 @@ async def _resolve_persistent_agent(slug: str) -> dict[str, Any]:
 
 @router.get("/board")
 async def get_workforce_board(
-    _user: Any = Depends(get_current_user),
+    _auth: AuthDep,
 ) -> dict[str, Any]:
     """Aggregate snapshot for the Workforce dashboard.
 
@@ -366,8 +375,8 @@ class PauseAgentBody(BaseModel):
 @router.post("/agents/{slug}/pause")
 async def pause_agent(
     slug: str,
+    auth: AdminAuthDep,
     body: PauseAgentBody = PauseAgentBody(),
-    user: Any = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Set ``paused_reason`` so RunRecorder.start refuses new runs.
 
@@ -378,27 +387,29 @@ async def pause_agent(
     reason = (body.reason or "manual").strip()[:120]
     repo = get_agent_repository()
     await repo.update_fields(UUID(agent["id"]), {"paused_reason": reason})
-    logger.info(f"[workforce] agent '{slug}' paused (reason={reason}) by user")
+    logger.info(
+        f"[workforce] agent '{slug}' paused (reason={reason}) by admin={auth.user_id}"
+    )
     return {"slug": slug, "paused_reason": reason, "status": "paused"}
 
 
 @router.post("/agents/{slug}/resume")
 async def resume_agent(
     slug: str,
-    user: Any = Depends(get_current_user),
+    auth: AdminAuthDep,
 ) -> dict[str, Any]:
     """Clear ``paused_reason`` so the agent accepts new runs again."""
     agent = await _resolve_persistent_agent(slug)
     repo = get_agent_repository()
     await repo.update_fields(UUID(agent["id"]), {"paused_reason": None})
-    logger.info(f"[workforce] agent '{slug}' resumed by user")
+    logger.info(f"[workforce] agent '{slug}' resumed by admin={auth.user_id}")
     return {"slug": slug, "paused_reason": None, "status": "resumed"}
 
 
 @router.post("/agents/{slug}/clear-inbox")
 async def clear_inbox(
     slug: str,
-    user: Any = Depends(get_current_user),
+    auth: AdminAuthDep,
 ) -> dict[str, Any]:
     """Bulk-dismiss every unread/reading inbox row for this agent.
 
@@ -572,7 +583,9 @@ async def workforce_healthz() -> dict[str, Any]:
             if overall == "healthy":
                 overall = "degraded"
     except Exception as err:
-        response["supabase"] = {"reachable": False, "error": str(err)[:200]}
+        # The class name, not ``str(err)``: this endpoint is anonymous, and a
+        # driver's message carries hosts, ports and SQL.
+        response["supabase"] = {"reachable": False, "error": type(err).__name__}
         issues.append(f"supabase unreachable: {type(err).__name__}")
         overall = "down"
 
@@ -583,7 +596,7 @@ async def workforce_healthz() -> dict[str, Any]:
 @router.get("/agents/{slug}/detail")
 async def get_agent_detail(
     slug: str,
-    user: Any = Depends(get_current_user),
+    auth: AdminAuthDep,
 ) -> dict[str, Any]:
     """Detail snapshot for one persistent agent — feeds the drawer view.
 
@@ -697,7 +710,7 @@ async def get_agent_detail(
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(
     task_id: UUID,
-    user: Any = Depends(get_current_user),
+    auth: AdminAuthDep,
 ) -> dict[str, Any]:
     """Mark an in-flight or queued task as cancelled.
 
@@ -727,7 +740,7 @@ async def cancel_task(
         logger.exception(f"[workforce] cancel-task failed for {task_id}: {err}")
         raise HTTPException(status_code=500, detail="cancel failed")
 
-    logger.info(f"[workforce] task {task_id} cancelled by user")
+    logger.info(f"[workforce] task {task_id} cancelled by admin={auth.user_id}")
     return {"task_id": str(task_id), "lifecycle_status": "cancelled"}
 
 
