@@ -8,10 +8,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IssueChatThread } from './IssueChatThread';
 import { ReplayContext } from './replayContext';
 
-vi.mock('../../services/issueMessageService', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../services/issueMessageService')>();
-  return { ...actual, simulateAgentRunComplete: vi.fn() };
-});
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, f?: unknown) => (typeof f === 'string' ? f : k) }),
