@@ -28,15 +28,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import Text as SAText
-from sqlalchemy import cast, column, func, literal, select
+from sqlalchemy import cast, func, literal, select
 from sqlalchemy import update as sa_update
 
 from app.core.admin_deps import AdminAuthDep
-from app.core.deps import AuthDep, get_current_user
+from app.core.deps import AuthDep
 from app.db.session import read_scope, write_scope
 from app.models import (
     AgentInbox,
@@ -757,7 +757,7 @@ async def cancel_task(
 @router.get("/tasks/by-inbox/{inbox_message_id}")
 async def get_task_by_inbox(
     inbox_message_id: UUID,
-    user: Any = Depends(get_current_user),
+    auth: AuthDep,
 ) -> dict[str, Any]:
     """Resolve an ``inbox_message_id`` (returned by the Delegate tool)
     to the sub-agent's task lifecycle + final outbox response.
@@ -805,9 +805,13 @@ async def get_task_by_inbox(
     # turns set sender_user_id; agent-to-agent delegates set
     # sender_agent_id and we don't expose those here (admin-only via
     # the workforce drawer).
+    #
+    # ``auth.user_id``, not the old ``get_current_user`` dict: that dependency
+    # returns ``{"id": ...}``, and ``getattr(dict, "id", dict)`` is the dict
+    # itself — so ``str(...)`` never equalled a uuid and EVERY real caller got
+    # 403 (the unit tests passed a SimpleNamespace and never saw it).
     sender_user_id = inbox.get("sender_user_id")
-    user_id_str = str(getattr(user, "id", user))
-    if not sender_user_id or str(sender_user_id) != user_id_str:
+    if not sender_user_id or str(sender_user_id) != str(auth.user_id):
         raise HTTPException(
             status_code=403,
             detail="not authorized to view this delegate task",
@@ -843,9 +847,8 @@ async def get_task_by_inbox(
         )
     task = tt_row_to_task_shape(_serialize_row(task_row) if task_row else None)
 
-    # Sub-agent's reply (if any). The sub-agent writes to outbox with
-    # ``reply_to_message_id`` pointing back at our inbox row, so we can
-    # find the response without a task→outbox join.
+    # Sub-agent's reply (if any): the outbox row the worker wrote for this
+    # task.
     outbox_response: Optional[dict[str, Any]] = None
     # ``cancelled`` too: a cancelled worker still delivers its partial answer
     # (agent_worker, framework hardening C3).
@@ -863,14 +866,13 @@ async def get_task_by_inbox(
                             AgentOutbox.delivered,
                             AgentOutbox.delivered_at,
                         )
-                        # NOTE: agent_outbox has no reply_to_message_id column
-                        # (it lives on agent_inbox — mig 159). This filter is a
-                        # pre-existing bug preserved byte-for-byte from the
-                        # supabase-py path: ``column(...)`` renders the same
-                        # unqualified predicate the old ``.eq(...)`` did, so the
-                        # runtime outcome is identical (works only if prod has
-                        # the column as drift; errors the same way otherwise).
-                        .where(column("reply_to_message_id") == str(inbox_message_id))
+                        # The worker files its answer with ``task_id`` set
+                        # (agent_worker: ``enqueue_outbox(..., task_id=...)``).
+                        # This used to filter on ``reply_to_message_id``, a
+                        # column agent_outbox does not have (it is agent_inbox's,
+                        # mig 159; schema_baseline agrees) — every terminal
+                        # lookup raised.
+                        .where(AgentOutbox.task_id == str(task["id"]))
                         .order_by(AgentOutbox.created_at.desc())
                         .limit(1)
                     )
