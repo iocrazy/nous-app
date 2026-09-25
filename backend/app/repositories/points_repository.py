@@ -52,7 +52,7 @@ teams.py):
        payment_service feeds points_amount/price_cents straight into the order
        (amount binds) — no type-sensitive op, REST returned numbers → native int.
      point_transactions.amount / balance_after (Integer): aggregated in
-       get_admin_overview / get_usage_stats (``amount < 0``, ``abs(amount)``,
+       get_usage_stats (``amount < 0``, ``abs(amount)``,
        ``sum(...)``, ``by_type[t] + amount``). balance_after is also fed back
        into create_transaction(data) and the response. Native int.
      orders.* live in PaymentRepository (separate flag) — not here.
@@ -194,7 +194,7 @@ increment_points_balance / update_storage_used / upsert_member_quota /
 increment_member_usage / create_transaction swallow + RE-RAISE (the legacy
 ``raise``s on these writes — a money write that returns ``{}`` on failure reads
 to the caller as "credited, balance 0");
-consume/refund RPC swallow + return None; get_admin_overview / get_usage_stats
+consume/refund RPC swallow + return None; get_usage_stats
 swallow + return the zeroed dict.
 """
 
@@ -1036,57 +1036,6 @@ class PointsRepository:
         except Exception as e:
             logger.error(f"Failed to get transactions for team {team_id}: {e}")
             return []
-
-    async def get_admin_overview(self) -> Dict[str, Any]:
-        """
-        Aggregate system-wide points statistics for admin overview.
-
-        Returns:
-            Dict with total_points_in_system, total_consumed, total_purchased,
-            active_teams_count, total_transactions_count.
-        """
-        try:
-            async with read_scope() as session:
-                quota_balances = (
-                    (await session.execute(select(TeamQuotas.points_balance)))
-                    .scalars()
-                    .all()
-                )
-                total_points_in_system = sum(b or 0 for b in quota_balances)
-                active_teams_count = len(quota_balances)
-
-                txn_rows = (
-                    await session.execute(
-                        select(PointTransactions.amount, PointTransactions.type)
-                    )
-                ).all()
-                total_transactions_count = len(txn_rows)
-
-                total_consumed = 0
-                total_purchased = 0
-                for amount, txn_type in txn_rows:
-                    amount = amount or 0
-                    if amount < 0:
-                        total_consumed += abs(amount)
-                    if txn_type == "purchase" and amount > 0:
-                        total_purchased += amount
-
-            return {
-                "total_points_in_system": total_points_in_system,
-                "total_consumed": total_consumed,
-                "total_purchased": total_purchased,
-                "active_teams_count": active_teams_count,
-                "total_transactions_count": total_transactions_count,
-            }
-        except Exception as e:
-            logger.error(f"Failed to get admin overview: {e}")
-            return {
-                "total_points_in_system": 0,
-                "total_consumed": 0,
-                "total_purchased": 0,
-                "active_teams_count": 0,
-                "total_transactions_count": 0,
-            }
 
     async def get_usage_stats(self, team_id: str) -> Dict[str, Any]:
         """

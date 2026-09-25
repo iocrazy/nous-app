@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
+from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.core.scope_guards import _is_team_member
 from app.db.supabase_client import get_async_supabase_admin
@@ -210,35 +211,6 @@ async def _auto_create_personal_team(user_id: str) -> str:
     return team_id
 
 
-async def _check_admin_role(user_id: str) -> bool:
-    """
-    Check whether the user has the ``admin`` role in the ``user_profiles`` table.
-
-    Args:
-        user_id: UUID of the authenticated user.
-
-    Returns:
-        True if the user is an admin, False otherwise.
-    """
-    try:
-        from sqlalchemy import select
-
-        from app.db.session import read_scope
-        from app.models import UserProfiles
-
-        async with read_scope() as session:
-            row = (
-                await session.execute(
-                    select(UserProfiles.role).where(UserProfiles.id == user_id).limit(1)
-                )
-            ).first()
-        if row is not None:
-            return row[0] == "admin"
-    except Exception as e:
-        logger.error(f"Failed to check admin role for user {user_id}: {e}")
-    return False
-
-
 # ============================================
 # Route endpoints
 # ============================================
@@ -427,7 +399,7 @@ async def check_quota(
 @router.post("/admin/adjust")
 async def admin_adjust_points(
     request: PointsAdjustRequest,
-    auth: AuthDep,
+    auth: AdminAuthDep,
 ):
     """
     Admin: manually adjust a team's points balance.
@@ -440,16 +412,9 @@ async def admin_adjust_points(
     - **amount**: Points to adjust (positive to add, negative to deduct).
     - **description**: Reason for the adjustment.
 
-    Authentication: Bearer Token or API Key (admin only)
+    Authentication: Bearer Token or API Key (platform admin only, via
+    ``get_admin_auth`` like every other ``/admin/`` route)
     """
-    # Verify admin role
-    is_admin = await _check_admin_role(auth.user_id)
-    if not is_admin:
-        raise HTTPException(
-            status_code=403,
-            detail="Forbidden: admin role required for this operation",
-        )
-
     try:
         svc = PointsService()
 
@@ -511,30 +476,3 @@ async def admin_adjust_points(
     except Exception as e:
         logger.error(f"Failed to adjust points: {e}")
         raise HTTPException(status_code=500, detail="Failed to adjust points")
-
-
-@router.get("/admin/overview")
-async def admin_overview(auth: AuthDep):
-    """
-    Admin: get system-wide points overview.
-
-    Returns aggregated statistics including total points in system,
-    total consumed, total purchased, active teams count, and total
-    transactions count.
-
-    Authentication: Bearer Token or API Key (admin only)
-    """
-    is_admin = await _check_admin_role(auth.user_id)
-    if not is_admin:
-        raise HTTPException(
-            status_code=403,
-            detail="Forbidden: admin role required for this operation",
-        )
-
-    try:
-        repo = get_points_repository()
-        overview = await repo.get_admin_overview()
-        return {"success": True, "data": overview}
-    except Exception as e:
-        logger.error(f"Failed to get admin overview: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get admin overview")
