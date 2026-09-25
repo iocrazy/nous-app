@@ -172,3 +172,20 @@ async def test_use_wire(client) -> None:
         "/api/v1/cover-templates/use", json={"resource_ids": ["1", "2"]}
     )
     assert_wire_unchanged(resp, {"data": {"counted": 2}})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("q", "pattern"),
+    [("100%", "%100\\%%"), ("a_b", "%a\\_b%"), ("cover", "%cover%")],
+)
+async def test_search_escapes_like_metacharacters(client, q, pattern) -> None:
+    """A search for ``%`` used to be a match-everything pattern."""
+    from sqlalchemy.dialects import postgresql
+
+    _Db.results = [_Result(scalar=0), _Result([])]
+    resp = await client.get("/api/v1/cover-templates", params={"q": q})
+    assert resp.status_code == 200, resp.text
+    count_stmt = _Db.statements[0].compile(dialect=postgresql.dialect())
+    assert pattern in count_stmt.params.values()
+    assert "ESCAPE" in str(count_stmt)

@@ -26,6 +26,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
 from app.models import CoverTemplateUsage, Folders, ResourceItems, Resources
+from app.services.library.like_escape import LIKE_ESCAPE_CHAR, escape_like
 
 COVER_TEMPLATE_SYSTEM_KEY = "cover_templates"
 
@@ -151,7 +152,12 @@ class CoverTemplatesRepository:
             Resources.mime_type.ilike("image/%"),
         ]
         if needle:
-            where.append(Resources.filename.ilike(f"%{needle}%"))
+            # A typed ``%`` / ``_`` must match itself, not every filename.
+            where.append(
+                Resources.filename.ilike(
+                    f"%{escape_like(needle)}%", escape=LIKE_ESCAPE_CHAR
+                )
+            )
         async with read_scope() as session:
             total = int(
                 (
