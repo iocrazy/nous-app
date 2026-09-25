@@ -197,9 +197,9 @@ def test_row_model_declares_every_column(model, orm, extra) -> None:
 
 
 def test_share_model_declares_every_column_but_the_password() -> None:
-    """``shares.password`` is plain text; the model withholds it and says
-    only whether one is set (the deliberate wire change of this PR)."""
-    expected = (column_names(Shares) - {"password"}) | {"has_password"}
+    """The model withholds both password columns (the legacy one and, since
+    mig 504, the bcrypt hash) and says only whether one is set."""
+    expected = (column_names(Shares) - {"password", "password_hash"}) | {"has_password"}
     assert set(pr.ProjectShareRow.model_fields) == expected
 
 
@@ -747,17 +747,20 @@ async def test_shares_wire_redacts_password(monkeypatch, client) -> None:
         {"id": SAMPLE_BIGINT, "filename": "a.mp4"},
     )
     _patch(monkeypatch, ProjectsRepository, "create_share", shares[0])
-    assert shares[0]["password"] is not None and shares[1]["password"] is None
+    assert shares[0]["password_hash"] is not None
+    assert shares[1]["password_hash"] is None
+    hidden = ("password", "password_hash")
     redacted = [
-        {**{k: v for k, v in row.items() if k != "password"}, "has_password": has}
+        {**{k: v for k, v in row.items() if k not in hidden}, "has_password": has}
         for row, has in zip(shares, (True, False))
     ]
     listed = await client.get(f"{BASE}/shares")
     assert_wire_unchanged(listed, _envelope(redacted))
-    assert all("password" not in row for row in listed.json()["data"])
+    for key in hidden:
+        assert all(key not in row for row in listed.json()["data"])
     resp = await client.post(f"{BASE}/shares", json={"file_id": "5"})
     assert_wire_unchanged(resp, _envelope(redacted[0]))
-    assert "password" not in resp.json()["data"]
+    assert not set(hidden) & set(resp.json()["data"])
 
 
 def repo_row_folder(*, nulls: bool = False) -> dict:

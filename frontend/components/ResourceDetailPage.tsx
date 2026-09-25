@@ -114,6 +114,8 @@ import Loading from './common/Loading';
 
 // ─── Utility functions ──────────────────────────────────
 
+const DRAW_TOOL_TYPES: ReadonlySet<string> = new Set(['arrow', 'rect', 'freehand', 'text']);
+
 function formatFileSize(bytes: number | null | undefined): string {
   if (!bytes) return 'Unknown';
   if (bytes < 1024) return `${bytes} B`;
@@ -1966,7 +1968,13 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               pendingAnnotations={pendingAnnotations}
               onClearAnnotations={() => setPendingAnnotations([])}
               onViewAnnotations={(annotations) => {
-                setViewAnnotations(annotations.map(a => ({ tool_type: a.tool_type, data: a.data })));
+                // tool_type is a plain string on the wire; skip kinds the overlay cannot draw.
+                setViewAnnotations(
+                  annotations
+                    .filter((a): a is typeof a & { tool_type: NormalizedAnnotation['tool_type'] } =>
+                      DRAW_TOOL_TYPES.has(a.tool_type))
+                    .map(a => ({ tool_type: a.tool_type, data: a.data })),
+                );
               }}
               onCommentChange={refreshCommentMarkers}
             />

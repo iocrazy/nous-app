@@ -10,7 +10,8 @@
  */
 import { getApiUrl } from '../../utils/apiConfig';
 import { getAuthHeaders } from '../../services/parserService';
-import { unwrapResponse } from '../../utils/apiHelpers';
+import { handleResponse, unwrapResponse } from '../../utils/apiHelpers';
+import type { BeatTemplateAnchorRow, BeatTemplateRow } from '../../types/api';
 import type { CustomTemplateAnchor } from './templates';
 
 const apiBase = () => `${getApiUrl()}/api/v1`;
@@ -21,17 +22,32 @@ export interface CustomTemplate {
   anchors: CustomTemplateAnchor[];
 }
 
-type CustomTemplateRow = Omit<CustomTemplate, 'id'> & { id: string | number };
+/**
+ * `anchors` is JSONB: every anchor the API wrote has all five keys, but the
+ * backend passes a hand-edited row through as-is rather than failing, so a
+ * key may be absent. Fill the gaps instead of letting `undefined` reach the
+ * timeline math.
+ */
+function toAnchor(a: BeatTemplateAnchorRow): CustomTemplateAnchor {
+  const pctStart = a.pctStart ?? 0;
+  return {
+    title: a.title ?? '',
+    summary: a.summary ?? null,
+    pctStart,
+    pctEnd: a.pctEnd ?? pctStart,
+    color: a.color ?? null,
+  };
+}
 
 /** Coerce the snowflake id to a string (JSON number → precision-safe string). */
-function toCustomTemplate(row: CustomTemplateRow): CustomTemplate {
-  return { ...row, id: String(row.id) };
+function toCustomTemplate(row: BeatTemplateRow): CustomTemplate {
+  return { id: String(row.id), name: row.name, anchors: row.anchors.map(toAnchor) };
 }
 
 export async function listBeatTemplates(): Promise<CustomTemplate[]> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${apiBase()}/beat-templates`, { headers });
-  const rows = await unwrapResponse<CustomTemplateRow[]>(res);
+  const rows = await unwrapResponse<BeatTemplateRow[]>(res);
   return rows.map(toCustomTemplate);
 }
 
@@ -45,7 +61,7 @@ export async function createBeatTemplate(
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, anchors }),
   });
-  return toCustomTemplate(await unwrapResponse<CustomTemplateRow>(res));
+  return toCustomTemplate(await unwrapResponse<BeatTemplateRow>(res));
 }
 
 export async function renameBeatTemplate(
@@ -58,10 +74,13 @@ export async function renameBeatTemplate(
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   });
-  return toCustomTemplate(await unwrapResponse<CustomTemplateRow>(res));
+  return toCustomTemplate(await unwrapResponse<BeatTemplateRow>(res));
 }
 
+/** Rejects on a non-2xx: the caller removes the card optimistically and
+ * restores it (with a toast) only when this throws. */
 export async function deleteBeatTemplate(templateId: string): Promise<void> {
   const headers = await getAuthHeaders();
-  await fetch(`${apiBase()}/beat-templates/${templateId}`, { method: 'DELETE', headers });
+  const res = await fetch(`${apiBase()}/beat-templates/${templateId}`, { method: 'DELETE', headers });
+  await handleResponse<unknown>(res);
 }

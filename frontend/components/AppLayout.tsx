@@ -6,7 +6,8 @@ import {
   LayoutList, LayoutGrid, Smartphone, Trash2, Share2, Zap, BookOpen, ListChecks,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ViewState, PointPackage, Library, SmartCollection } from '../types';
+import { ViewState, PointPackage, SmartCollection } from '../types';
+import type { Library } from '../types/api';
 import { VIEW_PATH_MAP, pathnameToView, viewToModule } from '../utils/routeConfig';
 import { fetchLibraries } from '../services/libraryService';
 import { fetchSmartFolders } from '../services/resourceService';

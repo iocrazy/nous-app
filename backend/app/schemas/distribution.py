@@ -2,8 +2,11 @@
 
 from datetime import datetime
 from typing import Literal, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from app.schemas.wire import WireDatetime
 
 
 class ConnectAccountRequest(BaseModel):
@@ -260,3 +263,44 @@ class CapabilitiesResponse(BaseModel):
     platforms: dict[str, PlatformCapability]
     #: 见 ``ReadbackTiming`` —— 模块级（不分平台），且是我们的数不是平台的数。
     publish_readback: Optional[ReadbackTiming] = None
+
+
+class DistributionAccountRow(BaseModel):
+    """``POST /accounts/{id}/refresh``: the whole public row (P7).
+
+    Unlike :class:`SocialAccountOut` (a whitelist the list route filters
+    through), this route has always returned ``_public_row`` as is: every
+    ``social_accounts`` column except the three secret ones (``access_token``,
+    ``refresh_token``, ``session_state``). Timestamps are native datetimes, so
+    they are :data:`WireDatetime` (``isoformat()``, not ``…Z``). Wire test:
+    ``tests/api/test_distribution_p7_wire.py``.
+    """
+
+    id: str
+    scope_type: str
+    scope_id: str
+    platform: str
+    platform_user_id: str
+    platform_handle: Optional[str]
+    username: str
+    avatar_url: Optional[str]
+    token_expires_at: Optional[WireDatetime]
+    status: str
+    auth_type: str
+    session_checked_at: Optional[WireDatetime]
+    created_by: UUID
+    deleted_at: Optional[WireDatetime]
+    created_at: WireDatetime
+    updated_at: WireDatetime
+
+
+class DistributionWebhookChallenge(BaseModel):
+    """Answer to Douyin's ``verify_webhook`` event: its challenge, echoed."""
+
+    challenge: int | str
+
+
+class DistributionWebhookAck(BaseModel):
+    """Every other signed event is acknowledged with ``{"msg": "ok"}``."""
+
+    msg: str

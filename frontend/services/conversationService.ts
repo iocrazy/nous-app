@@ -1,5 +1,18 @@
 import { getAuthHeaders } from './parserService';
-import type { Channel, ChatMessage, ConversationMember } from '../types';
+import type { Channel, ChatMessage } from '../types';
+import type {
+  ConversationAgentAdded,
+  ConversationAgentRemoved,
+  ConversationAttachmentPromoted,
+  ConversationDissolved,
+  ConversationImageUpload,
+  ConversationMarkRead,
+  ConversationMember,
+  ConversationMemberRemoved,
+  ConversationMemberRole,
+  ConversationMembersAdded,
+  ConversationOwnerTransfer,
+} from '../types/api';
 
 const API_BASE =
   ('VITE_API_URL' in import.meta.env ? import.meta.env.VITE_API_URL : '') ||
@@ -19,7 +32,11 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   if (!resp.ok) {
     let detail = `${resp.status}`;
     try {
-      detail = (await resp.json())?.detail ?? detail;
+      // Production errors are the ErrorResponse shell (`app/core/exceptions.py`):
+      // the message is `error`, not FastAPI's bare `detail`.
+      const errBody = (await resp.json()) as { error?: unknown; detail?: unknown } | null;
+      const message = errBody?.error ?? errBody?.detail;
+      if (typeof message === 'string' && message) detail = message;
     } catch (err) {
       console.error('[conversationService] error body parse failed', err);
     }
@@ -57,13 +74,6 @@ export type ConversationMessageRow = Omit<
   reply_to_id?: string | number | null;
   parent_id?: string | number | null;
 };
-
-export interface ConversationImageUpload {
-  id: string;
-  mime: string;
-  file_size_bytes?: number;
-  url: string;
-}
 
 export function normalizeConversationMessage(row: ConversationMessageRow): ChatMessage {
   const channelId = row.conversation_id ?? row.channel_id;
@@ -112,7 +122,7 @@ export const conversationService = {
     })),
 
   addMembers: (conversationId: string, userIds: string[]) =>
-    req<{ added: number }>(`/conversations/${conversationId}/members`, {
+    req<ConversationMembersAdded>(`/conversations/${conversationId}/members`, {
       method: 'POST',
       body: JSON.stringify({ user_ids: userIds }),
     }),
@@ -138,7 +148,7 @@ export const conversationService = {
     }).then(normalizeConversationMessage),
 
   markRead: (conversationId: string, lastReadSeq: string) =>
-    req<{ ok: boolean }>(`/conversations/${conversationId}/read`, {
+    req<ConversationMarkRead>(`/conversations/${conversationId}/read`, {
       method: 'POST',
       body: JSON.stringify({ last_read_seq: Number(lastReadSeq) }),
     }),
@@ -155,7 +165,7 @@ export const conversationService = {
     }).then(normalizeConversationMessage),
 
   addAgent: (conversationId: string, agentSlug: string) =>
-    req<{ added: boolean; agent_id?: string }>(`/conversations/${conversationId}/agents`, {
+    req<ConversationAgentAdded>(`/conversations/${conversationId}/agents`, {
       method: 'POST',
       body: JSON.stringify({ agent_slug: agentSlug }),
     }),
@@ -166,19 +176,17 @@ export const conversationService = {
     return req<ConversationImageUpload>(`/conversations/${conversationId}/attachments`, {
       method: 'POST',
       body,
-    }).then((row) => ({ ...row, id: String(row.id) }));
+    });
   },
 
   saveImageToLibrary: (attachmentId: string, scopeId: string) =>
-    req<{ promoted_resource_id: string }>(
+    req<ConversationAttachmentPromoted>(
       `/conversations/attachments/${attachmentId}/promote`,
       {
         method: 'POST',
         body: JSON.stringify({ scope_id: Number(scopeId) }),
       },
-    ).then((row) => ({
-      promoted_resource_id: String(row.promoted_resource_id),
-    })),
+    ),
 
   // ── Group management (owner / admin / member roles) ─────────────────────
 
@@ -186,25 +194,25 @@ export const conversationService = {
     req<ConversationMember[]>(`/conversations/${conversationId}/members`),
 
   removeMember: (conversationId: string, userId: string) =>
-    req<{ removed: boolean }>(
+    req<ConversationMemberRemoved>(
       `/conversations/${conversationId}/members/${userId}`,
       { method: 'DELETE' },
     ),
 
   setMemberRole: (conversationId: string, userId: string, role: 'admin' | 'member') =>
-    req<{ updated: boolean; role: string }>(
+    req<ConversationMemberRole>(
       `/conversations/${conversationId}/members/${userId}/role`,
       { method: 'PATCH', body: JSON.stringify({ role }) },
     ),
 
   transferOwner: (conversationId: string, toUserId: string) =>
-    req<{ transferred: boolean }>(
+    req<ConversationOwnerTransfer>(
       `/conversations/${conversationId}/transfer-owner`,
       { method: 'POST', body: JSON.stringify({ to_user_id: toUserId }) },
     ),
 
   removeAgent: (conversationId: string, agentId: string) =>
-    req<{ removed: boolean }>(
+    req<ConversationAgentRemoved>(
       `/conversations/${conversationId}/agents/${agentId}`,
       { method: 'DELETE' },
     ),
@@ -221,7 +229,7 @@ export const conversationService = {
     ),
 
   dissolveChannel: (conversationId: string) =>
-    req<{ archived: boolean }>(`/conversations/${conversationId}`, {
+    req<ConversationDissolved>(`/conversations/${conversationId}`, {
       method: 'DELETE',
     }),
 };

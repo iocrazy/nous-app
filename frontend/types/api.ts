@@ -497,3 +497,69 @@ export type ShareComment = Schemas['ShareComment'];
 /** The full row `POST /shares/code/{code}/comments` returns to its author. */
 export type ShareCommentRow = Schemas['ShareCommentRow'];
 // —— end P6 shares ——
+
+// ── P7 reviews ──
+// `/api/v1/reviews` (resource review panel). Comment, annotation, resource and
+// version ids are Snowflake BIGINTs sent as JSON numbers; timestamps keep the
+// `+00:00` form. `status` / `tool_type` are plain strings on the wire (the
+// columns carry no CHECK) — narrow them where a closed set is needed.
+// (`ReviewComment` above is the project-file comment, a different table.)
+export type ResourceReviewAnnotation = Schemas['ReviewAnnotationRow'];
+/** A bare `review_comments` row (`resolve` / `reopen`). */
+export type ResourceReviewComment = Schemas['ReviewCommentRow'];
+/** `POST /reviews/comments`: the new row with its annotations. */
+export type ResourceReviewCommentCreated = Schemas['ReviewCommentWithAnnotations'];
+/** A top-level comment from `GET /reviews/comments`, replies included. */
+export type ResourceReviewThread = Schemas['ReviewCommentThread'];
+export type ResourceReviewStatus = Schemas['ReviewStatusRow'];
+// —— end P7 reviews ——
+
+// ── P7 conversations ──
+// `/api/v1/conversations` (team chat). None of these bodies carries the
+// `{success, data}` envelope. Snowflake ids here are already strings on the
+// wire (`id`, `promoted_resource_id`); user and agent ids are UUID strings.
+/** One member row from `GET /conversations/{id}/members` (a user or an agent). */
+export type ConversationMember = Schemas['MemberOut'];
+/** `POST /conversations/{id}/members`: rows inserted (existing members skip). */
+export type ConversationMembersAdded = Schemas['ConversationMembersAddedResponse'];
+/** `DELETE /conversations/{id}/members/{userId}` (remove, or leave when self). */
+export type ConversationMemberRemoved = Schemas['ConversationMemberRemovedResponse'];
+export type ConversationMemberRole = Schemas['ConversationMemberRoleResponse'];
+export type ConversationOwnerTransfer = Schemas['ConversationOwnerTransferResponse'];
+/** `POST /conversations/{id}/agents`: only agents the caller can see (P7). */
+export type ConversationAgentAdded = Schemas['ConversationAgentAddedResponse'];
+/** `removed: false` when the agent was not in the conversation. */
+export type ConversationAgentRemoved = Schemas['ConversationAgentRemovedResponse'];
+export type ConversationDissolved = Schemas['ConversationDissolveResponse'];
+export type ConversationMarkRead = Schemas['ConversationMarkReadResponse'];
+/** `POST /conversations/{id}/attachments`: the staged image (id as a string). */
+export type ConversationImageUpload = Schemas['ConversationAttachmentUploadResponse'];
+export type ConversationAttachmentPromoted = Schemas['ConversationAttachmentPromoteResponse'];
+// —— end P7 conversations ——
+
+// ── P7 distribution / libraries / ideation ──
+// `/api/v1/libraries`: `id` is a Snowflake BIGINT sent as a JSON **number**
+// (`scope_id` is TEXT, a string). Ideation topic ids are strings on the wire.
+export type Library = Schemas['LibraryRow'];
+export type IdeationTopic = Schemas['IdeationTopic'];
+export type IdeationTopicStatus = IdeationTopic['status'];
+/** One cached 「选择音乐」 tab; kind + category_id together are its identity. */
+export type MusicChart = Schemas['DistributionMusicChart'];
+export type MusicChartTrack = Schemas['DistributionMusicChartTrack'];
+export type MusicChartsPage = Schemas['DistributionMusicChartsPage'];
+/** Always 200: a failed harvest is `success: false` + `detail.reason`. */
+export type MusicHarvestResult = Schemas['DistributionMusicHarvestResult'];
+/** `POST /distribution/accounts/{id}/refresh`: the whole public row. */
+export type SocialAccountRow = Schemas['DistributionAccountRow'];
+// —— end P7 distribution / libraries / ideation ——
+
+// ── P7 auth / beat-templates ──
+// The web app signs in through supabase-js directly; of `/api/v1/auth/*` it
+// only reads the media token.
+/** `POST /auth/media-token`: `expires_at` is a Unix timestamp in seconds. */
+export type AuthMediaToken = Schemas['AuthMediaToken'];
+/** `/api/v1/beat-templates`: `id` is a Snowflake BIGINT sent as a JSON **number**. */
+export type BeatTemplateRow = Schemas['BeatTemplateRow'];
+/** Stored JSONB anchor: every key may be absent on a hand-edited row. */
+export type BeatTemplateAnchorRow = Schemas['BeatTemplateAnchorRow'];
+// —— end P7 auth / beat-templates ——

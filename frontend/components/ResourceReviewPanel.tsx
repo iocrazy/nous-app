@@ -14,8 +14,6 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
-  ReviewComment,
-  ReviewAnnotation,
   fetchComments,
   createComment,
   resolveComment,
@@ -23,8 +21,12 @@ import {
   deleteComment,
   setReviewStatus,
   fetchReviewStatuses,
-  ReviewStatus,
 } from '../services/reviewService';
+import type {
+  ResourceReviewAnnotation,
+  ResourceReviewStatus,
+  ResourceReviewThread,
+} from '../types/api';
 import { ReviewStatusBadge } from './ReviewStatusBadge';
 import Loading from './common/Loading';
 
@@ -40,7 +42,7 @@ interface ResourceReviewPanelProps {
   onStartAnnotation: () => void;
   pendingAnnotations?: Array<{ tool_type: string; data: Record<string, unknown> }>;
   onClearAnnotations?: () => void;
-  onViewAnnotations?: (annotations: ReviewAnnotation[]) => void;
+  onViewAnnotations?: (annotations: ResourceReviewAnnotation[]) => void;
   onCommentChange?: () => void;
 }
 
@@ -66,13 +68,13 @@ function timeAgo(dateStr: string): string {
 // ─── CommentItem ────────────────────────────────────────
 
 const CommentItem: React.FC<{
-  comment: ReviewComment;
+  comment: ResourceReviewThread;
   currentUserId: string;
   onSeekTo: (s: number) => void;
-  onResolve: (id: string) => void;
-  onReopen: (id: string) => void;
-  onDelete: (id: string) => void;
-  onViewAnnotations?: (annotations: ReviewAnnotation[]) => void;
+  onResolve: (id: number) => void;
+  onReopen: (id: number) => void;
+  onDelete: (id: number) => void;
+  onViewAnnotations?: (annotations: ResourceReviewAnnotation[]) => void;
 }> = ({ comment, currentUserId, onSeekTo, onResolve, onReopen, onDelete, onViewAnnotations }) => {
   const isResolved = comment.status === 'resolved';
   const isAuthor = comment.author_id === currentUserId;
@@ -165,7 +167,7 @@ const CommentItem: React.FC<{
 const StatusControls: React.FC<{
   resourceId: string;
   versionId?: string;
-  statuses: ReviewStatus[];
+  statuses: ResourceReviewStatus[];
   currentUserId: string;
   onStatusChange: () => void;
 }> = ({ resourceId, versionId, statuses, currentUserId, onStatusChange }) => {
@@ -277,8 +279,8 @@ export const ResourceReviewPanel: React.FC<ResourceReviewPanelProps> = ({
   onCommentChange,
 }) => {
   const { t } = useTranslation();
-  const [comments, setComments] = useState<ReviewComment[]>([]);
-  const [statuses, setStatuses] = useState<ReviewStatus[]>([]);
+  const [comments, setComments] = useState<ResourceReviewThread[]>([]);
+  const [statuses, setStatuses] = useState<ResourceReviewStatus[]>([]);
   const [content, setContent] = useState('');
   const [capturedTime, setCapturedTime] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -333,26 +335,32 @@ export const ResourceReviewPanel: React.FC<ResourceReviewPanelProps> = ({
     }
   };
 
-  const handleResolve = async (id: string) => {
+  const handleResolve = async (id: number) => {
     try {
       await resolveComment(id);
       await loadData();
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('Review comment resolve failed:', err);
+    }
   };
 
-  const handleReopen = async (id: string) => {
+  const handleReopen = async (id: number) => {
     try {
       await reopenComment(id);
       await loadData();
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('Review comment reopen failed:', err);
+    }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: number) => {
     try {
       await deleteComment(id);
       await loadData();
       onCommentChange?.();
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('Review comment delete failed:', err);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

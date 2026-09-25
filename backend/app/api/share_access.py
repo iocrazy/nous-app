@@ -11,12 +11,20 @@ Two kinds of ``share_token`` are accepted (:func:`resolve_share_token`):
 
 - **a share grant** (``sg1.<share id>.<expires>.<sig>``), handed out by
   ``POST /shares/code/{code}`` once the visitor has passed the password check.
-  The signature covers a fingerprint of the share's current password, so
-  changing or removing the password revokes every grant issued before. A grant
+  The signature covers a fingerprint of the share's current password hash,
+  so changing or removing the password revokes every grant issued before
+  (a new bcrypt hash has a new salt, even for the same password). A grant
   does not re-check ``max_views``: it was issued on a counted view, and the
   visitor who used up the last view must still be able to load the file.
 - **the bare share code**, only for a share WITHOUT a password (old links,
   cached pages). It keeps the view limit, as it always did.
+
+Passwords (mig 504): ``shares.password_hash`` holds a bcrypt hash and is the
+only thing any code here reads. The old ``shares.password`` column no longer
+holds the password: new code writes a random lock value into it
+(``share_password_columns`` in ``app/services/library/share_passwords.py``), so a rolled-back image that still compares
+against that column fails closed instead of letting anyone in. A trigger in
+mig 504 hashes whatever a legacy writer still puts there in plain text.
 
 Either way the share has to be live: status ``active`` and not past
 ``expires_at``. Which resource it opens is the caller's business
@@ -32,6 +40,8 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from loguru import logger
+
+from app.services.library.share_passwords import has_password
 
 GRANT_PREFIX = "sg1"
 # Long enough for a visitor to keep a video page open; short enough that a
@@ -76,19 +86,12 @@ def is_live(share: Mapping[str, Any], *, count_views: bool) -> bool:
     return not (count_views and is_view_exhausted(share))
 
 
-def password_matches(stored: str | None, given: str | None) -> bool:
-    """Constant-time comparison (the old ``!=`` leaked a timing signal)."""
-    if not stored or given is None:
-        return False
-    return hmac.compare_digest(stored.encode(), given.encode())
+def _password_fingerprint(password_hash: str | None) -> str:
+    return hashlib.sha256((password_hash or "").encode()).hexdigest()[:16]
 
 
-def _password_fingerprint(password: str | None) -> str:
-    return hashlib.sha256((password or "").encode()).hexdigest()[:16]
-
-
-def _grant_payload(share_id: int, expires: int, password: str | None) -> str:
-    fingerprint = _password_fingerprint(password)
+def _grant_payload(share_id: int, expires: int, password_hash: str | None) -> str:
+    fingerprint = _password_fingerprint(password_hash)
     return f"{_GRANT_DOMAIN}|{share_id}|{expires}|{fingerprint}"
 
 
@@ -100,7 +103,8 @@ def sign_share_grant(share: Mapping[str, Any], *, now: int | None = None) -> str
     share_id = int(share["id"])
     expires = int(now if now is not None else time.time()) + GRANT_TTL_SECONDS
     sig = _hmac(
-        _signing_secret(), _grant_payload(share_id, expires, share.get("password"))
+        _signing_secret(),
+        _grant_payload(share_id, expires, share.get("password_hash")),
     )
     return f"{GRANT_PREFIX}.{share_id}.{expires}.{sig}"
 
@@ -120,7 +124,7 @@ def _grant_signature_ok(
 ) -> bool:
     from app.api.media_auth import _hmac, _verify_secrets
 
-    payload = _grant_payload(share_id, expires, share.get("password"))
+    payload = _grant_payload(share_id, expires, share.get("password_hash"))
     return any(
         hmac.compare_digest(sig, _hmac(secret, payload)) for secret in _verify_secrets()
     )
@@ -144,7 +148,7 @@ async def load_share(
         Shares.expires_at,
         Shares.max_views,
         Shares.view_count,
-        Shares.password,
+        Shares.password_hash,
     )
     if code is not None:
         stmt = stmt.where(Shares.share_code == code)
@@ -174,7 +178,7 @@ async def resolve_share_token(token: str | None) -> dict[str, Any] | None:
     share = await load_share(code=token)
     if not share:
         return None
-    if share.get("password"):
+    if has_password(share):
         # The code is printed in the link; it proves nothing about the
         # password. Only a grant opens a protected share.
         return None

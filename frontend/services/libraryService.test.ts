@@ -32,7 +32,7 @@ beforeEach(() => {
 
 describe('libraryService', () => {
   it('fetchLibraries threads scope_id and unwraps data', async () => {
-    const spy = stubJson({ data: [{ id: 'l1' }, { id: 'l2' }] });
+    const spy = stubJson({ data: [{ id: 101 }, { id: 102 }] });
     const rows = await fetchLibraries('t-1');
     const url = spy.mock.calls[0][0] as string;
     expect(url).toContain('scope_id=t-1');
@@ -45,7 +45,7 @@ describe('libraryService', () => {
   });
 
   it('createLibrary POSTs with scope_type=team', async () => {
-    const spy = stubJson({ data: { id: 'l1', name: 'x' } });
+    const spy = stubJson({ data: { id: 101, name: 'x' } });
     await createLibrary({ name: 'x', scope_id: 't-1' });
     const body = JSON.parse((spy.mock.calls[0][1] as RequestInit).body as string);
     expect(body.scope_type).toBe('team');
@@ -60,7 +60,7 @@ describe('libraryService', () => {
   });
 
   it('updateLibrary PATCHes /:id', async () => {
-    const spy = stubJson({ data: { id: 'l1', name: 'new' } });
+    const spy = stubJson({ data: { id: 101, name: 'new' } });
     await updateLibrary('l1', { name: 'new' });
     expect((spy.mock.calls[0][1] as RequestInit).method).toBe('PATCH');
   });

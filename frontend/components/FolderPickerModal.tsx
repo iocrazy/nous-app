@@ -4,7 +4,8 @@ import {
   Library as LibraryIcon, Home, File, Film, Image, Music, FileText,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Folder, Library } from '../types';
+import { Folder } from '../types';
+import type { Library } from '../types/api';
 import { fetchFolders, buildFolderTree, createFolder } from '../services/resourceService';
 import { fetchLibraries } from '../services/libraryService';
 
@@ -202,7 +203,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
   // Breadcrumb path
   const breadcrumb = useMemo(() => {
     if (selectedFolderId === null) {
-      const lib = libraries.find(l => l.id === selectedLibraryId);
+      const lib = libraries.find(l => String(l.id) === selectedLibraryId);
       return lib ? [{ id: null, name: lib.name }] : [{ id: null, name: 'Root' }];
     }
     const path: { id: string | null; name: string }[] = [];
@@ -220,7 +221,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
       return false;
     };
     findPath(folderTree);
-    const lib = libraries.find(l => l.id === selectedLibraryId);
+    const lib = libraries.find(l => String(l.id) === selectedLibraryId);
     path.unshift({ id: null, name: lib?.name || 'Root' });
     return path;
   }, [selectedFolderId, folderTree, libraries, selectedLibraryId]);
@@ -308,11 +309,11 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
                     <div
                       key={lib.id}
                       onClick={() => {
-                        setSelectedLibraryId(lib.id);
+                        setSelectedLibraryId(String(lib.id));
                         setSelectedFolderId(null);
                       }}
                       className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-all text-sm select-none ${
-                        selectedLibraryId === lib.id && selectedFolderId === null
+                        selectedLibraryId === String(lib.id) && selectedFolderId === null
                           ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                           : 'hover:bg-ink-800/80 text-ink-400 hover:text-ink-200'
                       }`}

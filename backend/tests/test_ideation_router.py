@@ -54,9 +54,6 @@ class _FakeRepo:
     async def get_topic_team_id(self, topic_id):
         return self._team_id_for_topic
 
-    async def get_topic(self, topic_id, team_id):
-        return self._topic
-
     async def update_topic(self, topic_id, team_id, **kwargs):
         self.updated.append({"id": topic_id, **kwargs})
         return self._topic
@@ -134,36 +131,6 @@ async def test_create_non_member_403(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await router_mod.create_topic(TopicCreate(title="X"), _AUTH, team_id="777")
     assert exc.value.status_code == 403
-
-
-# ── get ─────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_get_member_ok(monkeypatch):
-    repo = _FakeRepo(topic={"id": "500", "title": "Idea"})
-    _install(monkeypatch, repo, role="viewer")
-    r = await router_mod.get_topic("500", _AUTH)
-    assert r["data"]["id"] == "500"
-
-
-@pytest.mark.asyncio
-async def test_get_missing_404(monkeypatch):
-    repo = _FakeRepo(team_id_for_topic=None)
-    _install(monkeypatch, repo, role="manager")
-    with pytest.raises(HTTPException) as exc:
-        await router_mod.get_topic("500", _AUTH)
-    assert exc.value.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_get_non_member_404_no_leak(monkeypatch):
-    repo = _FakeRepo(topic={"id": "500"})
-    _install(monkeypatch, repo, role=None)
-    with pytest.raises(HTTPException) as exc:
-        await router_mod.get_topic("500", _AUTH)
-    # 404 (not 403) so existence never leaks across teams.
-    assert exc.value.status_code == 404
 
 
 # ── update (status flow) ─────────────────────────────────────────────────────

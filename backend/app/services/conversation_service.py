@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Optional
+from uuid import UUID
 
 from loguru import logger
 
@@ -30,7 +31,36 @@ def _get_conversation_semaphore(conversation_id: int) -> asyncio.Semaphore:
     return _conversation_agent_semaphores[conversation_id]
 
 
+async def _agent_usable_by(agent: dict[str, Any], user_id: str) -> bool:
+    """May ``user_id`` bring ``agent`` into a conversation?
+
+    Same visible set as the agent picker (``GET /ai-library/agents`` →
+    ``list_accessible``) and the by-slug routes since OpenAPI P5: system
+    presets, plus agents in the caller's own / team / project scope. Before
+    this, any member could add ANY chat-enabled agent by slug — including
+    someone else's private agent, whose prompts then answered in the
+    caller's group on every @-mention.
+    """
+    if agent.get("is_system_preset"):
+        return True
+    owner = agent.get("user_id")
+    if owner is not None and str(owner) == str(user_id):
+        return True
+    try:
+        user_uuid = UUID(str(user_id))
+    except ValueError:
+        return False
+    # Lazy: the P5 row-scope rule lives with the ai-library router; importing
+    # it at module load would pull the router into every service import.
+    from app.api.ai_library_router import _in_row_scope
+
+    return await _in_row_scope(agent, user_uuid, owner_key="user_id")
+
+
 class ConversationService:
+    # Conversations that are a fixed pair: nobody (user or agent) joins them.
+    _FIXED_PAIR_TYPES = frozenset({"direct_agent", "dm"})
+
     def __init__(self, repo: Optional[ConversationRepository] = None) -> None:
         self._repo = repo or get_conversation_repository()
 
@@ -69,9 +99,12 @@ class ConversationService:
         # per-pair consolidation joins conversation_members, so a second
         # user row fans out its message counts (P3 Task-2 review ledger).
         # A user dm is likewise a fixed pair — invite is a group concept.
-        if info is not None and info.get("type") in ("direct_agent", "dm"):
+        if info is None or info.get("archived_at") is not None:
+            # Dissolved groups keep their member rows; they take no one new.
+            raise ValueError(f"conversation {conversation_id} not found")
+        if info.get("type") in self._FIXED_PAIR_TYPES:
             raise PermissionError("cannot add members to this conversation type")
-        scope_id = info.get("scope_id") if info is not None else None
+        scope_id = info.get("scope_id")
         if scope_id is not None:
             for target in user_ids:
                 if not await self._repo.is_team_member(
@@ -177,14 +210,21 @@ class ConversationService:
     ) -> dict[str, Any]:
         """PERM-08: caller must be a conversation member; agent must be chat-enabled."""
         await self._require_member(conversation_id, user_id)
-        conversation = await self._repo.get_conversation(
+        conversation = await self._repo.conversation_scope_and_type(
             conversation_id=conversation_id
         )
-        if conversation is None:
+        if conversation is None or conversation.get("archived_at") is not None:
             raise ValueError(f"conversation {conversation_id} not found")
+        # Same fixed-pair rule as add_members: a 1:1 AI thread is one human +
+        # one agent, and a user dm has no group settings to add agents from.
+        if conversation.get("type") in self._FIXED_PAIR_TYPES:
+            raise PermissionError("cannot add agents to this conversation type")
         ar = get_agent_repository()
         agent = await ar.get_by_slug(agent_slug)
-        if agent is None:
+        # An agent the caller cannot see is answered exactly like a missing
+        # slug, BEFORE the caps check: otherwise "not enabled for chat" (403)
+        # vs "not found" (400) tells an outsider the slug exists.
+        if agent is None or not await _agent_usable_by(agent, user_id):
             raise ValueError(f"agent {agent_slug!r} not found")
         caps = agent_chat_caps(agent)
         if not caps.enabled or not caps.allows_team(conversation["scope_id"]):

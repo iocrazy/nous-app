@@ -40,6 +40,7 @@ from app.core.config import settings
 from app.core.deps import AuthContext, get_auth, get_optional_auth
 from app.main import app
 from app.models import ReviewComments, Shares
+from app.services.library.share_passwords import share_password_columns
 from tests.api.wire_parity import SAMPLE_BIGINT, assert_wire_unchanged, sample_row
 
 # ``app.api`` re-exports the router object under the module's name.
@@ -148,6 +149,8 @@ def _share(**overrides: Any) -> dict:
         view_count=0,
         max_views=None,
     )
+    if "password" in overrides:
+        row.update(share_password_columns(overrides.pop("password")))
     row.update(overrides)
     return row
 
@@ -183,6 +186,7 @@ async def test_create_share_wire(client) -> None:
     assert_wire_unchanged(resp, {"success": True, "data": _owner_view(row)})
     body = resp.json()["data"]
     assert "password" not in body and body["has_password"] is True
+    assert "password_hash" not in body
     assert _bound(_Db.statements[-1])["resource_id"] == RESOURCE_ID
 
 
@@ -549,7 +553,7 @@ def _protected(**overrides: Any) -> dict:
         "expires_at": FUTURE,
         "max_views": None,
         "view_count": 0,
-        "password": "s3cret",
+        **share_password_columns(overrides.pop("password", "s3cret")),
     }
     base.update(overrides)
     return base
@@ -593,7 +597,7 @@ async def test_password_change_revokes_old_grants(client, shares_table) -> None:
     share = _protected()
     shares_table[SHARE_ID] = share
     grant = _grant_for(share)
-    shares_table[SHARE_ID] = {**share, "password": "changed"}
+    shares_table[SHARE_ID] = {**share, **share_password_columns("changed")}
     resp = await client.get(
         f"/api/v1/shares/code/{CODE}/comments", params={"share_token": grant}
     )

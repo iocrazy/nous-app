@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, type NavigateFunction } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Folder, ResourceItem, SmartCollection, Library } from '../types';
+import { Folder, ResourceItem, SmartCollection } from '../types';
+import type { Library } from '../types/api';
 import type { Tag } from '../types/api';
 import {
   fetchFolders,

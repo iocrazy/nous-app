@@ -11,6 +11,8 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.envelope import Envelope
+
 # Status flow (spec §1): candidate → shortlisted → produced → archived.
 TopicStatus = Literal["candidate", "shortlisted", "produced", "archived"]
 
@@ -55,25 +57,40 @@ class TopicUpdate(BaseModel):
     status: Optional[TopicStatus] = None
 
 
-class TopicOut(BaseModel):
-    """GET payload for one topic (ids as strings)."""
+class IdeationTopic(BaseModel):
+    """One topic as the routes return it (``topics_repository._topic_row``).
+
+    Every key is always present. Ids are strings, timestamps ISO strings — the
+    repository renders them. ``status`` is guarded by the table's CHECK
+    constraint, so the literal is safe for any stored row.
+    """
 
     id: str
     team_id: str
     title: str
-    cover_url: Optional[str] = None
-    excerpt: Optional[str] = None
-    status: str
-    note_id: Optional[str] = None
-    resource_id: Optional[str] = None
-    media_id: Optional[str] = None
-    inspiration_topic_id: Optional[str] = None
-    created_by: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    cover_url: Optional[str]
+    excerpt: Optional[str]
+    status: TopicStatus
+    note_id: Optional[str]
+    resource_id: Optional[str]
+    media_id: Optional[str]
+    inspiration_topic_id: Optional[str]
+    created_by: Optional[str]
+    created_at: str
+    updated_at: str
 
 
-class TopicListOut(BaseModel):
-    """Envelope data for GET /ideation/topics."""
+class IdeationTopicResponse(Envelope[IdeationTopic]):
+    pass
 
-    data: List[TopicOut] = Field(default_factory=list)
+
+class IdeationTopicListResponse(Envelope[List[IdeationTopic]]):
+    pass
+
+
+class IdeationTopicDeleted(BaseModel):
+    deleted: bool
+
+
+class IdeationTopicDeleteResponse(Envelope[IdeationTopicDeleted]):
+    pass

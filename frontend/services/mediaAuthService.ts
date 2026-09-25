@@ -8,6 +8,7 @@
  * can't send Authorization headers).
  */
 
+import type { AuthMediaToken } from '../types/api';
 import { getApiUrl } from '../utils/apiConfig';
 
 /**
@@ -63,7 +64,7 @@ export async function fetchMediaToken(accessToken: string): Promise<string | nul
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok) return null;
-    const data = await res.json();
+    const data: AuthMediaToken = await res.json();
     return data.token || null;
   } catch (err) {
     console.error('Failed to fetch media token:', err);

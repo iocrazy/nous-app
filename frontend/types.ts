@@ -258,20 +258,7 @@ export interface CollectionMedia {
 // Backward-compat alias
 export type CollectionVideo = CollectionMedia;
 
-// Library (team-scoped resource library)
-export interface Library {
-  id: string;
-  name: string;
-  scope_type: 'team';
-  scope_id: string;
-  created_by: string;
-  icon: string | null;
-  color: string | null;
-  sort_order: number;
-  visibility: 'inherited' | 'restricted';
-  created_at: string;
-  updated_at: string;
-}
+// Library (team-scoped resource library): `Library` in `types/api.ts` (P7).
 
 // Folder (virtual folder tree)
 export interface Folder {
@@ -578,8 +565,6 @@ export interface PaymentOrder {
 
 // ── Ideation topic pool (M1.5) ───────────────────────────────────────────────
 
-export type TopicStatus = 'candidate' | 'shortlisted' | 'produced' | 'archived';
-
 /** Which library a topic's reference points back to (the "回源" target).
  *  'blank' = a hand-written topic with no source. */
 export type TopicSource =
@@ -588,23 +573,7 @@ export type TopicSource =
   | 'library'
   | 'blank';
 
-/** One ideation-pool topic = cover + title + reference (spec §1 / §9). The
- *  reference is a soft pointer to at most one source; ids stay strings. */
-export interface Topic {
-  id: string;
-  team_id: string;
-  title: string;
-  cover_url: string | null;
-  excerpt: string | null;
-  status: TopicStatus;
-  note_id: string | null;
-  resource_id: string | null;
-  media_id: string | null;
-  inspiration_topic_id: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-}
+// The topic row itself is `IdeationTopic` in `types/api.ts` (P7).
 
 export type ReviewStatus = 'pending_review' | 'in_review' | 'feedback_collected' | 'approved';
 
@@ -1449,18 +1418,6 @@ export interface Channel {
   unread: number;
   mentions: number;
   created_at: string;
-}
-
-/** One conversation member (user or agent) with its group role. */
-export interface ConversationMember {
-  member_type: 'user' | 'agent';
-  user_id: string | null;
-  agent_id: string | null;
-  role: 'owner' | 'admin' | 'member' | string;
-  name: string | null;
-  email: string | null;
-  agent_slug: string | null;
-  joined_at: string;
 }
 
 export interface ChatMessage {

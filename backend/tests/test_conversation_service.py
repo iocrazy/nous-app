@@ -566,7 +566,7 @@ async def test_dispatch_summons_reply_write_failure_does_not_raise(monkeypatch):
 async def test_add_agent_raises_when_caps_disabled():
     """add_agent raises PermissionError when agent_chat_caps.enabled is False."""
     repo = _make_repo()
-    fake_agent = {"id": "a1", "slug": "bot", "agent_md": ""}
+    fake_agent = {"id": "a1", "slug": "bot", "agent_md": "", "user_id": "u1"}
     fake_agent_repo = AsyncMock()
     fake_agent_repo.get_by_slug.return_value = fake_agent
 
@@ -599,7 +599,12 @@ async def test_add_agent_raises_when_caps_disabled():
 async def test_add_agent_raises_when_scope_restricted():
     """add_agent raises PermissionError when caps.enabled=True but allows_team=False."""
     repo = _make_repo()
-    fake_agent = {"id": "a2", "slug": "scoped-bot", "agent_md": ""}
+    fake_agent = {
+        "id": "a2",
+        "slug": "scoped-bot",
+        "agent_md": "",
+        "user_id": "u1",
+    }
     fake_agent_repo = AsyncMock()
     fake_agent_repo.get_by_slug.return_value = fake_agent
 
@@ -635,7 +640,7 @@ async def test_add_agent_raises_when_scope_restricted():
 async def test_add_agent_succeeds_when_caps_enabled():
     """add_agent succeeds when agent_chat_caps is enabled and allows the scope."""
     repo = _make_repo()
-    fake_agent = {"id": "a1", "slug": "bot", "agent_md": ""}
+    fake_agent = {"id": "a1", "slug": "bot", "agent_md": "", "user_id": "u1"}
     fake_agent_repo = AsyncMock()
     fake_agent_repo.get_by_slug.return_value = fake_agent
 

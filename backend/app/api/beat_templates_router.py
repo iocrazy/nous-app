@@ -17,15 +17,25 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.core.scope_guards import verify_beat_template_access
 from app.repositories.beat_template_repository import get_beat_template_repository
+from app.schemas.beat_template_responses import (
+    BeatTemplateAck,
+    BeatTemplateListResponse,
+    BeatTemplateResponse,
+)
 from app.schemas.script import BeatTemplateCreate, BeatTemplateRename
 
 router = APIRouter()
 
 
-@router.get("/beat-templates")
+@router.get(
+    "/beat-templates",
+    response_model=BeatTemplateListResponse,
+    response_model_exclude_unset=True,
+)
 async def list_beat_templates(auth: AuthDep) -> Dict[str, Any]:
     """List the caller's custom templates, newest first."""
     try:
@@ -36,7 +46,11 @@ async def list_beat_templates(auth: AuthDep) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail="Failed to list beat templates")
 
 
-@router.post("/beat-templates")
+@router.post(
+    "/beat-templates",
+    response_model=BeatTemplateResponse,
+    response_model_exclude_unset=True,
+)
 async def create_beat_template(
     auth: AuthDep, body: BeatTemplateCreate
 ) -> Dict[str, Any]:
@@ -53,7 +67,11 @@ async def create_beat_template(
         raise HTTPException(status_code=500, detail="Failed to create beat template")
 
 
-@router.put("/beat-templates/{template_id}")
+@router.put(
+    "/beat-templates/{template_id}",
+    response_model=BeatTemplateResponse,
+    response_model_exclude_unset=True,
+)
 async def rename_beat_template(
     template_id: str,
     auth: AuthDep,
@@ -63,9 +81,8 @@ async def rename_beat_template(
     """Rename a custom template (owner only)."""
     try:
         template = await get_beat_template_repository().rename(template_id, body.name)
-        if template is None:
-            raise HTTPException(status_code=404, detail="Beat template not found")
-        return {"success": True, "data": template}
+        # Deleted between the guard and the UPDATE: a typed 404, not 200/500.
+        return {"success": True, "data": require_row(template)}
     except HTTPException:
         raise
     except Exception as exc:
@@ -73,7 +90,7 @@ async def rename_beat_template(
         raise HTTPException(status_code=500, detail="Failed to rename beat template")
 
 
-@router.delete("/beat-templates/{template_id}")
+@router.delete("/beat-templates/{template_id}", response_model=BeatTemplateAck)
 async def delete_beat_template(
     template_id: str,
     auth: AuthDep,

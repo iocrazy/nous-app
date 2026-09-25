@@ -491,13 +491,14 @@ async def verify_beat_template_access(
     the #1006 trap (the repo returns ``user_id`` as a str; auth.user_id is a
     str, so this matches, but the coercion keeps it robust to a native-UUID
     read)."""
+    from app.api.row_guard import require_row
     from app.repositories.beat_template_repository import (
         get_beat_template_repository,
     )
 
-    template = await get_beat_template_repository().get_by_id(template_id)
-    if not template:
-        raise HTTPException(status_code=404, detail="Beat template not found")
+    # Missing (or a non-numeric id, which the repo reads as missing): the
+    # typed 404 every row-scoped route uses.
+    template = require_row(await get_beat_template_repository().get_by_id(template_id))
     if str(template.get("user_id")) != auth.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 

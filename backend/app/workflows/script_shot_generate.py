@@ -97,23 +97,20 @@ def _compose_prompt(shot: dict[str, Any], scene: Optional[dict[str, Any]]) -> st
     return ". ".join(segments) or "storyboard shot"
 
 
-def _step_output(
-    out: Any, *, key: str = "url"
-) -> tuple[str, Optional[str], Optional[str], bool]:
-    """出图/出视频 step 的返回值 → ``(载荷, provider, model, byok)``。
+def _step_output(out: Any) -> tuple[str, Optional[str], Optional[str], bool]:
+    """出图 step 的返回值 → ``(url, provider, model, byok)``。
 
     DBOS 把 step 返回值冻进 checkpoint，所以部署前排队的 workflow 恢复时
     拿回来的仍是旧的裸 ``str``。两种形状都要接：归因是增益，不是继续跑完
-    的前提。``key`` 是载荷在字典里的键——出图是 ``url``，出视频是 ``path``
-    （``script_shot_video`` 复用本函数，它的产物永远是本地文件）。
+    的前提。
 
     ``byok`` 是「这次用的是用户自己的 provider key」，由
     ``image_generation_service`` 从 provider 对象上读出来并列注入。缺席一律
     False —— 冻进 checkpoint 的旧返回值没有它，而把「不知道」读成 True 会
-    免掉平台该收的积分。出视频今天恒 False（视频侧没有 BYOK 目录行）。"""
+    免掉平台该收的积分。"""
     if isinstance(out, dict):
         return (
-            str(out.get(key) or ""),
+            str(out.get("url") or ""),
             out.get("provider") or None,
             out.get("model") or None,
             bool(out.get("byok")),

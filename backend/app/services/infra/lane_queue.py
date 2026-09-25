@@ -72,7 +72,6 @@ _TASK_TYPE_LANE: Dict[str, str] = {
     "ai_transcription": "background",
     "ai_summary": "background",
     "ai_visual_analysis": "background",
-    "script_outline_gen": "background",
     # Scheduled / cron
     "scheduled_master": "scheduled",
     "agent_runs_sweeper": "scheduled",
