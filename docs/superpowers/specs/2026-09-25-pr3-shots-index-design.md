@@ -40,12 +40,12 @@ video_shot_indexes     resource_id bigint PK FK resources ON DELETE CASCADE,
 
 `app/services/library/shot_cut.py`，纯 Python + Pillow，无 numpy 依赖：
 
-1. `materialize` 源视频 → `ffprobe` 时长 → `ffmpeg -vf fps=1,scale=-2:448` 抽 1 fps JPEG 到 0700 私有临时目录。时长 > 60 min 时 fps 降到 3600 / 时长，帧数封顶 3600。
+1. `materialize` 源视频 → `ffprobe` 时长 → `ffmpeg -vf fps=3,scale=-2:448` 抽 3 fps JPEG 到 0700 私有临时目录（`hist_v2`；`hist_v1` 是 1 fps，见 §11 的基准）。时长 > 60 min 时 fps 降到 10800 / 时长，帧数封顶 10800。
 2. 每帧缩到 32×32 → HSV 直方图（H 16 桶 + S 8 桶 + V 8 桶）→ 相邻帧 L1 距离序列 `d[i]`。
 3. 切点：PySceneDetect `AdaptiveDetector` 的骨架——`d[i]` 除以滚动窗口（±2 帧）均值得到比值，比值 ≥ 3.0 且 `d[i]` ≥ 绝对下限 0.15 记为切点；闪光抑制：切点后 1 帧又切回（与切前帧距离 < 0.1）则丢弃两点。
-4. 最短镜头 1.5 s（1 fps 下即 ≥ 2 帧）；超长镜头每 30 s 硬切；每支封顶 600 镜头（超出按 cut_score 高者保留）。
+4. 最短镜头 1.5 s（3 fps 下即 ≥ 5 帧）；超长镜头每 30 s 硬切；每支封顶 600 镜头（超出按 cut_score 高者保留）。
 5. 代表帧 = 镜头中点帧（母 spec 的「离均值向量最近」需要帧向量，本期不付这个钱）；相邻镜头直方图距离 < 0.05 合并（口播视频去重）。
-6. 输出 `list[Shot(start_ms, end_ms, rep_frame_ms, cut_score)]` + `algo_version = "hist_v1"`。
+6. 输出 `list[Shot(start_ms, end_ms, rep_frame_ms, cut_score)]` + `algo_version = "hist_v2"`（3 fps、ratio 2.5；`hist_v1` = 1 fps、ratio 3.0，被它切过的索引读作 `stale`）。
 
 验收对照物改为 **PySceneDetect `ContentDetector`（默认阈值 27）**，本机 pip 装即可跑，不依赖 OmniShotCut：30 支视频（附录 A 的基准集里挑）±0.5 s 容差 F1 ≥ 0.8。达不到先调参再上线，参数进 `algo_version`。
 
@@ -119,7 +119,8 @@ video_shot_indexes     resource_id bigint PK FK resources ON DELETE CASCADE,
 ## 11. Known Limitations and Deferred Work
 
 - 直方图切点对渐变转场（dissolve）弱，会晚 1–2 s 或漏切；帧向量法（引擎到位后）可作为 `hist_v2` 替换，`algo_version` 让两代并存可比。
-- 1 fps 采样让切点精度 ±0.5 s，与验收容差相同；更细需要二次精定位（未做）。
+- 3 fps 采样让切点精度 ±0.33 s（`hist_v1` 的 1 fps 是 ±0.5 s）；更细需要二次精定位（未做）。
+- **2026-09-25 本机 7 支真内容视频基准**（`bench_shot_cut.py`，非 §8 的 30 支）：`hist_v1` 平均 F1 0.578，20 刀的胶片老素材召回只有 0.25（1 fps 下镜头内相邻帧距离 0.2–0.4，刀口 0.3–0.6 的比值分不开）；`hist_v2` 平均 0.630、该支 0.76，两支单镜头短片仍零误报。剩下的两类漏切：渐变转场（两支 stock 片各漏 1 刀，见上一条）与低对比度 MV 上距离 0.13–0.15 卡在 `min_abs=0.15` 之下（降到 0.10 会让该支误报翻倍，不取）。30 支的正式数字仍待真视频。
 - 代表帧是中点帧，镜头内有大运动时不一定最有代表性。
 - doubao 图片 token 计价按图尺寸变化，`estimated_tokens` 是经验常数（每镜头 ≈ 300），先按实跑校准。
 - 回填是父子任务，没有 Pause；取消父任务不回收已派发的子任务（现有取消语义）。

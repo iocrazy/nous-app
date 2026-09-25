@@ -31,7 +31,11 @@ from PIL import Image
 
 #: Names THIS cutter + THESE defaults. Bump when the output for the same
 #: frames would change.
-ALGO_VERSION = "hist_v1"
+#: ``hist_v2`` (2026-09-25): 3 fps sampling + ratio 2.5. ``hist_v1`` sampled
+#: at 1 fps with ratio 3.0 and lost most cuts on grainy / fast-cut footage
+#: (recall 0.25 on a 20-cut archival reel; 0.75 at 3 fps — see the bench in
+#: PR "shots-cutter-v2"). Indexes cut by an older version read as ``stale``.
+ALGO_VERSION = "hist_v2"
 
 _THUMB = 32
 _H_BINS, _S_BINS, _V_BINS = 16, 8, 8
@@ -59,8 +63,10 @@ class Shot:
 
 @dataclass(frozen=True)
 class CutParams:
-    #: d[i] / rolling-mean(d around i) must reach this.
-    ratio: float = 3.0
+    #: d[i] / rolling-mean(d around i) must reach this. 2.5 at 3 fps: the
+    #: within-shot distance between frames 333 ms apart is small enough that
+    #: a real cut clears it; 3.0 was the 1 fps setting.
+    ratio: float = 2.5
     #: ... and d[i] itself must reach this (kills ratio spikes on static video
     #: where the baseline is ~0).
     min_abs: float = 0.15

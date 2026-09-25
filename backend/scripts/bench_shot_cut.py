@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Shot-cut benchmark: our ``hist_v1`` cutter vs PySceneDetect's
+"""Shot-cut benchmark: our ``hist_v2`` cutter vs PySceneDetect's
 ``ContentDetector`` on a directory of videos (spec §8.1: F1 ≥ 0.8 at ±0.5 s).
 
 Reference = PySceneDetect (pip: ``scenedetect[opencv]``), run on the same

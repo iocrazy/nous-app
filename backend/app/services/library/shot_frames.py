@@ -1,7 +1,7 @@
 """Frame sampling for the shot index: one ffmpeg pass → JPEG frames in a
 private scratch directory → colour signatures → shots.
 
-Spec §4 step 1: 1 fps, short side 448, capped at ``MAX_FRAMES`` frames (a
+Spec §4 step 1: 3 fps (hist_v2; was 1 fps), short side 448, capped at ``MAX_FRAMES`` frames (a
 video longer than an hour is sampled more sparsely). The JPEGs are what the
 cutter reads and what the representative frame is served from; nothing here
 is persisted, the caller deletes the directory when it is done (``async
@@ -38,9 +38,13 @@ from app.services.library.shot_cut import (
 from app.services.media.render.video_frame_extractor import _probe_duration
 
 #: Sampling rate for videos up to an hour.
-BASE_FPS = 1.0
-#: Frames per video, whatever its length (an hour at 1 fps).
-MAX_FRAMES = 3600
+#: 3 fps: frames 333 ms apart keep the within-shot histogram distance low
+#: on grainy / fast-moving footage, which is what lets a cut stand out (1 fps
+#: lost most cuts there — hist_v1). Only representative frames are embedded,
+#: so this costs decode time, not provider tokens.
+BASE_FPS = 3.0
+#: Frames per video, whatever its length (an hour at 3 fps; ~30 KB each).
+MAX_FRAMES = 10800
 #: Short side of a sampled frame, in pixels.
 SHORT_SIDE = 448
 #: ffmpeg ``-q:v`` for the JPEGs (2 best … 31 worst).
@@ -85,8 +89,8 @@ class CutResult:
 
 
 def choose_fps(duration_seconds: float) -> float:
-    """1 fps up to ``MAX_FRAMES`` seconds, then just enough to stay under
-    the cap."""
+    """``BASE_FPS`` while that stays under ``MAX_FRAMES`` frames, then just
+    enough to stay under the cap."""
     if duration_seconds <= 0:
         return BASE_FPS
     return min(BASE_FPS, MAX_FRAMES / duration_seconds)
