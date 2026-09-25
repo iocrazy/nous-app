@@ -5,6 +5,10 @@ admin prefix with no dependency at all, so anyone — not even signed in — cou
 read how many workflows were running and how deep the workforce queue was.
 They now take ``AdminAuthDep`` like every other ``/admin`` route.
 
+``test_every_admin_route_requires_the_admin_role`` walks the live app so the
+next route added under an ``/admin`` path without the guard fails here, not
+in prod.
+
 Each case runs over real HTTP through the real ``get_admin_auth``; only the
 role lookup's session is scripted.
 """
@@ -16,8 +20,10 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
+from app.core.admin_deps import get_admin_auth
 from app.core.deps import AuthContext, get_auth
 from app.main import app
 
@@ -109,3 +115,23 @@ async def test_unauthenticated_admin_health_is_gone(client):
     it; the admin dashboard reads the admin-only ``/system/health``."""
     resp = await client.get("/api/v1/admin/health")
     assert resp.status_code == 404, resp.text
+
+
+def _depends_on_admin(dependant) -> bool:
+    for dep in dependant.dependencies:
+        if dep.call is get_admin_auth or _depends_on_admin(dep):
+            return True
+    return False
+
+
+def test_every_admin_route_requires_the_admin_role() -> None:
+    admin_routes = [
+        r for r in app.routes if isinstance(r, APIRoute) and "/admin/" in r.path + "/"
+    ]
+    assert len(admin_routes) > 100  # the walk found the admin surface at all
+    missing = sorted(
+        f"{sorted(r.methods)} {r.path}"
+        for r in admin_routes
+        if not _depends_on_admin(r.dependant)
+    )
+    assert missing == [], missing
