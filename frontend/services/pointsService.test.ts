@@ -192,9 +192,18 @@ describe('adjustPoints', () => {
       ok: true,
       status: 200,
       headers: new Headers(),
+      // The real wire shape (AdminTeamPointsAdjustResult).
       text: async () =>
-        JSON.stringify({ success: true, new_balance: 1500 }),
-      json: async () => ({ success: true, new_balance: 1500 }),
+        JSON.stringify({
+          success: true,
+          message: 'Adjusted 500 points for team t1',
+          new_balance: 1500,
+        }),
+      json: async () => ({
+        success: true,
+        message: 'Adjusted 500 points for team t1',
+        new_balance: 1500,
+      }),
     } as unknown as Response);
 
     const result = await adjustPoints('t1', 500, 'Admin top-up');

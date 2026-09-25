@@ -20,6 +20,7 @@ from app.core.deps import AuthDep
 from app.core.scope_guards import _is_team_member
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.points_repository import get_points_repository
+from app.schemas.admin_credits import AdminTeamPointsAdjustResult
 from app.schemas.envelope import Envelope
 from app.schemas.points import (
     PointsAdjustRequest,
@@ -402,7 +403,7 @@ async def check_quota(
         raise HTTPException(status_code=500, detail="Failed to check quota")
 
 
-@router.post("/admin/adjust")
+@router.post("/admin/adjust", response_model=AdminTeamPointsAdjustResult)
 async def admin_adjust_points(
     request: PointsAdjustRequest,
     auth: AdminAuthDep,

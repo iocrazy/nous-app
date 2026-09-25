@@ -27,6 +27,14 @@ from app.schemas.admin import (
     AdminTeamCreditsDetailResponse,
     AdminTopTeamItem,
 )
+from app.schemas.admin_credits import (
+    AdminBatchGiftResult,
+    AdminCreditsOkResult,
+    AdminCreditsOrderActionResult,
+    AdminPointPackage,
+    AdminPointPricing,
+    AdminPointsAdjustResult,
+)
 from app.services.billing.admin_points import (
     AdminAdjustError,
     TeamNotFoundError,
@@ -395,7 +403,7 @@ async def list_orders(
     )
 
 
-@router.post("/orders/{order_id}/confirm")
+@router.post("/orders/{order_id}/confirm", response_model=AdminCreditsOrderActionResult)
 async def confirm_order(
     order_id: str,
     auth: AdminAuthDep,
@@ -442,7 +450,7 @@ async def confirm_order(
     return {"ok": True, "message": "Order confirmed and points added"}
 
 
-@router.post("/orders/{order_id}/refund")
+@router.post("/orders/{order_id}/refund", response_model=AdminCreditsOrderActionResult)
 async def refund_order(
     order_id: str,
     auth: AdminAuthDep,
@@ -503,14 +511,14 @@ async def refund_order(
 # ============================================
 
 
-@router.get("/packages")
+@router.get("/packages", response_model=list[AdminPointPackage])
 async def list_packages(auth: AdminAuthDep):
     """List all point packages (active and inactive)."""
     repo = get_admin_credits_repository()
     return await repo.list_packages()
 
 
-@router.post("/packages")
+@router.post("/packages", response_model=AdminPointPackage)
 async def create_package(
     body: AdminPackageRequest,
     auth: AdminAuthDep,
@@ -550,7 +558,7 @@ async def create_package(
     return created
 
 
-@router.put("/packages/{package_id}")
+@router.put("/packages/{package_id}", response_model=AdminPointPackage)
 async def update_package(
     package_id: str,
     body: AdminPackageRequest,
@@ -588,7 +596,7 @@ async def update_package(
     return updated
 
 
-@router.delete("/packages/{package_id}")
+@router.delete("/packages/{package_id}", response_model=AdminCreditsOkResult)
 async def delete_package(
     package_id: str,
     auth: AdminAuthDep,
@@ -627,14 +635,14 @@ async def delete_package(
 # ============================================
 
 
-@router.get("/pricing")
+@router.get("/pricing", response_model=list[AdminPointPricing])
 async def list_pricing(auth: AdminAuthDep):
     """List all action pricing rules."""
     repo = get_admin_credits_repository()
     return await repo.list_pricing()
 
 
-@router.put("/pricing/{action_type}")
+@router.put("/pricing/{action_type}", response_model=AdminPointPricing)
 async def update_pricing(
     action_type: str,
     body: AdminPricingUpdateRequest,
@@ -674,7 +682,7 @@ async def update_pricing(
 # ============================================
 
 
-@router.post("/batch-gift")
+@router.post("/batch-gift", response_model=AdminBatchGiftResult)
 async def batch_gift(
     body: AdminBatchGiftRequest,
     auth: AdminAuthDep,
@@ -742,7 +750,7 @@ async def batch_gift(
     return {"ok": True, "gifted_count": gifted_count, "errors": errors}
 
 
-@router.post("/adjust")
+@router.post("/adjust", response_model=AdminPointsAdjustResult)
 async def adjust_points(
     body: AdminPointsAdjustRequest,
     auth: AdminAuthDep,

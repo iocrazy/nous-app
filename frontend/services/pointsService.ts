@@ -9,6 +9,7 @@
 
 import { apiClient } from './apiClient';
 import type {
+  AdminTeamPointsAdjustResult,
   Envelope,
   PointsBalance,
   PointsPricing,
@@ -122,11 +123,7 @@ export const adjustPoints = async (
   amount: number,
   description: string,
 ): Promise<{ new_balance: number; success: boolean }> => {
-  const result = await apiClient.post<{
-    success: boolean;
-    message?: string;
-    new_balance: number;
-  }>('/api/v1/points/admin/adjust', {
+  const result = await apiClient.post<AdminTeamPointsAdjustResult>('/api/v1/points/admin/adjust', {
     team_id: teamId,
     amount,
     description,
