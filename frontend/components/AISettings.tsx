@@ -357,6 +357,28 @@ const EnabledModelsField: React.FC<{
    * rather than painting a working configuration danger-red (2026-09-15).
    */
   nonChatKindTag?: (modelId: string) => { label: string; hint: string } | null;
+  /**
+   * Visible text for an id, when the id is not what the user should read.
+   * The platform card keys chips by the row `name` (what routing and saved
+   * settings use) but shows the admin identifier (utils/platformModel).
+   * Defaults to the id itself, which is what every BYOK card wants.
+   */
+  labelOf?: (modelId: string) => string;
+  /**
+   * Neutral tag per chip AND per picker row, replacing `nonChatKindTag` when
+   * given: the platform card states each row's type (LLM / ASR / …) and
+   * whether nous-engine has it loaded, the same facts the admin page shows.
+   */
+  tagOf?: (modelId: string) => { label: string; hint: string } | null;
+  /** `data-testid` for each chip; the chip also carries `data-model-name`. */
+  chipTestId?: string;
+  /**
+   * Offer "Add <typed name>" for a name the catalog does not list. On for
+   * BYOK cards (providers rename models faster than any list keeps up); off
+   * for the platform card, whose catalog IS the admin's list — a typed name
+   * outside it has nothing to enable, and the button would be a silent no-op.
+   */
+  allowCustom?: boolean;
 }> = ({
   providerKey,
   enabledModels,
@@ -366,32 +388,40 @@ const EnabledModelsField: React.FC<{
   selectedModel,
   nonChatWarning,
   nonChatKindTag,
+  labelOf,
+  tagOf,
+  chipTestId,
+  allowCustom = true,
 }) => {
   const { t } = useTranslation();
   const [picking, setPicking] = useState(false);
   const [filter, setFilter] = useState('');
   const typed = filter.trim();
 
-  const remaining = useMemo(
-    () =>
-      catalog.filter(
-        (m) => !enabledModels.includes(m) && m.toLowerCase().includes(filter.toLowerCase()),
-      ),
-    [catalog, enabledModels, filter],
-  );
+  const textOf = useCallback((m: string) => labelOf?.(m) ?? m, [labelOf]);
+  const remaining = useMemo(() => {
+    const needle = filter.toLowerCase();
+    return catalog.filter(
+      (m) =>
+        !enabledModels.includes(m) &&
+        (m.toLowerCase().includes(needle) || textOf(m).toLowerCase().includes(needle)),
+    );
+  }, [catalog, enabledModels, filter, textOf]);
 
   return (
     <div className="space-y-1.5">
       <label className="text-xs font-medium text-ink-400">{t('aiSettings.enabledModels')}</label>
       <div className="flex flex-wrap items-center gap-2">
         {enabledModels.map((m) => {
-          const kind = nonChatKindTag?.(m) ?? null;
+          const kind = tagOf ? tagOf(m) : (nonChatKindTag?.(m) ?? null);
           return (
           <span
             key={m}
+            data-testid={chipTestId}
+            data-model-name={chipTestId ? m : undefined}
             className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-mono bg-[var(--accent-soft)] border border-[var(--accent-border)] text-[var(--accent-text)]"
           >
-            {m}
+            <span>{textOf(m)}</span>
             {kind && (
               <span
                 data-testid="non-chat-kind-tag"
@@ -405,7 +435,7 @@ const EnabledModelsField: React.FC<{
               type="button"
               onClick={() => onRemove(m)}
               className="text-[var(--accent-text)] transition-opacity hover:opacity-70"
-              aria-label={t('aiSettings.removeModel', { model: m })}
+              aria-label={t('aiSettings.removeModel', { model: textOf(m) })}
             >
               <X size={12} />
             </button>
@@ -449,7 +479,7 @@ const EnabledModelsField: React.FC<{
           </div>
           {/* A name the catalog does not list (providers rename models faster
               than any list keeps up) can still be enabled by typing it. */}
-          {typed && !enabledModels.includes(typed) && !catalog.includes(typed) && (
+          {allowCustom && typed && !enabledModels.includes(typed) && !catalog.includes(typed) && (
             <button
               type="button"
               data-testid="add-custom-model"
@@ -472,19 +502,30 @@ const EnabledModelsField: React.FC<{
             </div>
           ) : (
             <div className="max-h-60 overflow-y-auto space-y-0.5">
-              {remaining.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => {
-                    onAdd(m);
-                    setFilter('');
-                  }}
-                  className="w-full text-left rounded px-2 py-1 text-xs font-mono text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors"
-                >
-                  {m}
-                </button>
-              ))}
+              {remaining.map((m) => {
+                const kind = tagOf?.(m) ?? null;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => {
+                      onAdd(m);
+                      setFilter('');
+                    }}
+                    className="flex w-full items-center gap-1.5 text-left rounded px-2 py-1 text-xs font-mono text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors"
+                  >
+                    <span>{textOf(m)}</span>
+                    {kind && (
+                      <span
+                        title={kind.hint}
+                        className="rounded-sm bg-ink-800/60 px-1 py-px font-sans text-[10px] leading-none text-ink-400"
+                      >
+                        {kind.label}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -904,15 +945,57 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     });
   };
 
-  // Toggle one platform model in/out of the user's blacklist.
-  const toggleNousModel = (modelName: string) => {
+  // Platform rows in card order (llm → asr → embedding → image → tts → video).
+  const sortedNousModels = useMemo(
+    () =>
+      [...listedNousModels].sort(
+        (a, b) => (NOUS_TYPE_ORDER[a.type] ?? 99) - (NOUS_TYPE_ORDER[b.type] ?? 99),
+      ),
+    [listedNousModels],
+  );
+  const nousRowByName = useMemo(
+    () => new Map(listedNousModels.map((m) => [m.name, m])),
+    [listedNousModels],
+  );
+  // Chip text = the admin identifier (utils/platformModel); the chip's VALUE
+  // stays the row name, which is what `disabled_models` and routing key on.
+  const nousLabelOf = useCallback(
+    (name: string) => {
+      const m = nousRowByName.get(name);
+      return m ? platformModelLabel(m).primary : name;
+    },
+    [nousRowByName],
+  );
+  // Same facts the admin page states per row: its type, and — for a local
+  // nous-engine row — whether it is loaded (idle rows are listed, not hidden:
+  // the pickers grey them, this card lets the user keep them enabled).
+  const nousTagOf = useCallback(
+    (name: string): { label: string; hint: string } | null => {
+      const m = nousRowByName.get(name);
+      if (!m) return null;
+      const type = m.type.toUpperCase();
+      if (platformModelAvailability(m).reason === 'not_loaded') {
+        return {
+          label: `${type} ${t('platformModel.notLoadedSuffix', '(not loaded)')}`,
+          hint: t('platformModel.notLoaded', 'Not loaded on nous-engine'),
+        };
+      }
+      return { label: type, hint: type };
+    },
+    [nousRowByName, t],
+  );
+
+  // Put one platform model in or out of the user's blacklist.
+  const setNousModelEnabled = (modelName: string, enabled: boolean) => {
     editLocalSettings((prev) => {
       const providers = { ...prev.providers };
       const current = providers.nous ?? { enabled: true };
       const disabled = current.disabled_models ?? [];
-      const next = disabled.includes(modelName)
+      const next = enabled
         ? disabled.filter((n) => n !== modelName)
-        : [...disabled, modelName];
+        : disabled.includes(modelName)
+          ? disabled
+          : [...disabled, modelName];
       providers.nous = { ...current, disabled_models: next };
       return { ...prev, providers };
     });
@@ -1905,61 +1988,31 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                 {renderToggle(nousUserEnabled, toggleNousMaster)}
               </div>
 
-              {/* Body — collapses to header-only when the master toggle is off,
-                  and each row carries a per-model toggle (blacklist semantics). */}
+              {/* Body — collapses to header-only when the master toggle is off.
+                  Same "Enabled Models" chips + "Add Model" picker as every BYOK
+                  card above (2026-09-25 user request: one style for every
+                  provider). No API key and no Test Connection: the platform
+                  rows are the admin's to probe. Semantics stay a blacklist —
+                  removing a chip adds the row name to `nous.disabled_models`,
+                  adding it back removes it — so nothing changes on the wire. */}
               {nousUserEnabled && (
-                <div className="px-6 pb-4 space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-300">
-                  {listedNousModels.length === 0 ? (
+                <div className="px-6 pb-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                  {sortedNousModels.length === 0 ? (
                     <p className="text-xs text-ink-500">{t('aiSettings.noPlatformModels')}</p>
                   ) : (
-                    [...listedNousModels]
-                      .sort(
-                        (a, b) =>
-                          (NOUS_TYPE_ORDER[a.type] ?? 99) - (NOUS_TYPE_ORDER[b.type] ?? 99),
-                      )
-                      .map((m) => {
-                        const modelEnabled = !nousDisabledModels.includes(m.name);
-                        const label = platformModelLabel(m);
-                        return (
-                          <div
-                            key={m.name}
-                            data-testid="platform-model-row"
-                            data-model-name={m.name}
-                            className="flex items-center justify-between gap-3 text-sm text-ink-200 border-t border-ink-800 pt-1.5 first:border-t-0 first:pt-0"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              {/* Same string as the admin AI Models card. */}
-                              <span
-                                className={`font-mono font-medium truncate ${
-                                  modelEnabled ? 'text-ink-200' : 'text-ink-500'
-                                }`}
-                              >
-                                {label.primary}
-                              </span>
-                              {label.secondary && (
-                                <span className="text-xs text-ink-500 truncate">
-                                  {label.secondary}
-                                </span>
-                              )}
-                              <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-ink-800 text-ink-400">
-                                {m.type}
-                              </span>
-                              {/* Still toggleable — the switch is a preference,
-                                  not a pick — but say it cannot run right now. */}
-                              {nousNotLoadedReason(m) && (
-                                <span
-                                  data-testid="platform-model-not-loaded"
-                                  title={nousNotLoadedReason(m)}
-                                  className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-ink-800 text-ink-500"
-                                >
-                                  {t('platformModel.notLoadedSuffix')}
-                                </span>
-                              )}
-                            </div>
-                            {renderToggle(modelEnabled, () => toggleNousModel(m.name))}
-                          </div>
-                        );
-                      })
+                    <EnabledModelsField
+                      providerKey="nous"
+                      enabledModels={sortedNousModels
+                        .filter((m) => !nousDisabledModels.includes(m.name))
+                        .map((m) => m.name)}
+                      catalog={sortedNousModels.map((m) => m.name)}
+                      onAdd={(name) => setNousModelEnabled(name, true)}
+                      onRemove={(name) => setNousModelEnabled(name, false)}
+                      labelOf={nousLabelOf}
+                      tagOf={nousTagOf}
+                      chipTestId="platform-model-row"
+                      allowCustom={false}
+                    />
                   )}
                 </div>
               )}

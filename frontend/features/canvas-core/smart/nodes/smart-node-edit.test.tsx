@@ -227,7 +227,9 @@ describe('PromptNodeView — edit affordances', () => {
     // UiSelect: open the trigger, then pick the option (its onChange fires from
     // the portal option click, not a native <select> change event).
     fireEvent.click(screen.getByLabelText('Prompt provider'));
-    fireEvent.click(screen.getByRole('option', { name: 'doubao-seed-1-6-250615 · Doubao LLM' }));
+    // Options read as the admin identifier (actual_model), not display_name.
+    expect(screen.queryByRole('option', { name: /Doubao LLM/ })).toBeNull();
+    fireEvent.click(screen.getByRole('option', { name: 'doubao-seed-1-6-250615' }));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
       Record<string, unknown>

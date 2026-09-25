@@ -49,9 +49,10 @@ const LLM_MODEL = makeNousModel({
 });
 const MODELS: NousModelPublic[] = [ASR_MODEL, LLM_MODEL];
 
-// ASR picker label (transcription <select>) and LLM picker label (agent <select>).
-const ASR_OPTION = /MOSS ASR \(Platform/;
-const LLM_OPTION = /Nous LLM \(Platform\)/;
+// ASR picker label (transcription <select>) and LLM picker label (agent <select>),
+// named by the admin identifier (no actual_model here, so the row name).
+const ASR_OPTION = /moss-asr \(Platform/;
+const LLM_OPTION = /nous-llm \(Platform\)/;
 
 vi.mock('../services/aiService', () => ({
   saveAISettings: vi.fn().mockResolvedValue(undefined),
@@ -104,11 +105,13 @@ function renderSettings(overrides?: Partial<AISettingsType>) {
   );
 }
 
-/** Locate the per-model row's toggle button in the platform card. */
-function modelToggle(displayName: string): HTMLElement {
-  const row = screen.getByText(displayName).closest('.justify-between');
-  if (!row) throw new Error(`row not found for ${displayName}`);
-  return within(row as HTMLElement).getByRole('button');
+/** The × on a platform-card chip (removing it is an unsaved edit). */
+function removeChipButton(name: string): HTMLElement {
+  const chip = document.querySelector<HTMLElement>(
+    `[data-testid="platform-model-row"][data-model-name="${name}"]`,
+  );
+  if (!chip) throw new Error(`chip not found for ${name}`);
+  return within(chip).getByRole('button', { name: `Remove ${name}` });
 }
 
 const saveButton = () => screen.getByRole('button', { name: 'Save Settings' });
@@ -119,7 +122,9 @@ async function renderWithModels(onSave = vi.fn()) {
   vi.mocked(getNousModels).mockResolvedValue(MODELS);
   render(<AISettings settings={baseSettings} onSave={onSave} />);
   await waitFor(() => {
-    expect(screen.getByText('MOSS ASR')).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-testid="platform-model-row"][data-model-name="moss-asr"]'),
+    ).not.toBeNull();
   });
   return onSave;
 }
@@ -140,7 +145,7 @@ describe('AISettings — floating save button', () => {
 
   it('shows the unsaved dot after an edit and clears it once saved', async () => {
     const onSave = await renderWithModels();
-    fireEvent.click(modelToggle('MOSS ASR'));
+    fireEvent.click(removeChipButton('moss-asr'));
     expect(unsavedDot()).toBeInTheDocument();
     expect(unsavedDot()).toHaveTextContent('Unsaved changes');
 
@@ -155,7 +160,7 @@ describe('AISettings — floating save button', () => {
   it('Ctrl+S saves and prevents the browser default', async () => {
     const { saveAISettings } = await import('../services/aiService');
     const onSave = await renderWithModels();
-    fireEvent.click(modelToggle('MOSS ASR'));
+    fireEvent.click(removeChipButton('moss-asr'));
 
     const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true });
     await act(async () => {
@@ -183,7 +188,7 @@ describe('AISettings — floating save button', () => {
     vi.mocked(saveAISettings).mockRejectedValueOnce(new Error('HTTP 500'));
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const onSave = await renderWithModels();
-    fireEvent.click(modelToggle('MOSS ASR'));
+    fireEvent.click(removeChipButton('moss-asr'));
 
     fireEvent.click(saveButton());
 

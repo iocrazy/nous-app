@@ -9,9 +9,8 @@
 // to the row `name` when `actual_model` is empty (local-daemon rows such as
 // jimeng-local have no model selector). The user side used to print
 // `display_name` (`Doubao Embedding (Vision)`), so nobody could match a user's
-// list against the admin page by eye. The primary label now follows the admin
-// rule exactly; `display_name` rides along as secondary text when it says
-// something the primary does not.
+// list against the admin page by eye. The label now follows the admin rule
+// exactly and `display_name` is not shown at all (2026-09-25).
 //
 // Only the visible text changes. The picker VALUE stays the row `name`
 // (`nous:<name>` in task assignments) — that is what routing and saved
@@ -37,26 +36,29 @@ type LabelSource = Pick<NousModelPublic, 'name' | 'display_name' | 'actual_model
 export interface PlatformModelLabel {
   /** Same string the admin AI Models card shows for this row. */
   primary: string;
-  /** `display_name` when it differs from `primary`, else null. */
-  secondary: string | null;
-}
-
-export function platformModelLabel(m: LabelSource): PlatformModelLabel {
-  const actual = m.actual_model?.trim();
-  const primary = actual || m.name;
-  const display = m.display_name?.trim();
-  const secondary = display && display !== primary ? display : null;
-  return { primary, secondary };
 }
 
 /**
- * One-line form for places that can only hold plain text (native <option>).
- * The separator is ` · ` so it cannot be confused with the ` — ` that
- * introduces a warning suffix in the pickers.
+ * The ONE name a platform row goes by on the user side: exactly the
+ * identifier the admin entered (`actual_model`, else the row `name` for
+ * local-daemon rows that have no model selector). `display_name` is NOT
+ * shown anywhere on the user side (2026-09-25 user decision: "严格根据我
+ * admin 端引入的模型名称，不要自己创造") — the display names on the
+ * platform rows were authored by migrations, not by the admin, and a second
+ * line that the admin page does not show is one more thing to match by eye.
+ */
+export function platformModelLabel(m: LabelSource): PlatformModelLabel {
+  const actual = m.actual_model?.trim();
+  return { primary: actual || m.name };
+}
+
+/**
+ * Plain-text form for pickers and native <option>s. Same string as
+ * `platformModelLabel().primary`; kept as its own function so a caller that
+ * only needs text does not have to know about the label object.
  */
 export function platformModelText(m: LabelSource): string {
-  const { primary, secondary } = platformModelLabel(m);
-  return secondary ? `${primary} · ${secondary}` : primary;
+  return platformModelLabel(m).primary;
 }
 
 /** False only for a row whose last probe failed. */

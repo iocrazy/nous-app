@@ -442,6 +442,7 @@ describe('the model picker — not loaded on nous-engine', () => {
   const IDLE = {
     name: 'nous-studio-image',
     display_name: 'Studio Image',
+    actual_model: 'studio-image-v2',
     type: 'image' as const,
     last_test_status: 'idle' as const,
   };
@@ -455,11 +456,15 @@ describe('the model picker — not loaded on nous-engine', () => {
     const select = await screen.findByTestId('generate-model');
     const idle = select.querySelector('option[value="nous-studio-image"]') as HTMLOptionElement;
     expect(idle.disabled).toBe(true);
-    expect(idle.textContent).toBe('Studio Image (not loaded)');
+    // Option text is the admin identifier (actual_model, else the row name),
+    // never display_name.
+    expect(idle.textContent).toBe('studio-image-v2 (not loaded)');
     expect(idle.getAttribute('title')).toBe('Not loaded on nous-engine');
-    expect((select.querySelector('option[value="seedream-4"]') as HTMLOptionElement).disabled).toBe(
-      false,
-    );
+    const ready = select.querySelector('option[value="seedream-4"]') as HTMLOptionElement;
+    expect(ready.disabled).toBe(false);
+    expect(ready.textContent).toBe('seedream-4');
+    expect(select.textContent).not.toContain('Studio Image');
+    expect(select.textContent).not.toContain('Seedream 4');
   });
 
   it('keeps an idle preview model as the shown value instead of snapping away', async () => {

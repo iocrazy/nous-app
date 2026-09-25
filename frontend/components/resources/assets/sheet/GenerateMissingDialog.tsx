@@ -47,7 +47,7 @@ import type {
 } from '../../../../services/assetsService';
 import { saveGenerationAsAsset } from '../../../../services/generatedService';
 import { useGenerationModels } from '../../../../features/canvas-core/smart/nodes/useGenerationModels';
-import { platformModelAvailability } from '../../../../utils/platformModel';
+import { platformModelAvailability, platformModelText } from '../../../../utils/platformModel';
 import { slotLabelKey } from '../assetTypeMeta';
 import { loadoutForSlot } from './assetSheetModel';
 
@@ -493,8 +493,8 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
                         title={notLoaded ? t('platformModel.notLoaded', 'Not loaded on nous-engine') : undefined}
                       >
                         {notLoaded
-                          ? `${m.display_name} ${t('platformModel.notLoadedSuffix', '(not loaded)')}`
-                          : m.display_name}
+                          ? `${platformModelText(m)} ${t('platformModel.notLoadedSuffix', '(not loaded)')}`
+                          : platformModelText(m)}
                       </option>
                     );
                   })}

@@ -31,7 +31,9 @@ describe('GenFooterControls', () => {
   it('model pill pops a list; picking marks and patches', () => {
     const onChange = renderBar({});
     fireEvent.click(screen.getByTestId('pill-model'));
-    const opt = screen.getByRole('button', { name: /GPT Image \(Codex\)/ });
+    // Rows read as the admin identifier (row name here: no actual_model).
+    const opt = screen.getByRole('button', { name: /^codex-image/ });
+    expect(screen.queryByText(/GPT Image \(Codex\)/)).toBeNull();
     fireEvent.click(opt);
     expect(onChange).toHaveBeenCalledWith({ model: 'codex-image' });
   });
@@ -120,46 +122,39 @@ it('video kind has a resolution pill and an Adaptive aspect option', () => {
   expect(onChange).toHaveBeenCalledWith({ aspect: 'auto' });
 });
 
-// ── picker labels (2026-09-05) ───────────────────────────────────────────────
-// The picker used to say "GPT Image 2 (Local) · local": the server twin is
-// hidden whenever the local one can run (see visible_generation_rows), so
-// "local" is not a distinction the user needs twice — or at all.
-//
-// Migration 465 then renamed both codex rows to "GPT Image (Codex)" and
-// "GPT Image (Codex, local)" — the version number went because on the
-// subscription path OpenAI, not us, picks the image model. So the codex rows
-// no longer end in a bare "(Local)" tag and the strip rule never fires on
-// them; the rule itself still stands for any row that does, which is what the
-// Dreamina case below covers.
+// ── picker labels ────────────────────────────────────────────────────────────
+// 2026-09-25: a platform row goes by exactly the identifier the admin entered
+// (actual_model, else the row name — jimeng-local rows carry an empty
+// actual_model in production). display_name is not shown at all: it was
+// authored by migrations, the admin page never shows it, and the user asked
+// for the admin names verbatim. The old "· local" suffix and the "(Local)"
+// tag therefore cannot appear either.
 import { modelLabel } from './GenFooterControls';
 
 describe('modelLabel', () => {
-  // 2026-09-24: primary = the admin AI Models card's label (actual_model,
-  // else the row name — jimeng-local rows carry an empty actual_model in
-  // production), display name as secondary text.
-  it('leads with actual_model, like the admin card', () => {
+  it('is actual_model, like the admin card, and never includes display_name', () => {
+    const label = modelLabel({
+      name: 'openai-image-flare',
+      display_name: 'GPT Image 2.5 Flare (OpenAI API)',
+      actual_model: 'gpt-image-2.5-flare',
+    });
+    expect(label).toBe('gpt-image-2.5-flare');
+    expect(label).not.toContain('GPT Image 2.5 Flare');
+  });
+  it('falls back to the row name for a local row and never appends "· local"', () => {
     expect(
-      modelLabel({ name: 'openai-image-flare', display_name: 'GPT Image 2.5 Flare (OpenAI API)', actual_model: 'gpt-image-2.5-flare' }),
-    ).toBe('gpt-image-2.5-flare · GPT Image 2.5 Flare (OpenAI API)');
-  });
-  it('drops the "(Local)" tag from the secondary text and never appends "· local"', () => {
-    expect(modelLabel({ name: 'jimeng-local-image', display_name: 'Dreamina (Local)', actual_model: '', is_local: true })).toBe(
-      'jimeng-local-image · Dreamina',
-    );
-    expect(modelLabel({ name: 'a-row', display_name: 'Something (本地)', is_local: true })).toBe('a-row · Something');
-  });
-  it('keeps "local" inside a parenthesis and falls back to the bare row name', () => {
-    // The post-465 local row: "local" sits INSIDE the parenthesis beside
-    // "Codex", so the tag rule must not bite a piece out of it.
-    expect(modelLabel({ name: 'codex-local-image', display_name: 'GPT Image (Codex, local)', is_local: true })).toBe(
-      'codex-local-image · GPT Image (Codex, local)',
-    );
+      modelLabel({ name: 'jimeng-local-image', display_name: 'Dreamina (Local)', actual_model: '', is_local: true }),
+    ).toBe('jimeng-local-image');
+    expect(modelLabel({ name: 'a-row', display_name: 'Something (本地)', is_local: true })).toBe('a-row');
+    expect(
+      modelLabel({ name: 'codex-local-image', display_name: 'GPT Image (Codex, local)', is_local: true }),
+    ).toBe('codex-local-image');
     expect(modelLabel({ name: 'x-row' })).toBe('x-row');
   });
 });
 
 describe('GenFooterControls — model popover rows', () => {
-  it('lists a local row by its catalog name, with no "· local" suffix', () => {
+  it('lists a local row by its admin identifier only, with no display name and no "· local"', () => {
     render(
       <GenFooterControls
         gen={{ kind: 'image', model: '', ratio: '1:1', count: 1 } as never}
@@ -168,8 +163,9 @@ describe('GenFooterControls — model popover rows', () => {
       />,
     );
     fireEvent.click(screen.getByTestId('pill-model'));
-    const row = screen.getByRole('button', { name: /GPT Image \(Codex, local\)/ });
-    expect(row.textContent).toBe('codex-local-image · GPT Image (Codex, local)');
+    const row = screen.getByRole('button', { name: /^codex-local-image/ });
+    expect(row.textContent).toBe('codex-local-image');
+    expect(screen.queryByText(/GPT Image \(Codex, local\)/)).toBeNull();
     expect(screen.queryByText(/· local/)).toBeNull();
   });
 });
@@ -194,13 +190,13 @@ describe('GenFooterControls — model not loaded on nous-engine', () => {
   it('lists the idle model disabled, with the reason, and ignores a click on it', () => {
     const onChange = renderIdle({});
     fireEvent.click(screen.getByTestId('pill-model'));
-    const row = screen.getByRole('button', { name: /Studio Image/ }) as HTMLButtonElement;
+    const row = screen.getByRole('button', { name: /^nous-studio-image/ }) as HTMLButtonElement;
     expect(row.disabled).toBe(true);
     expect(row.getAttribute('title')).toBe('Not loaded on nous-engine');
     expect(row.textContent).toContain('Not loaded on nous-engine');
     fireEvent.click(row);
     expect(onChange).not.toHaveBeenCalled();
-    expect((screen.getByRole('button', { name: /GPT Image/ }) as HTMLButtonElement).disabled).toBe(
+    expect((screen.getByRole('button', { name: /^codex-image/ }) as HTMLButtonElement).disabled).toBe(
       false,
     );
   });
@@ -208,7 +204,8 @@ describe('GenFooterControls — model not loaded on nous-engine', () => {
   it('keeps a saved idle model on the pill, titled with the reason', () => {
     renderIdle({ model: 'nous-studio-image' });
     const pill = screen.getByTestId('pill-model');
-    expect(pill.textContent).toContain('Studio Image');
+    expect(pill.textContent).toContain('nous-studio-image');
+    expect(pill.textContent).not.toContain('Studio Image');
     expect(pill.getAttribute('title')).toBe('Not loaded on nous-engine');
   });
 });

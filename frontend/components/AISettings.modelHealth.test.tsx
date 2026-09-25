@@ -184,13 +184,14 @@ describe('AISettings — platform model health', () => {
 
   it('does not offer a failing model in the task picker', async () => {
     await renderWith([SICK_LLM, WELL_LLM]);
-    expect(screen.getAllByText(/DeepSeek V4 Pro \(Platform\)/).length).toBeGreaterThan(0);
-    expect(screen.queryAllByText(/DeepSeek V4 Flash/)).toHaveLength(0);
+    // Options are named by the admin identifier (row name: no actual_model).
+    expect(screen.getAllByText(/mediahub-deepseek-v4-pro \(Platform\)/).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(/mediahub-deepseek-v4-flash/)).toHaveLength(0);
   });
 
   it('keeps the healthy model label clean in the task picker', async () => {
     await renderWith([SICK_LLM, WELL_LLM]);
-    const healthy = screen.getAllByText(/DeepSeek V4 Pro \(Platform\)/);
+    const healthy = screen.getAllByText(/mediahub-deepseek-v4-pro \(Platform\)/);
     expect(healthy[0].textContent).not.toContain('health check failed');
   });
 
@@ -288,12 +289,17 @@ describe('AISettings — platform model not loaded on nous-engine', () => {
     expect(trigger.getAttribute('title')).toBe('Not loaded on nous-engine');
   });
 
-  it('lists an idle row on the platform card with a not-loaded badge', async () => {
+  it('lists an idle row on the platform card as a chip tagged "(not loaded)"', async () => {
     await renderWith([IDLE_LLM, WELL_LLM]);
-    const badge = cardRow(IDLE_LLM.name).querySelector('[data-testid="platform-model-not-loaded"]');
-    expect(badge?.getAttribute('title')).toBe('Not loaded on nous-engine');
-    expect(
-      cardRow(WELL_LLM.name).querySelector('[data-testid="platform-model-not-loaded"]'),
-    ).toBeNull();
+    const idleChip = cardRow(IDLE_LLM.name);
+    // Chip text is the admin identifier (actual_model), not display_name.
+    expect(idleChip.textContent).toContain('qwen3-8-27b');
+    expect(idleChip.textContent).not.toContain('Qwen3 27B');
+    const tag = idleChip.querySelector('[data-testid="non-chat-kind-tag"]');
+    expect(tag?.textContent).toBe('LLM (not loaded)');
+    expect(tag?.getAttribute('title')).toBe('Not loaded on nous-engine');
+    const wellTag = cardRow(WELL_LLM.name).querySelector('[data-testid="non-chat-kind-tag"]');
+    expect(wellTag?.textContent).toBe('LLM');
+    expect(wellTag?.getAttribute('title')).not.toBe('Not loaded on nous-engine');
   });
 });

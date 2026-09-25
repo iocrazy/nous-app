@@ -9,19 +9,29 @@ import {
 } from './platformModel';
 
 describe('platformModelLabel — same string as the admin AI Models card', () => {
-  it('leads with actual_model and keeps display_name as secondary text', () => {
+  it('is exactly actual_model; display_name is never shown on the user side', () => {
     const m = {
       name: 'nous-doubao-embedding-vision',
       display_name: 'Doubao Embedding (Vision)',
       actual_model: 'doubao-embedding-vision-251215',
     };
-    expect(platformModelLabel(m)).toEqual({
-      primary: 'doubao-embedding-vision-251215',
-      secondary: 'Doubao Embedding (Vision)',
-    });
-    expect(platformModelText(m)).toBe(
-      'doubao-embedding-vision-251215 · Doubao Embedding (Vision)',
-    );
+    expect(platformModelLabel(m)).toEqual({ primary: 'doubao-embedding-vision-251215' });
+    expect(platformModelText(m)).toBe('doubao-embedding-vision-251215');
+  });
+
+  it('keeps a display_name that differs from the admin identifier out of the text entirely', () => {
+    // The display names were authored by migrations, not by the admin, and the
+    // admin page does not show them — so they must not leak into any label.
+    const m = {
+      name: 'nous-qwen3-asr',
+      display_name: 'Qwen3 ASR (Flash)',
+      actual_model: 'qwen3-asr-flash',
+    };
+    const text = platformModelText(m);
+    expect(text).toBe('qwen3-asr-flash');
+    expect(text).not.toContain('Qwen3 ASR (Flash)');
+    expect(text).not.toContain(' · ');
+    expect(Object.keys(platformModelLabel(m))).toEqual(['primary']);
   });
 
   it('falls back to the row name when actual_model is empty, as admin does', () => {
@@ -33,22 +43,21 @@ describe('platformModelLabel — same string as the admin AI Models card', () =>
         display_name: 'Dreamina Image (Local)',
         actual_model: actual,
       };
-      expect(platformModelLabel(m)).toEqual({
-        primary: 'jimeng-local-image',
-        secondary: 'Dreamina Image (Local)',
-      });
+      expect(platformModelLabel(m)).toEqual({ primary: 'jimeng-local-image' });
+      expect(platformModelText(m)).toBe('jimeng-local-image');
     }
   });
 
-  it('does not repeat display_name when it equals the primary label', () => {
+  it('is the row name even when display_name equals it', () => {
     const m = { name: 'Codex (Local)', display_name: 'Codex (Local)', actual_model: '' };
-    expect(platformModelLabel(m)).toEqual({ primary: 'Codex (Local)', secondary: null });
+    expect(platformModelLabel(m)).toEqual({ primary: 'Codex (Local)' });
     expect(platformModelText(m)).toBe('Codex (Local)');
   });
 
-  it('drops an empty display_name', () => {
-    const m = { name: 'x', display_name: '', actual_model: 'model-x' };
-    expect(platformModelLabel(m)).toEqual({ primary: 'model-x', secondary: null });
+  it('trims actual_model and ignores an empty display_name', () => {
+    const m = { name: 'x', display_name: '', actual_model: '  model-x ' };
+    expect(platformModelLabel(m)).toEqual({ primary: 'model-x' });
+    expect(platformModelText(m)).toBe('model-x');
   });
 });
 
