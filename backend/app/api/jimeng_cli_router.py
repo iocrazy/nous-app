@@ -12,8 +12,14 @@ flow; this router puts the IC-style CLI card on the settings page instead:
   bind mount — survives container rebuilds).
 
 NB: this manages a SHARED server credential. Every signed-in user may view
-status; login is also open for now (the deployment is effectively
-single-tenant) — gate on an admin role before real multi-tenant use.
+status; starting a login is platform-admin only. It used to be open to every
+signed-in user: completing the device flow with one's own dreamina account
+re-pointed the server's shared credential — every user's jimeng generation
+then ran on, and was visible to, that account — and each call left one more
+``dreamina login`` process polling in the container.
+
+Both spawns go through ``safe_popen_kwargs()`` so the CLI never sees the
+server's secrets (CLAUDE.md, 防御模式「子进程环境要擦洗」).
 """
 
 from __future__ import annotations
@@ -26,6 +32,8 @@ from typing import Optional, Tuple
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
+from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 
 router = APIRouter(prefix="/jimeng-cli", tags=["Jimeng CLI"])
@@ -42,6 +50,7 @@ async def _run_dreamina(args: list[str], timeout_s: int = 30) -> Tuple[int, str,
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **safe_popen_kwargs(),
     )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
@@ -64,6 +73,7 @@ async def _start_login_flow() -> Optional[dict]:
         "login",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
+        **safe_popen_kwargs(),
     )
     collected = ""
     try:
@@ -123,7 +133,7 @@ async def jimeng_status(auth: AuthDep) -> dict:
 
 
 @router.post("/login")
-async def jimeng_login(auth: AuthDep) -> dict:
+async def jimeng_login(auth: AdminAuthDep) -> dict:
     """Start the dreamina device-flow login; returns the link + user code
     (valid ~10 minutes). Approve it in a browser on any device."""
     result = await _start_login_flow()
