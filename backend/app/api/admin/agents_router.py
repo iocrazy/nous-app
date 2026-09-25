@@ -18,8 +18,13 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.api.row_guard import require_row
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.agent_repository import get_agent_repository
+from app.schemas.admin_settings_catalog import (
+    AdminCatalogAgentDetail,
+    AdminCatalogAgentList,
+)
 
 router = APIRouter()
 
@@ -54,7 +59,7 @@ class AdminAgentUpdate(BaseModel):
     enabled: Optional[bool] = None
 
 
-@router.get("")
+@router.get("", response_model=AdminCatalogAgentList)
 async def list_catalog_agents(auth: AdminAuthDep) -> Dict[str, Any]:
     """System-preset catalog + per-agent override adoption counts."""
     repo = get_agent_repository()
@@ -89,7 +94,7 @@ async def list_catalog_agents(auth: AdminAuthDep) -> Dict[str, Any]:
     return {"items": items, "total": len(items)}
 
 
-@router.put("/{slug}")
+@router.put("/{slug}", response_model=AdminCatalogAgentDetail)
 async def update_catalog_agent(
     slug: str, body: AdminAgentUpdate, auth: AdminAuthDep
 ) -> Dict[str, Any]:
@@ -107,17 +112,24 @@ async def update_catalog_agent(
     if not updates:
         raise HTTPException(status_code=400, detail="no editable fields provided")
 
-    await repo.update_fields_versioned(
-        UUID(str(agent["id"])),
-        updates,
-        created_by=UUID(str(auth.user_id)),
-        notes="admin catalog edit",
-    )
+    try:
+        await repo.update_fields_versioned(
+            UUID(str(agent["id"])),
+            updates,
+            created_by=UUID(str(auth.user_id)),
+            notes="admin catalog edit",
+        )
+    except ValueError:
+        # The row vanished between the lookup and the write (the repository
+        # raises ValueError for a missing agent): typed 404, not a 500.
+        require_row(None)
     logger.info(f"[Admin] catalog agent '{slug}' updated: {sorted(updates)}")
 
-    refreshed = await repo.get_by_slug(slug)
+    # Gone by the re-read (deleted in between): typed 404 rather than a body
+    # holding nothing but ``override_counts``.
+    refreshed = require_row(await repo.get_by_slug(slug))
     counts = await repo.count_overrides_by_agent()
     return {
-        **(refreshed or {}),
+        **refreshed,
         "override_counts": counts.get(str(agent["id"]), {"user": 0, "team": 0}),
     }
