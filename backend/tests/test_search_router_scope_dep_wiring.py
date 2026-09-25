@@ -76,6 +76,18 @@ def test_vectors_status_runs_repo_under_user_scope(client, monkeypatch):
         search_router_mod.EmbeddingService, "space_spec", _fake_space_spec
     )
     monkeypatch.setattr(rer.ResourceEmbeddingsRepository, "coverage", _fake_coverage)
+    # The spaces listing and the admin check have no DB here; this test is
+    # about the scope around the resources read only.
+    from app.repositories import embedding_space_repository as esr
+
+    async def _no_spaces(self):
+        return []
+
+    async def _not_admin(user_id):
+        return False
+
+    monkeypatch.setattr(esr.EmbeddingSpaceRepository, "list_all", _no_spaces)
+    monkeypatch.setattr(search_router_mod, "is_admin_user", _not_admin)
 
     resp = client.get("/api/v1/search/vectors/status")
 

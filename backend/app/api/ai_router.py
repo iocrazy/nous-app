@@ -14,6 +14,7 @@ import time
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 
 from app.core.deps import AuthDep, get_team_id_for_user
 from app.core.scope_dep import ScopedRequestDep
@@ -1161,6 +1162,9 @@ _backfill_clock = time.monotonic
 class BackfillEmbeddingsBody(BaseModel):
     limit: int = Field(default=20, ge=1, le=_BACKFILL_MAX_LIMIT)
     dry_run: bool = False
+    #: Fill this (candidate) space with its own catalog model instead of the
+    #: active embedder. A string: Snowflake ids lose precision in JS.
+    space_id: str | None = Field(default=None, pattern=r"^[0-9]{1,20}$")
 
 
 def _skip(resource_id: int, reason: str) -> dict:
@@ -1225,6 +1229,11 @@ async def backfill_embeddings(
     or null when every row was attempted. ``space.id`` is a string
     (Snowflake). ``dispatched`` / ``in_flight`` are kept, always empty / 0,
     so readers of the old shape keep parsing.
+
+    ``space_id`` (optional, string) fills that CANDIDATE space instead, with
+    the embedder of its own catalog row (Settings -> Vectors, before Switch);
+    404 ``space_not_found`` / 409 ``space_catalog_row_missing`` /
+    ``catalog_model_disabled`` when it cannot.
     """
     from app.core.embedding_space import SEMANTIC_LAYER
     from app.repositories import embedding_space_repository as space_mod
@@ -1234,19 +1243,21 @@ async def backfill_embeddings(
     from app.services.library.embedding_document import DOC_VERSION
 
     opts = body or BackfillEmbeddingsBody()
-    # Typed refusal, not a silent no-op.
-    if await embedding_config.resolve_embedding_config() is None:
-        raise HTTPException(status_code=409, detail=_EMBEDDER_UNCONFIGURED)
-    embedder = emb_svc_mod.EmbeddingService()
-    spec = await embedder.space_spec()
-    if spec is None:
-        # Configured but no client could be built (bad base_url etc.); the
-        # ERROR log has the provider detail.
-        raise HTTPException(status_code=409, detail=_EMBEDDER_UNCONFIGURED)
-
     repo = emb_mod.get_resource_embeddings_repository()
     try:
-        space = await space_mod.get_embedding_space_repository().get_or_create(spec)
+        if opts.space_id is not None:
+            space, embedder = await _candidate_space_and_embedder(opts.space_id)
+        else:
+            # Typed refusal, not a silent no-op.
+            if await embedding_config.resolve_embedding_config() is None:
+                raise HTTPException(status_code=409, detail=_EMBEDDER_UNCONFIGURED)
+            embedder = emb_svc_mod.EmbeddingService()
+            spec = await embedder.space_spec()
+            if spec is None:
+                # Configured but no client could be built (bad base_url etc.);
+                # the ERROR log has the provider detail.
+                raise HTTPException(status_code=409, detail=_EMBEDDER_UNCONFIGURED)
+            space = await space_mod.get_embedding_space_repository().get_or_create(spec)
         rows, total_missing = await repo.pending_for_user(
             user_id=auth.user_id,
             space_id=space["id"],
@@ -1298,6 +1309,39 @@ async def backfill_embeddings(
     }
 
 
+async def _candidate_space_and_embedder(space_id: str):
+    """``(space row, its own embedder)`` for a ``space_id`` backfill: the
+    vectors land in THAT space, embedded by the catalog row serving its
+    ``actual_model`` — never by the active governance embedder. Typed 404 /
+    409 when the space or its catalog row is gone."""
+    from app.repositories import embedding_space_repository as space_mod
+    from app.services.library import embedding_spaces
+
+    space = await space_mod.get_embedding_space_repository().get(int(space_id))
+    if space is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "space_not_found", "message": "No such embedding space."},
+        )
+    try:
+        embedder = await embedding_spaces.service_for_space(space)
+    except embedding_spaces.SpaceCatalogError as e:
+        raise HTTPException(status_code=409, detail={"code": e.code, "message": str(e)})
+    return space, embedder
+
+
+async def _space_gone(space_id: int) -> bool:
+    """True when the space no longer exists. A failed check answers False:
+    the row is then one bad row, not a reason to abort the batch."""
+    from app.repositories import embedding_space_repository as space_mod
+
+    try:
+        return await space_mod.get_embedding_space_repository().get(space_id) is None
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"backfill: could not check space {space_id}: {e}")
+        return False
+
+
 async def _embed_backfill_rows(
     rows: list, *, embedder, space_id: int, repo
 ) -> tuple[list[str], int, list[dict], str | None]:
@@ -1307,8 +1351,10 @@ async def _embed_backfill_rows(
     Stops early — every remaining row accounted for in ``skipped`` — on a
     process-wide failure (``_BACKFILL_ABORT_CODES``), on
     ``_BACKFILL_MAX_PROVIDER_ERRORS`` consecutive provider errors (rest:
-    ``provider_error``), or past ``_BACKFILL_WALL_CLOCK_S`` (rest:
-    ``not_attempted``). ``aborted_reason`` names which; None = ran to the end.
+    ``provider_error``), past ``_BACKFILL_WALL_CLOCK_S`` (rest:
+    ``not_attempted``), or when the space is deleted mid-run (that row
+    ``space_gone``, rest ``not_attempted``). ``aborted_reason`` names which;
+    None = ran to the end.
     """
     from app.services.library import embedding_backfill
 
@@ -1325,6 +1371,19 @@ async def _embed_backfill_rows(
             ok, reason = await embedding_backfill.embed_candidate(
                 row, embedder=embedder, space_id=space_id, repo=repo
             )
+        except IntegrityError as e:
+            # FK violation: the space was deleted mid-run (every later row
+            # fails the same way), or just this resource was.
+            if await _space_gone(space_id):
+                logger.error(f"backfill: space {space_id} deleted mid-run: {e}")
+                skipped.append(_skip(row.resource_id, "space_gone"))
+                skipped.extend(
+                    _skip(r.resource_id, "not_attempted") for r in rows[i + 1 :]
+                )
+                return reembedded, rehashed, skipped, "space_gone"
+            logger.error(f"backfill: embed failed for resource {row.resource_id}: {e}")
+            skipped.append(_skip(row.resource_id, "reembed_error"))
+            continue
         except Exception as e:  # one bad row must not lose the rows before it
             logger.error(f"backfill: embed failed for resource {row.resource_id}: {e}")
             skipped.append(_skip(row.resource_id, "reembed_error"))

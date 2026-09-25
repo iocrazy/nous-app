@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import ProgrammingError
 
@@ -98,6 +98,42 @@ class EmbeddingSpaceRepository:
                 raise EmbeddingStoreMissing(_MISSING) from exc
             raise
         return _space_dict(row) if row is not None else None
+
+    async def list_all(self) -> list[dict]:
+        """Every space, oldest first (the active one and the candidates)."""
+        try:
+            async with read_scope() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(EmbeddingSpaces).order_by(
+                                EmbeddingSpaces.created_at, EmbeddingSpaces.id
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+        except ProgrammingError as exc:
+            if is_store_missing(exc):
+                raise EmbeddingStoreMissing(_MISSING) from exc
+            raise
+        return [_space_dict(r) for r in rows]
+
+    async def delete(self, space_id: int) -> bool:
+        """Delete one space. Its ``resource_embeddings`` rows go with it (FK
+        ``ON DELETE CASCADE``, mig 499) — count them first if you need to
+        say how many. True when a row was deleted."""
+        try:
+            async with write_scope() as session:
+                result = await session.execute(
+                    delete(EmbeddingSpaces).where(EmbeddingSpaces.id == space_id)
+                )
+        except ProgrammingError as exc:
+            if is_store_missing(exc):
+                raise EmbeddingStoreMissing(_MISSING) from exc
+            raise
+        return bool(result.rowcount)
 
 
 _repository: EmbeddingSpaceRepository | None = None

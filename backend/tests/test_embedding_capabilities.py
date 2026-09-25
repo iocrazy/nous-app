@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.ai.providers.embedding_capabilities import (
     PROTOCOL_ARK_MULTIMODAL,
+    PROTOCOL_OPENAI_CHAT,
     PROTOCOL_OPENAI_MULTIMODAL,
     PROTOCOL_OPENAI_TEXT,
     capabilities_for,
@@ -24,6 +27,7 @@ def test_protocol_constants() -> None:
     assert PROTOCOL_ARK_MULTIMODAL == "ark-multimodal"
     assert PROTOCOL_OPENAI_MULTIMODAL == "openai-embeddings-multimodal"
     assert PROTOCOL_OPENAI_TEXT == "openai-embeddings"
+    assert PROTOCOL_OPENAI_CHAT == "openai-embeddings-chat"
 
 
 def test_doubao_vision_is_ark_multimodal_text_image_video() -> None:
@@ -33,16 +37,24 @@ def test_doubao_vision_is_ark_multimodal_text_image_video() -> None:
     assert caps.native_dims == 2048 and caps.max_video_frames == 0
 
 
-def test_wemm_is_text_only_over_plain_openai_until_engine_multimodal_ships() -> None:
-    # nous-engine's multimodal /v1/embeddings is not live; the grouped shape
-    # would break every WeMM caller. See engine_multimodal_capabilities.
-    caps = capabilities_for(
-        _cfg("wemm-embedding-2b", base_url="http://nous-engine:8000/v1")
-    )
-    assert caps.protocol == "openai-embeddings"
+@pytest.mark.parametrize(
+    "model,native",
+    [
+        ("wemm-embedding-2b", 2048),
+        ("WeMM-Embedding-4B", 2560),
+        ("wemm-embedding-9b", 4096),
+        ("wemm-embedding", 2048),
+    ],
+)
+def test_wemm_is_text_only_over_the_chat_messages_shape(model, native) -> None:
+    # 2026-09-15: the engine gateway does not apply WeMM's chat template to a
+    # bare ``input`` (keyword recall 0.22 -> 0.06); only ``messages`` gets it.
+    # Multimodal stays off until the engine's grouped endpoint ships.
+    caps = capabilities_for(_cfg(model, base_url="http://nous-engine:8000/v1"))
+    assert caps.protocol == "openai-embeddings-chat"
     assert caps.modalities == frozenset({"text"})
     assert caps.max_video_frames == 0 and caps.matryoshka_dims == ()
-    assert caps.native_dims == 2048
+    assert caps.native_dims == native
 
 
 def test_qwen3_vl_embedding_is_text_only_over_plain_openai() -> None:

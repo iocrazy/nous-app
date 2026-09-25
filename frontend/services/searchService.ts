@@ -3,6 +3,7 @@
  */
 
 import { apiClient } from './apiClient';
+import type { NousModelPublic } from '../types/api';
 import type { SearchChipFilters } from './searchChipFilters';
 
 // Types
@@ -300,27 +301,73 @@ export const localSearch = (
 
 // --- Vector spaces status (Settings → AI → Vectors) ---
 
-/** Real body of `GET /api/v1/search/vectors/status` (PR 2). `space` is null
- *  when no embedder is configured or the vector store is not migrated. */
+/** One embedding space (`SpaceInfo`). The id is a Snowflake BIGINT the
+ *  backend serialises as a string (JS precision past 2^53). */
+export interface VectorSpaceInfo {
+  id: string;
+  actual_model: string;
+  protocol: string;
+  dims: number;
+  modalities: string[];
+  instruction_version: string;
+}
+
+export interface VectorLayerStatus {
+  layer: 'semantic' | 'transcript';
+  status: 'ok' | 'not_built';
+  covered: number;
+  total: number;
+  /** Covered vectors the next backfill re-embeds; absent on older backends. */
+  stale?: number;
+}
+
+/** A space with the caller's coverage in it (`SpaceStatus`). `active` = the
+ *  admin-governance embedder writes and searches here; the rest are
+ *  candidates. `catalog_name` is null when the model left the catalog. */
+export interface VectorSpaceStatus extends VectorSpaceInfo {
+  active: boolean;
+  catalog_name: string | null;
+  layers: VectorLayerStatus[];
+}
+
+/** Real body of `GET /api/v1/search/vectors/status`. `space` / `layers` are
+ *  the ACTIVE space (null when no embedder is configured or the store is not
+ *  migrated); `spaces` lists every space; `can_manage` = the caller is an
+ *  admin. The last two are absent on backends before space switching. */
 export interface VectorsStatus {
   status: 'ok' | 'unconfigured' | 'store_missing';
-  space: {
-    id: string; // Snowflake BIGINT, serialised as a string by the backend (JS precision past 2^53)
-    actual_model: string;
-    protocol: string;
-    dims: number;
-    modalities: string[];
-    instruction_version: string;
-  } | null;
-  layers: Array<{
-    layer: 'semantic' | 'transcript';
-    status: 'ok' | 'not_built';
-    covered: number;
-    total: number;
-    /** Covered vectors the next backfill re-embeds; absent on older backends. */
-    stale?: number;
-  }>;
+  space: VectorSpaceInfo | null;
+  layers: VectorLayerStatus[];
+  spaces?: VectorSpaceStatus[];
+  can_manage?: boolean;
+}
+
+/** Body of `DELETE /api/v1/search/vectors/spaces/{id}`. `deleted_vectors`
+ *  counts every user's vectors the delete cascaded away. */
+export interface DeleteVectorSpaceResult {
+  deleted: boolean;
+  space_id: string;
+  deleted_vectors: number;
 }
 
 export const getVectorsStatus = (): Promise<VectorsStatus> =>
   apiClient.get<VectorsStatus>('/api/v1/search/vectors/status');
+
+/** Add Space (admin). Probes the catalog model first: a 422 carries
+ *  `details: {code: 'dimension_mismatch', expected, got, model}`, an
+ *  unreachable provider is a 502 `provider_error`. */
+export const createVectorSpace = (modelName: string): Promise<VectorSpaceInfo> =>
+  apiClient.post<VectorSpaceInfo>('/api/v1/search/vectors/spaces', { model_name: modelName });
+
+/** Switch (admin): make this space active. Answers with the new status. */
+export const activateVectorSpace = (spaceId: string): Promise<VectorsStatus> =>
+  apiClient.post<VectorsStatus>(`/api/v1/search/vectors/spaces/${encodeURIComponent(spaceId)}/activate`);
+
+/** Delete a non-active space and every vector in it (admin). */
+export const deleteVectorSpace = (spaceId: string): Promise<DeleteVectorSpaceResult> =>
+  apiClient.delete<DeleteVectorSpaceResult>(`/api/v1/search/vectors/spaces/${encodeURIComponent(spaceId)}`);
+
+/** Catalog models Add Space may pick: enabled PLATFORM embedding rows only.
+ *  (`/ai/nous-models` also returns the caller's own BYOK rows.) */
+export const getVectorSpaceCatalog = async (): Promise<NousModelPublic[]> =>
+  (await apiClient.get<{ models: NousModelPublic[] }>('/api/v1/search/vectors/catalog')).models;

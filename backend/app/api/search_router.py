@@ -2,12 +2,16 @@
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 
+from app.core.admin_deps import AdminAuthDep, is_admin_user
 from app.core.deps import AuthDep
 from app.core.embedding_space import SEMANTIC_LAYER, EmbeddingDimensionMismatch
 from app.core.scope_dep import scoped_request
+from app.repositories.admin.system_settings_repository import (
+    get_system_settings_repository,
+)
 from app.repositories.analysis_repository import EmbeddingSearchUnavailable
 from app.repositories.embedding_space_repository import (
     get_embedding_space_repository,
@@ -16,19 +20,38 @@ from app.repositories.resource_embeddings_repository import (
     EmbeddingStoreMissing,
     get_resource_embeddings_repository,
 )
+from app.schemas.ai_settings_responses import AiNousModelsResponse
 from app.schemas.search import (
+    CreateSpaceRequest,
+    DeleteSpaceResponse,
     HybridSearchRequest,
     LayerStatus,
     SearchResponse,
     SearchResultItem,
     SemanticSearchRequest,
     SpaceInfo,
+    SpaceStatus,
     TextSearchRequest,
     VectorsStatusResponse,
 )
 from app.schemas.unified_search import UnifiedSearchResponse
-from app.services.ai.providers.embedding_service import EmbeddingService
+from app.services.ai.providers.embedding_service import (
+    EmbeddingService,
+    classify_embed_reason,
+)
 from app.services.library.embedding_document import DOC_VERSION
+from app.services.library.embedding_spaces import (
+    EMBEDDING_MODEL_SETTING,
+    PROBE_TEXT,
+    ActiveSpaceUnknown,
+    SpaceCatalogError,
+    active_actual_model,
+    catalog_name_for,
+    catalog_row_for_space,
+    config_for_catalog_model,
+    forget_space_id,
+    platform_embedding_models,
+)
 from app.services.library.like_escape import escape_like
 from app.services.library.resource_lookup import (
     fetch_user_resources_by_media_id as _fetch_user_resources_by_media_id,
@@ -38,6 +61,7 @@ from app.services.library.search_service import (
     SearchService,
 )
 from app.services.search.service import ALL_SEARCH_KINDS, unified_search
+from app.utils.admin_helpers import create_audit_log
 
 # Router-level ambient tenant scope, same as the four ``resources_*`` routers:
 # ``/hybrid`` / ``/similar`` / ``/vectors/status`` all read the
@@ -419,16 +443,52 @@ def _layers(covered: int, total: int, stale: int = 0) -> List[LayerStatus]:
     ]
 
 
+async def _space_statuses(
+    user_id: str, active_space: Optional[Dict[str, Any]]
+) -> List[SpaceStatus]:
+    """Every space with the caller's coverage. ``active_space`` is always in
+    the answer, even when the listing raced its creation."""
+    spaces = await get_embedding_space_repository().list_all()
+    if active_space is not None and all(
+        int(s["id"]) != int(active_space["id"]) for s in spaces
+    ):
+        spaces = [*spaces, active_space]
+    repo = get_resource_embeddings_repository()
+    active_id = int(active_space["id"]) if active_space is not None else None
+    out: List[SpaceStatus] = []
+    for space in spaces:
+        covered, total = await repo.coverage(
+            user_id=user_id, space_id=space["id"], layer=SEMANTIC_LAYER
+        )
+        stale = await repo.stale_count(
+            user_id=user_id,
+            space_id=space["id"],
+            layer=SEMANTIC_LAYER,
+            doc_version=DOC_VERSION,
+        )
+        out.append(
+            SpaceStatus(
+                **SpaceInfo.from_row(space).model_dump(),
+                active=int(space["id"]) == active_id,
+                catalog_name=await catalog_name_for(space["actual_model"]),
+                layers=_layers(covered, total, stale),
+            )
+        )
+    return out
+
+
 @router.get("/vectors/status", response_model=VectorsStatusResponse)
 async def vectors_status(auth: AuthDep):
     """How much of the caller's library has a vector, per retrieval layer, in
-    the CURRENT embedding space (the admin-configured embedder).
+    the CURRENT embedding space (the admin-configured embedder), plus every
+    candidate space (``spaces``) and whether the caller may manage them.
 
     ``status`` is "ok", "unconfigured" (no embedder: ``space`` null, coverage
     0 of the caller's total) or "store_missing" (migration 499 not applied:
-    ``space`` null, ``layers`` empty). A typed answer in every case, never a
-    500 — the UI shows it next to the search box.
+    ``space`` null, ``layers`` / ``spaces`` empty). A typed answer in every
+    case, never a 500 — the UI shows it next to the search box.
     """
+    can_manage = await is_admin_user(auth.user_id)
     embedder = EmbeddingService()
     spec = await embedder.space_spec()
     repo = get_resource_embeddings_repository()
@@ -437,29 +497,239 @@ async def vectors_status(auth: AuthDep):
             _, total = await repo.coverage(
                 user_id=auth.user_id, space_id=NO_SPACE_ID, layer=SEMANTIC_LAYER
             )
+            spaces = await _space_statuses(auth.user_id, None)
         except EmbeddingStoreMissing:
-            return VectorsStatusResponse(space=None, status="unconfigured", layers=[])
+            return VectorsStatusResponse(
+                space=None, status="unconfigured", layers=[], can_manage=can_manage
+            )
         return VectorsStatusResponse(
-            space=None, status="unconfigured", layers=_layers(0, total)
+            space=None,
+            status="unconfigured",
+            layers=_layers(0, total),
+            spaces=spaces,
+            can_manage=can_manage,
         )
     try:
         space = await get_embedding_space_repository().get_or_create(spec)
-        covered, total = await repo.coverage(
-            user_id=auth.user_id, space_id=space["id"], layer=SEMANTIC_LAYER
-        )
-        stale = await repo.stale_count(
-            user_id=auth.user_id,
-            space_id=space["id"],
-            layer=SEMANTIC_LAYER,
-            doc_version=DOC_VERSION,
-        )
+        spaces = await _space_statuses(auth.user_id, space)
     except EmbeddingStoreMissing as e:
         logger.error(f"Vector status: store missing (migration 499): {e}")
-        return VectorsStatusResponse(space=None, status="store_missing", layers=[])
+        return VectorsStatusResponse(
+            space=None, status="store_missing", layers=[], can_manage=can_manage
+        )
+    active = next(s for s in spaces if s.active)
     return VectorsStatusResponse(
         space=SpaceInfo.from_row(space),
         status="ok",
-        layers=_layers(covered, total, stale),
+        layers=active.layers,
+        spaces=spaces,
+        can_manage=can_manage,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Embedding space switching (admin). The active space = the governance
+# setting ``ai_module.embedding.model``; see app.services.library.
+# embedding_spaces.
+# ---------------------------------------------------------------------------
+_CATALOG_ERROR_STATUS = {
+    "catalog_model_not_found": status.HTTP_404_NOT_FOUND,
+    "catalog_model_disabled": status.HTTP_409_CONFLICT,
+    "not_an_embedding_model": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "space_catalog_row_missing": status.HTTP_409_CONFLICT,
+    "byok_row_not_allowed": status.HTTP_422_UNPROCESSABLE_ENTITY,
+}
+
+_STORE_MISSING = HTTPException(
+    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    detail={
+        "code": "vector_store_missing",
+        "message": "The vector store is not ready yet (a database update is "
+        "still rolling out). Try again shortly.",
+    },
+)
+
+
+def _catalog_http_error(e: SpaceCatalogError) -> HTTPException:
+    return HTTPException(
+        status_code=_CATALOG_ERROR_STATUS[e.code],
+        detail={"code": e.code, "message": str(e)},
+    )
+
+
+async def _load_space(space_id: str) -> Dict[str, Any]:
+    """The space row, or a typed 404. Ids travel as strings (Snowflake)."""
+    not_found = HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"code": "space_not_found", "message": "No such embedding space."},
+    )
+    if not space_id.isdigit():
+        raise not_found
+    try:
+        space = await get_embedding_space_repository().get(int(space_id))
+    except EmbeddingStoreMissing:
+        raise _STORE_MISSING
+    if space is None:
+        raise not_found
+    return space
+
+
+def _client_ip(request: Request) -> Optional[str]:
+    return request.client.host if request.client else None
+
+
+@router.get("/vectors/catalog", response_model=AiNousModelsResponse)
+async def vector_space_catalog(auth: AuthDep):
+    """Catalog models Add Space may pick: enabled PLATFORM embedding rows
+    only (public fields). ``/ai/nous-models`` also lists the caller's own
+    BYOK rows, which must never back a shared space."""
+    return {"models": await platform_embedding_models()}
+
+
+@router.post(
+    "/vectors/spaces",
+    response_model=SpaceInfo,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_vector_space(
+    body: CreateSpaceRequest, auth: AdminAuthDep, request: Request
+):
+    """Add a candidate space for a catalog embedding model (Add Space).
+
+    Probes the model once with its own config before creating anything: a
+    vector of the wrong width is a 422 ``dimension_mismatch`` carrying both
+    widths (the columns are fixed at ``EMBEDDING_DIM``); an unreachable
+    provider is a 502 ``provider_error``. Idempotent on the model: adding a
+    model that already has a space returns that space.
+    """
+    name = body.model_name.strip()
+    try:
+        cfg = await config_for_catalog_model(name)
+    except SpaceCatalogError as e:
+        raise _catalog_http_error(e)
+    candidate = EmbeddingService(cfg=cfg)
+    try:
+        vec, reason = await candidate.probe(PROBE_TEXT)
+    except EmbeddingDimensionMismatch as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "dimension_mismatch",
+                "expected": e.expected,
+                "got": e.got,
+                "model": name,
+                "message": f"{name} returns {e.got} dimensions; the vector "
+                f"store holds {e.expected}.",
+            },
+        )
+    if vec is None:
+        logger.error(f"Add space: probe of {name!r} failed: {reason}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "provider_error",
+                "reason": classify_embed_reason(reason),
+                "model": name,
+                "message": f"{name} did not answer the probe.",
+            },
+        )
+    spec = await candidate.space_spec()
+    try:
+        space = await get_embedding_space_repository().get_or_create(spec)
+    except EmbeddingStoreMissing:
+        raise _STORE_MISSING
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="create_embedding_space",
+        target_type="embedding_space",
+        target_id=str(space["id"]),
+        details={"model_name": name, "actual_model": space["actual_model"]},
+        ip_address=_client_ip(request),
+    )
+    return SpaceInfo.from_row(space)
+
+
+@router.post(
+    "/vectors/spaces/{space_id}/activate", response_model=VectorsStatusResponse
+)
+async def activate_vector_space(space_id: str, auth: AdminAuthDep, request: Request):
+    """Switch: make ``space_id`` the active space by writing its catalog row
+    name to ``ai_module.embedding.model`` (the same key the admin AI
+    Governance page writes). Answers with the new status.
+
+    Coverage is NOT checked here: it is per user, and the admin's own
+    coverage says nothing about anyone else's. The UI gates the button.
+    """
+    space = await _load_space(space_id)
+    try:
+        row = await catalog_row_for_space(space)
+    except SpaceCatalogError as e:
+        raise _catalog_http_error(e)
+    await get_system_settings_repository().upsert_setting(
+        EMBEDDING_MODEL_SETTING, row["name"], auth.user_id
+    )
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="activate_embedding_space",
+        target_type="embedding_space",
+        target_id=str(space["id"]),
+        details={"model_name": row["name"], "actual_model": space["actual_model"]},
+        ip_address=_client_ip(request),
+    )
+    return await vectors_status(auth)
+
+
+@router.delete("/vectors/spaces/{space_id}", response_model=DeleteSpaceResponse)
+async def delete_vector_space(space_id: str, auth: AdminAuthDep, request: Request):
+    """Delete a candidate (or retired) space and, by FK cascade, every vector
+    in it — every user's. The active space is refused (409
+    ``space_active``): switch away first."""
+    space = await _load_space(space_id)
+    # Read the governance setting itself: EmbeddingService.space_spec() folds
+    # every failure into None, and "None" here used to mean "nothing active"
+    # -> the active space and every user's vectors in it were deletable.
+    try:
+        active_model = await active_actual_model()
+    except ActiveSpaceUnknown as e:
+        logger.error(f"Delete space {space_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "active_space_unknown",
+                "message": "Could not determine the active embedding space; "
+                "nothing was deleted. Try again shortly.",
+            },
+        )
+    if active_model is not None and active_model == space["actual_model"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "space_active",
+                "message": "This is the active embedding space; switch to "
+                "another one before deleting it.",
+            },
+        )
+    try:
+        deleted_vectors = await get_resource_embeddings_repository().count_in_space(
+            space["id"]
+        )
+        await get_embedding_space_repository().delete(space["id"])
+    except EmbeddingStoreMissing:
+        raise _STORE_MISSING
+    forget_space_id(space["id"])
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="delete_embedding_space",
+        target_type="embedding_space",
+        target_id=str(space["id"]),
+        details={
+            "actual_model": space["actual_model"],
+            "deleted_vectors": deleted_vectors,
+        },
+        ip_address=_client_ip(request),
+    )
+    return DeleteSpaceResponse(
+        deleted=True, space_id=str(space["id"]), deleted_vectors=deleted_vectors
     )
 
 

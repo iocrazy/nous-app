@@ -221,6 +221,20 @@ class LayerStatus(BaseModel):
     stale: int = 0
 
 
+class SpaceStatus(SpaceInfo):
+    """One embedding space and the caller's coverage in it.
+
+    ``active`` = the admin governance embedder writes and searches here;
+    every other space is a candidate. ``catalog_name`` is the ``nous_models``
+    row serving ``actual_model`` (null when it was removed from the catalog:
+    such a space can neither be filled nor switched to).
+    """
+
+    active: bool
+    catalog_name: Optional[str] = None
+    layers: List[LayerStatus]
+
+
 class VectorsStatusResponse(BaseModel):
     """``GET /search/vectors/status``.
 
@@ -229,11 +243,33 @@ class VectorsStatusResponse(BaseModel):
     "store_missing" (migration 499 not applied; ``space`` null, ``layers``
     empty). A layer is "not_built" until it holds at least one vector;
     ``transcript`` is always "not_built" until that layer ships.
+
+    ``space`` / ``layers`` describe the ACTIVE space (kept for old readers);
+    ``spaces`` lists every space, active and candidates, each with the
+    caller's coverage. ``can_manage`` = the caller may add / switch / delete
+    spaces (admin).
     """
 
     space: Optional[SpaceInfo] = None
     status: Literal["ok", "unconfigured", "store_missing"]
     layers: List[LayerStatus]
+    spaces: List[SpaceStatus] = Field(default_factory=list)
+    can_manage: bool = False
+
+
+class CreateSpaceRequest(BaseModel):
+    """``POST /search/vectors/spaces``: a ``nous_models`` embedding row name."""
+
+    model_name: str = Field(..., min_length=1, max_length=200)
+
+
+class DeleteSpaceResponse(BaseModel):
+    """``DELETE /search/vectors/spaces/{id}``. ``deleted_vectors`` = rows of
+    ``resource_embeddings`` (every user, every layer) the FK cascade removed."""
+
+    deleted: bool
+    space_id: str
+    deleted_vectors: int
 
 
 class SimilarMediaRequest(BaseModel):

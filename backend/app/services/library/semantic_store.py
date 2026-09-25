@@ -22,18 +22,30 @@ match".
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
 from app.core.embedding_space import SEMANTIC_LAYER, SpaceSpec
 from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
 
-# Space ids by spec, per process. A space row is immutable identity (its
-# unique key IS the spec), so once resolved it never changes; without this
-# every hybrid query would pay an INSERT … ON CONFLICT round-trip.
-_SPACE_ID_CACHE: Dict[SpaceSpec, int] = {}
+# Space ids by spec, per process: ``spec -> (id, expires_at)``. A space row is
+# immutable identity (its unique key IS the spec); without this every hybrid
+# query would pay an INSERT … ON CONFLICT round-trip. Bounded by a TTL since
+# spaces can be deleted (``DELETE /search/vectors/spaces/{id}``): the process
+# that deletes forgets at once (:func:`forget_space_id`), every other worker
+# re-resolves within ``_SPACE_ID_TTL_S`` instead of writing into a dead id
+# until restart when a deleted model is re-added and switched back to.
+_SPACE_ID_CACHE: Dict[SpaceSpec, Tuple[int, float]] = {}
+_SPACE_ID_TTL_S = 60.0
+
+
+def forget_space_id(space_id: int) -> None:
+    """Drop every cached spec that resolved to ``space_id`` (it was deleted)."""
+    for spec in [k for k, (sid, _) in _SPACE_ID_CACHE.items() if sid == space_id]:
+        _SPACE_ID_CACHE.pop(spec, None)
 
 
 def parse_embedding(value: Any) -> Optional[List[float]]:
@@ -64,10 +76,13 @@ class SemanticStore:
         spec = await self.embedding_service.space_spec()
         if spec is None:
             return None
-        space_id = _SPACE_ID_CACHE.get(spec)
-        if space_id is None:
-            space = await self.space_repo.get_or_create(spec)
-            space_id = _SPACE_ID_CACHE[spec] = int(space["id"])
+        now = time.monotonic()
+        cached = _SPACE_ID_CACHE.get(spec)
+        if cached is not None and cached[1] > now:
+            return cached[0]
+        space = await self.space_repo.get_or_create(spec)
+        space_id = int(space["id"])
+        _SPACE_ID_CACHE[spec] = (space_id, now + _SPACE_ID_TTL_S)
         return space_id
 
     async def nearest(

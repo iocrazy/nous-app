@@ -21,6 +21,15 @@ Wire shapes:
   ``docs/superpowers/specs/2026-09-16-nous-engine-multimodal-embedding-request.md``
   §1): ``input`` is a list of groups, each group a list of parts; adds
   ``video_frames``; response ``data[i].embedding`` ordered by ``index``.
+
+* **OpenAI chat-messages** (WeMM on nous-engine ``/v1/embeddings``)::
+
+      {"model": m, "messages": [{"role": "user",
+                                 "content": [{"type": "text", "text": ...}]}],
+       "encoding_format": "float"}
+
+  the gateway applies the model's chat template only to ``messages``;
+  response ``data[0].embedding``.
 """
 
 from __future__ import annotations
@@ -143,6 +152,16 @@ def build_openai_multimodal_payload(
     }
 
 
+def build_openai_chat_payload(model: str, text: str) -> dict[str, Any]:
+    """Chat-messages ``/v1/embeddings`` body: ``text`` as one user message.
+    No ``input`` key — its presence makes the gateway skip the template."""
+    return {
+        "model": model,
+        "messages": [{"role": "user", "content": [_text_part(text)]}],
+        "encoding_format": "float",
+    }
+
+
 def parse_openai_embeddings_response(
     body: dict[str, Any], expected: int
 ) -> list[list[float]]:
@@ -176,6 +195,7 @@ __all__ = [
     "VideoFramesItem",
     "VideoUrlItem",
     "build_ark_payload",
+    "build_openai_chat_payload",
     "build_openai_multimodal_payload",
     "modality_of",
     "parse_ark_response",
