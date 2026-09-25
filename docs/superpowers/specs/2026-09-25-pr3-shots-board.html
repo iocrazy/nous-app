@@ -1,0 +1,296 @@
+<title>Shots Index Board</title>
+<style>
+  :root{
+    --page:#F3F0E9; --island:#FCFBF8; --sub:#F6F4EE; --line:#E5E0D4; --line2:#D6D0C0;
+    --ink:#1C1B18; --ink2:#57544B; --ink3:#8C887B;
+    --accent:#14694D; --accent-soft:#E3EFE8; --accent-line:#B9D6C7;
+    --ok:#1E7A5B; --ok-soft:#E3EFE8; --warn:#A87B2B; --warn-soft:#F5EBD6; --danger:#AD5147; --danger-soft:#F4E1DE; --info:#46708E; --info-soft:#E6EDF3; --info-line:#B9CBD9;
+    --c1:#46708E; --c2:#A87B2B; --c3:#7A5E8F; --c4:#1E7A5B; --c5:#AD5147; --c6:#8C887B;
+    --thumb-a:#3C4A55; --thumb-b:#1F262C;
+    --ink-950:#0d0d10; --ink-900:#15151a; --ink-800:#27272a; --ink-700:#3f3f46; --ink-600:#52525b; --ink-500:#8c8c96; --ink-400:#a3a3ad; --ink-200:#d4d4d8; --ink-100:#e7e7ea;
+  }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+    --page:#050507; --island:#15151a; --sub:#17171b; --line:rgba(255,255,255,.065); --line2:rgba(255,255,255,.12); --ink:#e7e7ea; --ink2:#a3a3ad; --ink3:#74747e;
+    --accent:#80B39C; --accent-soft:rgba(30,122,91,.14); --accent-line:rgba(30,122,91,.4);
+    --ok:#80B39C; --ok-soft:rgba(30,122,91,.14); --warn:#CEAC78; --warn-soft:rgba(168,123,43,.14); --danger:#D1948B; --danger-soft:rgba(173,81,71,.14); --info:#8DA9BE; --info-soft:rgba(70,112,142,.14); --info-line:rgba(70,112,142,.4);
+    --c1:#7FA3BD; --c2:#C99A4A; --c3:#AF9BBF; --c4:#4D9478; --c5:#D07267; --c6:#8c8c96;
+    color-scheme:dark; } }
+  :root[data-theme="dark"]{
+    --page:#050507; --island:#15151a; --sub:#17171b; --line:rgba(255,255,255,.065); --line2:rgba(255,255,255,.12); --ink:#e7e7ea; --ink2:#a3a3ad; --ink3:#74747e;
+    --accent:#80B39C; --accent-soft:rgba(30,122,91,.14); --accent-line:rgba(30,122,91,.4);
+    --ok:#80B39C; --ok-soft:rgba(30,122,91,.14); --warn:#CEAC78; --warn-soft:rgba(168,123,43,.14); --danger:#D1948B; --danger-soft:rgba(173,81,71,.14); --info:#8DA9BE; --info-soft:rgba(70,112,142,.14); --info-line:rgba(70,112,142,.4);
+    --c1:#7FA3BD; --c2:#C99A4A; --c3:#AF9BBF; --c4:#4D9478; --c5:#D07267; --c6:#8c8c96;
+    color-scheme:dark; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;padding-inline:16px;padding-block:16px 56px}
+  .wrap{max-width:1240px;margin:0 auto;display:grid;gap:14px}
+  h1{font-size:17px;margin:0;font-weight:600} h2{font-size:13px;margin:0;font-weight:600}
+  .muted{color:var(--ink3)} .dim{color:var(--ink2)} .num{font-variant-numeric:tabular-nums}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap} .between{justify-content:space-between}
+  .island{background:var(--island);border:1px solid var(--line);border-radius:12px} .pad{padding:14px}
+  .stages{display:flex;flex-wrap:wrap;border:1px solid var(--line2);border-radius:10px;overflow:hidden;background:var(--island)}
+  .stages button{flex:1 1 170px;border:0;border-right:1px solid var(--line);background:transparent;color:var(--ink2);padding:10px 12px;font:inherit;text-align:left;cursor:pointer;display:grid;gap:2px;min-width:0}
+  .stages button:last-child{border-right:0} .stages button b{font-size:13px;color:var(--ink)}
+  .stages button small{font-size:11px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stages button[aria-selected="true"]{background:var(--accent-soft)} .stages button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .screen[hidden]{display:none}
+  .notes{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;font-size:12.5px} @media (max-width:800px){.notes{grid-template-columns:1fr}}
+  .notes h3{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--ink2)} .notes ul{margin:0;padding-left:16px;display:grid;gap:3px}
+  .tag{display:inline-block;font-size:11px;border-radius:4px;padding:0 5px;border:1px solid var(--line2);color:var(--ink2);margin-left:4px;vertical-align:1px}
+  .tag.new{border-color:var(--info-line);background:var(--info-soft);color:var(--info)} .tag.wait{border-color:var(--warn);background:var(--warn-soft);color:var(--warn)}
+  .shell{display:grid;grid-template-columns:52px 1fr 380px;gap:12px;min-height:520px} @media (max-width:900px){.shell{grid-template-columns:52px 1fr}.shell .aside{grid-column:1/-1}}
+  .rail{background:var(--island);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;align-items:center;gap:10px;padding-block:12px}
+  .rail i{width:26px;height:26px;border-radius:7px;background:var(--sub);border:1px solid var(--line)} .rail i.on{background:var(--accent-soft);border-color:var(--accent)}
+  .content{display:flex;flex-direction:column;gap:10px;min-width:0}
+  .toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px} .toolbar .crumbs{font-weight:600}
+  .tsearch{display:flex;align-items:center;gap:6px;border:1px solid var(--line2);background:var(--sub);border-radius:8px;padding:4px 8px;min-width:240px}
+  .tsearch input{border:0;background:transparent;font:inherit;color:var(--ink);flex:1;outline:none;min-width:0}
+  .mode{font-size:11px;border:1px solid var(--accent-line);color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:1px 7px}
+  .fbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px}
+  .fchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:3px 8px;font-size:12px;color:var(--ink2);background:var(--island)} .fchip.on{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent)}
+  .legs{display:inline-flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:12px;color:var(--ink2);background:var(--sub)}
+  .legs .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:4px;vertical-align:1px;background:var(--line2)} .legs .ok .dot{background:var(--ok)} .legs .built{color:var(--ink)} .legs .off{color:var(--ink3)}
+  .hits{font-size:12px;color:var(--ink3);white-space:nowrap}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px;padding:0 12px 12px}
+  .card{background:var(--island);border:1px solid var(--line);border-radius:10px;overflow:hidden} .card.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .cover{aspect-ratio:9/12;position:relative;background:linear-gradient(160deg,var(--thumb-a),var(--thumb-b))}
+  .cover.p2{background:linear-gradient(160deg,#5C6B4A,#2C3324)} .cover.p3{background:linear-gradient(160deg,#6E5A4A,#2E251E)} .cover.p4{background:linear-gradient(160deg,#4A5C6E,#1E262E)}
+  .cover .plat{position:absolute;left:6px;top:6px;width:18px;height:18px;border-radius:5px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;display:grid;place-items:center}
+  .cover .tr{position:absolute;right:6px;top:6px;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+  .cover .type{width:18px;height:18px;border-radius:5px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;display:grid;place-items:center}
+  .cover .hit{background:rgba(252,251,248,.94);color:#1C1B18;font-size:10px;padding:1px 5px;border-radius:4px;border:1px solid #D6D0C0;white-space:nowrap} .cover .hit b{color:#14694D;font-weight:600}
+  .cover .ttl{position:absolute;left:0;right:0;bottom:0;padding:22px 8px 6px;background:linear-gradient(transparent,rgba(0,0,0,.7));color:#fff;font-size:12px;line-height:1.3}
+  .cover .pos{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.22)} .cover .pos i{position:absolute;top:0;bottom:0;background:#fff}
+  .bar{height:3px;background:var(--line)} .bar i{display:block;height:100%;background:var(--accent)}
+  .cbody{padding:7px 9px;display:grid;gap:4px} .irow{display:flex;gap:6px;color:var(--ink3);font-size:11px;align-items:center}
+  .irow .q{font-size:10px;border:1px solid var(--line2);color:var(--ink3);border-radius:4px;padding:0 4px;margin-left:auto} .meta{font-size:11px;color:var(--ink3)}
+  .aside{background:var(--island);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:0}
+  .tabbar{display:flex;border-bottom:1px solid var(--line);align-items:center}
+  .tabbar button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 12px;font:inherit;font-size:13px;font-weight:500;color:var(--ink3);cursor:pointer;display:flex;gap:6px;align-items:center}
+  .tabbar button[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)} .tabbar .sp{flex:1} .tabbar .statusdot{width:6px;height:6px;border-radius:50%;background:var(--ok)} .tabbar .statusdot.busy{background:var(--warn)}
+  .abody{padding:12px;display:grid;gap:12px;overflow:auto;align-content:start}
+  .hero{aspect-ratio:16/9;border-radius:8px;background:linear-gradient(135deg,var(--thumb-a),var(--thumb-b));position:relative;color:#fff}
+  .hero .t{position:absolute;left:10px;bottom:16px;font-size:11px} .hero .pbar{position:absolute;left:10px;right:10px;bottom:8px;height:3px;background:rgba(255,255,255,.3);border-radius:2px} .hero .pbar i{position:absolute;left:0;top:0;bottom:0;background:#fff;border-radius:2px} .hero .mk{position:absolute;bottom:8px;width:2px;height:3px;background:var(--warn)}
+  .shcard{border:1px solid var(--accent-line);background:var(--accent-soft);border-radius:6px;padding:8px;display:grid;gap:6px;font-size:12px} .shcard .h{font-weight:600;color:var(--accent);display:flex;gap:6px;align-items:center}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:5px 11px;font:inherit;font-size:12px;font-weight:500;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent-line)} .btn.quiet{background:transparent;color:var(--ink3);border:1px solid var(--line2)} .btn.danger{background:transparent;color:var(--danger);border:1px solid var(--danger)}
+  .btn[disabled]{opacity:.6;cursor:not-allowed}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px} .stat{background:var(--sub);border-radius:8px;padding:8px 10px;display:grid;gap:1px} .stat .v{font-size:18px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums} .stat .k{font-size:11px;color:var(--ink3)}
+  .ministrip{display:flex;height:22px;border-radius:5px;overflow:hidden;border:1px solid var(--line2)} .ministrip span{display:block;height:100%;border-right:1px solid rgba(0,0,0,.18);background:var(--c1)} .ministrip span:nth-child(odd){background:var(--c6)} .ministrip span.hit{box-shadow:inset 0 0 0 2px #fff;background:var(--accent)}
+  .axis{display:flex;justify-content:space-between;font-size:10px;color:var(--ink3);margin-top:3px}
+  .shotlist{display:grid;gap:2px;max-height:150px;overflow:auto;border:1px solid var(--line);border-radius:7px;padding:4px}
+  .shot{display:grid;grid-template-columns:8px 1fr auto;gap:8px;align-items:center;padding:4px 6px;border-radius:5px;font-size:12px} .shot i{width:8px;height:8px;border-radius:2px;background:var(--c6)} .shot.hit{background:var(--accent-soft);color:var(--accent);font-weight:500} .shot.hit i{background:var(--accent)} .shot .tc{color:var(--ink3);font-variant-numeric:tabular-nums}
+  .prog{height:6px;background:var(--line);border-radius:3px;overflow:hidden} .prog i{display:block;height:100%;background:var(--warn)}
+  .empty{display:grid;place-items:center;text-align:center;gap:8px;padding:22px 12px} .empty h4{margin:0;font-size:13px;font-weight:500}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--ink2)}
+  .three{display:grid;grid-template-columns:repeat(3,1fr);gap:12px} @media (max-width:900px){.three{grid-template-columns:1fr}}
+  .state{border:1px solid var(--line);border-radius:12px;background:var(--island);display:flex;flex-direction:column;min-height:0}
+  .state .cap{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);padding:8px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+  .state .cap b{color:var(--ink2);font-weight:600}
+  .modal{background:var(--ink-950);color:var(--ink-100);border-radius:14px;display:grid;grid-template-columns:180px 1fr;min-height:460px;overflow:hidden;border:1px solid var(--ink-800)} @media (max-width:800px){.modal{grid-template-columns:1fr}.modal .nav{display:none}}
+  .nav{border-right:1px solid var(--ink-800);padding:12px 8px;display:grid;gap:2px;align-content:start;font-size:13px} .nav .sec{color:var(--ink-500);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:10px 8px 4px} .nav a{display:block;padding:6px 10px;border-radius:7px;color:var(--ink-200)} .nav a.on{background:var(--ink-800);color:#fff}
+  .mbody{padding:16px;display:grid;gap:14px;align-content:start}
+  .mtabs{display:flex;gap:2px;border-bottom:1px solid var(--ink-800)} .mtabs button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;font:inherit;font-size:13px;color:var(--ink-500);cursor:pointer} .mtabs button[aria-selected="true"]{color:#fff;border-bottom-color:var(--accent)}
+  .sec-card{border:1px solid var(--ink-800);background:rgba(21,21,26,.4);border-radius:12px;padding:16px;display:grid;gap:12px} .sec-card h3{margin:0;font-size:14px;font-weight:600;color:var(--ink-100)}
+  table.lt{width:100%;border-collapse:collapse;font-size:13px;color:var(--ink-200)} .lt th{text-align:left;font-weight:500;color:var(--ink-500);font-size:12px;padding:6px 12px 6px 0} .lt td{padding:8px 12px 8px 0;border-top:1px solid var(--ink-800);vertical-align:middle}
+  .sdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ink-600);margin-right:6px} .sdot.ok{background:#80B39C}
+  .lprog{height:4px;width:96px;background:var(--ink-800);border-radius:3px;overflow:hidden;margin-top:4px} .lprog i{display:block;height:100%;background:#80B39C}
+  .dbtn{background:transparent;color:var(--ink-200);border:1px solid var(--ink-700);border-radius:7px;padding:2px 8px;font:inherit;font-size:12px;cursor:pointer} .dbtn.pri{background:#80B39C;color:#0d0d10;border-color:#80B39C;font-weight:600} .dbtn[disabled]{opacity:.5;cursor:not-allowed;color:var(--ink-500);border-color:var(--ink-800)}
+  .last{font-size:12px;color:var(--ink-400)} .last b{color:var(--ink-500);font-weight:500}
+  .dry{border:1px solid rgba(168,123,43,.5);background:rgba(168,123,43,.10);border-radius:8px;padding:10px 12px;font-size:12.5px;color:var(--ink-200);display:grid;gap:4px} .dry b{color:#CEAC78}
+  .tc-list{display:grid;gap:8px} .task{border:1px solid var(--line);border-radius:10px;background:var(--island);padding:10px 12px;display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:12.5px} .task .n{font-weight:500} .task .s{color:var(--ink3);font-size:12px;grid-column:1/-1} .task .st{font-size:11px;border-radius:999px;padding:1px 8px;border:1px solid var(--line2);color:var(--ink2);align-self:start} .task .st.run{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)} .task .st.done{border-color:var(--ok);color:var(--ok);background:var(--ok-soft)} .task .st.fail{border-color:var(--danger);color:var(--danger);background:var(--danger-soft)}
+  .task.child{margin-left:22px;border-style:dashed}
+  .task .prog{grid-column:1/-1}
+</style>
+
+<div class="wrap">
+  <div class="island pad">
+    <div class="row between">
+      <div>
+        <h1>PR 3 · 切镜索引与画面层 — 上线后用户看到什么</h1>
+        <div class="muted" style="font-size:12px">四屏对应 spec §7 的四块 UI。骨架与已上线的 as-built 画板一致（My Downloads · info island · Settings → AI · Task Center）。doubao 起步；WeMM 到位后换空间，屏不变。</div>
+      </div>
+      <button type="button" id="theme" class="btn quiet">dark</button>
+    </div>
+    <div class="stages" role="tablist" aria-label="Screens" style="margin-top:12px">
+      <button role="tab" aria-selected="true" data-s="s1"><b>1 · 搜索命中带时间码</b><small>Visual 腿 · 位置条 · shots queued</small></button>
+      <button role="tab" aria-selected="false" data-s="s2"><b>2 · Shots tab 三态</b><small>未索引 → 索引中 → 已索引</small></button>
+      <button role="tab" aria-selected="false" data-s="s3"><b>3 · Settings → Vectors</b><small>Visual 行 · Dry Run 先行 · Run 20</small></button>
+      <button role="tab" aria-selected="false" data-s="s4"><b>4 · Task Center</b><small>父任务 N/M · 子任务 · 单支按需</small></button>
+    </div>
+  </div>
+
+  <!-- ===== 1 ===== -->
+  <section class="screen" id="s1">
+    <div class="shell">
+      <div class="rail"><i></i><i class="on"></i><i></i><i></i><i></i></div>
+      <div class="content">
+        <div class="island toolbar"><div class="crumbs">My Downloads <span class="muted num">1,445</span></div><div class="row"><div class="tsearch"><span class="muted">⌕</span><input value="傍晚 骑楼 街景" aria-label="Search"><span class="mode">Smart Search</span><span class="muted">✕</span></div></div></div>
+        <div class="island">
+          <div class="fbar">
+            <span class="fchip">🏷 Tags</span><span class="fchip">☆ Rating</span><span class="fchip">▤ Type</span><span class="muted" style="font-size:12px">⋯</span>
+            <span class="fchip on">⧉ Layer · All ⌄</span><span class="fchip">⇅ Sort · Similarity ⌄</span>
+            <span class="legs"><span class="ok built"><i class="dot"></i>Text 3</span><span class="ok built"><i class="dot"></i>Semantic 8</span><span class="ok built"><i class="dot"></i>Visual 12</span><span class="off" title="Arrives with PR 4"><i class="dot"></i>Camera</span><span class="off"><i class="dot"></i>Transcript</span></span>
+            <span class="hits num">19 hits · best shot per video · 412 ms</span>
+          </div>
+          <div class="grid">
+            <div class="card sel"><div class="cover p4"><span class="plat">d</span><span class="tr"><span class="type">▶</span><span class="hit">0:48 · <b>Visual</b> · 0.62</span></span><div class="ttl">街拍 · 傍晚的海口骑楼老街</div><div class="pos"><i style="left:22%;width:6%"></i></div></div><div class="bar"><i style="width:62%"></i></div><div class="cbody"><div class="irow">▮▮ ▤ ▥ ⋈ ✦</div><div class="meta">@困困包子 · 2026-07-31</div></div></div>
+            <div class="card"><div class="cover p2"><span class="plat">b</span><span class="tr"><span class="type">▶</span><span class="hit">2:22 · <b>Visual</b> · 0.55</span></span><div class="ttl">海南骑行 vlog · 从三亚到万宁的三天</div><div class="pos"><i style="left:40%;width:4%"></i></div></div><div class="bar"><i style="width:55%"></i></div><div class="cbody"><div class="irow">▮▮ ▤ ▥ ⋈ ✦</div><div class="meta">@RICEDO · 2026-08-30</div></div></div>
+            <div class="card"><div class="cover p3"><span class="plat">b</span><span class="tr"><span class="type">▶</span><span class="hit"><b>Semantic</b> · 0.41</span></span><div class="ttl">老城区夜市怎么拍出电影感</div></div><div class="bar"><i style="width:41%"></i></div><div class="cbody"><div class="irow">▮▮ ▤ ▥ ⋈ ✦ <span class="q">shots queued</span></div><div class="meta">@老何说逆向 · 2026-09-10</div></div></div>
+            <div class="card"><div class="cover"><span class="plat">b</span><span class="tr"><span class="type">▶</span><span class="hit"><b>Title</b> · 1.00</span></span><div class="ttl">骑楼老街傍晚延时</div></div><div class="bar"><i style="width:100%"></i></div><div class="cbody"><div class="irow">▮▮ ▤ ▥ ⋈ ✦ <span class="q">not indexed</span></div><div class="meta">@早+ · 2026-07-02</div></div></div>
+          </div>
+        </div>
+      </div>
+      <aside class="aside">
+        <div class="tabbar"><button aria-selected="true">◉ Overview</button><button>◈ AI <i class="statusdot"></i></button><button>▣ Shots <i class="statusdot"></i></button><span class="sp"></span></div>
+        <div class="abody">
+          <div class="hero"><div class="t">0:48 / 3:12</div><div class="pbar"><i style="width:25%"></i></div><div class="mk" style="left:26%"></div></div>
+          <div class="shcard"><div class="h">⌕ Search Hit <span class="tag" style="margin-left:auto;border-color:var(--c1);color:var(--c1)">Visual</span></div>
+            <div class="dim">Shot 5 · 0:41–0:52 · 11 s · similarity <b>0.62</b></div>
+            <div class="row"><button class="btn ghost">▶ Play From 0:48</button><button class="btn ghost">▣ Open Shots</button></div></div>
+          <div class="muted" style="font-size:11px">Search Hit 卡是 #2404 已有的；本期多了镜头行与两个按钮。</div>
+        </div>
+      </aside>
+    </div>
+    <div class="island pad notes" style="margin-top:12px">
+      <div><h3>这一屏新增<span class="tag new">PR 3</span></h3><ul>
+        <li>命中徽标带时间码：<b>0:48 · Visual · 0.62</b>（语义/标题命中没有时间码，形状不变）。</li>
+        <li>封面底部 3 px 位置条上的白色小段 = 命中镜头在整支里的位置与长度。</li>
+        <li>legs chip 的 <b>Visual</b> 点变绿有数；Camera / Transcript 仍灰（PR 4 / 二期）。</li>
+        <li>图标行末尾：<b>shots queued</b>（回填已派发未跑完）/ <b>not indexed</b>（没派过）。点卡进详情自动 seek 到 start_ms。</li>
+      </ul></div>
+      <div><h3>数据从哪来</h3><ul>
+        <li><code>SearchResultItem.shot = {shot_id, start_ms, end_ms} | null</code>，<code>layer='visual'</code>；<code>legs.visual</code>；新字段 <code>visual_leg</code> 与 <code>vector_leg</code> 并列。</li>
+        <li>查询文本用当前空间的 embedder 嵌一次，doubao 文本↔图片同空间，直接查 <code>match_video_shot_embeddings(kind='frame')</code>。</li>
+        <li>queued / not indexed 来自 <code>GET /resources/{id}/shots</code> 的 <code>indexed</code> 与 Task Center 里该资源的 <code>index_shots</code> 行。</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ===== 2 ===== -->
+  <section class="screen" id="s2" hidden>
+    <div class="three">
+      <div class="state">
+        <div class="cap"><span>State A</span><b>Not Indexed</b></div>
+        <div class="tabbar"><button>◉ Overview</button><button>◈ AI <i class="statusdot"></i></button><button aria-selected="true">▣ Shots</button><span class="sp"></span></div>
+        <div class="abody">
+          <div class="hero"><div class="t">0:00 / 3:12</div><div class="pbar"><i style="width:0"></i></div></div>
+          <div class="empty">
+            <div style="font-size:26px;color:var(--ink3)">▣</div>
+            <h4>Not Indexed Yet</h4>
+            <div class="mono">3:12 · ≈ 42 shots · ≈ 42 embeddings</div>
+            <div class="muted" style="font-size:11px">doubao ≈ 300 tokens per shot · local provider free</div>
+            <button class="btn">Index This Video</button>
+            <div class="muted" style="font-size:11px">Runs as a Task Center task · you can keep browsing</div>
+          </div>
+        </div>
+      </div>
+      <div class="state">
+        <div class="cap"><span>State B</span><b>Indexing</b></div>
+        <div class="tabbar"><button>◉ Overview</button><button>◈ AI <i class="statusdot"></i></button><button aria-selected="true">▣ Shots <i class="statusdot busy"></i></button><span class="sp"></span></div>
+        <div class="abody">
+          <div class="hero"><div class="t">0:00 / 3:12</div><div class="pbar"><i style="width:0"></i></div></div>
+          <div style="display:grid;gap:8px">
+            <div class="row between"><b style="font-size:13px">Indexing shots…</b><span class="muted num" style="font-size:12px">62%</span></div>
+            <div class="prog"><i style="width:62%"></i></div>
+            <div class="mono">Embedding 26 / 42</div>
+            <div class="muted" style="font-size:11px">Extracting frames 100% → 41 cuts → Embedding 26/42 → Writing</div>
+            <div class="row"><button class="btn quiet">Open In Task Center</button><button class="btn danger">Cancel</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="state">
+        <div class="cap"><span>State C</span><b>Indexed</b></div>
+        <div class="tabbar"><button>◉ Overview</button><button>◈ AI <i class="statusdot"></i></button><button aria-selected="true">▣ Shots <i class="statusdot"></i></button><span class="sp"></span></div>
+        <div class="abody">
+          <div class="hero"><div class="t">0:48 / 3:12</div><div class="pbar"><i style="width:25%"></i></div><div class="mk" style="left:26%"></div></div>
+          <div class="row between" style="font-size:11px"><span class="muted">indexed 2026-09-30 · space doubao · hist_v1</span><button class="btn quiet">Re-index</button></div>
+          <div class="stats"><div class="stat"><div class="v">42</div><div class="k">Shots</div></div><div class="stat"><div class="v">42</div><div class="k">Vectors · frame</div></div><div class="stat"><div class="v">4.6s</div><div class="k">Average shot</div></div><div class="stat"><div class="v">—</div><div class="k">Clusters · PR 4</div></div></div>
+          <div><div class="muted" style="font-size:11px;margin-bottom:4px">Shot strip · click to seek · outlined = search hit</div>
+            <div class="ministrip"><span style="width:6%"></span><span style="width:4%"></span><span style="width:8%"></span><span style="width:5%"></span><span class="hit" style="width:6%"></span><span style="width:7%"></span><span style="width:4%"></span><span style="width:9%"></span><span style="width:5%"></span><span style="width:6%"></span><span style="width:8%"></span><span style="width:5%"></span><span style="width:7%"></span><span style="width:6%"></span><span style="width:5%"></span><span style="width:9%"></span></div>
+            <div class="axis"><span>0:00</span><span>1:36</span><span>3:12</span></div></div>
+          <div class="shotlist">
+            <div class="shot"><i></i><span>Shot 4</span><span class="tc">0:33 – 0:41</span></div>
+            <div class="shot hit"><i></i><span>Shot 5 · search hit</span><span class="tc">0:41 – 0:52</span></div>
+            <div class="shot"><i></i><span>Shot 6</span><span class="tc">0:52 – 1:05</span></div>
+            <div class="shot"><i></i><span>Shot 7</span><span class="tc">1:05 – 1:12</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="island pad notes" style="margin-top:12px">
+      <div><h3>三态怎么切</h3><ul>
+        <li><b>A → B</b>：点 Index This Video → <code>POST /ai/analyze/index-shots/{id}</code> 202 → 这块立刻换成进度（乐观），之后跟 Task Center realtime 的 subtitle / progress。409 <code>provider_no_image</code> 时按钮下方红字「Current embedding model cannot take images」，不弹窗。</li>
+        <li><b>B → C</b>：任务 completed → 重新拉 <code>GET /resources/{id}/shots</code>。失败 → 回到 A，估算行下方显示类型化原因 + Retry。</li>
+        <li><b>C</b>：镜头条本期顺序单色（按簇着色随 PR 4）；点击 seek 播放器；命中镜头描白边，来源是搜索带进来的 <code>shot</code>。Re-index = force 重跑，走同一任务。</li>
+        <li>A 的估算行沿用 #2404 的 <code>estimateShots</code>，embeddings 数改成 ×1（本期只有 frame 向量）。</li>
+      </ul></div>
+      <div><h3>不做的</h3><ul>
+        <li>镜头缩略图条：不落库缩略图，条用色块；只有 Search Hit 卡的 hero 用 <code>/frame?ms=</code> 现切一张。</li>
+        <li>簇、簇标签、Camera 向量：PR 4。</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ===== 3 ===== -->
+  <section class="screen" id="s3" hidden>
+    <div class="modal">
+      <nav class="nav"><div class="sec">Account</div><a>Personal</a><div class="sec">App settings</div><a>General</a><a>API</a><a>Logs</a><a>Tasks</a><a>Tags</a><a>Workflow templates</a><a class="on">AI</a><a>MCP</a><a>API docs</a><a>Cookies</a></nav>
+      <div class="mbody">
+        <div class="mtabs"><button>General</button><button>Providers</button><button>Local CLI</button><button>Memory</button><button aria-selected="true">Vectors</button></div>
+        <div class="sec-card">
+          <h3>Retrieval Layers <span class="last" style="font-weight:400">· space doubao-embedding-vision-251215</span></h3>
+          <table class="lt"><thead><tr><th>Layer</th><th>Status</th><th>Coverage</th><th>Source</th><th>Backfill</th></tr></thead><tbody>
+            <tr><td>Semantic</td><td><span class="sdot ok"></span>ok</td><td class="num">1,445 / 1,445<div class="lprog"><i style="width:100%"></i></div></td><td style="font-size:12px;color:var(--ink-400)">title + description + tags + summary + transcript</td><td><button class="dbtn">Dry Run</button> <button class="dbtn">Run 200</button></td></tr>
+            <tr><td>Visual · frame</td><td><span class="sdot ok"></span>ok</td><td class="num">38 / 1,409 <span style="color:#CEAC78">· 2 stale</span><div class="lprog"><i style="width:2.7%"></i></div></td><td style="font-size:12px;color:var(--ink-400)">one keyframe per shot · hist_v1</td><td><button class="dbtn">Dry Run</button> <button class="dbtn pri" title="Run after a dry run in this session">Run 20</button></td></tr>
+            <tr style="color:var(--ink-500)"><td>Camera · clip</td><td><span class="sdot"></span>Arrives with PR 4</td><td class="num">— / 1,409</td><td></td><td></td></tr>
+            <tr style="color:var(--ink-500)"><td>Transcript</td><td><span class="sdot"></span>not built · Phase 2</td><td class="num">0 / 1,445</td><td></td><td></td></tr>
+          </tbody></table>
+          <div class="dry"><b>Dry run · Visual</b><span>20 candidates · ≈ 1,120 shots · ≈ 336k tokens on doubao · 3 skipped (no_video_file 2 · already_indexed 1)</span><span style="color:var(--ink-500)">Run 20 dispatches one parent task with 20 children. Tokens are billed by the provider; local providers are free.</span></div>
+          <div class="last"><b>Last backfill · Visual ·</b> 18 indexed · 2 failed (provider_error) · 1,371 remaining</div>
+        </div>
+      </div>
+    </div>
+    <div class="island pad notes" style="margin-top:12px">
+      <div><h3>这一屏新增</h3><ul>
+        <li>Visual 行变 ok：Coverage = 当前空间有 frame 向量的视频 / 视频总数（分母是视频，不是全部资源）；<b>stale</b> = 索引过但当前空间没向量或 algo_version 落后。</li>
+        <li><b>网络 provider 下 Run 之前必须先 Dry Run</b>：Run 20 在本会话跑过一次 Dry Run 前是禁用态。Dry Run 卡显示候选数、估算镜头数与 token、类型化 skipped。本地 provider 不设这道门。</li>
+        <li>Run 20 上限 20（每支是一个任务，不像语义层 200 条同步嵌），派发后 Last backfill 行跟父任务的 metadata 走。</li>
+      </ul></div>
+      <div><h3>数据从哪来</h3><ul>
+        <li><code>GET /search/vectors/status</code> 的 <code>layers[]</code> 多一行 <code>layer='visual'</code>（枚举扩），<code>covered / total / stale</code>。</li>
+        <li><code>POST /ai/analyze/backfill-shots {dry_run, limit}</code>：与 backfill-embeddings 同形，多 <code>estimated_shots / estimated_tokens</code>。</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ===== 4 ===== -->
+  <section class="screen" id="s4" hidden>
+    <div class="island pad" style="max-width:760px">
+      <div class="row between" style="margin-bottom:10px"><h2>Task Center</h2><span class="muted" style="font-size:12px">3 running · 1 failed · 41 done</span></div>
+      <div class="tc-list">
+        <div class="task"><div class="n">Index shots · 20 videos</div><span class="st run">Running 12 / 20</span><div class="s">shot_backfill · dispatched 20 · done 11 · failed 1 · 1,120 shots so far</div><div class="prog"><i style="width:60%"></i></div></div>
+        <div class="task child"><div class="n">Index shots · 街拍 · 傍晚的海口骑楼老街</div><span class="st done">Done</span><div class="s">Indexed · 42 shots · 42 vectors · 38 s</div></div>
+        <div class="task child"><div class="n">Index shots · 海南骑行 vlog</div><span class="st run">Running</span><div class="s">Embedding 61 / 118</div><div class="prog"><i style="width:52%"></i></div></div>
+        <div class="task child"><div class="n">Index shots · 六万多！RTX Pro 6000 开箱</div><span class="st fail">Failed</span><div class="s">embedding failed: provider_error · 3 in a row · Retry</div></div>
+        <div class="task"><div class="n">Index shots · 老城区夜市怎么拍出电影感</div><span class="st run">Running</span><div class="s">On-demand from Shots tab · Extracting frames 100% → 57 cuts</div><div class="prog"><i style="width:30%"></i></div></div>
+      </div>
+    </div>
+    <div class="island pad notes" style="margin-top:12px">
+      <div><h3>这一屏新增</h3><ul>
+        <li>父任务 <code>shot_backfill</code> 显示 N/M，进度 = done / dispatched；子任务各一行（<code>metadata.parent_task_id</code>），按现有 flow 分组渲染。</li>
+        <li>单支按需索引就是一行 <code>index_shots</code>，标题「Index shots · 视频标题」。</li>
+        <li>subtitle 是业务写的阶段文案：Extracting frames → N cuts → Embedding i/n → Writing → Indexed · N shots；失败行 subtitle 是类型化原因，带 Retry。</li>
+      </ul></div>
+      <div><h3>路线 C</h3><ul>
+        <li>phase / status / progress 由 trigger 同步；业务只写 subtitle 与 metadata。失败 raise，不 return dict。</li>
+        <li>取消：走现有取消语义；取消父任务不回收已派发子任务（spec §11 记着）。</li>
+      </ul></div>
+    </div>
+  </section>
+</div>
+<script>
+  const tabs=[...document.querySelectorAll('.stages [data-s]')];
+  tabs.forEach(b=>b.addEventListener('click',()=>{tabs.forEach(x=>x.setAttribute('aria-selected',x===b));document.querySelectorAll('.screen').forEach(s=>s.hidden=s.id!==b.dataset.s);}));
+  document.getElementById('theme').addEventListener('click',e=>{const r=document.documentElement;const d=r.dataset.theme==='dark';r.dataset.theme=d?'light':'dark';e.target.textContent=d?'dark':'light';});
+</script>

@@ -233,6 +233,11 @@ on:
       - 'backend/tests/db/test_migration_499_resource_embeddings_integration.py'
       - 'backend/app/repositories/resource_embeddings_repository.py'
       - 'backend/app/repositories/embedding_space_repository.py'
+      # mig 507：video_shots / video_shot_embeddings（halfvec + HNSW）/ video_shot_indexes
+      # 与两个 repository。DISTINCT ON 的「每支视频最佳镜头」RPC、replace 的整表替换
+      # + FK 级联、coverage / stale / pending 同一口径 —— 只有真库答得出。
+      - 'backend/tests/db/test_migration_507_video_shots_integration.py'
+      - 'backend/app/repositories/video_shots_repository.py'
       # mig 504：分享密码改 bcrypt。回填与 trigger 用 pgcrypto 的 crypt()，后端用
       # Python 的 bcrypt 校验，两边要对同一段字节（72 字节截断）给出同一结论 ——
       # 单测跑不到 pgcrypto，只有真库答得出。
@@ -263,15 +268,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all forty-two, so it has to
+      # to it changes what "green" means for all forty-three, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the forty-two above was counted with this command, not derived
-      # from the forty-one it replaced):
+      # (the forty-three above was counted with this command, not derived
+      # from the forty-two it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -1066,6 +1071,18 @@ jobs:
           # anon / authenticated 没有 EXECUTE；再经真 ORM 引擎跑两个 repository
           # （upsert 原地替换、insert-or-ignore 的空间键、coverage 与缺行反连接）。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_499_resource_embeddings_integration.py -v
+
+      - name: Assert mig 507's shot index (halfvec + HNSW, best-shot RPC) and its repositories
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 三张表在、列真是 halfvec(2048)、HNSW 用 halfvec_cosine_ops、RPC 每支视频只回最佳
+          # 镜头且只在一个空间里排序、anon / authenticated 既不能 SELECT 也不能 EXECUTE；
+          # 再经真 ORM 引擎跑两个 repository（replace 整表替换 + 级联删旧向量、upsert_many、
+          # coverage / stale_count / pending_for_user 同一口径、search 拒绝空 user_id）。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_507_video_shots_integration.py -v
 
       - name: Assert mig 504 hashed share passwords and pgcrypto agrees with the backend
         working-directory: backend
