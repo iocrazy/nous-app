@@ -18,6 +18,15 @@ import {
 const { Title, Text } = Typography
 const FormItem = Form.Item
 
+// POST /admin/nous-models/sync-engine (NousEngineSyncResponse).
+interface EngineSyncReport {
+  discovered: number
+  created: string[]
+  updated: string[]
+  skipped: { id: string; reason: string }[]
+  error: string | null
+}
+
 interface NousModel {
   id: string
   name: string
@@ -378,6 +387,7 @@ export function AIModelsPage() {
     | null
   >(null)
   const [editSaving, setEditSaving] = useState(false)
+  const [syncingEngine, setSyncingEngine] = useState(false)
 
   const apiBase = import.meta.env.VITE_API_URL || ''
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
@@ -395,6 +405,38 @@ export function AIModelsPage() {
   }, [token])
 
   useEffect(() => { fetchModels() }, [fetchModels])
+
+  // Mirror nous-engine's /v1/models into the catalog (same sync the hourly
+  // health poll runs first). Rows the engine does not list are never disabled:
+  // today it lists only LOADED services.
+  const handleSyncEngine = async () => {
+    setSyncingEngine(true)
+    try {
+      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/sync-engine`, {
+        method: 'POST',
+        headers,
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        // ErrorResponse shell: the typed reason lives in details.
+        Message.error(data?.details?.message || data?.error || `Sync failed (HTTP ${res.status})`)
+        return
+      }
+      const report = data as EngineSyncReport
+      const summary =
+        `Identified ${report.discovered} services · added ${report.created.length}` +
+        ` · updated ${report.updated.length}`
+      if (report.error && report.discovered === 0) Message.error(`Sync failed: ${report.error}`)
+      else if (report.error) Message.warning(`${summary} (${report.error})`)
+      else Message.success(summary)
+      fetchModels()
+    } catch (err) {
+      console.error('nous-engine sync failed', err)
+      Message.error('Sync failed')
+    } finally {
+      setSyncingEngine(false)
+    }
+  }
 
   useEffect(() => {
     // Best-effort: a failure leaves protocols=[] and the field falls back to
@@ -1057,6 +1099,16 @@ export function AIModelsPage() {
                   ))}
                 </div>
                 <Space>
+                  {g.provider === 'nous' && (
+                    <Button
+                      size="small"
+                      icon={<IconSync />}
+                      loading={syncingEngine}
+                      onClick={handleSyncEngine}
+                    >
+                      Sync from nous-engine
+                    </Button>
+                  )}
                   {(() => {
                     const k = `${g.provider}|${g.base_url}`
                     const prog = testProgress[k]

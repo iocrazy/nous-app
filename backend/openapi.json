@@ -28254,6 +28254,74 @@
         "title": "NotificationResponse",
         "type": "object"
       },
+      "NousEngineSyncResponse": {
+        "description": "POST /admin/nous-models/sync-engine — merged over every engine endpoint.\n\n``created`` / ``updated`` are catalog names. ``error`` is set when at least\none endpoint's ``/v1/models`` could not be read (the others still synced).\nRows missing from the engine list are never disabled: the list holds only\nloaded services today.",
+        "properties": {
+          "created": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Created",
+            "type": "array"
+          },
+          "discovered": {
+            "title": "Discovered",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/NousEngineSyncSkipped"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "updated": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Updated",
+            "type": "array"
+          }
+        },
+        "required": [
+          "discovered",
+          "created",
+          "updated",
+          "skipped"
+        ],
+        "title": "NousEngineSyncResponse",
+        "type": "object"
+      },
+      "NousEngineSyncSkipped": {
+        "description": "One engine service the sync did not write, and why (e.g.\n``unsupported_type:app``, ``name_taken``, ``no_credential_source``).",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reason"
+        ],
+        "title": "NousEngineSyncSkipped",
+        "type": "object"
+      },
       "NousModelCreate": {
         "description": "Request body for creating a Nous model.",
         "properties": {
@@ -57501,6 +57569,74 @@
           }
         },
         "summary": "List Provider Protocols",
+        "tags": [
+          "Admin",
+          "Admin",
+          "Admin - Nous Models"
+        ]
+      }
+    },
+    "/api/v1/admin/nous-models/sync-engine": {
+      "post": {
+        "description": "Mirror nous-engine's ``/v1/models`` into the catalog now.\n\nSame sync the hourly health step runs first (``nous_engine_sync``): every\nlisted service without a row gets ``nous-<id>`` (credentials copied from\nan existing engine row, zero price row), existing rows only take a newer\n``context_window``. Rows missing from the list are never disabled.\n\n400 ``no_engine_row`` when no enabled ``actual_provider='nous'`` row exists\nto take the endpoint and key from. An engine that cannot be read is NOT a\n5xx: the report comes back with ``error`` set (admin-only text, same as\nthe probe endpoints; a 5xx would be scrubbed by the error shell).",
+        "operationId": "sync_nous_engine_models_api_v1_admin_nous_models_sync_engine_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NousEngineSyncResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync Nous Engine Models",
         "tags": [
           "Admin",
           "Admin",
