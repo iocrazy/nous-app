@@ -11,25 +11,40 @@ and makes the catalog follow it:
 * listed, no row (key: ``actual_provider='nous' AND actual_model=<id>``) →
   INSERT ``nous-<id>``, endpoint/credential/pricing/owner copied from an
   existing nous row on the same base_url, plus a zero ``ai_model_prices`` row;
-* listed, row exists → only ``context_window_tokens`` is written, when the
-  engine sends a valid ``context_window`` that differs;
+* listed, row exists → ``context_window_tokens`` is written when the engine
+  sends a valid ``context_window`` that differs, and the entry's ``ready`` is
+  mirrored into ``last_test_status`` (``ok`` / ``idle``) when it changed;
 * engine types the catalog has no type for (``app`` / ``workflow`` / …) →
   reported as skipped, never guessed.
 
-Absence is not a negative result
---------------------------------
-Today ``/v1/models`` lists only services that are authorized AND LOADED. A row
-whose service is missing is therefore never disabled or deleted here — a cold
-model would otherwise vanish from the catalog every time the card swapped.
-TODO(engine include_unloaded): once the engine honours ``?include_unloaded=1``
-(already sent; unknown query params are ignored today) and marks each entry
-``loaded``, a service missing from the FULL list means its grant was revoked;
-only then may a follow-up disable such rows.
+The engine contract (nous-engine ``/v1/models``)
+------------------------------------------------
+The list is read with ``?include_unready=1``, so it holds EVERY service this
+key is authorized for, loaded or not; each entry carries ``ready`` (callable
+right now — an LLM idle for an hour is unloaded and turns ``false``; workflow
+and image services are always ``true``). Without the parameter unloaded models
+are left out, which would read as a mass revocation.
 
-Forward-compatible fields: ``context_window`` is used when present;
-``capabilities.vision`` seeds the new row's price-table ``supports_vision``
-flag (the column ``model_capabilities`` reads). ``capabilities.tools`` /
-``thinking`` and ``loaded`` have no catalog column yet and are ignored.
+* A service whose grant was paused/deleted DISAPPEARS from that list. So on a
+  successful read (200 with a ``data`` list) every ENABLED platform row
+  (``owner_user_id IS NULL``) on this base_url whose ``actual_model`` is
+  missing is disabled and reported in ``disabled``, one WARNING each. Rows an
+  admin already disabled, rows on other base_urls and BYOK rows are not
+  touched, and a service that reappears is NOT re-enabled: turning it back on
+  would override an admin's manual disable, so that is the admin's call.
+* The whole key revoked/deleted answers 401: every enabled platform row on the
+  base_url is disabled and the report says ``unauthorized``. After that
+  ``engine_endpoints`` no longer yields the base_url, so neither this sync nor
+  the probe touches it until an admin enables one row with a new key.
+* Any other failure (5xx, timeout, transport, malformed body) is only an
+  ``error``: a probe that cannot reach the engine is not a revocation.
+* ``ready=false`` is NEVER read as revoked — it only means not loaded.
+
+Fields that may be ``null`` (``context_window`` / ``capabilities`` on non-model
+services) never overwrite a stored value: an invalid or null window is not
+written, and ``capabilities.vision`` only seeds a NEW row's price-table
+``supports_vision`` flag. ``capabilities.tools`` / ``thinking`` have no catalog
+column yet and are ignored.
 """
 
 from __future__ import annotations
@@ -47,6 +62,7 @@ from app.repositories.nous_engine_sync_repository import (
     get_nous_engine_sync_repository,
 )
 from app.schemas.nous_model import INT4_MAX
+from app.services.ai.nous_model_health import PROBEABLE_TYPES
 
 # engine service ``type`` → catalog ``type`` (schemas.nous_model.NousModelType).
 ENGINE_TYPE_TO_CATALOG: Mapping[str, str] = {
@@ -61,6 +77,11 @@ ENGINE_TYPE_TO_CATALOG: Mapping[str, str] = {
 CATALOG_NAME_PREFIX = "nous-"
 _LIST_TIMEOUT_S = 15.0
 _ERROR_TEXT_MAX = 200
+UNAUTHORIZED_ERROR = "HTTP 401: platform key rejected by nous-engine"
+# Row types whose ``last_test_status`` follows the engine's ``ready``. Image
+# rows are excluded on purpose: the hourly probe writes ``not_probed`` for them
+# and two writers would flip the light back and forth.
+READY_TRACKED_TYPES = frozenset(PROBEABLE_TYPES - {"image"})
 
 
 @dataclass(frozen=True)
@@ -73,14 +94,19 @@ class SkippedService:
 class SyncReport:
     """Outcome of one sync against one engine endpoint.
 
-    ``error`` set ⇒ the list could not be read and nothing was written.
-    ``created`` / ``updated`` hold catalog names.
+    ``error`` set ⇒ the list could not be read; nothing was written except,
+    when ``unauthorized`` (401), the rows in ``disabled``. ``created`` /
+    ``updated`` / ``disabled`` hold catalog names; ``ready_changed`` counts
+    rows whose ok/idle status followed the engine's ``ready``.
     """
 
     discovered: int = 0
     created: tuple[str, ...] = ()
     updated: tuple[str, ...] = ()
     skipped: tuple[SkippedService, ...] = ()
+    disabled: tuple[str, ...] = ()
+    ready_changed: int = 0
+    unauthorized: bool = False
     error: str | None = None
 
 
@@ -89,6 +115,14 @@ class _Tally:
     created: list[str] = field(default_factory=list)
     updated: list[str] = field(default_factory=list)
     skipped: list[SkippedService] = field(default_factory=list)
+    ready_changed: int = 0
+
+
+@dataclass(frozen=True)
+class _Fetch:
+    data: list[Any] | None = None
+    error: str | None = None
+    unauthorized: bool = False
 
 
 class EngineSyncRepo(Protocol):
@@ -103,6 +137,10 @@ class EngineSyncRepo(Protocol):
     ) -> dict[str, Any]: ...
 
     async def set_context_window(self, row_id: int, tokens: int) -> bool: ...
+
+    async def disable_rows(self, ids: Sequence[int]) -> list[str]: ...
+
+    async def record_ready(self, row_id: int, ready: bool) -> bool: ...
 
 
 def display_name_for(service_id: str) -> str:
@@ -133,29 +171,57 @@ def _wants_vision(entry: Mapping[str, Any]) -> bool:
     return isinstance(caps, Mapping) and caps.get("vision") is True
 
 
-async def _fetch_services(
-    base_url: str, api_key: str
-) -> tuple[list[Any] | None, str | None]:
+async def _fetch_services(base_url: str, api_key: str) -> _Fetch:
     url = f"{normalize_base_url(base_url)}/models"
     try:
         async with httpx.AsyncClient(timeout=_LIST_TIMEOUT_S) as client:
             resp = await client.get(
                 url,
-                params={"include_unloaded": "1"},
+                params={"include_unready": "1"},
                 headers={"Authorization": f"Bearer {api_key}"},
             )
     except Exception as exc:  # noqa: BLE001 — reported as a typed error
-        return None, f"{type(exc).__name__}: {str(exc) or '<no message>'}"
+        return _Fetch(error=f"{type(exc).__name__}: {str(exc) or '<no message>'}")
+    if resp.status_code == 401:
+        return _Fetch(error=UNAUTHORIZED_ERROR, unauthorized=True)
     if resp.status_code != 200:
-        return None, f"HTTP {resp.status_code}: {resp.text[:160]}"
+        return _Fetch(error=f"HTTP {resp.status_code}: {resp.text[:160]}")
     try:
         payload = resp.json()
     except ValueError:
-        return None, "engine /models response is not JSON"
+        return _Fetch(error="engine /models response is not JSON")
     data = payload.get("data") if isinstance(payload, Mapping) else None
     if not isinstance(data, list):
-        return None, "engine /models response has no 'data' list"
-    return data, None
+        return _Fetch(error="engine /models response has no 'data' list")
+    return _Fetch(data=data)
+
+
+def _platform_rows_on(
+    rows: Sequence[Mapping[str, Any]], base_url: str
+) -> list[Mapping[str, Any]]:
+    """ENABLED platform-wide (non-BYOK) rows on ``base_url``."""
+    target = normalize_base_url(base_url)
+    return [
+        r
+        for r in rows
+        if normalize_base_url(r.get("base_url")) == target
+        and r.get("owner_user_id") is None
+        and r.get("is_enabled")
+    ]
+
+
+async def _disable(
+    repo: EngineSyncRepo,
+    base_url: str,
+    rows: Sequence[Mapping[str, Any]],
+    reason: str,
+) -> tuple[str, ...]:
+    if not rows:
+        return ()
+    names = tuple(await repo.disable_rows([r["id"] for r in rows]))
+    for name in names:
+        logger.warning(f"[nous_engine_sync] {base_url}: disabled {name} — {reason}")
+    return names
 
 
 def _source_row(
@@ -180,12 +246,33 @@ async def _update_existing(
     row: Mapping[str, Any],
     entry: Mapping[str, Any],
     tally: _Tally,
+    base_url: str,
 ) -> None:
     window = _valid_window(entry.get("context_window"))
-    if window is None or window == row.get("context_window_tokens"):
+    if window is not None and window != row.get("context_window_tokens"):
+        if await repo.set_context_window(row["id"], window):
+            tally.updated.append(row["name"])
+    if row in _platform_rows_on([row], base_url):
+        await _follow_ready(repo, row, entry, tally)
+
+
+async def _follow_ready(
+    repo: EngineSyncRepo,
+    row: Mapping[str, Any],
+    entry: Mapping[str, Any],
+    tally: _Tally,
+) -> None:
+    """Mirror ``ready`` into ok/idle — enabled, ready-tracked rows only, and
+    only when the status would change (a no-op write every minute is noise)."""
+    ready = entry.get("ready")
+    if not isinstance(ready, bool) or not row.get("is_enabled"):
         return
-    if await repo.set_context_window(row["id"], window):
-        tally.updated.append(row["name"])
+    if row.get("type") not in READY_TRACKED_TYPES:
+        return
+    if row.get("last_test_status") == ("ok" if ready else "idle"):
+        return
+    if await repo.record_ready(row["id"], ready):
+        tally.ready_changed += 1
 
 
 async def _create_row(
@@ -239,7 +326,7 @@ async def _sync_one(
         return
     existing = ctx["by_model"].get(service_id)
     if existing is not None:
-        await _update_existing(repo, existing, entry, tally)
+        await _update_existing(repo, existing, entry, tally, ctx["base_url"])
         return
     if ctx["source"] is None:
         tally.skipped.append(SkippedService(service_id, "no_credential_source"))
@@ -265,18 +352,26 @@ async def sync_engine_models(
     writing one service is logged and reported as skipped, the rest continue.
     """
     repo = repo or get_nous_engine_sync_repository()
-    data, error = await _fetch_services(base_url, api_key)
-    if error is not None:
-        return SyncReport(error=error[:_ERROR_TEXT_MAX])
+    fetched = await _fetch_services(base_url, api_key)
+    if fetched.unauthorized:
+        rows = await repo.list_engine_rows()
+        disabled = await _disable(
+            repo, base_url, _platform_rows_on(rows, base_url), "platform key rejected"
+        )
+        return SyncReport(error=fetched.error, unauthorized=True, disabled=disabled)
+    if fetched.error is not None:
+        return SyncReport(error=fetched.error[:_ERROR_TEXT_MAX])
+    data = fetched.data or []
     rows = await repo.list_engine_rows()
     ctx: dict[str, Any] = {
-        "by_model": {r["actual_model"]: r for r in rows},
+        "by_model": _rows_by_model(rows, base_url),
         "source": _source_row(rows, base_url),
         "sort_order": await repo.max_sort_order(),
         "seen": set(),
+        "base_url": base_url,
     }
     tally = _Tally()
-    for entry in data or []:
+    for entry in data:
         try:
             await _sync_one(repo, entry, ctx, tally)
         except Exception as exc:  # noqa: BLE001 — one bad write must not stop the rest
@@ -285,12 +380,40 @@ async def sync_engine_models(
                 f"[nous_engine_sync] writing service {service_id!r} failed: {exc!r}"
             )
             tally.skipped.append(SkippedService(str(service_id), "write_failed"))
+    listed = {e.get("id") for e in data if isinstance(e, Mapping)}
+    revoked = [
+        r for r in _platform_rows_on(rows, base_url) if r["actual_model"] not in listed
+    ]
+    disabled = await _disable(
+        repo, base_url, revoked, "service no longer authorized for this key"
+    )
     return SyncReport(
-        discovered=len(data or []),
+        discovered=len(data),
         created=tuple(tally.created),
         updated=tuple(tally.updated),
         skipped=tuple(tally.skipped),
+        disabled=disabled,
+        ready_changed=tally.ready_changed,
     )
+
+
+def _rows_by_model(
+    rows: Sequence[Mapping[str, Any]], base_url: str
+) -> dict[str, Mapping[str, Any]]:
+    """``actual_model`` → row; a platform row on THIS base_url wins over any
+    other row with the same model id, so ready/window land on the right one."""
+    target = normalize_base_url(base_url)
+
+    def rank(r: Mapping[str, Any]) -> tuple[bool, bool]:
+        return (
+            normalize_base_url(r.get("base_url")) == target,
+            r.get("owner_user_id") is None,
+        )
+
+    by_model: dict[str, Mapping[str, Any]] = {}
+    for r in sorted(rows, key=rank):
+        by_model[r["actual_model"]] = r
+    return by_model
 
 
 def engine_endpoints(rows: Sequence[Mapping[str, Any]]) -> list[tuple[str, str]]:
@@ -329,10 +452,11 @@ async def sync_all_engines(
             report = SyncReport(error=f"{type(exc).__name__}: {exc}"[:_ERROR_TEXT_MAX])
         if report.error:
             logger.warning(f"[nous_engine_sync] {base_url}: {report.error}")
-        elif report.created or report.updated:
+        elif report.created or report.updated or report.disabled:
             logger.info(
                 f"[nous_engine_sync] {base_url}: discovered={report.discovered} "
-                f"created={list(report.created)} updated={list(report.updated)}"
+                f"created={list(report.created)} updated={list(report.updated)} "
+                f"disabled={list(report.disabled)}"
             )
         results.append((base_url, report))
     return results
@@ -346,5 +470,8 @@ def merge_reports(reports: Sequence[SyncReport]) -> SyncReport:
         created=tuple(n for r in reports for n in r.created),
         updated=tuple(n for r in reports for n in r.updated),
         skipped=tuple(s for r in reports for s in r.skipped),
+        disabled=tuple(n for r in reports for n in r.disabled),
+        ready_changed=sum(r.ready_changed for r in reports),
+        unauthorized=any(r.unauthorized for r in reports),
         error="; ".join(errors) if errors else None,
     )

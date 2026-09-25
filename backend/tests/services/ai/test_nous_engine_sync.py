@@ -7,15 +7,17 @@ row was typed in by hand. ``sync_engine_models`` closes that gap:
 
 * a listed service with no row → a row named ``nous-<id>``, credentials copied
   from an existing nous row on the same base_url, plus a zero price row;
-* a listed service with a row → only the forward-compatible fields the engine
-  starts sending (``context_window``) are written;
-* a row whose service is NOT listed is never touched: today the list holds only
-  LOADED services, so absence is not a negative result.
+* a listed service with a row → ``context_window`` when the engine sends a
+  valid one, and ``ready`` → ``last_test_status`` ok/idle when it changed;
+* the list is read with ``?include_unready=1`` so it holds every AUTHORIZED
+  service, loaded or not: an enabled platform row on this base_url whose
+  service is missing had its grant revoked and is disabled; a 401 means the
+  whole key was revoked and every enabled platform row on the base_url is
+  disabled. Other failures (5xx, timeout) write nothing.
 """
 
 from __future__ import annotations
 
-import inspect
 from typing import Any
 
 import httpx
@@ -62,6 +64,7 @@ def _row(**over: Any) -> dict[str, Any]:
         "sort_order": 0,
         "owner_user_id": None,
         "context_window_tokens": None,
+        "last_test_status": None,
     }
     base.update(over)
     return base
@@ -77,6 +80,8 @@ class FakeRepo:
         self.other_names = set(other_names)
         self.prices: list[dict[str, Any]] = []
         self.window_writes: list[tuple[int, int]] = []
+        self.disable_calls: list[list[int]] = []
+        self.ready_writes: list[tuple[int, bool]] = []
         self._next_id = 1900000000000000100
 
     async def list_engine_rows(self) -> list[dict[str, Any]]:
@@ -113,6 +118,23 @@ class FakeRepo:
         for r in self.rows:
             if r["id"] == row_id:
                 r["context_window_tokens"] = tokens
+        return True
+
+
+    async def disable_rows(self, ids: list[int]) -> list[str]:
+        self.disable_calls.append(list(ids))
+        names = []
+        for r in self.rows:
+            if r["id"] in ids and r["is_enabled"]:
+                r["is_enabled"] = False
+                names.append(r["name"])
+        return names
+
+    async def record_ready(self, row_id: int, ready: bool) -> bool:
+        self.ready_writes.append((row_id, ready))
+        for r in self.rows:
+            if r["id"] == row_id:
+                r["last_test_status"] = "ok" if ready else "idle"
         return True
 
 
@@ -239,42 +261,16 @@ async def test_missing_data_is_a_typed_error() -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_http_error_and_transport_error_are_typed_errors() -> None:
-    _mock_engine({"detail": "bad key"}, status=401)
+    _mock_engine({"detail": "boom"}, status=500)
     report = await _sync(FakeRepo([_row()]))
-    assert report.error is not None and "401" in report.error
+    assert report.error is not None and "500" in report.error
+    assert report.unauthorized is False
 
     respx.get(url__startswith=f"{_BASE}/models").mock(
         side_effect=httpx.ConnectError("refused")
     )
     report = await _sync(FakeRepo([_row()]))
     assert report.error is not None and "ConnectError" in report.error
-
-
-@pytest.mark.asyncio
-@respx.mock
-async def test_absent_rows_are_never_disabled_or_touched() -> None:
-    """``/v1/models`` lists only LOADED services today — absence ≠ revoked."""
-    _mock_engine({"data": []})
-    rows = [
-        _row(),
-        _row(
-            id=1900000000000000002,
-            name="nous-moss-asr",
-            type="asr",
-            actual_model="moss-asr",
-        ),
-    ]
-    repo = FakeRepo(rows)
-
-    report = await _sync(repo)
-
-    assert report.error is None and report.discovered == 0
-    assert [r["is_enabled"] for r in repo.rows] == [True, True]
-    assert repo.window_writes == []
-    # structural guard: the service has no write path that could disable/delete
-    src = inspect.getsource(nous_engine_sync)
-    assert "is_enabled=False" not in src.replace(" ", "")
-    assert "delete(" not in src
 
 
 @pytest.mark.asyncio
@@ -324,7 +320,7 @@ async def test_vision_capability_seeds_new_price_row_when_present() -> None:
                     "id": "qwen3-vl-8b",
                     "type": "llm",
                     "capabilities": {"vision": True, "tools": True},
-                    "loaded": False,
+                    "ready": False,
                 }
             ]
         }
@@ -365,3 +361,308 @@ def test_type_map_matches_catalog_vocabulary() -> None:
     assert set(nous_engine_sync.ENGINE_TYPE_TO_CATALOG.values()) <= set(
         get_args(NousModelType)
     )
+
+
+# ---------------------------------------------------------------------------
+# nous-engine /v1/models contract: include_unready, revocation, 401, ready
+# ---------------------------------------------------------------------------
+
+_OTHER_BASE = "http://other-engine:8000/v1"
+
+
+@pytest.fixture
+def caplog_loguru():
+    """Messages loguru emitted during the test, as ``"LEVEL message"`` lines."""
+    from loguru import logger
+
+    lines: list[str] = []
+    sink_id = logger.add(
+        lambda m: lines.append(f"{m.record['level'].name} {m.record['message']}"),
+        level="DEBUG",
+    )
+    try:
+        yield lines
+    finally:
+        logger.remove(sink_id)
+
+
+def _asr(**over: Any) -> dict[str, Any]:
+    return _row(
+        id=1900000000000000002,
+        name="nous-moss-asr",
+        type="asr",
+        actual_model="moss-asr",
+        **over,
+    )
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_is_read_with_include_unready_and_nothing_else() -> None:
+    route = _mock_engine({"data": []})
+
+    await _sync(FakeRepo([_row()]))
+
+    params = route.calls.last.request.url.params
+    assert params.get("include_unready") == "1"
+    assert "include_unloaded" not in params
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_revoked_service_row_is_disabled_and_reported(caplog_loguru) -> None:
+    _mock_engine({"data": [{"id": "qwen3-8-27b", "type": "llm", "ready": False}]})
+    repo = FakeRepo([_row(), _asr()])
+
+    report = await _sync(repo)
+
+    assert report.error is None
+    assert report.disabled == ("nous-moss-asr",)
+    by_name = {r["name"]: r for r in repo.rows}
+    assert by_name["nous-moss-asr"]["is_enabled"] is False
+    assert by_name["nous-qwen3-8-27b"]["is_enabled"] is True
+    assert repo.disable_calls == [[1900000000000000002]]
+    assert any(
+        "nous-moss-asr" in m and "WARNING" in m for m in caplog_loguru
+    ), caplog_loguru
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_unready_listed_service_is_not_disabled() -> None:
+    """``ready=false`` = not loaded right now, never a revocation."""
+    _mock_engine(
+        {
+            "data": [
+                {"id": "qwen3-8-27b", "type": "llm", "ready": False},
+                {"id": "moss-asr", "type": "asr", "ready": False},
+            ]
+        }
+    )
+    repo = FakeRepo([_row(), _asr()])
+
+    report = await _sync(repo)
+
+    assert report.disabled == ()
+    assert repo.disable_calls == []
+    assert all(r["is_enabled"] for r in repo.rows)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_revocation_leaves_other_rows_alone() -> None:
+    """Admin-disabled, other-base_url and BYOK rows are never in the batch."""
+    _mock_engine({"data": [{"id": "qwen3-8-27b", "type": "llm"}]})
+    rows = [
+        _row(),
+        _asr(is_enabled=False),
+        _row(
+            id=1900000000000000003,
+            name="nous-far",
+            actual_model="far-model",
+            base_url=_OTHER_BASE,
+        ),
+        _row(
+            id=1900000000000000004,
+            name="byok-mine",
+            actual_model="mine",
+            owner_user_id="0b6f2a54-0000-0000-0000-000000000001",
+        ),
+    ]
+    repo = FakeRepo(rows)
+
+    report = await _sync(repo)
+
+    assert report.disabled == ()
+    assert repo.disable_calls == []
+    assert [r["is_enabled"] for r in repo.rows] == [True, False, True, True]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_relisted_disabled_row_is_not_re_enabled() -> None:
+    """An admin's manual disable must not be overwritten by the sync."""
+    _mock_engine({"data": [{"id": "moss-asr", "type": "asr", "ready": True}]})
+    repo = FakeRepo([_row(), _asr(is_enabled=False)])
+
+    report = await _sync(repo)
+
+    assert {r["name"]: r["is_enabled"] for r in repo.rows}["nous-moss-asr"] is False
+    assert repo.ready_writes == []  # disabled rows take no status write either
+    assert report.disabled == ("nous-qwen3-8-27b",)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_401_disables_every_enabled_platform_row_on_the_base_url(
+    caplog_loguru,
+) -> None:
+    _mock_engine({"detail": "bad key"}, status=401)
+    rows = [
+        _row(),
+        _asr(),
+        _row(
+            id=1900000000000000003,
+            name="nous-far",
+            actual_model="far-model",
+            base_url=_OTHER_BASE,
+        ),
+        _row(
+            id=1900000000000000004,
+            name="byok-mine",
+            actual_model="mine",
+            owner_user_id="0b6f2a54-0000-0000-0000-000000000001",
+        ),
+    ]
+    repo = FakeRepo(rows)
+
+    report = await _sync(repo)
+
+    assert report.error == "HTTP 401: platform key rejected by nous-engine"
+    assert report.unauthorized is True
+    assert set(report.disabled) == {"nous-qwen3-8-27b", "nous-moss-asr"}
+    assert [r["is_enabled"] for r in repo.rows] == [False, False, True, True]
+    assert sum("WARNING" in m for m in caplog_loguru) >= 2
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize("status", [500, 502, 503, 403])
+async def test_non_200_non_401_writes_nothing(status: int) -> None:
+    _mock_engine({"detail": "down"}, status=status)
+    repo = FakeRepo([_row(), _asr()])
+
+    report = await _sync(repo)
+
+    assert report.error is not None and str(status) in report.error
+    assert report.unauthorized is False
+    assert report.disabled == ()
+    assert repo.disable_calls == [] and repo.ready_writes == []
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_timeout_writes_nothing() -> None:
+    respx.get(url__startswith=f"{_BASE}/models").mock(
+        side_effect=httpx.ReadTimeout("slow")
+    )
+    repo = FakeRepo([_row(), _asr()])
+
+    report = await _sync(repo)
+
+    assert report.error is not None and "ReadTimeout" in report.error
+    assert report.disabled == () and repo.disable_calls == []
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ready_writes_ok_and_idle_only_on_change() -> None:
+    _mock_engine(
+        {
+            "data": [
+                {"id": "qwen3-8-27b", "type": "llm", "ready": True},
+                {"id": "moss-asr", "type": "asr", "ready": False},
+            ]
+        }
+    )
+    repo = FakeRepo([_row(last_test_status="idle"), _asr(last_test_status="idle")])
+
+    first = await _sync(repo)
+    second = await _sync(repo)
+
+    assert repo.ready_writes == [(1900000000000000001, True)]  # asr already idle
+    assert first.ready_changed == 1
+    assert second.ready_changed == 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ready_false_turns_ok_row_idle() -> None:
+    _mock_engine({"data": [{"id": "qwen3-8-27b", "type": "llm", "ready": False}]})
+    repo = FakeRepo([_row(last_test_status="ok")])
+
+    report = await _sync(repo)
+
+    assert repo.ready_writes == [(1900000000000000001, False)]
+    assert report.ready_changed == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ready_is_ignored_for_image_rows_and_non_bool_values() -> None:
+    _mock_engine(
+        {
+            "data": [
+                {"id": "studio-upscale", "type": "image", "ready": True},
+                {"id": "qwen3-8-27b", "type": "llm", "ready": "yes"},
+                {"id": "moss-asr", "type": "asr"},
+            ]
+        }
+    )
+    image = _row(
+        id=1900000000000000005,
+        name="nous-studio-upscale",
+        type="image",
+        actual_model="studio-upscale",
+        last_test_status="not_probed",
+    )
+    repo = FakeRepo([_row(), _asr(), image])
+
+    report = await _sync(repo)
+
+    assert repo.ready_writes == []
+    assert report.ready_changed == 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_null_window_and_capabilities_never_overwrite() -> None:
+    """Non-model services send ``context_window: null`` / ``capabilities: null``."""
+    _mock_engine(
+        {
+            "data": [
+                {
+                    "id": "qwen3-8-27b",
+                    "type": "llm",
+                    "context_window": None,
+                    "capabilities": None,
+                    "ready": True,
+                },
+                {
+                    "id": "wemm-embedding-2b",
+                    "type": "embedding",
+                    "context_window": None,
+                    "capabilities": None,
+                },
+            ]
+        }
+    )
+    repo = FakeRepo([_row(context_window_tokens=65536, last_test_status="ok")])
+
+    report = await _sync(repo)
+
+    assert repo.window_writes == []
+    assert report.updated == ()
+    assert {r["name"]: r for r in repo.rows}["nous-qwen3-8-27b"][
+        "context_window_tokens"
+    ] == 65536
+    new = {r["name"]: r for r in repo.rows}["nous-wemm-embedding-2b"]
+    assert new["context_window_tokens"] is None
+    assert repo.prices[0]["supports_vision"] is False
+
+
+def test_merge_reports_carries_disabled_ready_and_unauthorized() -> None:
+    merged = nous_engine_sync.merge_reports(
+        [
+            SyncReport(disabled=("a",), ready_changed=2),
+            SyncReport(
+                disabled=("b", "c"),
+                ready_changed=1,
+                unauthorized=True,
+                error="HTTP 401: platform key rejected by nous-engine",
+            ),
+        ]
+    )
+    assert merged.disabled == ("a", "b", "c")
+    assert merged.ready_changed == 3
+    assert merged.unauthorized is True

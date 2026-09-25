@@ -177,3 +177,127 @@ async def test_name_owned_by_another_provider_is_skipped(orm_dsn, pg, engine_env
 
     assert report.created == ()
     assert [(s.id, s.reason) for s in report.skipped] == [(svc, "name_taken")]
+
+
+@_skip
+async def test_disable_rows_flips_only_enabled_and_returns_names(
+    orm_dsn, pg, engine_env
+):
+    from app.repositories.nous_engine_sync_repository import (
+        NousEngineSyncRepository,
+    )
+
+    tag, base_url = engine_env
+    off_id = await pg.fetchval(
+        """
+        INSERT INTO public.nous_models
+            (name, display_name, type, actual_provider, actual_model, api_key,
+             base_url, pricing_type, pricing_value, is_enabled, sort_order)
+        VALUES ($1, 'Off', 'asr', 'nous', $2, $3, $4, 'per_hour', 0, false, 1)
+        RETURNING id
+        """,
+        f"nous-off-{tag}",
+        f"off-{tag}",
+        _CIPHER,
+        base_url,
+    )
+    seed = await pg.fetchrow(
+        "SELECT id, updated_at FROM public.nous_models WHERE name = $1",
+        f"nous-seed-{tag}",
+    )
+
+    names = await NousEngineSyncRepository().disable_rows([seed["id"], off_id])
+    again = await NousEngineSyncRepository().disable_rows([seed["id"]])
+
+    assert names == [f"nous-seed-{tag}"]  # the already-disabled row is not echoed
+    assert again == []
+    after = await pg.fetchrow(
+        "SELECT is_enabled, updated_at FROM public.nous_models WHERE id = $1",
+        seed["id"],
+    )
+    assert after["is_enabled"] is False
+    assert after["updated_at"] >= seed["updated_at"]
+
+
+@_skip
+async def test_record_ready_writes_status_without_touching_updated_at(
+    orm_dsn, pg, engine_env
+):
+    from app.repositories.nous_engine_sync_repository import (
+        NousEngineSyncRepository,
+    )
+
+    tag, _ = engine_env
+    row = await pg.fetchrow(
+        "SELECT id, updated_at FROM public.nous_models WHERE name = $1",
+        f"nous-seed-{tag}",
+    )
+    repo = NousEngineSyncRepository()
+
+    assert await repo.record_ready(row["id"], False) is True
+    idle = await pg.fetchrow(
+        "SELECT last_test_status, last_test_detail, last_test_code, "
+        "last_tested_at, updated_at FROM public.nous_models WHERE id = $1",
+        row["id"],
+    )
+    assert await repo.record_ready(row["id"], True) is True
+    ok = await pg.fetchrow(
+        "SELECT last_test_status, last_test_detail, last_test_code, updated_at "
+        "FROM public.nous_models WHERE id = $1",
+        row["id"],
+    )
+
+    assert (idle["last_test_status"], idle["last_test_detail"]) == (
+        "idle",
+        "authorized, not loaded",
+    )
+    assert idle["last_test_code"] is None and idle["last_tested_at"] is not None
+    assert (ok["last_test_status"], ok["last_test_detail"]) == ("ok", "loaded")
+    assert ok["last_test_code"] is None
+    assert ok["updated_at"] == row["updated_at"]  # a reading is not an edit
+    assert await repo.record_ready(1, True) is False  # no such row
+
+
+@_skip
+@respx.mock
+async def test_sync_disables_revoked_rows_and_follows_ready(orm_dsn, pg, engine_env):
+    """End-to-end through the real repository: a missing service is disabled,
+    a listed one takes its ready status."""
+    from app.services.ai.nous_engine_sync import sync_engine_models
+
+    tag, base_url = engine_env
+    await pg.execute(
+        """
+        INSERT INTO public.nous_models
+            (name, display_name, type, actual_provider, actual_model, api_key,
+             base_url, pricing_type, pricing_value, is_enabled, sort_order)
+        VALUES ($1, 'Gone', 'asr', 'nous', $2, $3, $4, 'per_hour', 0, true, 1)
+        """,
+        f"nous-gone-{tag}",
+        f"gone-{tag}",
+        _CIPHER,
+        base_url,
+    )
+    route = respx.get(url__startswith=f"{base_url}/models").mock(
+        return_value=httpx.Response(
+            200, json={"data": [{"id": f"seed-{tag}", "type": "llm", "ready": False}]}
+        )
+    )
+
+    report = await sync_engine_models(base_url=base_url, api_key="sk-plain")
+
+    assert route.calls.last.request.url.params.get("include_unready") == "1"
+    assert report.error is None, report.error
+    assert report.disabled == (f"nous-gone-{tag}",)
+    assert report.ready_changed == 1
+    rows = {
+        r["name"]: r
+        for r in await pg.fetch(
+            "SELECT name, is_enabled, last_test_status FROM public.nous_models "
+            "WHERE base_url = $1",
+            base_url,
+        )
+    }
+    assert rows[f"nous-gone-{tag}"]["is_enabled"] is False
+    assert rows[f"nous-seed-{tag}"]["is_enabled"] is True
+    assert rows[f"nous-seed-{tag}"]["last_test_status"] == "idle"
