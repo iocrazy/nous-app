@@ -23,6 +23,7 @@ from sqlalchemy import update as sa_update
 
 from app.db.session import read_scope, write_scope
 from app.models import InspirationNotes
+from app.services.library.like_escape import LIKE_ESCAPE_CHAR, escape_like
 
 
 def _bigint(value: Any) -> int:
@@ -155,7 +156,13 @@ class InspirationNotesRepository:
                 # text[] containment: tags @> ARRAY[:tag]
                 stmt = stmt.where(InspirationNotes.tags.contains([tag]))
             if q:
-                stmt = stmt.where(InspirationNotes.content_md.ilike(f"%{q}%"))
+                # Escaped: a typed ``%`` / ``_`` must match itself, not act as
+                # a wildcard (see app/services/library/like_escape.py).
+                stmt = stmt.where(
+                    InspirationNotes.content_md.ilike(
+                        f"%{escape_like(q)}%", escape=LIKE_ESCAPE_CHAR
+                    )
+                )
             # `0` means "any rating", not "rating >= 0" — both would return the
             # same rows today, but only the former stays correct if ratings
             # ever go negative or become nullable.

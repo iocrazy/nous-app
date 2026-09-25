@@ -219,6 +219,7 @@ from app.models import (
     TeamQuotas,
 )
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+from app.services.library.like_escape import LIKE_ESCAPE_CHAR, escape_like
 
 _PRICING_N2A: Dict[str, str] = _name_to_attr(PointPricing)
 _PACKAGE_N2A: Dict[str, str] = _name_to_attr(PointPackages)
@@ -1083,8 +1084,11 @@ class PointsRepository:
                         PointTransactions.reference_type == reference_type_filter
                     )
                 if search:
+                    # Escaped so a typed ``%`` / ``_`` matches itself.
                     stmt = stmt.where(
-                        PointTransactions.description.ilike(f"%{search}%")
+                        PointTransactions.description.ilike(
+                            f"%{escape_like(search)}%", escape=LIKE_ESCAPE_CHAR
+                        )
                     )
                 if days is not None:
                     # v3 temporal-filter rule: bind a tz-aware datetime (NOT an

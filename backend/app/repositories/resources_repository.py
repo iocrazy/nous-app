@@ -114,6 +114,7 @@ from app.models import (
 )
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
 from app.services.library.gallery_mime import GALLERY_MIMES
+from app.services.library.like_escape import LIKE_ESCAPE_CHAR, escape_like
 from app.utils.url_canonical import parsed_media_url_predicate as _url_matches
 
 # Working-set caps for the batch sweepers in this repo. They replace
@@ -243,7 +244,10 @@ def _picker_visibility_filters(
         scope_id_text.in_(membership_ids),
     ]
     if q:
-        conditions.append(Resources.filename.ilike(f"%{q}%"))
+        # Escaped so a typed ``%`` / ``_`` matches itself.
+        conditions.append(
+            Resources.filename.ilike(f"%{escape_like(q)}%", escape=LIKE_ESCAPE_CHAR)
+        )
     return conditions
 
 
@@ -2651,9 +2655,10 @@ class ResourcesRepository(AsyncpgRepository):
         if op == "eq":
             return col == self._coerce_smart_value(col, value)
         elif op == "contains":
-            return col.ilike(f"%{value}%")
+            # Rule values are user text: escaped so ``%`` / ``_`` match themselves.
+            return col.ilike(f"%{escape_like(str(value))}%", escape=LIKE_ESCAPE_CHAR)
         elif op == "starts_with":
-            return col.ilike(f"{value}%")
+            return col.ilike(f"{escape_like(str(value))}%", escape=LIKE_ESCAPE_CHAR)
         elif op == "gt":
             return col > self._coerce_smart_value(col, value)
         elif op == "lt":
