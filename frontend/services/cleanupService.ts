@@ -126,7 +126,7 @@ export const takeCleanupAction = async (
   action: CleanupActionType,
 ): Promise<CleanupActionResponse> =>
   apiClient.post<CleanupActionResponse>(
-    `/api/v1/cleanup/videos/${mediaId}/action`,
+    `/api/v1/cleanup/media/${mediaId}/action`,
     { action },
   );
 
@@ -143,14 +143,14 @@ export const markKeepForever = async (
   mediaId: number,
 ): Promise<CleanupActionResponse> =>
   apiClient.post<CleanupActionResponse>(
-    `/api/v1/cleanup/videos/${mediaId}/keep`,
+    `/api/v1/cleanup/media/${mediaId}/keep`,
   );
 
 export const unmarkKeepForever = async (
   mediaId: number,
 ): Promise<CleanupActionResponse> =>
   apiClient.delete<CleanupActionResponse>(
-    `/api/v1/cleanup/videos/${mediaId}/keep`,
+    `/api/v1/cleanup/media/${mediaId}/keep`,
   );
 
 // Utility functions
