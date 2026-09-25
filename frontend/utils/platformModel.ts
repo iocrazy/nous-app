@@ -23,6 +23,10 @@
 // the user's request; the cost is that a probe false negative hides a working
 // model until the next hourly probe clears it.
 //
+// A row that is `idle` (local nous-engine: authorized, not loaded) IS offered
+// but not pickable — shown greyed with "Not loaded on nous-engine"; see
+// platformModelAvailability for why.
+//
 // Pure and i18n-free on purpose, like utils/modelHealth: any component can
 // import it cheaply.
 
@@ -60,4 +64,51 @@ export function isPlatformModelAvailable(
   m: Partial<Pick<NousModelPublic, 'last_test_status'>>,
 ): boolean {
   return m.last_test_status !== 'fail';
+}
+
+export interface PlatformModelAvailability {
+  selectable: boolean;
+  /** Why a visible row cannot be picked. Pair with i18n `platformModel.notLoaded`. */
+  reason?: 'not_loaded';
+}
+
+/**
+ * Whether a row that IS offered (see isPlatformModelAvailable) can be picked.
+ *
+ * `idle` = a local nous-engine row that is authorized but not loaded (hourly
+ * readiness read, migration 503). It stays visible but greyed out: on
+ * 2026-09-24 a real chat to such a row got 503 "not loaded" back instead of
+ * loading on demand, so offering it would hand the user a model that errors.
+ * Visible rather than hidden so the user can see the model exists and why it
+ * cannot be chosen right now.
+ *
+ * `fail` is not handled here on purpose — those rows are hidden before they
+ * reach a picker (isPlatformModelAvailable), per the 2026-09-24 user decision.
+ */
+export function platformModelAvailability(
+  m: Partial<Pick<NousModelPublic, 'last_test_status'>>,
+): PlatformModelAvailability {
+  if (m.last_test_status === 'idle') return { selectable: false, reason: 'not_loaded' };
+  return { selectable: true };
+}
+
+export interface PlatformOptionAttrs {
+  disabled: boolean;
+  'data-availability'?: 'not_loaded';
+  'data-description'?: string;
+}
+
+/**
+ * Spread onto a model `<option>` inside UiSelect: an unselectable row becomes
+ * `disabled` with `notLoadedText` (caller-localized) as its second line, and
+ * UiSelect dims + titles it when it is the saved value. Native `<select>`s
+ * cannot show a description — append the reason to the text there instead.
+ */
+export function platformOptionAttrs(
+  m: Partial<Pick<NousModelPublic, 'last_test_status'>>,
+  notLoadedText: string,
+): PlatformOptionAttrs {
+  const { selectable, reason } = platformModelAvailability(m);
+  if (selectable) return { disabled: false };
+  return { disabled: true, 'data-availability': reason, 'data-description': notLoadedText };
 }

@@ -62,7 +62,7 @@ const GRIP_PX = 18;
 // Canvas pill trigger — keeps the node's ghost/rounded look while borrowing the
 // shared UiSelect portal menu (fixes the native popup covering the trigger).
 import { CANVAS_PILL_TRIGGER } from './canvasPill';
-import { platformModelText } from '../../../../utils/platformModel';
+import { platformModelText, platformOptionAttrs } from '../../../../utils/platformModel';
 
 export function PromptNodeView({ id, data, selected }: NodeProps) {
   const {
@@ -156,6 +156,8 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // Text-mode model options come from the platform DB catalog (same source as
   // genModels), never a hardcoded list (P0-1).
   const textModels = useTextModels();
+  // Idle nous-engine rows stay listed but disabled (utils/platformModel).
+  const notLoadedText = t('platformModel.notLoaded', 'Not loaded on nous-engine');
   // Agent picker (CC3) — writes the pre-plumbed agent_id channel; the run
   // injects the agent's IDENTITY/SOUL server-side.
   const agents = useAgents();
@@ -917,7 +919,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 {/* Empty value → backend resolves the DB catalog default. */}
                 <option value="">Catalog default</option>
                 {textModels.map((m) => (
-                  <option key={m.name} value={m.name}>
+                  <option key={m.name} value={m.name}
+                    {...platformOptionAttrs(m, notLoadedText)}
+                  >
                     {platformModelText(m)}
                   </option>
                 ))}

@@ -13,7 +13,8 @@ vi.mock('@xyflow/react', () => ({
   Handle: () => null,
   Position: { Left: 'left', Right: 'right' },
 }));
-vi.mock('./useTextModels', () => ({ useTextModels: () => [] }));
+const textModels = vi.hoisted(() => ({ rows: [] as Record<string, unknown>[] }));
+vi.mock('./useTextModels', () => ({ useTextModels: () => textModels.rows }));
 vi.mock('./useAgents', () => ({ useAgents: () => [] }));
 
 const mockCaller = vi.hoisted(() => vi.fn());
@@ -55,6 +56,7 @@ const BASE = {
 };
 
 afterEach(() => {
+  textModels.rows = [];
   cleanup();
   vi.clearAllMocks();
   useCanvasCoreStore.getState().reset();
@@ -132,5 +134,25 @@ describe('LlmNodeView', () => {
     renderView();
     fireEvent.click(screen.getByRole('button', { name: /Run/ }));
     expect(mockCaller).not.toHaveBeenCalled();
+  });
+});
+
+describe('LlmNodeView text-model dropdown — idle rows', () => {
+  it('shows a nous-engine row that is not loaded as disabled, with the reason', () => {
+    textModels.rows = [
+      { name: 'nous-qwen3-8-27b', display_name: 'Qwen3 27B', actual_model: 'qwen3-8-27b', type: 'llm', last_test_status: 'idle' },
+      { name: 'mediahub-deepseek', display_name: 'DeepSeek', actual_model: 'deepseek-v4-pro', type: 'llm', last_test_status: 'ok' },
+    ];
+    seed({ ...BASE, provider_slug: 'nous-qwen3-8-27b' });
+    renderView();
+    const trigger = screen.getByLabelText('LLM provider');
+    const mirror = trigger.parentElement!.querySelector('select') as HTMLSelectElement;
+    const idle = Array.from(mirror.options).find((o) => o.value === 'nous-qwen3-8-27b')!;
+    expect(idle.disabled).toBe(true);
+    expect(idle.dataset.description).toBe('Not loaded on nous-engine');
+    expect(Array.from(mirror.options).find((o) => o.value === 'mediahub-deepseek')!.disabled).toBe(false);
+    // Saved value kept, dimmed and titled — never swapped.
+    expect(mirror.value).toBe('nous-qwen3-8-27b');
+    expect(trigger.getAttribute('title')).toBe('Not loaded on nous-engine');
   });
 });

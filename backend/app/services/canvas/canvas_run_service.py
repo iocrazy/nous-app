@@ -28,7 +28,7 @@ distinguishes ok vs failed by the body).
 
 from __future__ import annotations
 
-from typing import Any, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from uuid import UUID
 
 from loguru import logger
@@ -227,6 +227,40 @@ def _extract_video_gen_params(node: Optional[Mapping[str, Any]]) -> dict:
     }
 
 
+# Probe statuses a "Catalog default" may land on, best first. ``idle`` (local
+# nous-engine row authorized but not loaded — a real chat got 503 "not loaded"
+# on 2026-09-24) and ``fail`` are skipped: the user pickers grey / hide those
+# rows, so the implicit default must not quietly pick one either.
+_DEFAULT_STATUS_RANK = {"ok": 0, None: 1, "not_probed": 1}
+
+
+def _row_name(row: Dict[str, Any]) -> Optional[str]:
+    name = row.get("name")
+    return name.strip() if isinstance(name, str) and name.strip() else None
+
+
+def _pick_default_row(rows: List[Dict[str, Any]]) -> Optional[str]:
+    """``ok`` row first, then never-probed / ``not_probed``, catalog order
+    within a rank. When every named row is ``idle``/``fail``, keep the old
+    first-row behaviour (a guess beats no model) and say so in a WARN."""
+    named = [(row, n) for row in rows if (n := _row_name(row))]
+    ranked = [
+        (_DEFAULT_STATUS_RANK[row.get("last_test_status")], i, n)
+        for i, (row, n) in enumerate(named)
+        if row.get("last_test_status") in _DEFAULT_STATUS_RANK
+    ]
+    if ranked:
+        return min(ranked)[2]
+    if not named:
+        return None
+    row, name = named[0]
+    logger.warning(
+        "canvas: no enabled llm row is ok or unprobed; default falls back to "
+        f"{name!r} (last_test_status={row.get('last_test_status')!r})"
+    )
+    return name
+
+
 class CanvasRunService:
     """Single entrypoint: ``await svc.run_prompt(...)`` returns a result."""
 
@@ -240,10 +274,11 @@ class CanvasRunService:
     async def _default_text_model(self) -> str:
         """The catalog model an empty ``provider_slug`` resolves to.
 
-        First enabled ``llm`` row in the platform ``nous_models`` catalog,
-        falling back to the governed maintenance model (itself a catalog
-        entry). DB-only, so the default text Run always names a model the
-        platform actually has configured — the root cause of the 2026-07-12
+        Best enabled ``llm`` row in the platform ``nous_models`` catalog (see
+        ``_pick_default_row`` for the probe-status ranking), falling back to
+        the governed maintenance model (itself a catalog entry). DB-only, so
+        the default text Run always names a model the platform actually has
+        configured — the root cause of the 2026-07-12
         "default prompt won't run" report was a hardcoded ``qwen-plus`` that
         the catalog no longer carries.
         """
@@ -261,10 +296,9 @@ class CanvasRunService:
                 "canvas: enabled-llm catalog read failed; using maintenance model"
             )
             rows = []
-        for row in rows:
-            name = row.get("name")
-            if isinstance(name, str) and name.strip():
-                return name.strip()
+        picked = _pick_default_row(rows)
+        if picked is not None:
+            return picked
         return await get_maintenance_model()
 
     async def run_prompt(

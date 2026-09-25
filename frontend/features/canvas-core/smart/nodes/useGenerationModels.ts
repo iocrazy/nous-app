@@ -1,45 +1,28 @@
 // features/canvas-core/smart/nodes/useGenerationModels.ts
 //
 // Generation model catalog for the prompt node's model picker (G4-F1).
-// Fetched once per session (module cache) — the catalog changes via admin
-// action, not mid-edit. Failures degrade to an empty list (the picker shows
+// One module-level cache shared by every picker, refreshed when stale or on
+// window focus (see staleCatalog — the rows carry a probe status that changes
+// without admin action). Failures degrade to an empty list (the picker shows
 // only the catalog-default option) and are logged for the error funnel.
-
-import { useEffect, useState } from 'react';
 
 import {
   listGenerationModels,
   type GenerationModel,
 } from '../../services/canvasGenerationService';
+import { createStaleCatalog } from './staleCatalog';
 
-let cache: GenerationModel[] | null = null;
-let inflight: Promise<GenerationModel[]> | null = null;
+const catalog = createStaleCatalog<GenerationModel>(
+  () => listGenerationModels(),
+  'useGenerationModels',
+);
 
 /** Test hook: reset the module cache between cases. */
 export function _resetGenerationModelsCache(): void {
-  cache = null;
-  inflight = null;
+  catalog.reset();
 }
 
 export function useGenerationModels(kind?: 'image' | 'video'): GenerationModel[] {
-  const [models, setModels] = useState<GenerationModel[]>(cache ?? []);
-
-  useEffect(() => {
-    if (cache) return undefined;
-    let live = true;
-    inflight = inflight ?? listGenerationModels();
-    inflight
-      .then((m) => {
-        cache = m;
-        if (live) setModels(m);
-      })
-      .catch((err: unknown) => {
-        console.error('[useGenerationModels] catalog fetch failed:', err);
-      });
-    return () => {
-      live = false;
-    };
-  }, []);
-
+  const models = catalog.useRows();
   return kind ? models.filter((m) => m.type === kind) : models;
 }
