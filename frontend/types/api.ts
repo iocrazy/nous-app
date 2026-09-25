@@ -563,3 +563,9 @@ export type BeatTemplateRow = Schemas['BeatTemplateRow'];
 /** Stored JSONB anchor: every key may be absent on a hand-edited row. */
 export type BeatTemplateAnchorRow = Schemas['BeatTemplateAnchorRow'];
 // —— end P7 auth / beat-templates ——
+
+// —— P8 admin: credits ——
+/** `POST /points/admin/adjust` (Billing page, platform admins only): the team's
+ * balance after the change. A debit larger than the balance stops at 0. */
+export type AdminTeamPointsAdjustResult = Schemas['AdminTeamPointsAdjustResult'];
+// —— end P8 admin: credits ——

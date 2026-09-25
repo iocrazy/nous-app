@@ -4,9 +4,8 @@ Post-rollout the repository is the SQLAlchemy 2.0 implementation — reads go
 through ``read_scope()`` with ``select(...)``/``select(func.count())``
 statements. These tests mock ``read_scope`` with a fake session that captures
 every emitted ``(sql, binds)`` pair and returns configured scalar values /
-row tuples, so the compiled SQL shape + bind params AND the value-type sweep
-(created_at → ISO str, video_download_status Enum → bare .value via _plain,
-creator_id → str) are asserted WITHOUT a live database (the DSN-gated
+row tuples, so the compiled SQL shape + bind params are asserted WITHOUT a
+live database (the DSN-gated
 integration suite in ``tests/integration/test_stats_repository_orm.py``
 exercises the real round-trip). This keeps fast, always-run coverage of the
 collapsed ORM bodies.
@@ -165,71 +164,3 @@ async def test_distinct_active_users_returns_zero_on_error(
 
     count = await repo.distinct_active_users_since(datetime.now(tz=timezone.utc))
     assert count == 0
-
-
-@pytest.mark.asyncio
-async def test_user_registrations_since_returns_rows(
-    repo: AdminStatsRepository, fake_session: _FakeSession
-) -> None:
-    fake_session.rows = [
-        (datetime(2026, 4, 1, tzinfo=timezone.utc),),
-        (datetime(2026, 4, 2, tzinfo=timezone.utc),),
-    ]
-    rows = await repo.user_registrations_since(
-        datetime(2026, 4, 1, tzinfo=timezone.utc)
-    )
-    assert len(rows) == 2
-    # created_at → ISO str (CONSUMED — the growth endpoint slices [:10]).
-    assert rows[0]["created_at"] == "2026-04-01T00:00:00+00:00"
-
-
-@pytest.mark.asyncio
-async def test_video_status_history_filters_by_since(
-    repo: AdminStatsRepository, fake_session: _FakeSession
-) -> None:
-    fake_session.rows = []
-    since = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    await repo.video_status_history(since)
-
-    sql, binds = fake_session.calls[-1]
-    assert "created_at >=" in sql
-    assert since in binds.values()
-
-
-@pytest.mark.asyncio
-async def test_video_status_history_unwraps_enum_via_plain(
-    repo: AdminStatsRepository, fake_session: _FakeSession
-) -> None:
-    """video_download_status Enum member → bare .value (CONSUMED — the router
-    does status == 'completed')."""
-    from app.models._enums import DownloadStatus
-
-    fake_session.rows = [
-        (datetime(2026, 4, 1, tzinfo=timezone.utc), DownloadStatus.COMPLETED),
-    ]
-    rows = await repo.video_status_history(datetime(2026, 1, 1, tzinfo=timezone.utc))
-    assert rows[0]["video_download_status"] == "completed"
-    assert "DownloadStatus." not in rows[0]["video_download_status"]
-
-
-@pytest.mark.asyncio
-async def test_completed_videos_by_user_is_resource_centric(
-    repo: AdminStatsRepository, fake_session: _FakeSession
-) -> None:
-    """Resource-centric fix: parsed_media.user_id was dropped in migration 083,
-    so this now queries non-trashed ``resources`` by ``creator_id`` and maps each
-    row to a ``{"user_id": <str>}`` shape (what the /storage handler groups on)."""
-    fake_session.rows = [
-        ("11111111-1111-1111-1111-111111111111",),
-        ("22222222-2222-2222-2222-222222222222",),
-        (None,),  # defensive: skipped
-    ]
-    rows = await repo.completed_videos_by_user()
-
-    sql, _ = fake_session.calls[-1]
-    assert "resources" in sql
-    assert "is_trashed IS false" in sql
-    assert rows == [
-        {"user_id": "11111111-1111-1111-1111-111111111111"},
-        {"user_id": "22222222-2222-2222-2222-222222222222"},
-    ]

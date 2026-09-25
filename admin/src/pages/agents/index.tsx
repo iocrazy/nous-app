@@ -15,30 +15,15 @@ import {
 } from '@arco-design/web-react'
 import { IconEdit, IconSync } from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
+import type { CatalogAgent, CatalogAgentList, SeedReloadResult } from '../../api/endpoints/agents'
 
 const { Title, Text } = Typography
 const FormItem = Form.Item
 
-interface CatalogAgent {
-  id: string
-  slug: string
-  name: string
-  description?: string | null
-  icon?: string | null
-  model: string
-  temperature: number
-  max_tokens: number
-  identity_md?: string | null
-  soul_md?: string | null
-  agent_md?: string | null
-  fallback_models?: string[]
-  enabled: boolean
-  updated_at: string
-  current_version: number
-  override_counts: { user: number; team: number }
-}
-
 const apiBase = import.meta.env.VITE_API_URL || ''
+
+/** NULL `enabled` is a legacy row: the column defaults to true. */
+const isEnabled = (a: CatalogAgent) => a.enabled !== false
 
 export function AgentsCatalogPage() {
   const { session } = useAuth()
@@ -59,9 +44,11 @@ export function AgentsCatalogPage() {
     setLoading(true)
     try {
       const res = await fetch(`${apiBase}/api/v1/admin/agents`, { headers })
-      const data = await res.json()
-      setAgents(data.items || [])
-    } catch {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data: CatalogAgentList = await res.json()
+      setAgents(data.items)
+    } catch (err) {
+      console.error('[AgentsCatalog] load failed', err)
       Message.error('Failed to load agents')
     } finally {
       setLoading(false)
@@ -88,7 +75,7 @@ export function AgentsCatalogPage() {
   }
 
   const handleSave = async () => {
-    if (!editing) return
+    if (!editing?.slug) return
     let values: Record<string, unknown>
     try {
       values = await form.validate()
@@ -132,14 +119,16 @@ export function AgentsCatalogPage() {
   }
 
   const handleToggleEnabled = async (a: CatalogAgent) => {
+    if (!a.slug) return
+    const next = !isEnabled(a)
     const res = await fetch(`${apiBase}/api/v1/admin/agents/${a.slug}`, {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ enabled: !a.enabled }),
+      body: JSON.stringify({ enabled: next }),
     })
     if (res.ok) {
       setAgents((prev) =>
-        prev.map((x) => (x.id === a.id ? { ...x, enabled: !x.enabled } : x)),
+        prev.map((x) => (x.id === a.id ? { ...x, enabled: next } : x)),
       )
     } else {
       Message.error('Failed to toggle')
@@ -153,16 +142,25 @@ export function AgentsCatalogPage() {
         method: 'POST',
         headers,
       })
-      const data = await res.json().catch(() => ({}))
-      if (res.ok) {
-        Message.success(
-          `Seeds reloaded — agents: ${data.agents ?? '?'}, skills: ${data.skills ?? '?'}`,
-        )
-        fetchAgents()
-      } else {
-        Message.error('Reload seeds failed')
+      if (!res.ok) {
+        Message.error(`Reload seeds failed (${res.status})`)
+        return
       }
-    } catch {
+      const data = (await res.json()) as SeedReloadResult
+      const summary = `agents: ${data.agents}, skills: ${data.skills}`
+      // A seed that failed to load is reported per item; it is not a
+      // clean reload even though the request succeeded.
+      if (data.errors.length > 0) {
+        Message.warning(
+          `Seeds reloaded with ${data.errors.length} error(s) — ${summary}. ` +
+            data.errors.map((e) => `${e.scope}/${e.slug}`).join(', '),
+        )
+      } else {
+        Message.success(`Seeds reloaded — ${summary}`)
+      }
+      fetchAgents()
+    } catch (err) {
+      console.error('[admin] reload seeds failed:', err)
       Message.error('Reload seeds failed')
     } finally {
       setReseeding(false)
@@ -226,7 +224,7 @@ export function AgentsCatalogPage() {
                     {a.description || '—'}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--color-text-3)', marginTop: 2 }}>
-                    temp {a.temperature} · max {a.max_tokens} tokens
+                    temp {a.temperature ?? '—'} · max {a.max_tokens ?? '—'} tokens
                     {a.fallback_models?.length
                       ? ` · fallback: ${a.fallback_models.join(' → ')}`
                       : ''}
@@ -235,10 +233,16 @@ export function AgentsCatalogPage() {
                 <Space>
                   <Switch
                     size="small"
-                    checked={a.enabled}
+                    checked={isEnabled(a)}
+                    disabled={!a.slug}
                     onChange={() => handleToggleEnabled(a)}
                   />
-                  <Button size="small" icon={<IconEdit />} onClick={() => openEdit(a)}>
+                  <Button
+                    size="small"
+                    icon={<IconEdit />}
+                    disabled={!a.slug}
+                    onClick={() => openEdit(a)}
+                  >
                     Edit
                   </Button>
                 </Space>

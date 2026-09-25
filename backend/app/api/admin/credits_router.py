@@ -1,12 +1,15 @@
 """Admin API routes for Credits / Points management."""
 
 import asyncio
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
+from app.api.row_guard import require_row
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.credits_repository import get_admin_credits_repository
 from app.schemas.admin import (
@@ -24,6 +27,22 @@ from app.schemas.admin import (
     AdminTeamCreditsDetailResponse,
     AdminTopTeamItem,
 )
+from app.schemas.admin_credits import (
+    AdminBatchGiftResult,
+    AdminCreditsOkResult,
+    AdminCreditsOrderActionResult,
+    AdminPointPackage,
+    AdminPointPricing,
+    AdminPointsAdjustResult,
+)
+from app.services.billing.admin_points import (
+    AdminAdjustError,
+    TeamNotFoundError,
+    admin_adjust_team_points,
+    existing_team_ids,
+    parse_team_id,
+    require_team,
+)
 from app.utils.admin_helpers import (
     batch_get_team_member_counts,
     batch_get_user_auth_info,
@@ -32,6 +51,51 @@ from app.utils.admin_helpers import (
 )
 
 router = APIRouter()
+
+
+def _order_not_found() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
+    )
+
+
+def _require_order_id(order_id: str) -> str:
+    """Order ids are Snowflake BIGINTs; anything else names no order (it used
+    to reach ``int()`` in the repository and come back as a 500)."""
+    if parse_team_id(order_id) is None:
+        raise _order_not_found()
+    return order_id
+
+
+def _require_package_id(package_id: str) -> str:
+    """Package ids are uuids; anything else names no package (it used to reach
+    the uuid bind and come back as a 500)."""
+    try:
+        uuid.UUID(package_id)
+    except ValueError:
+        require_row(None)
+    return package_id
+
+
+def _validate_package(body: AdminPackageRequest) -> None:
+    """``orders`` CHECKs ``points_amount > 0`` and ``amount_cents > 0``: a
+    package outside those bounds could be saved but never bought (the order
+    insert fails), so refuse it here."""
+    if body.points_amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="points_amount must be positive",
+        )
+    if body.price_cents <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="price_cents must be positive",
+        )
+
+
+def _package_conflict(e: IntegrityError, message: str) -> HTTPException:
+    logger.warning(f"[Admin] point_packages write refused: {e.orig}")
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
 
 
 # ============================================
@@ -339,7 +403,7 @@ async def list_orders(
     )
 
 
-@router.post("/orders/{order_id}/confirm")
+@router.post("/orders/{order_id}/confirm", response_model=AdminCreditsOrderActionResult)
 async def confirm_order(
     order_id: str,
     auth: AdminAuthDep,
@@ -348,11 +412,9 @@ async def confirm_order(
     """Manually confirm payment for a pending order."""
     repo = get_admin_credits_repository()
 
-    order = await repo.get_order(order_id)
+    order = await repo.get_order(_require_order_id(order_id))
     if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
-        )
+        raise _order_not_found()
 
     if order["payment_status"] != "pending":
         raise HTTPException(
@@ -388,7 +450,7 @@ async def confirm_order(
     return {"ok": True, "message": "Order confirmed and points added"}
 
 
-@router.post("/orders/{order_id}/refund")
+@router.post("/orders/{order_id}/refund", response_model=AdminCreditsOrderActionResult)
 async def refund_order(
     order_id: str,
     auth: AdminAuthDep,
@@ -397,11 +459,9 @@ async def refund_order(
     """Refund a paid order (deduct points, mark as refunded)."""
     repo = get_admin_credits_repository()
 
-    order = await repo.get_order(order_id)
+    order = await repo.get_order(_require_order_id(order_id))
     if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
-        )
+        raise _order_not_found()
 
     if order["payment_status"] != "paid":
         raise HTTPException(
@@ -451,20 +511,21 @@ async def refund_order(
 # ============================================
 
 
-@router.get("/packages")
+@router.get("/packages", response_model=list[AdminPointPackage])
 async def list_packages(auth: AdminAuthDep):
     """List all point packages (active and inactive)."""
     repo = get_admin_credits_repository()
     return await repo.list_packages()
 
 
-@router.post("/packages")
+@router.post("/packages", response_model=AdminPointPackage)
 async def create_package(
     body: AdminPackageRequest,
     auth: AdminAuthDep,
     request: Request,
 ):
     """Create a new point package."""
+    _validate_package(body)
     repo = get_admin_credits_repository()
 
     payload = {
@@ -475,13 +536,21 @@ async def create_package(
         "sort_order": body.sort_order,
         "is_active": body.is_active,
     }
-    created = await repo.create_package(payload)
+    try:
+        created = await repo.create_package(payload)
+    except IntegrityError as e:
+        raise _package_conflict(e, "A package with this name already exists")
+    if not created:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Package was not created",
+        )
 
     await create_audit_log(
         admin_id=auth.user_id,
         action="package_create",
         target_type="point_package",
-        target_id=str(created["id"]) if created else "unknown",
+        target_id=str(created["id"]),
         details=payload,
         ip_address=request.client.host if request.client else None,
     )
@@ -489,7 +558,7 @@ async def create_package(
     return created
 
 
-@router.put("/packages/{package_id}")
+@router.put("/packages/{package_id}", response_model=AdminPointPackage)
 async def update_package(
     package_id: str,
     body: AdminPackageRequest,
@@ -497,6 +566,8 @@ async def update_package(
     request: Request,
 ):
     """Update an existing point package."""
+    _require_package_id(package_id)
+    _validate_package(body)
     repo = get_admin_credits_repository()
 
     payload = {
@@ -507,12 +578,11 @@ async def update_package(
         "sort_order": body.sort_order,
         "is_active": body.is_active,
     }
-    updated = await repo.update_package(package_id, payload)
-
-    if not updated:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Package not found"
-        )
+    try:
+        updated = await repo.update_package(package_id, payload)
+    except IntegrityError as e:
+        raise _package_conflict(e, "A package with this name already exists")
+    require_row(updated)
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -526,15 +596,28 @@ async def update_package(
     return updated
 
 
-@router.delete("/packages/{package_id}")
+@router.delete("/packages/{package_id}", response_model=AdminCreditsOkResult)
 async def delete_package(
     package_id: str,
     auth: AdminAuthDep,
     request: Request,
 ):
-    """Delete a point package."""
+    """Delete a point package.
+
+    A package that orders point at cannot be deleted (``orders.package_id`` has
+    no ON DELETE): that is a 409 telling the admin to deactivate it instead,
+    not a 500. A package that is not there is a 404, not ``ok``.
+    """
+    _require_package_id(package_id)
     repo = get_admin_credits_repository()
-    await repo.delete_package(package_id)
+    try:
+        deleted = await repo.delete_package(package_id)
+    except IntegrityError as e:
+        raise _package_conflict(
+            e, "This package has orders; deactivate it instead of deleting it"
+        )
+    if not deleted:
+        require_row(None)
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -552,14 +635,14 @@ async def delete_package(
 # ============================================
 
 
-@router.get("/pricing")
+@router.get("/pricing", response_model=list[AdminPointPricing])
 async def list_pricing(auth: AdminAuthDep):
     """List all action pricing rules."""
     repo = get_admin_credits_repository()
     return await repo.list_pricing()
 
 
-@router.put("/pricing/{action_type}")
+@router.put("/pricing/{action_type}", response_model=AdminPointPricing)
 async def update_pricing(
     action_type: str,
     body: AdminPricingUpdateRequest,
@@ -567,6 +650,12 @@ async def update_pricing(
     request: Request,
 ):
     """Update pricing for a specific action type."""
+    if body.points_cost < 0:
+        # A negative cost would make every consume of this action CREDIT points.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="points_cost must not be negative",
+        )
     repo = get_admin_credits_repository()
 
     payload: dict = {"points_cost": body.points_cost}
@@ -574,11 +663,7 @@ async def update_pricing(
         payload["description"] = body.description
 
     updated = await repo.update_pricing(action_type, payload)
-
-    if not updated:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Action type not found"
-        )
+    require_row(updated)
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -597,32 +682,57 @@ async def update_pricing(
 # ============================================
 
 
-@router.post("/batch-gift")
+@router.post("/batch-gift", response_model=AdminBatchGiftResult)
 async def batch_gift(
     body: AdminBatchGiftRequest,
     auth: AdminAuthDep,
     request: Request,
 ):
-    """Gift points to multiple teams."""
+    """Gift points to multiple teams.
+
+    A team only counts as gifted when the points really landed: an unknown or
+    non-numeric team id is reported in ``errors`` instead of failing inside
+    the quota insert, and a non-positive amount is refused up front (it used
+    to count every team as gifted while ``add_points`` credited nothing).
+    """
     from app.services.billing.points_service import PointsService
+
+    if body.amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Amount must be positive",
+        )
+
+    # One gift per team, in the order given (a repeated id is not a second gift).
+    team_ids = list(dict.fromkeys(body.team_ids))
+    numeric = {tid: parse_team_id(tid) for tid in team_ids}
+    known = await existing_team_ids([n for n in numeric.values() if n is not None])
 
     points_svc = PointsService()
 
     gifted_count = 0
     errors = []
-    for tid in body.team_ids:
+    for tid in team_ids:
+        team_num = numeric[tid]
+        if team_num is None or team_num not in known:
+            errors.append({"team_id": tid, "error": "Team not found"})
+            continue
         try:
-            await points_svc.add_points(
-                team_id=tid,
+            result = await points_svc.add_points(
+                team_id=str(team_num),
                 amount=body.amount,
                 type="gift",
                 description=body.description or f"Admin gift by {auth.user_id}",
                 user_id=auth.user_id,
             )
-            gifted_count += 1
         except Exception as e:
             logger.warning(f"[Admin] Batch gift failed for team {tid}: {e}")
             errors.append({"team_id": tid, "error": str(e)})
+            continue
+        if not result.get("success"):
+            errors.append({"team_id": tid, "error": "Points were not added"})
+            continue
+        gifted_count += 1
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -640,35 +750,41 @@ async def batch_gift(
     return {"ok": True, "gifted_count": gifted_count, "errors": errors}
 
 
-@router.post("/adjust")
+@router.post("/adjust", response_model=AdminPointsAdjustResult)
 async def adjust_points(
     body: AdminPointsAdjustRequest,
     auth: AdminAuthDep,
     request: Request,
 ):
-    """Manually adjust points for a single team."""
-    from app.services.billing.points_service import PointsService
-
-    points_svc = PointsService()
-
-    result = await points_svc.add_points(
-        team_id=body.team_id,
-        amount=body.amount,
-        type="admin_adjust",
-        description=body.description or f"Admin adjustment by {auth.user_id}",
-        user_id=auth.user_id,
-    )
+    """Manually adjust points for a single team (positive adds, negative
+    deducts down to zero; zero is refused)."""
+    try:
+        team_id = await require_team(body.team_id)
+        result = await admin_adjust_team_points(
+            team_id=team_id,
+            amount=body.amount,
+            description=body.description or f"Admin adjustment by {auth.user_id}",
+            user_id=auth.user_id,
+        )
+    except TeamNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AdminAdjustError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     await create_audit_log(
         admin_id=auth.user_id,
         action="points_adjust",
         target_type="team_quota",
-        target_id=body.team_id,
-        details={"amount": body.amount, "description": body.description},
+        target_id=team_id,
+        details={
+            "amount": body.amount,
+            "applied": result["applied"],
+            "description": body.description,
+        },
         ip_address=request.client.host if request.client else None,
     )
 
-    return {"ok": True, "new_balance": result.get("new_balance")}
+    return {"ok": True, "new_balance": result["new_balance"]}
 
 
 @router.get("/team/{team_id}/detail", response_model=AdminTeamCreditsDetailResponse)

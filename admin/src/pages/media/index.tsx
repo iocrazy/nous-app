@@ -45,6 +45,7 @@ import {
   useAudit,
   useDeepVerify,
   useMediaStatus,
+  isAuditRunning,
 } from '../../api/endpoints/storage'
 import type { MediaStorageRow } from '../../api/endpoints/storage'
 import { StorageSection } from './StorageSection'
@@ -207,7 +208,7 @@ function StatsCards() {
       <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
         {audit?.status === 'completed'
           ? `Last S3 scan ${formatDateTime(audit.scanned_at)} · ${audit.scanned} objects · ${audit.missing.length} missing`
-          : audit?.status === 'queued' || audit?.status === 'in_progress'
+          : isAuditRunning(audit?.status)
             ? 'Scanning storage…'
             : audit?.status === 'failed'
               ? 'Last deep scan failed'
@@ -423,7 +424,7 @@ export function MediaList() {
   const retryVideo = useRetryVideo()
   const { data: audit } = useAudit()
   const deepVerify = useDeepVerify()
-  const auditRunning = audit?.status === 'queued' || audit?.status === 'in_progress'
+  const auditRunning = isAuditRunning(audit?.status)
 
   // Storage status for the currently-loaded page of rows (lags one render behind
   // pagination: `pageIds` is synced from the table's fetched items via effect below).
@@ -701,7 +702,11 @@ export function MediaList() {
             <Button
               size="small"
               loading={deepVerify.isPending || auditRunning}
-              onClick={() => deepVerify.mutate()}
+              onClick={() =>
+                deepVerify.mutate(undefined, {
+                  onError: (err) => Message.error(`Deep Verify failed: ${err.message}`),
+                })
+              }
             >
               {auditRunning ? 'Verifying…' : 'Deep Verify'}
             </Button>

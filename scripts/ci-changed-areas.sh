@@ -70,6 +70,8 @@ while IFS= read -r f; do
   [ -z "$f" ] && continue
   case "$f" in
     frontend/*)            frontend=true ;;
+    # 管理台没有自己的 job：它的生成物 diff 与 build 跑在 frontend job 里。
+    admin/*)               frontend=true ;;
     # 契约快照：前端类型由它生成（npm run gen:api），所以它一变 frontend job
     # 必须跑「Generate API types & diff」—— 否则只改后端 schema 的 PR 会让
     # frontend/types/api.generated.d.ts 静默过期。必须排在 backend/* 之前。

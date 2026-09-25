@@ -15,6 +15,7 @@ from app.api.admin.settings_validation import (
     SettingValidationError,
     validate_setting_value,
 )
+from app.api.row_guard import require_row
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.system_settings_repository import (
     get_system_settings_repository,
@@ -23,6 +24,7 @@ from app.repositories.nous_model_repository import (
     NousModelRepository,
     get_nous_model_repository,
 )
+from app.schemas.admin_settings_catalog import AdminNousModelDeleteResult
 from app.schemas.ai import TestConnectionResponse
 from app.schemas.nous_model import (
     CardLabelsResponse,
@@ -364,13 +366,15 @@ async def update_nous_model(model_id: str, body: NousModelUpdate, auth: AdminAut
     return _to_response(row)
 
 
-@router.delete("/{model_id}")
+@router.delete("/{model_id}", response_model=AdminNousModelDeleteResult)
 async def delete_nous_model(model_id: str, auth: AdminAuthDep):
-    """Delete a Nous model."""
+    """Delete a Nous model. A non-numeric id or one that matches no row is a
+    typed 404 (it used to answer 200 "Deleted" for a missing row)."""
+    if not (model_id.isascii() and model_id.isdigit() and int(model_id) < 2**63):
+        require_row(None)
     repo = get_nous_model_repository()
-    ok = await repo.delete(model_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Model not found")
+    if not await repo.delete(model_id):
+        require_row(None)
     logger.info(f"[Admin] Deleted Nous model: {model_id}")
     await refresh_catalog_windows()
     return {"message": "Deleted"}

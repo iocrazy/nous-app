@@ -6,11 +6,10 @@ import type { PointPackage, PaymentOrder } from '../types';
 import type { PointsBalance, PointsPricing, PointsUsageStats } from '../types/api';
 import { fetchPointsBalance, fetchPointsPricing, fetchUsageStats, adjustPoints } from '../services/pointsService';
 import { fetchPackages, fetchOrders } from '../services/paymentService';
-import { hasPermission } from '../utils/permissions';
+import { useOptionalAuth } from '../contexts/AuthContext';
 
 interface BillingViewProps {
   teamId: string;
-  permissions: string[];
   onBuyPackage: (pkg: PointPackage) => void;
 }
 
@@ -38,8 +37,13 @@ const getStatusBadge = (status: string) => {
   return styles[status] || styles.pending;
 };
 
-export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, onBuyPackage }) => {
+export const BillingView: React.FC<BillingViewProps> = ({ teamId, onBuyPackage }) => {
   const { t } = useTranslation();
+  // `/points/admin/adjust` answers only platform admins (AdminAuthDep). The
+  // panel used to be gated on a team-level 'team.manage' permission that the
+  // owner wildcard ('*') satisfies, so every user saw it on their personal
+  // team and every submit came back 403.
+  const isPlatformAdmin = useOptionalAuth()?.userProfile?.role === 'admin';
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState<PointsBalance | null>(null);
   const [packages, setPackages] = useState<PointPackage[]>([]);
@@ -288,7 +292,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
       </section>
 
       {/* ── Admin Points Adjustment ─────────────────────── */}
-      {hasPermission(permissions, 'team.manage') && (
+      {isPlatformAdmin && (
         <section>
           <div className="flex items-center gap-2 mb-4">
             <Settings size={20} className="text-amber-400" />

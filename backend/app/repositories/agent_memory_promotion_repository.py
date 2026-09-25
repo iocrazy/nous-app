@@ -247,18 +247,20 @@ async def approve_proposal(*, proposal_id: int, reviewer_id: str) -> bool:
 async def reject_proposal(*, proposal_id: int, reviewer_id: str) -> bool:
     """Mark a pending proposal as rejected. The ``agent_memory`` row is untouched.
 
-    Returns True on success, False on any error (never raises).
+    Returns True iff a pending proposal with that id was rejected; False when
+    none matched (unknown id, or already reviewed) or on any error (never
+    raises).
     """
     try:
         async with write_scope() as session:
-            await session.execute(
+            result = await session.execute(
                 _UPDATE_PROMOTION_REJECTED_SQL,
                 {
                     "reviewer_id": reviewer_id,
                     "proposal_id": proposal_id,
                 },
             )
-        return True
+        return result.rowcount > 0
     except Exception:  # noqa: BLE001
         logger.warning(
             f"[agent_memory_promotions] reject_proposal failed for proposal_id={proposal_id}"
@@ -272,18 +274,19 @@ async def demote_memory(*, memory_id: int) -> bool:
     ``team_id`` is intentionally left as-is (private rows may retain team_id;
     the CHECK constraint only requires team_id when visibility='shared').
 
-    Returns True on success, False on any error (never raises).
+    Returns True iff a memory row with that id exists; False when none does
+    or on any error (never raises).
     """
     try:
         async with write_scope() as session:
-            await session.execute(
+            result = await session.execute(
                 _UPDATE_AGENT_MEMORY_DEMOTE_SQL,
                 {
                     "visibility": "private",
                     "memory_id": memory_id,
                 },
             )
-        return True
+        return result.rowcount > 0
     except Exception:  # noqa: BLE001
         logger.warning(
             f"[agent_memory_promotions] demote_memory failed for memory_id={memory_id}"

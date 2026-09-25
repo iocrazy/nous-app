@@ -36,16 +36,6 @@ export interface Video {
   created_at: string
 }
 
-export interface Tag {
-  id: string
-  name: string
-  color: string | null
-  icon: string | null
-  type: 'system' | 'user' | 'time'
-  user_id: string | null
-  created_at: string
-}
-
 export interface AuditLog {
   id: string
   admin_id: string

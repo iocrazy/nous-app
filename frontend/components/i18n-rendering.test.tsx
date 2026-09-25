@@ -95,7 +95,7 @@ describe('BillingView i18n rendering', () => {
   it('renders English labels with no raw-key leakage', async () => {
     const text = await renderToText(
       <I18nextProvider i18n={makeI18n('en')}>
-        <BillingView teamId="t1" permissions={['team.manage']} onBuyPackage={() => {}} />
+        <BillingView teamId="t1" onBuyPackage={() => {}} />
       </I18nextProvider>,
     );
     expect(text).toContain('Points Balance');
@@ -109,7 +109,7 @@ describe('BillingView i18n rendering', () => {
   it('renders Chinese labels with no raw-key leakage', async () => {
     const text = await renderToText(
       <I18nextProvider i18n={makeI18n('zh')}>
-        <BillingView teamId="t1" permissions={['team.manage']} onBuyPackage={() => {}} />
+        <BillingView teamId="t1" onBuyPackage={() => {}} />
       </I18nextProvider>,
     );
     expect(text).toContain('积分余额');

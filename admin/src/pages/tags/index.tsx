@@ -30,6 +30,7 @@ import {
   useDeleteTag,
   useBatchTagAction,
   type TagData,
+  type TagListResponse,
 } from '../../api/endpoints/tags'
 import { GroupSidebar } from './GroupSidebar'
 import { TagFormModal } from './TagFormModal'
@@ -71,7 +72,7 @@ export function TagsPage() {
   const handleUpdateTag = (values: Parameters<typeof createTag.mutate>[0]) => {
     if (!editingTag) return
     updateTag.mutate(
-      { id: editingTag.id, values },
+      { id: String(editingTag.id), values },
       {
         onSuccess: () => {
           Message.success('Tag updated')
@@ -88,7 +89,7 @@ export function TagsPage() {
       content: `Delete "${tag.name}"? This will remove it from all resources.`,
       okButtonProps: { status: 'danger' },
       onOk: () =>
-        deleteTagMut.mutateAsync(tag.id, {
+        deleteTagMut.mutateAsync(String(tag.id), {
           onSuccess: () => Message.success('Tag deleted'),
         }),
     })
@@ -163,12 +164,11 @@ export function TagsPage() {
         filterable: true,
         size: 100,
         filterOptions: [
-          { label: 'System', value: 'system' },
           { label: 'User', value: 'user' },
           { label: 'Time', value: 'time' },
         ],
         cell: (row) => (
-          <Tag size="small" color={row.type === 'system' ? 'blue' : row.type === 'time' ? 'green' : 'gray'}>
+          <Tag size="small" color={row.type === 'time' ? 'green' : 'gray'}>
             {row.type}
           </Tag>
         ),
@@ -193,7 +193,7 @@ export function TagsPage() {
         type: 'date',
         sortable: true,
         size: 130,
-        cell: (row) => new Date(row.created_at).toLocaleDateString(),
+        cell: (row) => (row.created_at ? new Date(row.created_at).toLocaleDateString() : '-'),
       },
       {
         key: 'actions',
@@ -250,7 +250,7 @@ export function TagsPage() {
       const sortBy = sorts[0]?.field
       const sortOrder = sorts[0]?.direction
 
-      const { data } = await apiClient.get('/api/v1/admin/tags', {
+      const { data } = await apiClient.get<TagListResponse>('/api/v1/admin/tags', {
         params: {
           page,
           page_size: pageSize,
@@ -288,7 +288,7 @@ export function TagsPage() {
       >
         <Select.Option value="">Uncategorized</Select.Option>
         {groups.map((g) => (
-          <Select.Option key={g.id} value={g.id}>
+          <Select.Option key={g.id} value={String(g.id)}>
             {g.name}
           </Select.Option>
         ))}

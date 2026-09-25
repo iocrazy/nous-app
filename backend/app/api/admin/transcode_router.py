@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.admin_deps import AdminAuthDep
 from app.core.config import settings
 from app.repositories.admin.transcode_repository import (
@@ -20,6 +21,10 @@ from app.schemas.admin import (
     AdminTranscodeStatsResponse,
     AdminTranscodeVersionResponse,
 )
+from app.schemas.admin_ops import (
+    AdminTranscodeBatchResponse,
+    AdminTranscodeRetryResponse,
+)
 from app.utils.admin_helpers import create_audit_log
 
 router = APIRouter()
@@ -29,6 +34,15 @@ VALID_STATUSES = {"pending", "processing", "completed", "failed", "null"}
 
 # Tiers to check for HLS status
 HLS_TIER_NAMES = ["480p", "720p", "1080p", "source"]
+
+_BIGINT_MAX = 2**63 - 1
+
+
+def _is_version_id(value: str) -> bool:
+    """A ``resource_versions.id`` is a positive BIGINT. Anything else (``abc``,
+    a 20-digit number) can match no row; letting it reach the int8 bind was a
+    500 (``ValueError`` / asyncpg ``DataError``)."""
+    return value.isascii() and value.isdigit() and int(value) <= _BIGINT_MAX
 
 
 def _scan_hls_tiers(hls_path: str) -> Optional[dict[str, bool]]:
@@ -171,7 +185,7 @@ async def list_transcode_versions(
     )
 
 
-@router.post("/{version_id}/retry")
+@router.post("/{version_id}/retry", response_model=AdminTranscodeRetryResponse)
 async def retry_transcode(
     version_id: str,
     auth: AdminAuthDep,
@@ -180,7 +194,7 @@ async def retry_transcode(
     """Retry HLS transcode for a specific resource version."""
     repo = get_admin_transcode_repository()
 
-    version = await repo.get_version(version_id)
+    version = await repo.get_version(version_id) if _is_version_id(version_id) else None
     if not version:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Version not found"
@@ -195,8 +209,10 @@ async def retry_transcode(
 
     resource_id = str(version["resource_id"])
 
-    # Mark as pending and dispatch DBOS workflow.
-    await repo.mark_pending(version_id)
+    # Mark as pending and dispatch DBOS workflow. A version deleted since the
+    # read above matches nothing: 404, and nothing is dispatched for it.
+    if not await repo.mark_pending(version_id):
+        require_row(None)
 
     from app.services.infra.dbos_orchestrator import start_workflow_routed
     from app.workflows.transcode import transcode_workflow
@@ -227,7 +243,7 @@ async def retry_transcode(
     return {"message": "Transcode retry queued", "version_id": version_id}
 
 
-@router.post("/batch")
+@router.post("/batch", response_model=AdminTranscodeBatchResponse)
 async def batch_transcode(
     auth: AdminAuthDep,
     request: Request,
@@ -245,7 +261,9 @@ async def batch_transcode(
         try:
             vid = str(v["id"])
             rid = str(v["resource_id"])
-            await repo.mark_pending(vid)
+            if not await repo.mark_pending(vid):
+                # Deleted since the batch read it: nothing to transcode.
+                continue
             await start_workflow_routed(
                 "transcode",
                 dbos_workflow_callable=transcode_workflow,

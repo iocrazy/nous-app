@@ -380,13 +380,18 @@ class AdminCreditsRepository:
             row = result.scalars().first()
             return _package_row(row) if row else None
 
-    async def delete_package(self, package_id: str) -> None:
+    async def delete_package(self, package_id: str) -> bool:
+        """Delete one package; ``False`` when no row matched (the route turns
+        that into a 404 instead of answering ``ok`` for nothing)."""
         from sqlalchemy import delete as sa_delete
 
         async with write_scope() as session:
-            await session.execute(
-                sa_delete(PointPackages).where(PointPackages.id == package_id)
+            result = await session.execute(
+                sa_delete(PointPackages)
+                .where(PointPackages.id == package_id)
+                .returning(PointPackages.id)
             )
+            return result.scalars().first() is not None
 
     # ─── Pricing ───────────────────────────────────────────────────
 

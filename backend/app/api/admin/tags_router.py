@@ -1,14 +1,41 @@
 """Admin API routes for Tag and Tag Group management."""
 
-from typing import List, Optional
+from typing import List, NoReturn, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from loguru import logger
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
+from app.api.row_guard import require_row
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.admin.tags_repository import get_admin_tags_repository
+from app.repositories.admin.tags_repository import (
+    AdminTagGroupNotFound,
+    get_admin_tags_repository,
+)
+from app.schemas.admin_tags import (
+    AdminTagBatchResult,
+    AdminTagGroupListResponse,
+    AdminTagGroupResponse,
+    AdminTagListResponse,
+    AdminTagResponse,
+    AdminTagsOk,
+)
 
 router = APIRouter()
+
+
+def _not_found() -> NoReturn:
+    """Typed 404 (``details.code=not_found_or_out_of_scope``) for a write that
+    named no row: an unknown id, a non-numeric one, or a batch/reorder list
+    with any such id (those write nothing)."""
+    require_row(None)
+    raise AssertionError("unreachable")  # require_row(None) always raises
+
+
+def _duplicate(what: str, name: str | None, e: IntegrityError) -> HTTPException:
+    logger.info(f"[AdminTags] {what} refused, duplicate name: {e.orig}")
+    return HTTPException(status_code=409, detail=f"{what} '{name}' already exists")
 
 
 # ============================================
@@ -63,7 +90,7 @@ class TagReorder(BaseModel):
 # ============================================
 
 
-@router.get("/groups")
+@router.get("/groups", response_model=AdminTagGroupListResponse)
 async def list_groups(auth: AdminAuthDep):
     """List all tag groups with tag counts."""
     repo = get_admin_tags_repository()
@@ -91,18 +118,21 @@ async def list_groups(auth: AdminAuthDep):
     }
 
 
-@router.post("/groups")
+@router.post("/groups", response_model=AdminTagGroupResponse)
 async def create_group(body: AdminTagGroupCreate, auth: AdminAuthDep):
     """Create a new tag group."""
     repo = get_admin_tags_repository()
     max_order = await repo.max_group_sort_order()
-    group = await repo.create_group(body.name, max_order + 1)
+    try:
+        group = await repo.create_group(body.name, max_order + 1)
+    except IntegrityError as e:  # tag_groups_name_key
+        raise _duplicate("Group", body.name, e) from e
     if not group:
         raise HTTPException(status_code=500, detail="Failed to create group")
     return {"success": True, "group": group}
 
 
-@router.patch("/groups/{group_id}")
+@router.patch("/groups/{group_id}", response_model=AdminTagGroupResponse)
 async def update_group(group_id: str, body: AdminTagGroupUpdate, auth: AdminAuthDep):
     """Update a tag group."""
     update_data = {k: v for k, v in body.model_dump().items() if v is not None}
@@ -110,26 +140,32 @@ async def update_group(group_id: str, body: AdminTagGroupUpdate, auth: AdminAuth
         raise HTTPException(status_code=400, detail="No update data provided")
 
     repo = get_admin_tags_repository()
-    group = await repo.update_group(group_id, update_data)
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-    return {"success": True, "group": group}
+    try:
+        group = await repo.update_group(group_id, update_data)
+    except IntegrityError as e:  # tag_groups_name_key
+        raise _duplicate("Group", body.name, e) from e
+    return {"success": True, "group": require_row(group)}
 
 
-@router.delete("/groups/{group_id}")
+@router.delete("/groups/{group_id}", response_model=AdminTagsOk)
 async def delete_group(group_id: str, auth: AdminAuthDep):
     """Delete a tag group. Tags become uncategorized."""
     repo = get_admin_tags_repository()
     if not await repo.delete_group(group_id):
-        raise HTTPException(status_code=404, detail="Group not found")
+        _not_found()
     return {"success": True}
 
 
-@router.post("/groups/reorder")
+@router.post("/groups/reorder", response_model=AdminTagsOk)
 async def reorder_groups(body: TagGroupReorder, auth: AdminAuthDep):
-    """Bulk reorder groups. IDs list defines the new order."""
+    """Bulk reorder groups. IDs list defines the new order.
+
+    Any unknown or non-numeric id → typed 404 and nothing is reordered (same
+    answer as the user-facing ``PUT /tags/groups/reorder``).
+    """
     repo = get_admin_tags_repository()
-    await repo.reorder_groups(body.ids)
+    if not await repo.reorder_groups(body.ids):
+        _not_found()
     return {"success": True}
 
 
@@ -138,7 +174,7 @@ async def reorder_groups(body: TagGroupReorder, auth: AdminAuthDep):
 # ============================================
 
 
-@router.get("")
+@router.get("", response_model=AdminTagListResponse)
 async def list_tags(
     auth: AdminAuthDep,
     page: int = Query(1, ge=1),
@@ -178,14 +214,21 @@ async def list_tags(
     return {"success": True, "items": items, "total": total}
 
 
-@router.post("")
+@router.post("", response_model=AdminTagResponse)
 async def create_tag(body: AdminTagCreate, auth: AdminAuthDep):
-    """Create a new system tag."""
+    """Create a tag owned by the calling admin.
+
+    There are no system tags any more (mig 468 dropped ``type='system'`` from
+    ``tags_type_check`` and gave every user their own copy of the initial
+    set), so an admin-made tag is an ordinary ``user`` tag in the admin's own
+    library. This used to insert ``type='system', user_id=NULL``, which the
+    CHECK rejects: every create from the admin console was a 500.
+    """
     insert_data: dict = {
         "name": body.name,
-        "type": "system",
+        "type": "user",
         "color": body.color,
-        "user_id": None,
+        "user_id": auth.user_id,
     }
     if body.name_zh:
         insert_data["name_zh"] = body.name_zh
@@ -195,13 +238,23 @@ async def create_tag(body: AdminTagCreate, auth: AdminAuthDep):
         insert_data["group_id"] = body.group_id
 
     repo = get_admin_tags_repository()
-    tag = await repo.create_tag(insert_data)
+    try:
+        tag = await repo.create_tag(insert_data)
+    except AdminTagGroupNotFound:
+        _not_found()
+    except IntegrityError as e:
+        # unique_tag_per_scope (name, type, user_id) — the admin already has
+        # a tag with this name. Same answer as the user-facing POST /tags.
+        logger.info(f"[AdminTags] create refused, duplicate name: {e.orig}")
+        raise HTTPException(
+            status_code=409, detail=f"Tag '{body.name}' already exists"
+        ) from e
     if not tag:
         raise HTTPException(status_code=500, detail="Failed to create tag")
     return {"success": True, "tag": tag}
 
 
-@router.patch("/{tag_id}")
+@router.patch("/{tag_id}", response_model=AdminTagResponse)
 async def update_tag(tag_id: str, body: AdminTagUpdate, auth: AdminAuthDep):
     """Update a tag."""
     update_data: dict = {}
@@ -218,53 +271,64 @@ async def update_tag(tag_id: str, body: AdminTagUpdate, auth: AdminAuthDep):
         raise HTTPException(status_code=400, detail="No update data provided")
 
     repo = get_admin_tags_repository()
-    tag = await repo.update_tag(tag_id, update_data)
-    if not tag:
-        raise HTTPException(status_code=404, detail="Tag not found")
-    return {"success": True, "tag": tag}
+    try:
+        tag = await repo.update_tag(tag_id, update_data)
+    except AdminTagGroupNotFound:
+        _not_found()
+    except IntegrityError as e:  # unique_tag_per_scope
+        raise _duplicate("Tag", body.name, e) from e
+    return {"success": True, "tag": require_row(tag)}
 
 
-@router.delete("/{tag_id}")
+@router.delete("/{tag_id}", response_model=AdminTagsOk)
 async def delete_tag(tag_id: str, auth: AdminAuthDep):
     """Delete a tag and its resource associations."""
     repo = get_admin_tags_repository()
     if not await repo.delete_tag(tag_id):
-        raise HTTPException(status_code=404, detail="Tag not found")
+        _not_found()
     return {"success": True}
 
 
-@router.post("/batch")
+@router.post("/batch", response_model=AdminTagBatchResult)
 async def batch_action(body: TagBatchAction, auth: AdminAuthDep):
-    """Batch operations on tags: move, delete, or change color."""
+    """Batch operations on tags: move, delete, or change color.
+
+    All-or-nothing: any unknown or non-numeric tag id (or an unknown target
+    group for ``move``) → typed 404 and no tag is touched.
+    """
     repo = get_admin_tags_repository()
+    n = len(body.tag_ids)
 
     if body.action == "move":
         gid = body.group_id if body.group_id else None
-        await repo.batch_set_group(body.tag_ids, gid)
-        return {"success": True, "message": f"Moved {len(body.tag_ids)} tags"}
-
+        try:
+            done = await repo.batch_set_group(body.tag_ids, gid)
+        except AdminTagGroupNotFound:
+            done = False
+        message = f"Moved {n} tags"
     elif body.action == "delete":
-        await repo.batch_delete(body.tag_ids)
-        return {"success": True, "message": f"Deleted {len(body.tag_ids)} tags"}
-
+        done = await repo.batch_delete(body.tag_ids)
+        message = f"Deleted {n} tags"
     elif body.action == "color":
         if not body.color:
             raise HTTPException(
                 status_code=400, detail="Color required for color action"
             )
-        await repo.batch_set_color(body.tag_ids, body.color)
-        return {
-            "success": True,
-            "message": f"Updated color for {len(body.tag_ids)} tags",
-        }
-
+        done = await repo.batch_set_color(body.tag_ids, body.color)
+        message = f"Updated color for {n} tags"
     else:
         raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")
 
+    if not done:
+        _not_found()
+    return {"success": True, "message": message}
 
-@router.post("/reorder")
+
+@router.post("/reorder", response_model=AdminTagsOk)
 async def reorder_tags(body: TagReorder, auth: AdminAuthDep):
-    """Reorder tags within a group."""
+    """Reorder tags within a group. Any unknown or non-numeric id → typed 404
+    and nothing is reordered."""
     repo = get_admin_tags_repository()
-    await repo.reorder_tags(body.tag_ids)
+    if not await repo.reorder_tags(body.tag_ids):
+        _not_found()
     return {"success": True}

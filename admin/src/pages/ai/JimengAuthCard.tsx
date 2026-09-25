@@ -143,7 +143,7 @@ export function JimengAuthCard({ embedded = false }: { embedded?: boolean } = {}
                 <Button
                   type="primary"
                   icon={<IconLaunch />}
-                  onClick={() => window.open(material.verification_uri, '_blank', 'noopener')}
+                  onClick={() => window.open(material.verification_uri!, '_blank', 'noopener')}
                 >
                   Open link
                 </Button>

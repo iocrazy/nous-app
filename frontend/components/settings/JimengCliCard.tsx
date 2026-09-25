@@ -12,6 +12,7 @@ import { Coins, HelpCircle, Loader2, QrCode, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useOptionalAuth } from '../../contexts/AuthContext';
 import { apiFetch } from '../../services/apiClient';
 
 const BTN_PRIMARY =
@@ -29,6 +30,9 @@ interface JimengStatus {
 
 export function JimengCliCard() {
   const { t } = useTranslation();
+  // Logging in re-points the SHARED server account, so the backend only lets
+  // a platform admin start it; everyone else just sees the status.
+  const isPlatformAdmin = useOptionalAuth()?.userProfile?.role === 'admin';
   const [status, setStatus] = useState<JimengStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -44,6 +48,7 @@ export function JimengCliCard() {
     setLoading(true);
     try {
       const res = await apiFetch('/api/v1/jimeng-cli/status');
+      if (!res.ok) throw new Error(`status ${res.status}`);
       const body = (await res.json()) as { data?: JimengStatus };
       setStatus(body.data ?? null);
       setError(null);
@@ -64,6 +69,7 @@ export function JimengCliCard() {
     setError(null);
     try {
       const res = await apiFetch('/api/v1/jimeng-cli/login', { method: 'POST' });
+      if (!res.ok) throw new Error(`login ${res.status}`);
       const body = (await res.json()) as { data?: typeof loginInfo };
       setLoginInfo(body.data ?? null);
       if (body.data?.already_logged_in) void refresh();
@@ -101,16 +107,18 @@ export function JimengCliCard() {
       {error && <div className="text-xs text-danger">{error}</div>}
 
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          data-testid="jimeng-login"
-          onClick={() => void startLogin()}
-          disabled={working}
-          className={BTN_PRIMARY}
-        >
-          {working ? <Loader2 size={12} className="animate-spin" /> : <QrCode size={12} />}
-          {t('settings.localCli.logIn')}
-        </button>
+        {isPlatformAdmin && (
+          <button
+            type="button"
+            data-testid="jimeng-login"
+            onClick={() => void startLogin()}
+            disabled={working}
+            className={BTN_PRIMARY}
+          >
+            {working ? <Loader2 size={12} className="animate-spin" /> : <QrCode size={12} />}
+            {t('settings.localCli.logIn')}
+          </button>
+        )}
         <button type="button" onClick={() => void refresh()} className={BTN_SECONDARY}>
           <RefreshCw size={12} /> {t('settings.localCli.checkCredits')}
         </button>

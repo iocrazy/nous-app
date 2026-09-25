@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { apiClient } from '../client'
+import type { Schema } from '../../types/api'
 
 // ============================================
 // Types
@@ -25,6 +26,10 @@ interface AlertRuleListResponse {
   data: AlertRule[]
   total: number
 }
+
+/** delete / unmute / resolve. A missing or non-numeric id is a typed 404. */
+export type AlertOkResult = Schema<'AdminAlertOkResult'>
+export type AlertMuteResult = Schema<'AdminAlertMuteResult'>
 
 export interface AlertRuleCreate {
   name: string
@@ -126,7 +131,7 @@ export function useDeleteAlertRule() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => {
-      await apiClient.delete(`/api/v1/admin/alerts/rules/${id}`)
+      await apiClient.delete<AlertOkResult>(`/api/v1/admin/alerts/rules/${id}`)
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'alert-rules'] }),
   })
@@ -136,11 +141,12 @@ export function useMuteAlertRule() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({ id, duration_minutes }: { id: string; duration_minutes: number }) => {
-      await apiClient.post(
+      const { data } = await apiClient.post<AlertMuteResult>(
         `/api/v1/admin/alerts/rules/${id}/mute`,
         null,
         { params: { duration_minutes } },
       )
+      return data
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'alert-rules'] }),
   })
@@ -150,7 +156,7 @@ export function useUnmuteAlertRule() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => {
-      await apiClient.post(`/api/v1/admin/alerts/rules/${id}/unmute`)
+      await apiClient.post<AlertOkResult>(`/api/v1/admin/alerts/rules/${id}/unmute`)
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'alert-rules'] }),
   })
@@ -192,7 +198,7 @@ export function useResolveAlert() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (alertId: string) => {
-      await apiClient.post(`/api/v1/admin/alerts/history/${alertId}/resolve`)
+      await apiClient.post<AlertOkResult>(`/api/v1/admin/alerts/history/${alertId}/resolve`)
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'alert-history'] }),
   })

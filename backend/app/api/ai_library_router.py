@@ -57,6 +57,7 @@ from app.repositories.skill_repository import (
     get_skill_repository,
 )
 from app.repositories.team_repository import get_team_repository
+from app.schemas.admin_ops import AdminAgentTelemetry, AdminSeedReloadResponse
 from app.schemas.agent_runs import (
     RunDetail,
     RunGroupListResponse,
@@ -1878,7 +1879,7 @@ async def delete_skill_file(slug: str, path: str, auth: AuthDep) -> None:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/admin/reload-seeds", response_model=Dict[str, Any])
+@router.post("/admin/reload-seeds", response_model=AdminSeedReloadResponse)
 async def reload_seeds(auth: AdminAuthDep) -> Dict[str, Any]:
     """Re-run SeedLoader.load_all() against backend/seeds/.
 
@@ -3552,6 +3553,7 @@ async def send_chat_message_stream(
 
 @router.get(
     "/admin/telemetry",
+    response_model=AdminAgentTelemetry,
     summary="Admin-only system-wide agent telemetry snapshot",
 )
 async def admin_telemetry(
@@ -4286,33 +4288,6 @@ def _signal_dbos_workflow_if_any(
             f"[approval] DBOS signal failed for workflow={workflow_id} "
             f"(non-fatal — chat path unaffected): {exc}"
         )
-
-
-# ─── G3: Lane queue snapshot for ops ──────────────────────────────────
-
-
-@router.get("/admin/lanes/snapshot", summary="Per-lane queue depth snapshot")
-async def admin_lane_snapshot(auth: AdminAuthDep) -> Dict[str, Any]:
-    """Returns current depth of each LaneQueue partition. Lets ops see
-    which lane is backed up (User vs Background vs Scheduled vs Subagent).
-    """
-    from app.main import app as _app
-
-    lq = getattr(_app.state, "lane_queue", None)
-    if lq is None:
-        return {"available": False, "reason": "lane_queue not wired on this process"}
-
-    queues = getattr(lq, "_queues", {})
-    snapshot: Dict[str, Any] = {}
-    for lane, q in queues.items():
-        try:
-            lane_name = lane.value if hasattr(lane, "value") else str(lane)
-            snapshot[lane_name] = {
-                "depth": q.qsize() if hasattr(q, "qsize") else 0,
-            }
-        except Exception:
-            continue
-    return {"available": True, "lanes": snapshot}
 
 
 # ─── Version history (Phase 3) ────────────────────────────────────────

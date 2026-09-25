@@ -521,6 +521,226 @@
         "title": "AddMemberRequest",
         "type": "object"
       },
+      "AdminAgentBound": {
+        "properties": {
+          "agents": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "lane_capacity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Lane Capacity",
+            "type": "object"
+          },
+          "last_seen_age_s": {
+            "title": "Last Seen Age S",
+            "type": "number"
+          },
+          "providers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "number"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "workflows": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Workflows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "role",
+          "version",
+          "workflows",
+          "agents",
+          "providers",
+          "lane_capacity",
+          "started_at",
+          "last_seen_age_s"
+        ],
+        "title": "AdminAgentBound",
+        "type": "object"
+      },
+      "AdminAgentMetrics": {
+        "description": "Per-process harness snapshot. ``counters`` maps each canonical counter\nto its count; typo'd names collected since start sit under ``_unknown``\nas a nested ``{name: count}`` map.",
+        "properties": {
+          "bounds": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AdminAgentBound"
+            },
+            "title": "Bounds",
+            "type": "object"
+          },
+          "context_engines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Context Engines",
+            "type": "array"
+          },
+          "counters": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "title": "Counters",
+            "type": "object"
+          },
+          "hooks_registered": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hooks Registered",
+            "type": "array"
+          },
+          "model_health": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AdminModelHealthEntry"
+            },
+            "title": "Model Health",
+            "type": "object"
+          },
+          "root_aborts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AdminRootAbortEntry"
+            },
+            "title": "Root Aborts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "counters",
+          "bounds",
+          "root_aborts",
+          "model_health",
+          "hooks_registered",
+          "context_engines"
+        ],
+        "title": "AdminAgentMetrics",
+        "type": "object"
+      },
+      "AdminAgentOverrideCounts": {
+        "description": "How many users / teams customized a preset (``agent_overrides``).",
+        "properties": {
+          "team": {
+            "title": "Team",
+            "type": "integer"
+          },
+          "user": {
+            "title": "User",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "user",
+          "team"
+        ],
+        "title": "AdminAgentOverrideCounts",
+        "type": "object"
+      },
+      "AdminAgentTelemetry": {
+        "properties": {
+          "daily_trend": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTelemetryDailyPoint"
+            },
+            "title": "Daily Trend",
+            "type": "array"
+          },
+          "failure_modes": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTelemetryFailureMode"
+            },
+            "title": "Failure Modes",
+            "type": "array"
+          },
+          "overview": {
+            "$ref": "#/components/schemas/AdminTelemetryOverview"
+          },
+          "status_breakdown": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Status Breakdown",
+            "type": "object"
+          },
+          "top_agents": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTelemetryTopAgent"
+            },
+            "title": "Top Agents",
+            "type": "array"
+          },
+          "top_users": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTelemetryTopUser"
+            },
+            "title": "Top Users",
+            "type": "array"
+          },
+          "window_days": {
+            "title": "Window Days",
+            "type": "integer"
+          },
+          "window_end": {
+            "title": "Window End",
+            "type": "string"
+          },
+          "window_start": {
+            "title": "Window Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window_days",
+          "window_start",
+          "window_end",
+          "overview",
+          "status_breakdown",
+          "top_agents",
+          "top_users",
+          "daily_trend",
+          "failure_modes"
+        ],
+        "title": "AdminAgentTelemetry",
+        "type": "object"
+      },
       "AdminAgentUpdate": {
         "properties": {
           "agent_md": {
@@ -652,6 +872,57 @@
         "title": "AdminAgentUpdate",
         "type": "object"
       },
+      "AdminAlertMuteResult": {
+        "properties": {
+          "mute_until": {
+            "title": "Mute Until",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "mute_until"
+        ],
+        "title": "AdminAlertMuteResult",
+        "type": "object"
+      },
+      "AdminAlertOkResult": {
+        "description": "``{\"ok\": true}`` from delete / unmute / resolve.",
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "AdminAlertOkResult",
+        "type": "object"
+      },
+      "AdminBatchGiftError": {
+        "description": "A team the gift did not reach, and why.",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "team_id": {
+            "title": "Team Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "error"
+        ],
+        "title": "AdminBatchGiftError",
+        "type": "object"
+      },
       "AdminBatchGiftRequest": {
         "description": "Gift points to multiple teams at once.",
         "properties": {
@@ -683,6 +954,821 @@
           "amount"
         ],
         "title": "AdminBatchGiftRequest",
+        "type": "object"
+      },
+      "AdminBatchGiftResult": {
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/AdminBatchGiftError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "gifted_count": {
+            "title": "Gifted Count",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "gifted_count",
+          "errors"
+        ],
+        "title": "AdminBatchGiftResult",
+        "type": "object"
+      },
+      "AdminBoundaryAuditPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminBoundaryAuditRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "AdminBoundaryAuditPage",
+        "type": "object"
+      },
+      "AdminBoundaryAuditRow": {
+        "properties": {
+          "blocked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "layer": {
+            "title": "Layer",
+            "type": "string"
+          },
+          "metadata_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Json"
+          },
+          "raw_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Url"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "resolved_ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Ip"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "blocked_at",
+          "layer",
+          "reason",
+          "raw_url",
+          "resolved_ip",
+          "user_id",
+          "request_id",
+          "metadata_json"
+        ],
+        "title": "AdminBoundaryAuditRow",
+        "type": "object"
+      },
+      "AdminBoundaryAuditSummary": {
+        "properties": {
+          "by_layer": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Layer",
+            "type": "object"
+          },
+          "by_reason": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Reason",
+            "type": "object"
+          },
+          "total_7d": {
+            "title": "Total 7D",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "by_layer",
+          "by_reason",
+          "total_7d"
+        ],
+        "title": "AdminBoundaryAuditSummary",
+        "type": "object"
+      },
+      "AdminCatalogAgentDetail": {
+        "description": "``PUT /admin/agents/{slug}``: the whole refreshed ``ai_agents`` row\n(``SELECT *`` shape) plus its override counts.\n\n``team_id`` / ``project_id`` are Snowflake BIGINTs sent as JSON numbers.",
+        "properties": {
+          "agent_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Group"
+          },
+          "agent_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Md"
+          },
+          "budget_per_run_cents": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Per Run Cents"
+          },
+          "capability_profile": {
+            "title": "Capability Profile"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "fallback_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Models"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "identity_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Md"
+          },
+          "is_system_preset": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is System Preset"
+          },
+          "max_concurrent_runs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Concurrent Runs"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          },
+          "memory_injection_top_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Injection Top N"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "monthly_cost_cents_budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Cost Cents Budget"
+          },
+          "monthly_token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Token Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "override_counts": {
+            "$ref": "#/components/schemas/AdminAgentOverrideCounts"
+          },
+          "paused_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused Reason"
+          },
+          "persistent": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persistent"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "seed_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed Hash"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "soul_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Soul Md"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          },
+          "timeout_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Sec"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "current_version",
+          "fallback_models",
+          "persistent",
+          "description",
+          "model",
+          "temperature",
+          "max_tokens",
+          "team_id",
+          "project_id",
+          "created_by",
+          "enabled",
+          "sort_order",
+          "created_at",
+          "updated_at",
+          "slug",
+          "identity_md",
+          "soul_md",
+          "agent_md",
+          "is_system_preset",
+          "capability_profile",
+          "user_id",
+          "icon",
+          "monthly_token_budget",
+          "monthly_cost_cents_budget",
+          "paused_reason",
+          "budget_per_run_cents",
+          "memory_injection_top_n",
+          "seed_hash",
+          "timeout_sec",
+          "max_concurrent_runs",
+          "agent_group",
+          "deleted_at",
+          "override_counts"
+        ],
+        "title": "AdminCatalogAgentDetail",
+        "type": "object"
+      },
+      "AdminCatalogAgentItem": {
+        "description": "One ``GET /admin/agents`` row: a fixed projection of the preset.",
+        "properties": {
+          "agent_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Md"
+          },
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "fallback_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Models"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "identity_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Md"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "override_counts": {
+            "$ref": "#/components/schemas/AdminAgentOverrideCounts"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "soul_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Soul Md"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "description",
+          "icon",
+          "model",
+          "temperature",
+          "max_tokens",
+          "identity_md",
+          "soul_md",
+          "agent_md",
+          "fallback_models",
+          "enabled",
+          "updated_at",
+          "current_version",
+          "override_counts"
+        ],
+        "title": "AdminCatalogAgentItem",
+        "type": "object"
+      },
+      "AdminCatalogAgentList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminCatalogAgentItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "AdminCatalogAgentList",
         "type": "object"
       },
       "AdminConsumptionChartItem": {
@@ -819,6 +1905,39 @@
         "title": "AdminCreditTransactionResponse",
         "type": "object"
       },
+      "AdminCreditsOkResult": {
+        "description": "Package delete.",
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "AdminCreditsOkResult",
+        "type": "object"
+      },
+      "AdminCreditsOrderActionResult": {
+        "description": "Manual order confirm / refund.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "message"
+        ],
+        "title": "AdminCreditsOrderActionResult",
+        "type": "object"
+      },
       "AdminCreditsStatsResponse": {
         "description": "System-wide credits statistics for the admin dashboard.",
         "properties": {
@@ -861,6 +1980,178 @@
         "title": "AdminCreditsStatsResponse",
         "type": "object"
       },
+      "AdminJimengLoginResponse": {
+        "description": "``status='already'`` carries nothing else. ``status='pending'`` carries\nthe device-flow material the operator needs to authorize: the link, the\ncode to type, and when the window closes. The ``device_code`` (what the\npolling client redeems for a token) stays on the server.",
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "already"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "user_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Code"
+          },
+          "verification_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification Uri"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "AdminJimengLoginResponse",
+        "type": "object"
+      },
+      "AdminJimengLogoutResponse": {
+        "properties": {
+          "logged_in": {
+            "title": "Logged In",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "logged_in"
+        ],
+        "title": "AdminJimengLogoutResponse",
+        "type": "object"
+      },
+      "AdminJimengStatus": {
+        "description": "``credit`` only when the CLI printed one; ``error`` only when not\nlogged in and the provider classified why (an error code, never CLI\noutput).",
+        "properties": {
+          "credit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "logged_in": {
+            "title": "Logged In",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "logged_in"
+        ],
+        "title": "AdminJimengStatus",
+        "type": "object"
+      },
+      "AdminMemoryDemoteResult": {
+        "description": "``demoted=false``: no memory row with that id, or the write failed.",
+        "properties": {
+          "demoted": {
+            "title": "Demoted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "demoted"
+        ],
+        "title": "AdminMemoryDemoteResult",
+        "type": "object"
+      },
+      "AdminMemoryPromotionApproveResult": {
+        "description": "``approved=false``: the proposal was not pending, the owner has left\nthe target team (it stays pending), or the write failed.",
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "approved"
+        ],
+        "title": "AdminMemoryPromotionApproveResult",
+        "type": "object"
+      },
+      "AdminMemoryPromotionRejectResult": {
+        "description": "``rejected=false``: no pending proposal with that id, or the write\nfailed.",
+        "properties": {
+          "rejected": {
+            "title": "Rejected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rejected"
+        ],
+        "title": "AdminMemoryPromotionRejectResult",
+        "type": "object"
+      },
+      "AdminModelHealthEntry": {
+        "properties": {
+          "cooldown_remaining_s": {
+            "title": "Cooldown Remaining S",
+            "type": "number"
+          },
+          "health": {
+            "title": "Health",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "health",
+          "reason",
+          "cooldown_remaining_s"
+        ],
+        "title": "AdminModelHealthEntry",
+        "type": "object"
+      },
       "AdminModuleDefinition": {
         "description": "Module definition for API response.",
         "properties": {
@@ -888,6 +2179,19 @@
           "enabled"
         ],
         "title": "AdminModuleDefinition",
+        "type": "object"
+      },
+      "AdminNousModelDeleteResult": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "AdminNousModelDeleteResult",
         "type": "object"
       },
       "AdminOrderListResponse": {
@@ -1077,6 +2381,123 @@
         "title": "AdminPackageRequest",
         "type": "object"
       },
+      "AdminPointPackage": {
+        "description": "One ``point_packages`` row.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "points_amount": {
+            "title": "Points Amount",
+            "type": "integer"
+          },
+          "price_cents": {
+            "title": "Price Cents",
+            "type": "integer"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "points_amount",
+          "price_cents",
+          "currency",
+          "is_active",
+          "sort_order",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminPointPackage",
+        "type": "object"
+      },
+      "AdminPointPricing": {
+        "description": "One ``point_pricing`` row.",
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "points_cost": {
+            "title": "Points Cost",
+            "type": "integer"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "action_type",
+          "points_cost",
+          "description",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminPointPricing",
+        "type": "object"
+      },
       "AdminPointsAdjustRequest": {
         "description": "Admin manual points adjustment for a single team.",
         "properties": {
@@ -1108,6 +2529,25 @@
         "title": "AdminPointsAdjustRequest",
         "type": "object"
       },
+      "AdminPointsAdjustResult": {
+        "description": "``POST /admin/credits/adjust``: the team's balance after the change.",
+        "properties": {
+          "new_balance": {
+            "title": "New Balance",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "new_balance"
+        ],
+        "title": "AdminPointsAdjustResult",
+        "type": "object"
+      },
       "AdminPricingUpdateRequest": {
         "description": "Update pricing for a specific action_type.",
         "properties": {
@@ -1131,6 +2571,40 @@
           "points_cost"
         ],
         "title": "AdminPricingUpdateRequest",
+        "type": "object"
+      },
+      "AdminQueueDepth": {
+        "properties": {
+          "messages": {
+            "title": "Messages",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "messages"
+        ],
+        "title": "AdminQueueDepth",
+        "type": "object"
+      },
+      "AdminQueuesResponse": {
+        "properties": {
+          "queues": {
+            "items": {
+              "$ref": "#/components/schemas/AdminQueueDepth"
+            },
+            "title": "Queues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "queues"
+        ],
+        "title": "AdminQueuesResponse",
         "type": "object"
       },
       "AdminRevenueChartItem": {
@@ -1157,6 +2631,32 @@
         "title": "AdminRevenueChartItem",
         "type": "object"
       },
+      "AdminRootAbortEntry": {
+        "properties": {
+          "child_count": {
+            "title": "Child Count",
+            "type": "integer"
+          },
+          "children": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "is_aborted": {
+            "title": "Is Aborted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_aborted",
+          "children",
+          "child_count"
+        ],
+        "title": "AdminRootAbortEntry",
+        "type": "object"
+      },
       "AdminSearchResponse": {
         "properties": {
           "facets": {
@@ -1180,6 +2680,183 @@
           "facets"
         ],
         "title": "AdminSearchResponse",
+        "type": "object"
+      },
+      "AdminSecretsSelfhealSummary": {
+        "description": "``POST /admin/settings/encrypt-secrets``: rows rewritten per store.\n\nCounts only — the sweep never puts a secret (plain or encrypted) into its\nsummary. A skipped run carries ``ok=false`` + ``reason`` and none of the\ncounters; the route drops unset keys so those stay absent on the wire.",
+        "properties": {
+          "errors": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errors"
+          },
+          "nous_models": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nous Models"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "platform_ai_providers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Ai Providers"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "system_settings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Settings"
+          },
+          "user_mcp_servers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Mcp Servers"
+          },
+          "user_settings_ai_providers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Settings Ai Providers"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "AdminSecretsSelfhealSummary",
+        "type": "object"
+      },
+      "AdminSeedCounters": {
+        "properties": {
+          "agents": {
+            "title": "Agents",
+            "type": "integer"
+          },
+          "skill_files": {
+            "title": "Skill Files",
+            "type": "integer"
+          },
+          "skills": {
+            "title": "Skills",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agents",
+          "skills",
+          "skill_files"
+        ],
+        "title": "AdminSeedCounters",
+        "type": "object"
+      },
+      "AdminSeedLoadError": {
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "title": "Error",
+            "type": "object"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "slug",
+          "error"
+        ],
+        "title": "AdminSeedLoadError",
+        "type": "object"
+      },
+      "AdminSeedReloadResponse": {
+        "properties": {
+          "agent_skill_bindings": {
+            "title": "Agent Skill Bindings",
+            "type": "integer"
+          },
+          "agents": {
+            "title": "Agents",
+            "type": "integer"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/AdminSeedLoadError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "skills": {
+            "title": "Skills",
+            "type": "integer"
+          },
+          "skipped": {
+            "$ref": "#/components/schemas/AdminSeedCounters"
+          },
+          "upserted": {
+            "$ref": "#/components/schemas/AdminSeedCounters"
+          }
+        },
+        "required": [
+          "agents",
+          "skills",
+          "agent_skill_bindings",
+          "skipped",
+          "upserted",
+          "errors"
+        ],
+        "title": "AdminSeedReloadResponse",
         "type": "object"
       },
       "AdminSourceCreate": {
@@ -1394,6 +3071,452 @@
         "title": "AdminStatsResponse",
         "type": "object"
       },
+      "AdminStorageAsset": {
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "kind": {
+            "enum": [
+              "video",
+              "cover",
+              "thumbnail",
+              "sprite",
+              "hls"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "present_in_db": {
+            "title": "Present In Db",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          }
+        },
+        "required": [
+          "kind",
+          "key",
+          "size_bytes",
+          "present_in_db"
+        ],
+        "title": "AdminStorageAsset",
+        "type": "object"
+      },
+      "AdminStorageAudit": {
+        "description": "Newest storage_audit run. ``status`` is the task_tracking phase, or\n``none`` when no scan has ever run; ``missing_truncated`` is absent in\nthat ``none`` case (route uses ``response_model_exclude_unset``).",
+        "properties": {
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/AdminStorageAuditMissing"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "missing_truncated": {
+            "default": false,
+            "title": "Missing Truncated",
+            "type": "boolean"
+          },
+          "scanned": {
+            "title": "Scanned",
+            "type": "integer"
+          },
+          "scanned_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanned At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "scanned",
+          "errors",
+          "scanned_at",
+          "missing"
+        ],
+        "title": "AdminStorageAudit",
+        "type": "object"
+      },
+      "AdminStorageAuditMissing": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "media_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Id"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "media_id",
+          "resource_id"
+        ],
+        "title": "AdminStorageAuditMissing",
+        "type": "object"
+      },
+      "AdminStorageDeepVerifyDispatch": {
+        "properties": {
+          "already_running": {
+            "title": "Already Running",
+            "type": "boolean"
+          },
+          "workflow_id": {
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_id",
+          "already_running"
+        ],
+        "title": "AdminStorageDeepVerifyDispatch",
+        "type": "object"
+      },
+      "AdminStorageLastScan": {
+        "description": "Summary of the newest completed storage_audit run.",
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "integer"
+          },
+          "scanned": {
+            "title": "Scanned",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "at",
+          "scanned",
+          "missing",
+          "errors"
+        ],
+        "title": "AdminStorageLastScan",
+        "type": "object"
+      },
+      "AdminStorageMediaDetail": {
+        "properties": {
+          "assets": {
+            "items": {
+              "$ref": "#/components/schemas/AdminStorageAsset"
+            },
+            "title": "Assets",
+            "type": "array"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          }
+        },
+        "required": [
+          "assets",
+          "scope_id"
+        ],
+        "title": "AdminStorageMediaDetail",
+        "type": "object"
+      },
+      "AdminStorageMediaStatusList": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/AdminStorageMediaStatusRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "AdminStorageMediaStatusList",
+        "type": "object"
+      },
+      "AdminStorageMediaStatusRow": {
+        "properties": {
+          "cover_ok": {
+            "title": "Cover Ok",
+            "type": "boolean"
+          },
+          "hls_ok": {
+            "title": "Hls Ok",
+            "type": "boolean"
+          },
+          "media_id": {
+            "title": "Media Id",
+            "type": "string"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "storage_status": {
+            "enum": [
+              "ok",
+              "no_video",
+              "fs_residue"
+            ],
+            "title": "Storage Status",
+            "type": "string"
+          },
+          "thumbnail_ok": {
+            "title": "Thumbnail Ok",
+            "type": "boolean"
+          },
+          "video_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Key"
+          },
+          "video_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Size"
+          }
+        },
+        "required": [
+          "media_id",
+          "video_key",
+          "video_size",
+          "cover_ok",
+          "thumbnail_ok",
+          "hls_ok",
+          "storage_status",
+          "scope_id"
+        ],
+        "title": "AdminStorageMediaStatusRow",
+        "type": "object"
+      },
+      "AdminStorageMediaVerify": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/AdminStorageVerifyResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "title": "AdminStorageMediaVerify",
+        "type": "object"
+      },
+      "AdminStorageStats": {
+        "properties": {
+          "broken": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broken"
+          },
+          "fs_residue": {
+            "title": "Fs Residue",
+            "type": "integer"
+          },
+          "hls_ready": {
+            "title": "Hls Ready",
+            "type": "integer"
+          },
+          "last_scan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminStorageLastScan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "orphans": {
+            "title": "Orphans",
+            "type": "integer"
+          },
+          "videos": {
+            "$ref": "#/components/schemas/AdminStorageVideoTotals"
+          }
+        },
+        "required": [
+          "videos",
+          "fs_residue",
+          "orphans",
+          "hls_ready",
+          "broken",
+          "last_scan"
+        ],
+        "title": "AdminStorageStats",
+        "type": "object"
+      },
+      "AdminStorageVerifyResult": {
+        "properties": {
+          "exists": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exists"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "video",
+              "cover",
+              "thumbnail",
+              "sprite",
+              "hls"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "key",
+          "exists"
+        ],
+        "title": "AdminStorageVerifyResult",
+        "type": "object"
+      },
+      "AdminStorageVideoTotals": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "size_bytes"
+        ],
+        "title": "AdminStorageVideoTotals",
+        "type": "object"
+      },
+      "AdminTablePreferenceResetResult": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "AdminTablePreferenceResetResult",
+        "type": "object"
+      },
       "AdminTablePreferenceResponse": {
         "description": "Stored table preferences for a user + table_key.",
         "properties": {
@@ -1503,6 +3626,24 @@
         "title": "AdminTablePreferenceUpdate",
         "type": "object"
       },
+      "AdminTagBatchResult": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "AdminTagBatchResult",
+        "type": "object"
+      },
       "AdminTagCreate": {
         "properties": {
           "color": {
@@ -1574,6 +3715,144 @@
         "title": "AdminTagGroupCreate",
         "type": "object"
       },
+      "AdminTagGroupListItem": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "tag_count": {
+            "title": "Tag Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sort_order",
+          "created_at",
+          "tag_count"
+        ],
+        "title": "AdminTagGroupListItem",
+        "type": "object"
+      },
+      "AdminTagGroupListResponse": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTagGroupListItem"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "total_tags": {
+            "title": "Total Tags",
+            "type": "integer"
+          },
+          "uncategorized_count": {
+            "title": "Uncategorized Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "groups",
+          "total_tags",
+          "uncategorized_count"
+        ],
+        "title": "AdminTagGroupListResponse",
+        "type": "object"
+      },
+      "AdminTagGroupResponse": {
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/AdminTagGroupRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "group"
+        ],
+        "title": "AdminTagGroupResponse",
+        "type": "object"
+      },
+      "AdminTagGroupRow": {
+        "description": "One ``tag_groups`` row, ``SELECT *`` shape.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sort_order",
+          "created_at"
+        ],
+        "title": "AdminTagGroupRow",
+        "type": "object"
+      },
       "AdminTagGroupUpdate": {
         "properties": {
           "name": {
@@ -1600,6 +3879,367 @@
           }
         },
         "title": "AdminTagGroupUpdate",
+        "type": "object"
+      },
+      "AdminTagListItem": {
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "group_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Name"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "name_zh": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Zh"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "prompt_trigger": {
+            "title": "Prompt Trigger",
+            "type": "boolean"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "type": {
+            "enum": [
+              "user",
+              "time"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "usage_count": {
+            "title": "Usage Count",
+            "type": "integer"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "slug",
+          "enabled",
+          "color",
+          "icon",
+          "user_id",
+          "created_at",
+          "name_zh",
+          "scope_id",
+          "group_id",
+          "sort_order",
+          "origin",
+          "prompt_trigger",
+          "group_name",
+          "usage_count"
+        ],
+        "title": "AdminTagListItem",
+        "type": "object"
+      },
+      "AdminTagListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTagListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "AdminTagListResponse",
+        "type": "object"
+      },
+      "AdminTagResponse": {
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "tag": {
+            "$ref": "#/components/schemas/AdminTagRow"
+          }
+        },
+        "required": [
+          "tag"
+        ],
+        "title": "AdminTagResponse",
+        "type": "object"
+      },
+      "AdminTagRow": {
+        "description": "One ``tags`` row, ``SELECT *`` shape.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "name_zh": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Zh"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "prompt_trigger": {
+            "title": "Prompt Trigger",
+            "type": "boolean"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "type": {
+            "enum": [
+              "user",
+              "time"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "slug",
+          "enabled",
+          "color",
+          "icon",
+          "user_id",
+          "created_at",
+          "name_zh",
+          "scope_id",
+          "group_id",
+          "sort_order",
+          "origin",
+          "prompt_trigger"
+        ],
+        "title": "AdminTagRow",
         "type": "object"
       },
       "AdminTagUpdate": {
@@ -1672,6 +4312,37 @@
           }
         },
         "title": "AdminTagUpdate",
+        "type": "object"
+      },
+      "AdminTagsOk": {
+        "description": "Body of the writes that return nothing but success.",
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "title": "AdminTagsOk",
+        "type": "object"
+      },
+      "AdminTaskActionResponse": {
+        "description": "Cancel and retry both answer ``{message, task_id}``.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "task_id"
+        ],
+        "title": "AdminTaskActionResponse",
         "type": "object"
       },
       "AdminTaskListResponse": {
@@ -2081,6 +4752,30 @@
         "title": "AdminTeamModulesResponse",
         "type": "object"
       },
+      "AdminTeamPointsAdjustResult": {
+        "description": "``POST /points/admin/adjust`` (the user app's Billing page).",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "new_balance": {
+            "title": "New Balance",
+            "type": "integer"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "message",
+          "new_balance"
+        ],
+        "title": "AdminTeamPointsAdjustResult",
+        "type": "object"
+      },
       "AdminTeamResponse": {
         "description": "Admin team response with full details.",
         "properties": {
@@ -2172,6 +4867,151 @@
         "title": "AdminTeamResponse",
         "type": "object"
       },
+      "AdminTelemetryDailyPoint": {
+        "properties": {
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost_cents": {
+            "title": "Cost Cents",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "runs",
+          "cost_cents",
+          "prompt_tokens",
+          "completion_tokens"
+        ],
+        "title": "AdminTelemetryDailyPoint",
+        "type": "object"
+      },
+      "AdminTelemetryFailureMode": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "error_code": {
+            "title": "Error Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error_code",
+          "count"
+        ],
+        "title": "AdminTelemetryFailureMode",
+        "type": "object"
+      },
+      "AdminTelemetryOverview": {
+        "properties": {
+          "total_completion_tokens": {
+            "title": "Total Completion Tokens",
+            "type": "integer"
+          },
+          "total_cost_cents": {
+            "title": "Total Cost Cents",
+            "type": "number"
+          },
+          "total_prompt_tokens": {
+            "title": "Total Prompt Tokens",
+            "type": "integer"
+          },
+          "total_runs": {
+            "title": "Total Runs",
+            "type": "integer"
+          },
+          "unique_agents": {
+            "title": "Unique Agents",
+            "type": "integer"
+          },
+          "unique_users": {
+            "title": "Unique Users",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_runs",
+          "total_prompt_tokens",
+          "total_completion_tokens",
+          "total_cost_cents",
+          "unique_agents",
+          "unique_users"
+        ],
+        "title": "AdminTelemetryOverview",
+        "type": "object"
+      },
+      "AdminTelemetryTopAgent": {
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "cost_cents": {
+            "title": "Cost Cents",
+            "type": "number"
+          },
+          "run_count": {
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agent_id",
+          "run_count",
+          "cost_cents",
+          "total_tokens"
+        ],
+        "title": "AdminTelemetryTopAgent",
+        "type": "object"
+      },
+      "AdminTelemetryTopUser": {
+        "properties": {
+          "cost_cents": {
+            "title": "Cost Cents",
+            "type": "number"
+          },
+          "run_count": {
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "run_count",
+          "cost_cents",
+          "total_tokens"
+        ],
+        "title": "AdminTelemetryTopUser",
+        "type": "object"
+      },
       "AdminTopTeamItem": {
         "description": "Team entry for the top-consumers ranking.",
         "properties": {
@@ -2194,6 +5034,34 @@
           "team_name"
         ],
         "title": "AdminTopTeamItem",
+        "type": "object"
+      },
+      "AdminTranscodeBatchResponse": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "integer"
+          },
+          "total_found": {
+            "title": "Total Found",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message",
+          "total_found",
+          "queued",
+          "has_more"
+        ],
+        "title": "AdminTranscodeBatchResponse",
         "type": "object"
       },
       "AdminTranscodeListResponse": {
@@ -2226,6 +5094,24 @@
           "page_size"
         ],
         "title": "AdminTranscodeListResponse",
+        "type": "object"
+      },
+      "AdminTranscodeRetryResponse": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "version_id"
+        ],
+        "title": "AdminTranscodeRetryResponse",
         "type": "object"
       },
       "AdminTranscodeSettingsResponse": {
@@ -3331,6 +6217,91 @@
           }
         },
         "title": "AdminVideoStatsResponse",
+        "type": "object"
+      },
+      "AdminWorkerInfo": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "concurrency": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "processed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Processed"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "uptime": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "active",
+          "processed",
+          "concurrency",
+          "uptime"
+        ],
+        "title": "AdminWorkerInfo",
+        "type": "object"
+      },
+      "AdminWorkersResponse": {
+        "properties": {
+          "online": {
+            "title": "Online",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/AdminWorkerInfo"
+            },
+            "title": "Workers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "online",
+          "total",
+          "workers"
+        ],
+        "title": "AdminWorkersResponse",
         "type": "object"
       },
       "AdvanceNodeRef": {
@@ -54572,9 +57543,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Agent Metrics Api V1 Admin Agent Metrics Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AdminAgentMetrics"
                 }
               }
             },
@@ -54640,11 +57609,13 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "Prometheus exposition format 0.0.4"
           },
           "422": {
             "content": {
@@ -54708,9 +57679,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Catalog Agents Api V1 Admin Agents Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AdminCatalogAgentList"
                 }
               }
             },
@@ -54797,9 +57766,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Catalog Agent Api V1 Admin Agents  Slug  Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AdminCatalogAgentDetail"
                 }
               }
             },
@@ -55287,6 +58254,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "pattern": "^\\d{1,19}$",
                   "type": "string"
                 },
                 {
@@ -55460,7 +58428,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAlertOkResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -55630,7 +58600,7 @@
     },
     "/api/v1/admin/alerts/rules/{rule_id}": {
       "delete": {
-        "description": "Delete an alert rule.",
+        "description": "Delete an alert rule (its history goes with it: FK cascade).",
         "operationId": "delete_alert_rule_api_v1_admin_alerts_rules__rule_id__delete",
         "parameters": [
           {
@@ -55679,7 +58649,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAlertOkResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -55851,7 +58823,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAlertMuteResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -55926,7 +58900,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAlertOkResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -56471,9 +59447,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Boundary Audit Api V1 Admin Boundary Audit Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AdminBoundaryAuditPage"
                 }
               }
             },
@@ -56541,9 +59515,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Boundary Audit Summary Api V1 Admin Boundary Audit Summary Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AdminBoundaryAuditSummary"
                 }
               }
             },
@@ -56572,14 +59544,60 @@
       "get": {
         "description": "Return queue depths. PR-D7: there are no Celery queues. We\nreport the DBOS `agent_workforce` queue depth instead, plus an\nempty list of legacy queue names for back-compat with the admin\nfrontend that may still iterate them.",
         "operationId": "get_celery_queues_api_v1_admin_celery_queues_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminQueuesResponse"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get Celery Queues",
@@ -56594,14 +59612,60 @@
       "get": {
         "description": "Return DBOS worker info. Single in-process 'worker' since DBOS\nruns in the FastAPI host process. Payload mirrors the legacy\nCelery-shape so the admin UI keeps rendering.",
         "operationId": "get_celery_workers_api_v1_admin_celery_workers_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminWorkersResponse"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get Celery Workers",
@@ -56614,7 +59678,7 @@
     },
     "/api/v1/admin/credits/adjust": {
       "post": {
-        "description": "Manually adjust points for a single team.",
+        "description": "Manually adjust points for a single team (positive adds, negative\ndeducts down to zero; zero is refused).",
         "operationId": "adjust_points_api_v1_admin_credits_adjust_post",
         "parameters": [
           {
@@ -56664,7 +59728,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPointsAdjustResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -56690,7 +59756,7 @@
     },
     "/api/v1/admin/credits/batch-gift": {
       "post": {
-        "description": "Gift points to multiple teams.",
+        "description": "Gift points to multiple teams.\n\nA team only counts as gifted when the points really landed: an unknown or\nnon-numeric team id is reported in ``errors`` instead of failing inside\nthe quota insert, and a non-positive amount is refused up front (it used\nto count every team as gifted while ``add_points`` credited nothing).",
         "operationId": "batch_gift_api_v1_admin_credits_batch_gift_post",
         "parameters": [
           {
@@ -56740,7 +59806,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBatchGiftResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -57060,7 +60128,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCreditsOrderActionResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -57135,7 +60205,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCreditsOrderActionResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -57201,7 +60273,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminPointPackage"
+                  },
+                  "title": "Response List Packages Api V1 Admin Credits Packages Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -57275,7 +60353,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPointPackage"
+                }
               }
             },
             "description": "Successful Response"
@@ -57301,7 +60381,7 @@
     },
     "/api/v1/admin/credits/packages/{package_id}": {
       "delete": {
-        "description": "Delete a point package.",
+        "description": "Delete a point package.\n\nA package that orders point at cannot be deleted (``orders.package_id`` has\nno ON DELETE): that is a 409 telling the admin to deactivate it instead,\nnot a 500. A package that is not there is a 404, not ``ok``.",
         "operationId": "delete_package_api_v1_admin_credits_packages__package_id__delete",
         "parameters": [
           {
@@ -57350,7 +60430,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCreditsOkResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -57433,7 +60515,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPointPackage"
+                }
               }
             },
             "description": "Successful Response"
@@ -57499,7 +60583,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminPointPricing"
+                  },
+                  "title": "Response List Pricing Api V1 Admin Credits Pricing Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -57584,7 +60674,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPointPricing"
+                }
               }
             },
             "description": "Successful Response"
@@ -58167,30 +61259,9 @@
         ]
       }
     },
-    "/api/v1/admin/health": {
-      "get": {
-        "description": "Unauthenticated health check for admin API diagnostics.",
-        "operationId": "admin_health_api_v1_admin_health_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Admin Health",
-        "tags": [
-          "Admin",
-          "Admin"
-        ]
-      }
-    },
     "/api/v1/admin/jimeng/login": {
       "post": {
-        "description": "Start the OAuth device flow and return the authorization material.\n\nLaunches ``dreamina login`` (which prints the material then keeps polling the\ndevice authorization, writing the token on success). Returns\n``{status:'pending', verification_uri, user_code, device_code, expires_at}``.\nA new login supersedes any in-flight one (old process killed first). If the\nCLI is already logged in the process exits immediately → ``{status:'already'}``.\n504 if the material doesn't arrive within the window.",
+        "description": "Start the OAuth device flow and return the authorization material.\n\nLaunches ``dreamina login`` (which prints the material then keeps polling the\ndevice authorization, writing the token on success). Returns\n``{status:'pending', verification_uri, user_code, expires_at}`` — never the\n``device_code`` (see ``_PUBLIC_MATERIAL_KEYS``).\nA new login supersedes any in-flight one (old process killed first). If the\nCLI is already logged in the process exits immediately → ``{status:'already'}``.\n504 if the material doesn't arrive within the window.",
         "operationId": "jimeng_login_api_v1_admin_jimeng_login_post",
         "parameters": [
           {
@@ -58231,9 +61302,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Jimeng Login Api V1 Admin Jimeng Login Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AdminJimengLoginResponse"
                 }
               }
             },
@@ -58301,9 +61370,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Jimeng Logout Api V1 Admin Jimeng Logout Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AdminJimengLogoutResponse"
                 }
               }
             },
@@ -58371,9 +61438,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Jimeng Status Api V1 Admin Jimeng Status Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AdminJimengStatus"
                 }
               }
             },
@@ -59747,7 +62812,7 @@
     },
     "/api/v1/admin/nous-models/{model_id}": {
       "delete": {
-        "description": "Delete a Nous model.",
+        "description": "Delete a Nous model. A non-numeric id or one that matches no row is a\ntyped 404 (it used to answer 200 \"Deleted\" for a missing row).",
         "operationId": "delete_nous_model_api_v1_admin_nous_models__model_id__delete",
         "parameters": [
           {
@@ -59796,7 +62861,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminNousModelDeleteResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -60659,7 +63726,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSecretsSelfhealSummary"
+                }
               }
             },
             "description": "Successful Response"
@@ -61390,7 +64459,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMemoryPromotionApproveResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -61465,7 +64536,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMemoryPromotionRejectResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -61686,7 +64759,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMemoryDemoteResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -62677,228 +65752,6 @@
         ]
       }
     },
-    "/api/v1/admin/stats/storage": {
-      "get": {
-        "description": "Get storage usage statistics.",
-        "operationId": "get_storage_stats_api_v1_admin_stats_storage_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Storage Stats",
-        "tags": [
-          "Admin",
-          "Admin",
-          "Admin - Stats"
-        ]
-      }
-    },
-    "/api/v1/admin/stats/users/growth": {
-      "get": {
-        "description": "Get user registration growth over time.",
-        "operationId": "get_user_growth_api_v1_admin_stats_users_growth_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "days",
-            "required": false,
-            "schema": {
-              "default": 30,
-              "maximum": 365,
-              "minimum": 7,
-              "title": "Days",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get User Growth",
-        "tags": [
-          "Admin",
-          "Admin",
-          "Admin - Stats"
-        ]
-      }
-    },
-    "/api/v1/admin/stats/videos/stats": {
-      "get": {
-        "description": "Get video statistics over time.",
-        "operationId": "get_video_stats_api_v1_admin_stats_videos_stats_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "days",
-            "required": false,
-            "schema": {
-              "default": 30,
-              "maximum": 365,
-              "minimum": 7,
-              "title": "Days",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Video Stats",
-        "tags": [
-          "Admin",
-          "Admin",
-          "Admin - Stats"
-        ]
-      }
-    },
     "/api/v1/admin/storage-migration": {
       "post": {
         "description": "Dispatch one ``storage_migration_workflow`` run for ``body.module``.\n\n404/500 handling of the underlying batch (missing files, size\nmismatches, etc.) happens inside the workflow itself and is surfaced\nvia ``task_tracking`` — this endpoint only validates the module name\nand enqueues the run.",
@@ -63018,7 +65871,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStorageAudit"
+                }
               }
             },
             "description": "Successful Response"
@@ -63092,7 +65947,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStorageMediaStatusList"
+                }
               }
             },
             "description": "Successful Response"
@@ -63125,6 +65982,8 @@
             "name": "media_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Media Id",
               "type": "integer"
             }
@@ -63166,7 +66025,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStorageMediaDetail"
+                }
               }
             },
             "description": "Successful Response"
@@ -63200,6 +66061,8 @@
             "name": "media_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Media Id",
               "type": "integer"
             }
@@ -63241,7 +66104,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStorageMediaVerify"
+                }
               }
             },
             "description": "Successful Response"
@@ -63306,7 +66171,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStorageStats"
+                }
               }
             },
             "description": "Successful Response"
@@ -63372,7 +66239,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStorageDeepVerifyDispatch"
+                }
               }
             },
             "description": "Successful Response"
@@ -63398,7 +66267,7 @@
     },
     "/api/v1/admin/table-preferences/{table_key}": {
       "delete": {
-        "description": "Delete saved table preferences for a specific table.",
+        "description": "Reset a table to its defaults: delete the CALLER's saved preferences.\n\nScoped to ``auth.user_id`` — one admin cannot clear another's. Idempotent:\nresetting a table that was never customized is still a success (it is\nalready at its defaults), so a miss is not a 404 here.",
         "operationId": "delete_table_preferences_api_v1_admin_table_preferences__table_key__delete",
         "parameters": [
           {
@@ -63447,7 +66316,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTablePreferenceResetResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -63763,7 +66634,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTagListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -63787,7 +66660,7 @@
         ]
       },
       "post": {
-        "description": "Create a new system tag.",
+        "description": "Create a tag owned by the calling admin.\n\nThere are no system tags any more (mig 468 dropped ``type='system'`` from\n``tags_type_check`` and gave every user their own copy of the initial\nset), so an admin-made tag is an ordinary ``user`` tag in the admin's own\nlibrary. This used to insert ``type='system', user_id=NULL``, which the\nCHECK rejects: every create from the admin console was a 500.",
         "operationId": "create_tag_api_v1_admin_tags_post",
         "parameters": [
           {
@@ -63837,7 +66710,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTagResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -63863,7 +66738,7 @@
     },
     "/api/v1/admin/tags/batch": {
       "post": {
-        "description": "Batch operations on tags: move, delete, or change color.",
+        "description": "Batch operations on tags: move, delete, or change color.\n\nAll-or-nothing: any unknown or non-numeric tag id (or an unknown target\ngroup for ``move``) → typed 404 and no tag is touched.",
         "operationId": "batch_action_api_v1_admin_tags_batch_post",
         "parameters": [
           {
@@ -63913,7 +66788,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTagBatchResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -63979,7 +66856,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTagGroupListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -64053,7 +66932,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTagGroupResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -64079,7 +66960,7 @@
     },
     "/api/v1/admin/tags/groups/reorder": {
       "post": {
-        "description": "Bulk reorder groups. IDs list defines the new order.",
+        "description": "Bulk reorder groups. IDs list defines the new order.\n\nAny unknown or non-numeric id → typed 404 and nothing is reordered (same\nanswer as the user-facing ``PUT /tags/groups/reorder``).",
         "operationId": "reorder_groups_api_v1_admin_tags_groups_reorder_post",
         "parameters": [
           {
@@ -64129,7 +67010,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTagsOk"
+                }
               }
             },
             "description": "Successful Response"
@@ -64204,7 +67087,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTagsOk"
+                }
               }
             },
             "description": "Successful Response"
@@ -64287,7 +67172,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTagGroupResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -64313,7 +67200,7 @@
     },
     "/api/v1/admin/tags/reorder": {
       "post": {
-        "description": "Reorder tags within a group.",
+        "description": "Reorder tags within a group. Any unknown or non-numeric id → typed 404\nand nothing is reordered.",
         "operationId": "reorder_tags_api_v1_admin_tags_reorder_post",
         "parameters": [
           {
@@ -64363,7 +67250,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTagsOk"
+                }
               }
             },
             "description": "Successful Response"
@@ -64438,7 +67327,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTagsOk"
+                }
               }
             },
             "description": "Successful Response"
@@ -64521,7 +67412,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTagResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -64788,7 +67681,7 @@
     },
     "/api/v1/admin/tasks/{task_id}/cancel": {
       "post": {
-        "description": "Cancel a pending or processing task.",
+        "description": "Request cancellation of a pending or processing task's workflow.\n\nGoes through DBOS, the same native cancel the Task Center uses\n(``POST /workflows/{id}/cancel``). ``task_tracking`` is NOT written here:\n``phase`` / ``status`` belong to the ``mirror_dbos_lifecycle_to_tracking``\ntrigger, which records CANCELLED once DBOS does (CLAUDE.md, 任务系统架构\n纪律 §2). This used to PATCH the row to ``cancelled`` and never touch the\nworkflow — it kept running, and the trigger could flip the row back.\n\nThere is no admin retry: re-dispatching needs the owner's per-type dispatch\nand request scope (``POST /task-manager/tasks/{id}/retry``). The old route\nreset the row to ``pending`` and started nothing, so it was removed.",
         "operationId": "cancel_task_api_v1_admin_tasks__task_id__cancel_post",
         "parameters": [
           {
@@ -64837,7 +67730,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTaskActionResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -64854,81 +67749,6 @@
           }
         },
         "summary": "Cancel Task",
-        "tags": [
-          "Admin",
-          "Admin",
-          "Admin - Tasks"
-        ]
-      }
-    },
-    "/api/v1/admin/tasks/{task_id}/retry": {
-      "post": {
-        "description": "Retry a failed task by resetting its status.",
-        "operationId": "retry_task_api_v1_admin_tasks__task_id__retry_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "task_id",
-            "required": true,
-            "schema": {
-              "title": "Task Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Retry Task",
         "tags": [
           "Admin",
           "Admin",
@@ -66229,7 +69049,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTranscodeBatchResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -66516,7 +69338,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTranscodeRetryResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -67596,75 +70420,6 @@
         ]
       }
     },
-    "/api/v1/ai-library/admin/lanes/snapshot": {
-      "get": {
-        "description": "Returns current depth of each LaneQueue partition. Lets ops see\nwhich lane is backed up (User vs Background vs Scheduled vs Subagent).",
-        "operationId": "admin_lane_snapshot_api_v1_ai_library_admin_lanes_snapshot_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Admin Lane Snapshot Api V1 Ai Library Admin Lanes Snapshot Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Per-lane queue depth snapshot",
-        "tags": [
-          "AI Library",
-          "AI Library"
-        ]
-      }
-    },
     "/api/v1/ai-library/admin/reload-seeds": {
       "post": {
         "description": "Re-run SeedLoader.load_all() against backend/seeds/.\n\nAdmin-only. Returns the same dict shape as the startup path:\n``{\"agents\": N, \"skills\": M, \"agent_skill_bindings\": K, \"errors\": [...]}``.\n\nIntended for recovery after a startup seed failure — see\n``docs/superpowers/plans/2026-04-21-ai-library-phase2-seed-loader-fix.md``.\n\nReturns 500 (not 403) on DB-level failures — see AdminAuthDep.",
@@ -67708,9 +70463,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Reload Seeds Api V1 Ai Library Admin Reload Seeds Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AdminSeedReloadResponse"
                 }
               }
             },
@@ -67787,9 +70540,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Admin Telemetry Api V1 Ai Library Admin Telemetry Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AdminAgentTelemetry"
                 }
               }
             },
@@ -98499,7 +101250,7 @@
     },
     "/api/v1/points/admin/adjust": {
       "post": {
-        "description": "Admin: manually adjust a team's points balance.\n\nAdds or deducts points from a team's balance and records the\ntransaction. Only users with the ``admin`` role in ``user_profiles``\nare permitted.\n\n- **team_id**: Target team ID.\n- **amount**: Points to adjust (positive to add, negative to deduct).\n- **description**: Reason for the adjustment.\n\nAuthentication: Bearer Token or API Key (admin only)",
+        "description": "Admin: manually adjust a team's points balance.\n\nAdds or deducts points from a team's balance and records the\ntransaction. Only users with the ``admin`` role in ``user_profiles``\nare permitted.\n\n- **team_id**: Target team ID.\n- **amount**: Points to adjust (positive to add, negative to deduct).\n- **description**: Reason for the adjustment.\n\nAuthentication: Bearer Token or API Key (platform admin only, via\n``get_admin_auth`` like every other ``/admin/`` route)",
         "operationId": "admin_adjust_points_api_v1_points_admin_adjust_post",
         "parameters": [
           {
@@ -98549,7 +101300,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTeamPointsAdjustResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -98566,70 +101319,6 @@
           }
         },
         "summary": "Admin Adjust Points",
-        "tags": [
-          "Points"
-        ]
-      }
-    },
-    "/api/v1/points/admin/overview": {
-      "get": {
-        "description": "Admin: get system-wide points overview.\n\nReturns aggregated statistics including total points in system,\ntotal consumed, total purchased, active teams count, and total\ntransactions count.\n\nAuthentication: Bearer Token or API Key (admin only)",
-        "operationId": "admin_overview_api_v1_points_admin_overview_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Admin Overview",
         "tags": [
           "Points"
         ]

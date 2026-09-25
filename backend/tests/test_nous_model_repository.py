@@ -382,19 +382,30 @@ async def test_update_parity_bigint_numeric_timestamp(
 async def test_delete_returns_true_on_success(
     repo: NousModelRepository, fake_session: _FakeSession
 ) -> None:
+    fake_session.scalar_rows = [1]  # DELETE ... RETURNING id matched a row
     assert await repo.delete("1") is True
 
     sql, binds = fake_session.calls[-1]
-    assert "DELETE FROM public.nous_models" in sql
+    assert "DELETE FROM public.nous_models" in sql and "RETURNING" in sql
     assert 1 in binds.values()  # str model_id "1" → int (bigint bind)
 
 
 @pytest.mark.asyncio
-async def test_delete_returns_false_on_exception(
+async def test_delete_returns_false_when_no_row_matches(
     repo: NousModelRepository, fake_session: _FakeSession
 ) -> None:
-    fake_session.raises = RuntimeError("boom")
+    fake_session.scalar_rows = []
     assert await repo.delete("1") is False
+
+
+@pytest.mark.asyncio
+async def test_delete_reraises_a_database_error(
+    repo: NousModelRepository, fake_session: _FakeSession
+) -> None:
+    """A failed DELETE is not "no such row": the route must not answer 404."""
+    fake_session.raises = RuntimeError("boom")
+    with pytest.raises(RuntimeError):
+        await repo.delete("1")
 
 
 # ─── Factory ───────────────────────────────────────────────────────

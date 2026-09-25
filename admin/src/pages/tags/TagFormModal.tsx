@@ -39,7 +39,7 @@ export function TagFormModal({ visible, tag, groups, onSubmit, onClose }: TagFor
           name_zh: tag.name_zh || '',
           color: tag.color || '#6366f1',
           icon: tag.icon || '',
-          group_id: tag.group_id || undefined,
+          group_id: tag.group_id != null ? String(tag.group_id) : undefined,
         })
       } else {
         form.resetFields()
@@ -56,7 +56,9 @@ export function TagFormModal({ visible, tag, groups, onSubmit, onClose }: TagFor
         name_zh: values.name_zh || undefined,
         color: values.color,
         icon: values.icon || undefined,
-        group_id: values.group_id || undefined,
+        // '' (not undefined) when cleared: PATCH reads '' as "move to
+        // Uncategorized", and omitting the key would keep the old group.
+        group_id: values.group_id || '',
       })
     } catch {
       // validation failed
@@ -88,7 +90,7 @@ export function TagFormModal({ visible, tag, groups, onSubmit, onClose }: TagFor
         <Form.Item label="Group" field="group_id">
           <Select placeholder="Uncategorized" allowClear>
             {groups.map((g) => (
-              <Select.Option key={g.id} value={g.id}>
+              <Select.Option key={g.id} value={String(g.id)}>
                 {g.name}
               </Select.Option>
             ))}

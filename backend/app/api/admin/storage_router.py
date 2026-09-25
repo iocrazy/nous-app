@@ -7,17 +7,33 @@ verification lives in Task 3 (same file). Read logic is module-level
 from __future__ import annotations
 
 from contextlib import nullcontext
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Path, Request, status
+from loguru import logger
 from sqlalchemy import and_, func, or_, select, true
 
 from app.core.admin_deps import AdminAuthDep
 from app.db.scope import is_enforced, system_request_scope
 from app.db.session import read_scope
 from app.models import ParsedMedia, ResourceItems, Resources, ResourceVersions
+from app.schemas.admin_observability import (
+    AdminStorageAudit,
+    AdminStorageDeepVerifyDispatch,
+    AdminStorageMediaDetail,
+    AdminStorageMediaStatusList,
+    AdminStorageMediaVerify,
+    AdminStorageStats,
+)
 from app.utils.admin_helpers import create_audit_log
 
 router = APIRouter()
+
+# parsed_media.id is a BIGINT: a larger path value would reach Postgres and
+# come back as a 500, so FastAPI rejects it up front (422, like a non-number).
+MediaIdPath = Annotated[int, Path(ge=1, le=2**63 - 1)]
+
+DEEP_VERIFY_DISPATCH_FAILED = "storage_audit_dispatch_failed"
 
 
 def _fs_cond(col):
@@ -134,12 +150,22 @@ async def _fetch_latest_audit() -> dict:
         import json
 
         meta = json.loads(meta or "{}")
+    if not isinstance(meta, dict):
+        logger.warning(f"[storage-audit] ignoring non-object metadata: {meta!r:.200}")
+        meta = {}
+    missing = meta.get("missing") or []
+    if not isinstance(missing, list) or not all(isinstance(m, dict) for m in missing):
+        # The workflow only ever writes a list of {key, kind, media_id,
+        # resource_id}; anything else is a hand-edited row. Report no findings
+        # (and say so in the log) rather than 500 the Storage page.
+        logger.warning("[storage-audit] ignoring malformed metadata.missing")
+        missing = []
     return {
         "status": row.get("phase") or "queued",
         "scanned": int(meta.get("scanned") or 0),
         "errors": int(meta.get("errors") or 0),
         "scanned_at": meta.get("scanned_at"),
-        "missing": meta.get("missing") or [],
+        "missing": missing,
         "missing_truncated": bool(meta.get("missing_truncated")),
     }
 
@@ -394,12 +420,12 @@ async def _fetch_media_detail(media_id: int) -> dict:
     }
 
 
-@router.get("/stats")
+@router.get("/stats", response_model=AdminStorageStats)
 async def get_storage_stats(auth: AdminAuthDep):
     return await _fetch_stats()
 
 
-@router.get("/media-status")
+@router.get("/media-status", response_model=AdminStorageMediaStatusList)
 async def get_media_status(auth: AdminAuthDep, media_ids: str):
     try:
         ids = [int(x) for x in media_ids.split(",") if x.strip()]
@@ -412,8 +438,8 @@ async def get_media_status(auth: AdminAuthDep, media_ids: str):
     return {"rows": await _fetch_media_status(ids)}
 
 
-@router.get("/media/{media_id}/detail")
-async def get_media_storage_detail(auth: AdminAuthDep, media_id: int):
+@router.get("/media/{media_id}/detail", response_model=AdminStorageMediaDetail)
+async def get_media_storage_detail(auth: AdminAuthDep, media_id: MediaIdPath):
     return await _fetch_media_detail(media_id)
 
 
@@ -487,8 +513,8 @@ async def _find_running_audit() -> str | None:
     return row["dbos_workflow_id"] if row else None
 
 
-@router.post("/media/{media_id}/verify")
-async def verify_media_on_s3(auth: AdminAuthDep, media_id: int):
+@router.post("/media/{media_id}/verify", response_model=AdminStorageMediaVerify)
+async def verify_media_on_s3(auth: AdminAuthDep, media_id: MediaIdPath):
     """Synchronous single-media S3 existence check — probes every asset key
     from ``_fetch_media_detail`` right now (no workflow dispatch)."""
     from app.services.library.media_storage import library_store
@@ -497,7 +523,17 @@ async def verify_media_on_s3(auth: AdminAuthDep, media_id: int):
     return {"results": await _verify_keys(library_store(), detail["assets"])}
 
 
-@router.post("/verify")
+def _deep_verify_failed() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": DEEP_VERIFY_DISPATCH_FAILED,
+            "message": "The storage audit could not be started. Try again later.",
+        },
+    )
+
+
+@router.post("/verify", response_model=AdminStorageDeepVerifyDispatch)
 async def dispatch_deep_verify(auth: AdminAuthDep, request: Request):
     """Dispatch a full-library storage_audit workflow run, deduped against
     any run still queued/in_progress.
@@ -545,19 +581,41 @@ async def dispatch_deep_verify(auth: AdminAuthDep, request: Request):
     # prod smoke 2026-07-31; storage_migration's identical in-workflow create
     # has been failing the same way for weeks — just silently, because that
     # call is wrapped in a non-fatal try/except).
-    await manager.create(
-        user_id=auth.user_id,
-        task_type="storage_audit",
-        title="Deep S3 storage audit",
-        dbos_workflow_id=workflow_id,
-    )
+    try:
+        await manager.create(
+            user_id=auth.user_id,
+            task_type="storage_audit",
+            title="Deep S3 storage audit",
+            dbos_workflow_id=workflow_id,
+        )
+    except Exception as e:
+        logger.error(f"[storage-audit] pre-create task_tracking row failed: {e}")
+        raise _deep_verify_failed()
 
-    result = await start_workflow_routed(
-        "storage_audit",
-        dbos_workflow_callable=storage_audit_workflow,
-        dbos_workflow_kwargs={},
-        workflow_id=workflow_id,
-    )
+    try:
+        result = await start_workflow_routed(
+            "storage_audit",
+            dbos_workflow_callable=storage_audit_workflow,
+            dbos_workflow_kwargs={},
+            workflow_id=workflow_id,
+        )
+    except Exception as e:
+        # The row created above is 'queued' and nothing will ever move it:
+        # left alone, _find_running_audit would answer every retry for the
+        # next 2 hours with {already_running: true} for a scan that never
+        # started, and the Storage page would poll it forever. Fail it.
+        logger.error(f"[storage-audit] dispatch {workflow_id} failed: {e}")
+        try:
+            await manager.fail(
+                workflow_id,
+                f"dispatch failed: {type(e).__name__}",
+                error_code=DEEP_VERIFY_DISPATCH_FAILED,
+            )
+        except Exception as fail_exc:
+            logger.error(
+                f"[storage-audit] fail {workflow_id} after dispatch: {fail_exc}"
+            )
+        raise _deep_verify_failed()
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -571,6 +629,8 @@ async def dispatch_deep_verify(auth: AdminAuthDep, request: Request):
     return {"workflow_id": result["dbos_workflow_id"], "already_running": False}
 
 
-@router.get("/audit")
+@router.get(
+    "/audit", response_model=AdminStorageAudit, response_model_exclude_unset=True
+)
 async def get_storage_audit(auth: AdminAuthDep):
     return await _fetch_latest_audit()

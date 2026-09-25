@@ -133,7 +133,7 @@ function PackageModal({
           field="price_yuan"
           rules={[{ required: true, message: 'Price is required' }]}
         >
-          <InputNumber min={0} step={0.01} placeholder="Price in yuan" style={{ width: '100%' }} />
+          <InputNumber min={0.01} step={0.01} placeholder="Price in yuan" style={{ width: '100%' }} />
         </FormItem>
         <FormItem label="Sort Order" field="sort_order">
           <InputNumber min={0} style={{ width: '100%' }} />
