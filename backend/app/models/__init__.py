@@ -261,6 +261,11 @@ from app.models.users import (  # noqa: F401
     UserSettings,
     UserTagPreferences,
 )
+from app.models.video_shots import (  # noqa: F401
+    VideoShotEmbeddings,
+    VideoShotIndexes,
+    VideoShots,
+)
 from app.models.workers import (  # noqa: F401
     t_worker_registry,
 )
@@ -338,6 +343,10 @@ __all__ = [
     # embeddings (mig 499)
     "EmbeddingSpaces",
     "ResourceEmbeddings",
+    # video shots (mig 507)
+    "VideoShots",
+    "VideoShotEmbeddings",
+    "VideoShotIndexes",
     "GeneratedMedia",
     "ParsedMedia",
     "ResourceAccessLogs",
