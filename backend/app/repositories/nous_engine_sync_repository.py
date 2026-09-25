@@ -131,7 +131,6 @@ class NousEngineSyncRepository:
             )
             return result.first() is not None
 
-
     async def disable_rows(self, ids: Sequence[int]) -> List[str]:
         """Disable the given rows in ONE transaction; returns the names that
         were actually flipped (already-disabled rows are not re-written)."""

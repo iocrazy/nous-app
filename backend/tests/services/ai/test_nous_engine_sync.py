@@ -120,7 +120,6 @@ class FakeRepo:
                 r["context_window_tokens"] = tokens
         return True
 
-
     async def disable_rows(self, ids: list[int]) -> list[str]:
         self.disable_calls.append(list(ids))
         names = []
