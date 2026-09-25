@@ -197,3 +197,27 @@ class CardLabelsUpdate(BaseModel):
     reject the same things with the same message."""
 
     labels: dict[str, Any] = Field(default_factory=dict)
+
+
+class NousEngineSyncSkipped(BaseModel):
+    """One engine service the sync did not write, and why (e.g.
+    ``unsupported_type:app``, ``name_taken``, ``no_credential_source``)."""
+
+    id: str
+    reason: str
+
+
+class NousEngineSyncResponse(BaseModel):
+    """POST /admin/nous-models/sync-engine — merged over every engine endpoint.
+
+    ``created`` / ``updated`` are catalog names. ``error`` is set when at least
+    one endpoint's ``/v1/models`` could not be read (the others still synced).
+    Rows missing from the engine list are never disabled: the list holds only
+    loaded services today.
+    """
+
+    discovered: int
+    created: List[str]
+    updated: List[str]
+    skipped: List[NousEngineSyncSkipped]
+    error: Optional[str] = None

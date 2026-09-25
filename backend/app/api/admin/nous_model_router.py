@@ -27,6 +27,8 @@ from app.schemas.ai import TestConnectionResponse
 from app.schemas.nous_model import (
     CardLabelsResponse,
     CardLabelsUpdate,
+    NousEngineSyncResponse,
+    NousEngineSyncSkipped,
     NousModelCreate,
     NousModelProbeRequest,
     NousModelResponse,
@@ -38,6 +40,11 @@ from app.schemas.nous_model import (
 from app.services.ai.model_pricing_coverage import (
     load_priced_models,
     price_coverage_for,
+)
+from app.services.ai.nous_engine_sync import (
+    engine_endpoints,
+    merge_reports,
+    sync_all_engines,
 )
 
 # Shared probe — same implementation the scheduled health poll uses. Aliased to
@@ -213,6 +220,53 @@ async def probe_nous_models(body: NousModelProbeRequest, auth: AdminAuthDep):
         },
     )
     return TestConnectionResponse(**result)
+
+
+@router.post("/sync-engine", response_model=NousEngineSyncResponse)
+async def sync_nous_engine_models(auth: AdminAuthDep):
+    """Mirror nous-engine's ``/v1/models`` into the catalog now.
+
+    Same sync the hourly health step runs first (``nous_engine_sync``): every
+    listed service without a row gets ``nous-<id>`` (credentials copied from
+    an existing engine row, zero price row), existing rows only take a newer
+    ``context_window``. Rows missing from the list are never disabled.
+
+    400 ``no_engine_row`` when no enabled ``actual_provider='nous'`` row exists
+    to take the endpoint and key from. An engine that cannot be read is NOT a
+    5xx: the report comes back with ``error`` set (admin-only text, same as
+    the probe endpoints; a 5xx would be scrubbed by the error shell).
+    """
+    repo = get_nous_model_repository()
+    rows = await repo.list_all()
+    if not engine_endpoints(rows):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "no_engine_row",
+                "message": (
+                    "No enabled nous-engine model to take the endpoint and key "
+                    "from. Add one model on the nous provider first."
+                ),
+            },
+        )
+    results = await sync_all_engines(rows)
+    report = merge_reports([r for _, r in results])
+    if report.created or report.updated:
+        await refresh_catalog_windows()
+    logger.info(
+        f"[Admin] nous-engine sync: discovered={report.discovered} "
+        f"created={len(report.created)} updated={len(report.updated)} "
+        f"skipped={len(report.skipped)} error={report.error!r}"
+    )
+    return NousEngineSyncResponse(
+        discovered=report.discovered,
+        created=list(report.created),
+        updated=list(report.updated),
+        skipped=[
+            NousEngineSyncSkipped(id=s.id, reason=s.reason) for s in report.skipped
+        ],
+        error=report.error,
+    )
 
 
 async def _reject_name_collision(

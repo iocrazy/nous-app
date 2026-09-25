@@ -1167,6 +1167,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/nous-models/sync-engine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Nous Engine Models
+         * @description Mirror nous-engine's ``/v1/models`` into the catalog now.
+         *
+         *     Same sync the hourly health step runs first (``nous_engine_sync``): every
+         *     listed service without a row gets ``nous-<id>`` (credentials copied from
+         *     an existing engine row, zero price row), existing rows only take a newer
+         *     ``context_window``. Rows missing from the list are never disabled.
+         *
+         *     400 ``no_engine_row`` when no enabled ``actual_provider='nous'`` row exists
+         *     to take the endpoint and key from. An engine that cannot be read is NOT a
+         *     5xx: the report comes back with ``error`` set (admin-only text, same as
+         *     the probe endpoints; a 5xx would be scrubbed by the error shell).
+         */
+        post: operations["sync_nous_engine_models_api_v1_admin_nous_models_sync_engine_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/nous-models/{model_id}": {
         parameters: {
             query?: never;
@@ -28387,6 +28417,38 @@ export interface components {
             type: "system" | "team";
         };
         /**
+         * NousEngineSyncResponse
+         * @description POST /admin/nous-models/sync-engine — merged over every engine endpoint.
+         *
+         *     ``created`` / ``updated`` are catalog names. ``error`` is set when at least
+         *     one endpoint's ``/v1/models`` could not be read (the others still synced).
+         *     Rows missing from the engine list are never disabled: the list holds only
+         *     loaded services today.
+         */
+        NousEngineSyncResponse: {
+            /** Created */
+            created: string[];
+            /** Discovered */
+            discovered: number;
+            /** Error */
+            error?: string | null;
+            /** Skipped */
+            skipped: components["schemas"]["NousEngineSyncSkipped"][];
+            /** Updated */
+            updated: string[];
+        };
+        /**
+         * NousEngineSyncSkipped
+         * @description One engine service the sync did not write, and why (e.g.
+         *     ``unsupported_type:app``, ``name_taken``, ``no_credential_source``).
+         */
+        NousEngineSyncSkipped: {
+            /** Id */
+            id: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
          * NousModelCreate
          * @description Request body for creating a Nous model.
          */
@@ -39356,6 +39418,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderProtocolListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_nous_engine_models_api_v1_admin_nous_models_sync_engine_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NousEngineSyncResponse"];
                 };
             };
             /** @description Validation Error */
