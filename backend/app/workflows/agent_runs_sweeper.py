@@ -171,11 +171,26 @@ async def reap_stale_workforce_tasks_step() -> dict[str, int]:
     20 per tick — see ``services/workforce/stale_tasks.py`` for the three
     rules. Never raises: the reaper counts per-row failures instead.
 
-    ⚠️ Must stay the LAST step of the tick: a step inserted mid-sequence
-    shifts the step ids of in-flight scheduled workflows across a deploy."""
+    ⚠️ Steps are only ever APPENDED to the tick: a step inserted mid-sequence
+    shifts the step ids of in-flight scheduled workflows across a deploy. This
+    one was last until FH3 T6 appended ``reap_zombie_locks_step`` after it."""
     from app.services.workforce.stale_tasks import reap_stale_workforce_tasks
 
     return await reap_stale_workforce_tasks()
+
+
+@DBOS.step()
+async def reap_zombie_locks_step() -> int:
+    """Release issue execution locks whose workflow is already terminal or
+    gone (FH3 T6): a cancelled ``execute_issue`` never reaches its
+    ``finally: clear_lock``. CAS per row, ``status`` untouched, nothing
+    cancelled — see ``input_gate.reap_zombie_locks``. Never raises.
+
+    ⚠️ Must stay the LAST step of the tick: a step inserted mid-sequence
+    shifts the step ids of in-flight scheduled workflows across a deploy."""
+    from app.agent_framework.input_gate import reap_zombie_locks
+
+    return await reap_zombie_locks()
 
 
 @DBOS.step()
@@ -626,8 +641,9 @@ async def agent_runs_sweeper_workflow(
     reconciled = await reconcile_issue_execution_state_step()
     forced_settles = await force_settle_stale_pending_trees_step()
     preempted_waits = await reap_preempted_input_waits_step()
-    # LAST, always — new steps go below this line, never above it.
     stale_tasks = await reap_stale_workforce_tasks_step()
+    # LAST, always — new steps go below this line, never above it.
+    zombie_locks = await reap_zombie_locks_step()
     # Only outcomes that CHANGED something (or failed) make the tick worth a
     # line; a long healthy run is ``skipped_pending`` every minute and must not
     # turn a quiet tick into an INFO line forever.
@@ -645,6 +661,7 @@ async def agent_runs_sweeper_workflow(
         or forced_settles
         or preempted_waits
         or stale_acted
+        or zombie_locks
     ):
         logger.info(
             f"[sweeper] heartbeat_lost={heartbeat_lost} "
@@ -657,4 +674,5 @@ async def agent_runs_sweeper_workflow(
             f"preempted_waits_released={preempted_waits} "
             f"stale_workforce_tasks="
             f"{' '.join(f'{k}={v}' for k, v in sorted(stale_acted.items())) or 0}"
+            + (f" zombie_locks_released={zombie_locks}" if zombie_locks else "")
         )

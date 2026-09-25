@@ -1,6 +1,6 @@
-"""framework-hardening T5: the minute sweeper reaps stale workforce tasks as
-its LAST step (a step added mid-sequence shifts the step ids of in-flight
-scheduled workflows across a deploy)."""
+"""framework-hardening T5: the minute sweeper reaps stale workforce tasks near
+the END of the tick (a step added mid-sequence shifts the step ids of in-flight
+scheduled workflows across a deploy). FH3 T6 appended one step after it."""
 
 from __future__ import annotations
 
@@ -42,10 +42,13 @@ def _awaited_step_names(fn) -> list[str]:
     return [n for _, n in sorted(names)]
 
 
-def test_reap_step_is_the_last_step_of_the_tick():
+def test_reap_steps_keep_their_order_at_the_end_of_the_tick():
+    """Steps are only ever appended: FH3 T6's zombie-lock reaper is now last,
+    the workforce reaper second to last, the preempted-wait reaper third."""
     steps = _awaited_step_names(sw.agent_runs_sweeper_workflow)
-    assert steps[-1] == "reap_stale_workforce_tasks_step", steps
-    assert steps.index("reap_preempted_input_waits_step") == len(steps) - 2, steps
+    assert steps[-1] == "reap_zombie_locks_step", steps
+    assert steps[-2] == "reap_stale_workforce_tasks_step", steps
+    assert steps[-3] == "reap_preempted_input_waits_step", steps
 
 
 async def test_tick_logs_the_stale_task_counts(monkeypatch):
@@ -56,6 +59,7 @@ async def test_tick_logs_the_stale_task_counts(monkeypatch):
         "reconcile_issue_execution_state_step",
         "force_settle_stale_pending_trees_step",
         "reap_preempted_input_waits_step",
+        "reap_zombie_locks_step",
     ):
         monkeypatch.setattr(sw, name, AsyncMock(return_value=0))
     monkeypatch.setattr(sw, "scan_idle_inbox_step", AsyncMock(return_value=[]))
@@ -78,6 +82,7 @@ async def test_skips_alone_keep_the_tick_quiet(monkeypatch):
         "reconcile_issue_execution_state_step",
         "force_settle_stale_pending_trees_step",
         "reap_preempted_input_waits_step",
+        "reap_zombie_locks_step",
     ):
         monkeypatch.setattr(sw, name, AsyncMock(return_value=0))
     monkeypatch.setattr(sw, "scan_idle_inbox_step", AsyncMock(return_value=[]))

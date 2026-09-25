@@ -32,6 +32,13 @@ _PROMPT_MAX = 500
 # imported from there because that module pulls in the whole DBOS workflow set.
 PREEMPT_STATUSES = frozenset({"cancelled", "done", "closed"})
 
+#: Zombie-lock reaper (FH3 T6): a lock younger than this is never touched —
+#: same order as the sweeper's RECONCILE_GRACE_SECONDS, far longer than the
+#: seconds between a cancel and the cancel hook's own release.
+ZOMBIE_LOCK_GRACE_SECONDS = 600
+#: Issues released per tick at most (same bound as the workforce reaper).
+ZOMBIE_LOCK_LIMIT = 20
+
 
 class ParkedReleaseError(RuntimeError):
     """A parked workflow could not be cancelled from this process.
@@ -358,6 +365,47 @@ async def _fetch_preempted_awaiting_rows() -> list[dict]:
     )
 
 
+#: Candidate read of ``reap_zombie_locks`` — a module constant so the drift-DB
+#: integration test runs the very same text inside its rolled-back transaction.
+_ZOMBIE_LOCK_ROWS_SQL = """SELECT i.id AS issue_id, i.status, i.dbos_workflow_id,
+           i.execution_locked_at, w.status AS wf_status
+    FROM public.issues i
+    LEFT JOIN dbos.workflow_status w ON w.workflow_uuid = i.dbos_workflow_id
+    WHERE i.execution_locked_at IS NOT NULL
+      AND i.execution_locked_at < now() - make_interval(secs => :grace_s)
+      AND (w.workflow_uuid IS NULL
+           OR w.status NOT IN ('PENDING', 'ENQUEUED', 'DELAYED'))
+      AND NOT (COALESCE(i.execution_state, '{}'::jsonb) ? 'dispatching')
+      AND NOT EXISTS (
+            SELECT 1 FROM public.agent_runs r
+            WHERE r.status = 'running'
+              AND (r.issue_id = i.id OR r.conversation_id = i.ai_session_id))
+    ORDER BY i.execution_locked_at
+    LIMIT :limit"""
+
+
+async def _fetch_zombie_lock_rows(*, limit: int, grace_s: int) -> list[dict]:
+    """Issues holding an execution lock whose workflow will never release it:
+    the DBOS row is terminal (anything but PENDING / ENQUEUED / DELAYED — a
+    future terminal state is covered too) or missing. ``execute_issue``
+    releases in ``finally: clear_lock``, a step that never lands once the
+    workflow is cancelled — production held five such locks on 2026-09-25.
+
+    Guards (recon-5 §5): the lock is older than ``grace_s``; no ``dispatching``
+    marker (a dispatch in flight); no ``running`` agent_run on the issue or its
+    session — a reply turn takes the same lock WITHOUT writing
+    ``dbos_workflow_id``, so a SUCCESS workflow id alone proves nothing.
+
+    Same engine-side read as ``_fetch_awaiting_rows`` (not a UI data source,
+    so route C is not violated — route C forbids list endpoints reading the
+    engine tables; a reaper of engine orphans is the other side of that)."""
+    from app.db import engine as db_engine
+
+    return await db_engine.fetch_all(
+        _ZOMBIE_LOCK_ROWS_SQL, {"limit": limit, "grace_s": grace_s}
+    )
+
+
 async def _cancel_workflow(workflow_id: str) -> None:
     """Cancel through whichever DBOS handle THIS process really has.
 
@@ -461,6 +509,98 @@ async def reap_preempted_input_waits() -> int:
     return released
 
 
+def zombie_lock_release_stmt(
+    *, issue_id: int, seen_locked_at: datetime, seen_wf: Optional[str]
+):
+    """Compare-and-swap release of one zombie lock: only if the lock and the
+    workflow id are still what the candidate read saw. A dispatch that took a
+    new lock in between (new time, new workflow) makes this match 0 rows.
+    Drops the ``awaiting_input`` / ``dispatching`` markers; ``status`` is left
+    exactly as it is."""
+    from sqlalchemy import Text, cast, literal, update
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    from app.models import Issues
+
+    state = Issues.execution_state
+    for key in ("awaiting_input", "dispatching"):
+        # Explicit text cast: jsonb's `-` is overloaded (text / text[] / int).
+        state = state.op("-", return_type=JSONB)(cast(literal(key), Text))
+    return (
+        update(Issues)
+        .where(
+            Issues.id == issue_id,
+            Issues.execution_locked_at == seen_locked_at,
+            Issues.dbos_workflow_id.is_not_distinct_from(seen_wf),
+        )
+        .values(execution_locked_at=None, execution_state=state)
+    )
+
+
+async def _release_zombie_lock(row: dict) -> bool:
+    """Run the CAS for one candidate. False = raced (someone else moved the
+    lock since the read)."""
+    from sqlalchemy import text
+
+    from app.db.session import write_scope
+
+    async with write_scope() as session:
+        # issues execution fields are service_role-only (mig 170 allowlist).
+        await session.execute(text("SET LOCAL ROLE service_role"))
+        result = await session.execute(
+            zombie_lock_release_stmt(
+                issue_id=int(row["issue_id"]),
+                seen_locked_at=row["execution_locked_at"],
+                seen_wf=row.get("dbos_workflow_id"),
+            )
+        )
+    return bool(result.rowcount)
+
+
+def _locked_for(locked_at: Any) -> str:
+    if not isinstance(locked_at, datetime):
+        return "?"
+    if locked_at.tzinfo is None:
+        locked_at = locked_at.replace(tzinfo=timezone.utc)
+    return str(datetime.now(timezone.utc) - locked_at).split(".")[0]
+
+
+async def reap_zombie_locks(
+    *, limit: int = ZOMBIE_LOCK_LIMIT, grace_s: int = ZOMBIE_LOCK_GRACE_SECONDS
+) -> int:
+    """Release execution locks left behind by a workflow that is already
+    terminal or gone (FH3 T6, E3). Never cancels anything — the workflow will
+    not move again — and never changes ``issues.status``. Each release is a
+    WARN (a lock outliving its workflow is a defect somewhere upstream); a
+    raced row is silent; one bad row is an ERROR and the sweep goes on.
+    Returns how many were released. Never raises."""
+    try:
+        rows = await _fetch_zombie_lock_rows(limit=limit, grace_s=grace_s)
+    except Exception as exc:  # noqa: BLE001 — the tick must go on
+        logger.error(f"[input_gate] zombie lock scan failed: {exc!r}")
+        return 0
+    released = 0
+    for row in rows:
+        issue_id = row.get("issue_id")
+        try:
+            if not await _release_zombie_lock(row):
+                continue  # raced: the lock moved since the read
+        except Exception as exc:  # noqa: BLE001 — one row must not stop the sweep
+            logger.error(
+                f"[input_gate] release of zombie lock failed issue={issue_id} "
+                f"wf={row.get('dbos_workflow_id')}: {exc!r}"
+            )
+            continue
+        released += 1
+        logger.warning(
+            f"[input_gate] released zombie lock issue={issue_id} "
+            f"status={row.get('status')} wf={row.get('dbos_workflow_id')} "
+            f"wf_status={row.get('wf_status') or 'missing'} "
+            f"locked_for={_locked_for(row.get('execution_locked_at'))}"
+        )
+    return released
+
+
 async def reap_stale_input_waits(*, current_version: str) -> int:
     """部署换版本后,旧版本挂起的 workflow 无 worker 认领 —— 假活。
     清标记 + cancel + 释放 issue 执行锁,使回复自动走旧路径;issue 停在
@@ -493,4 +633,6 @@ __all__ = [
     "release_parked_workflow",
     "reap_preempted_input_waits",
     "reap_stale_input_waits",
+    "reap_zombie_locks",
+    "zombie_lock_release_stmt",
 ]

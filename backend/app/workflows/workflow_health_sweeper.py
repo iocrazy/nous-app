@@ -33,7 +33,7 @@ full control.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from dbos import DBOS
@@ -396,10 +396,68 @@ def _is_permanent_dbos_orphan(
         return False
     # Post-deploy version-orphan: both versions known and different → no live
     # executor of that version will ever pick this up.
-    if current_version and app_version and app_version != current_version:
+    if _is_version_orphan(app_version, current_version):
         return True
     # Age backstop: frozen far beyond any realistic queue wait.
     return age_seconds >= max_age_seconds
+
+
+def _is_version_orphan(
+    app_version: "str | None", current_version: "str | None"
+) -> bool:
+    """Both versions known and different: no executor of that version exists."""
+    return bool(current_version and app_version and app_version != current_version)
+
+
+#: Slack past the needs_input gate's TTL before a parked issue wait stops
+#: being spared by the age backstop (FH3 T6). Same value as
+#: ``agent_runs_sweeper.PARKED_EXPIRY_GRACE_SECONDS`` — a test pins the two
+#: together; not imported because that module registers its own workflows.
+PARKED_WAIT_GRACE_SECONDS = 3600
+
+
+def _parked_floor(now: datetime) -> datetime:
+    """``awaiting_input.since`` must be newer than this for a wait to count as
+    live: the gate's own TTL plus the slack."""
+    from app.core.config import settings
+
+    return now - timedelta(
+        hours=settings.NEEDS_INPUT_RECV_TTL_HOURS, seconds=PARKED_WAIT_GRACE_SECONDS
+    )
+
+
+async def _parked_issue_workflow_ids(workflow_ids: "list[str]") -> "frozenset[str]":
+    """Of ``workflow_ids``, the ones whose issue is parked on the needs_input
+    gate inside its wait (lock held, marker unanswered, ``since`` within TTL +
+    1h). ORM read on ``issues`` — no new ``dbos.*`` access point."""
+    from app.db.session import read_scope
+    from app.repositories.agent_run_inbox_repository import (
+        parked_workflow_ids_stmt,
+    )
+
+    stmt = parked_workflow_ids_stmt(
+        workflow_ids, _parked_floor(datetime.now(timezone.utc))
+    )
+    async with read_scope() as session:
+        found = (await session.execute(stmt)).scalars().all()
+    return frozenset(found)
+
+
+async def _spared_as_parked(age_only_ids: "list[str]") -> "frozenset[str]":
+    """Age-backstop candidates to leave alone this tick because their issue
+    is legitimately waiting on a person (FH3 T6). A failed lookup spares them
+    all: cancelling a live 72h wait is the harm this guards against, and a
+    real zombie only waits one more tick."""
+    if not age_only_ids:
+        return frozenset()
+    try:
+        return await _parked_issue_workflow_ids(age_only_ids)
+    except Exception as exc:  # noqa: BLE001 — fail closed, next tick retries
+        logger.warning(
+            f"[workflow_health] parked-wait lookup failed; sparing "
+            f"{len(age_only_ids)} age-backstop candidate(s) this tick: {exc!r}"
+        )
+        return frozenset(age_only_ids)
 
 
 def _zombie_max_age_seconds() -> float:
@@ -654,9 +712,10 @@ async def reap_dbos_zombies_step() -> Dict[str, int]:
         {"iq": _INTERNAL_QUEUE},
     )
 
-    cancelled = 0
-    for row in rows or []:
-        if not _is_permanent_dbos_orphan(
+    orphans = [
+        row
+        for row in rows or []
+        if _is_permanent_dbos_orphan(
             row.get("status"),
             row.get("queue_name"),
             row.get("name"),
@@ -664,7 +723,22 @@ async def reap_dbos_zombies_step() -> Dict[str, int]:
             current_version,
             float(row.get("age_s") or 0.0),
             max_age,
-        ):
+        )
+    ]
+    # FH3 T6: the AGE backstop must spare an issue legitimately parked on a
+    # question (the gate waits NEEDS_INPUT_RECV_TTL_HOURS, far past 6h). The
+    # version-orphan branch is untouched — startup reap_stale_input_waits owns
+    # cross-version waits and releases their lock too.
+    parked = await _spared_as_parked(
+        [
+            row["workflow_uuid"]
+            for row in orphans
+            if not _is_version_orphan(row.get("application_version"), current_version)
+        ]
+    )
+    cancelled = 0
+    for row in orphans:
+        if row.get("workflow_uuid") in parked:
             continue
         if await _cancel_dbos_zombie(row.get("workflow_uuid")):
             cancelled += 1
@@ -672,9 +746,14 @@ async def reap_dbos_zombies_step() -> Dict[str, int]:
     if cancelled:
         logger.warning(
             f"[workflow_health] reaped {cancelled} DBOS zombie workflow(s) "
-            "(PENDING engine orphans the UI never showed)"
+            f"(PENDING engine orphans the UI never showed) "
+            f"parked_skipped={len(parked)}"
         )
-    return {"zombies_cancelled": cancelled}
+    elif parked:
+        # A parked issue is spared every tick for up to TTL + 1h: not a line
+        # worth printing every two minutes.
+        logger.debug(f"[workflow_health] zombie scan parked_skipped={len(parked)}")
+    return {"zombies_cancelled": cancelled, "parked_skipped": len(parked)}
 
 
 async def _cancel_dbos_zombie(workflow_uuid: "str | None") -> bool:
