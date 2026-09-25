@@ -633,3 +633,10 @@ export type PipelineRunList = Schemas['PipelineRunListResponse'];
 export type FlowCancelResult = Schemas['FlowCancelResult'];
 export type ScheduleFireNowResult = Schemas['ScheduleFireNowResult'];
 // —— end P9 workforce/tasks/issues ——
+// —— P9 codex/keys/misc ——
+// `/api/v1/codex-daemon/*` ids are strings on the wire; the bodies have no
+// `success` key (`{"data": ...}`).
+/** One live paired device; `env_report` is whatever the daemon last reported. */
+export type CodexDevice = Schemas['CodexDaemonDevice'];
+export type CodexDaemonPairCode = Schemas['CodexDaemonPairCode'];
+// —— end P9 codex/keys/misc ——

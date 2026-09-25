@@ -30,8 +30,17 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.core.redis import get_async_redis
+from app.schemas.codex_daemon import (
+    CodexDaemonDevice,
+    CodexDaemonDeviceRevoked,
+    CodexDaemonPairCode,
+    CodexDaemonPairResult,
+    CodexDaemonUploadResult,
+)
+from app.schemas.wire import DataEnvelope
 
 router = APIRouter(prefix="/codex-daemon", tags=["Codex Daemon"])
 
@@ -107,7 +116,7 @@ class PairRequest(BaseModel):
 # ── routes ────────────────────────────────────────────────────────────────
 
 
-@router.post("/pair-code")
+@router.post("/pair-code", response_model=DataEnvelope[CodexDaemonPairCode])
 async def issue_pair_code(auth: AuthDep) -> dict:
     """Mint a one-shot pairing code for the signed-in user (TTL 10 min)."""
     code = _mint_code()
@@ -119,7 +128,7 @@ async def issue_pair_code(auth: AuthDep) -> dict:
     return {"data": {"code": code, "expires_in_seconds": PAIR_TTL_SECONDS}}
 
 
-@router.post("/pair")
+@router.post("/pair", response_model=DataEnvelope[CodexDaemonPairResult])
 async def pair_device(payload: PairRequest) -> dict:
     """Swap a pairing code for a device token.
 
@@ -291,7 +300,7 @@ async def _register_daemon_result(**kwargs: Any) -> dict:
     return await register_generated_media(origin=origin, **kwargs)
 
 
-@router.post("/upload")
+@router.post("/upload", response_model=DataEnvelope[CodexDaemonUploadResult])
 async def upload_daemon_result(
     file: UploadFile = File(...),
     ticket: str = Form(...),
@@ -338,17 +347,21 @@ async def upload_daemon_result(
                 pass
 
 
-@router.get("/devices")
+@router.get("/devices", response_model=DataEnvelope[list[CodexDaemonDevice]])
 async def list_devices(auth: AuthDep) -> dict:
     rows = await _list_daemons(str(auth.user_id))
     return {"data": rows}
 
 
-@router.delete("/devices/{device_id}")
+@router.delete(
+    "/devices/{device_id}", response_model=DataEnvelope[CodexDaemonDeviceRevoked]
+)
 async def revoke_device(device_id: int, auth: AuthDep) -> dict:
     ok = await _revoke_daemon(str(auth.user_id), device_id)
     if not ok:
-        raise HTTPException(404, "device not found")
+        # Unknown, already revoked, or another user's device: the UPDATE
+        # matched no row. One typed 404 for all three.
+        require_row(None)
     # Revocation must be immediate — a still-open socket would keep taking
     # jobs after the user pulled the device (spec §10 security checklist).
     from app.services.codex.daemon_registry import registry
