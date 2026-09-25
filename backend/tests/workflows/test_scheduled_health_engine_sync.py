@@ -134,3 +134,109 @@ def test_sync_helper_is_not_a_step():
 
     assert not hasattr(_sync_engine_catalog, "dbos_function_name")
     assert inspect.unwrap(_sync_engine_catalog) is _sync_engine_catalog
+
+
+# ---------------------------------------------------------------------------
+# Every-minute catalog sync workflow (nous-engine ready / revocation contract)
+# ---------------------------------------------------------------------------
+
+
+def test_minute_workflow_body_calls_only_the_sync_step():
+    from app.workflows import scheduled_health
+
+    body = inspect.getsource(inspect.unwrap(scheduled_health.nous_engine_sync_workflow))
+    assert body.count("await ") == 1
+    assert "sync_engine_catalog_step()" in body
+
+
+def test_minute_workflow_is_scheduled_every_minute():
+    from app.workflows import scheduled_health
+
+    src = inspect.getsource(scheduled_health)
+    head = src[: src.index("async def nous_engine_sync_workflow")]
+    assert head.rstrip().splitlines()[-2:] == [
+        '@DBOS.scheduled("* * * * *")',
+        "@DBOS.workflow()",
+    ]
+
+
+def test_scheduled_bundle_registers_the_minute_workflow():
+    import app.workflows._scheduled_bundle as bundle
+    from app.workflows.scheduled_health import nous_engine_sync_workflow
+
+    assert bundle.nous_engine_sync_workflow is nous_engine_sync_workflow
+
+
+@pytest.mark.asyncio
+async def test_sync_step_refreshes_windows_only_on_change_and_counts():
+    from app.workflows.scheduled_health import sync_engine_catalog_step
+
+    rows = [_engine_row()]
+    repo = MagicMock()
+    repo.list_all = AsyncMock(return_value=rows)
+    changed = [
+        ("a", SyncReport(discovered=3, created=("nous-x",), disabled=("nous-y",))),
+        ("b", SyncReport(error="HTTP 500: boom")),
+    ]
+    quiet = [("a", SyncReport(discovered=3, disabled=("nous-y",), ready_changed=2))]
+
+    for reports, want_refresh in ((changed, True), (quiet, False)):
+        refresh = AsyncMock()
+        with (
+            patch(_REPO_PATH, return_value=repo),
+            patch(_SYNC_PATH, AsyncMock(return_value=reports)) as sync,
+            patch(_REFRESH_PATH, refresh),
+        ):
+            summary = await sync_engine_catalog_step()
+        sync.assert_awaited_once_with(rows)
+        assert refresh.await_count == (1 if want_refresh else 0)
+
+    assert summary == {
+        "discovered": 3,
+        "created": 0,
+        "updated": 0,
+        "disabled": 1,
+        "ready_changed": 2,
+        "errors": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_sync_step_counts_changed_run():
+    from app.workflows.scheduled_health import sync_engine_catalog_step
+
+    repo = MagicMock()
+    repo.list_all = AsyncMock(return_value=[_engine_row()])
+    reports = [
+        ("a", SyncReport(discovered=3, created=("nous-x",), disabled=("nous-y",))),
+        ("b", SyncReport(error="HTTP 500: boom")),
+    ]
+    with (
+        patch(_REPO_PATH, return_value=repo),
+        patch(_SYNC_PATH, AsyncMock(return_value=reports)),
+        patch(_REFRESH_PATH, AsyncMock()),
+    ):
+        summary = await sync_engine_catalog_step()
+
+    assert summary == {
+        "discovered": 3,
+        "created": 1,
+        "updated": 0,
+        "disabled": 1,
+        "ready_changed": 0,
+        "errors": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_sync_step_catalog_read_failure_is_counted_not_raised():
+    from app.workflows.scheduled_health import sync_engine_catalog_step
+
+    repo = MagicMock()
+    repo.list_all = AsyncMock(side_effect=RuntimeError("db down"))
+    sync = AsyncMock()
+    with patch(_REPO_PATH, return_value=repo), patch(_SYNC_PATH, sync):
+        summary = await sync_engine_catalog_step()
+
+    assert summary["errors"] == 1
+    sync.assert_not_awaited()
