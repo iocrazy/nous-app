@@ -6,13 +6,14 @@ import json
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
 from app.core.deps import get_current_user
 from app.repositories.logs_repository import get_logs_repository
+from app.schemas.wire import binary_response
 
 router = APIRouter(prefix="/logs", tags=["Logs"])
 
@@ -176,7 +177,15 @@ async def get_logs(
         raise HTTPException(status_code=500, detail="Failed to retrieve logs")
 
 
-@router.get("/export")
+@router.get(
+    "/export",
+    response_class=Response,
+    responses=binary_response(
+        "The caller's own logs as a file attachment (JSON or CSV)",
+        "application/json",
+        "text/csv",
+    ),
+)
 async def export_logs(
     current_user: dict = Depends(get_current_user),
     format: str = Query("json", description="Export format: json or csv"),
