@@ -114,11 +114,11 @@ jobs:
       - name: ESLint (react-hooks gate)
         run: npm run lint
 
-      # Non-blocking: surfaces pre-existing type errors in PR output without
-      # breaking CI. Flip to a required step once the backlog is cleared.
+      # Blocking since the typed-frontend work cleared the backlog to zero
+      # (spec 2026-09-24 P-final). `vite build` below does NOT type-check, so
+      # this step is the only thing that runs tsc over frontend/.
       - name: TypeScript check
         run: npm run typecheck
-        continue-on-error: true
 
       - name: No zinc utilities (ink migration guard)
         run: bash scripts/check-no-zinc.sh
@@ -136,7 +136,8 @@ jobs:
             exit 1
           fi
 
-      - name: Build (includes TypeScript check)
+      # Plain `vite build`: it strips types without checking them.
+      - name: Build
         run: npm run build
 
       # 管理台（admin/）读同一份 backend/openapi.json 生成自己的类型。它没有

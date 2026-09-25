@@ -11,6 +11,9 @@
  * real `ContextMenu` and the real `useContextMenuItems`. `SaveAsAssetDialog` is
  * a probe that reports the props it received, because the question here is
  * "did the right resource reach the dialog", not "does the dialog work".
+ *
+ * The same harness also pins the drop-on-folder failure path: the touch hook's
+ * `onDrop` is captured so a drop can be driven without a real gesture.
  */
 
 import React from 'react';
@@ -100,8 +103,13 @@ vi.mock('../hooks/useResourceUpload', () => ({
     handleDrop: vi.fn(),
   }),
 }));
+const touchOpts = vi.hoisted(() => ({
+  onDrop: null as null | ((targetFolderId: string | null, droppedIds: string[]) => Promise<void>),
+}));
 vi.mock('../hooks/useResourceTouch', () => ({
-  useResourceTouch: () => ({
+  useResourceTouch: (opts: { onDrop: (targetFolderId: string | null, droppedIds: string[]) => Promise<void> }) => {
+    touchOpts.onDrop = opts.onDrop;
+    return {
     touchDragState: null,
     handleTouchDragMove: vi.fn(),
     handleTouchDragEnd: vi.fn(),
@@ -110,7 +118,8 @@ vi.mock('../hooks/useResourceTouch', () => ({
     handleEmptyAreaTouchStart: vi.fn(),
     handleEmptyAreaTouchMove: vi.fn(),
     handleEmptyAreaTouchEnd: vi.fn(),
-  }),
+    };
+  },
 }));
 vi.mock('../hooks/useFilterBarConfig', () => ({
   useFilterBarConfig: () => ({ toFilterParams: () => ({}) }),
@@ -212,6 +221,7 @@ vi.mock('../contexts/ResourcesContext', () => ({
 }));
 
 import { ResourcesViewInner } from './ResourcesViewInner';
+import { moveFolder, moveResourceItem } from '../services/resourceService';
 
 const openMenuOn = (rowId: string) => fireEvent.click(screen.getByTestId(`row-${rowId}`));
 
@@ -267,5 +277,42 @@ describe('ResourcesViewInner — As Asset wiring', () => {
     // Wait for the menu itself before asserting the absence.
     await screen.findByText('Send to Agent');
     expect(screen.queryByText('As Asset')).toBeNull();
+  });
+});
+
+describe('ResourcesViewInner — drop on folder failure', () => {
+  const addToast = ctx.addToast as ReturnType<typeof vi.fn>;
+  const reloadResources = ctx.reloadResources as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    addToast.mockClear();
+    reloadResources.mockClear();
+    touchOpts.onDrop = null;
+  });
+
+  it('says the move failed, logs it, and still reloads what did move', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(moveResourceItem).mockRejectedValueOnce(new Error('network down'));
+    render(<ResourcesViewInner />);
+
+    await touchOpts.onDrop!('7', ['item:42']);
+
+    expect(addToast).toHaveBeenCalledWith(
+      'Move failed — nothing was changed for the remaining items',
+      'error',
+    );
+    expect(consoleError).toHaveBeenCalled();
+    expect(reloadResources).toHaveBeenCalled();
+  });
+
+  it('names the system-folder lock instead of a generic failure', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // The shape a PostgREST refusal takes: `code` carries the typed reason.
+    vi.mocked(moveFolder).mockRejectedValueOnce({ code: 'system_folder', message: 'system_folder' });
+    render(<ResourcesViewInner />);
+
+    await touchOpts.onDrop!('7', ['folder:9']);
+
+    expect(addToast).toHaveBeenCalledWith('resources.systemFolderLocked', 'error');
   });
 });

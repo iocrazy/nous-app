@@ -83,19 +83,6 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, isOpen
                 </div>
 
                 <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-ink-400 ml-1">Bio</label>
-                    <div className="bg-ink-950 border border-ink-800 rounded-xl px-3.5 py-3 focus-within:border-indigo-500 transition-colors">
-                    <textarea
-                        value={formData.bio || ''}
-                        onChange={e => setFormData({...formData, bio: e.target.value})}
-                        rows={3}
-                        className="bg-transparent border-none outline-none text-[15px] text-ink-200 w-full placeholder-ink-600 resize-none"
-                        placeholder="Tell us about yourself..."
-                    />
-                    </div>
-                </div>
-
-                <div className="space-y-1.5">
                     <label className="text-xs font-medium text-ink-400 ml-1">Email</label>
                     <div className="flex items-center bg-ink-950 border border-ink-800 rounded-xl px-3.5 py-3">
                     <input

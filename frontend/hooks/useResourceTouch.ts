@@ -33,7 +33,16 @@ export function useResourceTouch({
     handleTouchMove: handleTouchDragMove,
     handleTouchEnd: handleTouchDragEnd,
     isDropTarget: isTouchDropTarget,
-  } = useTouchDragDrop({ onDrop, selectedIds });
+  } = useTouchDragDrop({
+    // useTouchDragDrop reports (dragIds, folderId); our onDrop takes
+    // (folderId, droppedIds). Passing it straight through swapped the two, so a
+    // touch drop iterated the folder id's characters and moved nothing.
+    // onDrop owns its own try/catch, so the returned promise is not awaited.
+    onDrop: (dragIds, targetFolderId) => {
+      void onDrop(targetFolderId, dragIds);
+    },
+    selectedIds,
+  });
 
   // ─── Double-tap detection ─────────────────────────────
   const DOUBLE_TAP_DELAY = 300;

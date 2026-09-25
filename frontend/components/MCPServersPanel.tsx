@@ -340,10 +340,12 @@ export const MCPServersPanel: React.FC = () => {
                         {server.name}
                       </span>
                       {server.has_bearer_token && (
-                        <Lock
-                          className="w-3 h-3 text-amber-500"
-                          title={t('mcp.tokenConfigured')}
-                        />
+                        <span title={t('mcp.tokenConfigured')} className="inline-flex">
+                          <Lock
+                            className="w-3 h-3 text-amber-500"
+                            aria-label={t('mcp.tokenConfigured')}
+                          />
+                        </span>
                       )}
                       {!server.enabled && (
                         <span className="text-[10px] uppercase text-ink-600 tracking-wider">

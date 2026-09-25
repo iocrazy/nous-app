@@ -221,9 +221,9 @@ describe('loop image-input batch slicing', () => {
     ] as never[];
 
     const seen: (string | null | undefined)[] = [];
-    const caller = async (ctx: RunnerContext) => {
+    const caller = async (ctx: RunnerContext): Promise<RunnerResult> => {
       seen.push(ctx.source_url);
-      return { ok: true, text: 'ok', urls: ['/api/v1/generated-media/o.png'], media_kind: 'image' };
+      return { ok: true, text: 'ok', error: null, urls: ['/api/v1/generated-media/o.png'], media_kind: 'image' };
     };
 
     await runLoopCascade({

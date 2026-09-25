@@ -11,6 +11,9 @@ function src(p: Partial<SourceHealth>): SourceHealth {
     enabled: true,
     health: 'ok',
     consecutive_failures: 0,
+    // Always on the wire (SourceHealthOut declares both as required).
+    is_owner: false,
+    is_hidden: false,
     ...p,
   };
 }

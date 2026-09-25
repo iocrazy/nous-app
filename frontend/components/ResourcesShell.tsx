@@ -20,7 +20,7 @@ export interface ResourcesShellProps {
   /** Props for ResourcesInfoPanelWrapper */
   infoPanelProps: {
     trashedFolderPreviews: Record<string, FolderPreviewItem[]>;
-    onRenameFolder: (folderId: string | number, name: string) => Promise<void>;
+    onRenameFolder: (folderId: string, name: string) => Promise<void>;
   };
   /** The main content area (ResourceGrid, DownloadsView, etc.) */
   children: React.ReactNode;

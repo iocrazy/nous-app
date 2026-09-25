@@ -85,6 +85,24 @@ interface UiSelectGroupItem {
 
 type UiSelectItem = UiSelectOptionItem | UiSelectGroupItem;
 
+/** Props UiSelect reads off its `<option>` children. React 19 types
+ *  `isValidElement` narrowing as `ReactElement<unknown>`, so the shape has
+ *  to be named explicitly. */
+interface UiSelectOptionChildProps {
+  value?: string | number;
+  children?: ReactNode;
+  disabled?: boolean;
+  'data-loaded'?: boolean | string;
+  'data-description'?: string;
+  'data-dot'?: string;
+}
+
+/** Props UiSelect reads off its `<optgroup>` children. */
+interface UiSelectOptgroupChildProps {
+  label?: string;
+  children?: ReactNode;
+}
+
 interface UiModalProps {
   isOpen: boolean;
   title: string;
@@ -258,7 +276,7 @@ export function UiSelect({
   );
   const parsedItems = useMemo<UiSelectItem[]>(() => {
     const toOption = (child: unknown): UiSelectOptionItem | null => {
-      if (!isValidElement(child) || child.type !== 'option') {
+      if (!isValidElement<UiSelectOptionChildProps>(child) || child.type !== 'option') {
         return null;
       }
 
@@ -277,7 +295,7 @@ export function UiSelect({
     };
 
     return Children.toArray(children).flatMap((child, index) => {
-      if (isValidElement(child) && child.type === 'optgroup') {
+      if (isValidElement<UiSelectOptgroupChildProps>(child) && child.type === 'optgroup') {
         const groupOptions = Children.toArray(child.props.children)
           .map(toOption)
           .filter((option): option is UiSelectOptionItem => option !== null);
