@@ -3,7 +3,9 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from loguru import logger
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.tags_repository import get_admin_tags_repository
@@ -180,12 +182,19 @@ async def list_tags(
 
 @router.post("")
 async def create_tag(body: AdminTagCreate, auth: AdminAuthDep):
-    """Create a new system tag."""
+    """Create a tag owned by the calling admin.
+
+    There are no system tags any more (mig 468 dropped ``type='system'`` from
+    ``tags_type_check`` and gave every user their own copy of the initial
+    set), so an admin-made tag is an ordinary ``user`` tag in the admin's own
+    library. This used to insert ``type='system', user_id=NULL``, which the
+    CHECK rejects: every create from the admin console was a 500.
+    """
     insert_data: dict = {
         "name": body.name,
-        "type": "system",
+        "type": "user",
         "color": body.color,
-        "user_id": None,
+        "user_id": auth.user_id,
     }
     if body.name_zh:
         insert_data["name_zh"] = body.name_zh
@@ -195,7 +204,15 @@ async def create_tag(body: AdminTagCreate, auth: AdminAuthDep):
         insert_data["group_id"] = body.group_id
 
     repo = get_admin_tags_repository()
-    tag = await repo.create_tag(insert_data)
+    try:
+        tag = await repo.create_tag(insert_data)
+    except IntegrityError as e:
+        # unique_tag_per_scope (name, type, user_id) — the admin already has
+        # a tag with this name. Same answer as the user-facing POST /tags.
+        logger.info(f"[AdminTags] create refused, duplicate name: {e.orig}")
+        raise HTTPException(
+            status_code=409, detail=f"Tag '{body.name}' already exists"
+        ) from e
     if not tag:
         raise HTTPException(status_code=500, detail="Failed to create tag")
     return {"success": True, "tag": tag}
