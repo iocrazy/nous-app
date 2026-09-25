@@ -72,6 +72,8 @@ def test_returns_merged_report_and_refreshes_windows() -> None:
         created=("nous-qwen3-8-27b-orcarouter", "nous-wemm-embedding-2b"),
         updated=("nous-qwen3-8-27b",),
         skipped=(SkippedService("krea2", "unsupported_type:app"),),
+        disabled=("nous-moss-asr",),
+        ready_changed=2,
     )
     _, sync, refresh, ps = _patches([_row()], [(_BASE, report)])
     with ps[0], ps[1], ps[2]:
@@ -83,6 +85,9 @@ def test_returns_merged_report_and_refreshes_windows() -> None:
         "created": ["nous-qwen3-8-27b-orcarouter", "nous-wemm-embedding-2b"],
         "updated": ["nous-qwen3-8-27b"],
         "skipped": [{"id": "krea2", "reason": "unsupported_type:app"}],
+        "disabled": ["nous-moss-asr"],
+        "ready_changed": 2,
+        "unauthorized": False,
         "error": None,
     }
     sync.assert_awaited_once()
@@ -117,4 +122,23 @@ def test_every_endpoint_failing_reports_error_in_the_body() -> None:
     body = resp.json()
     assert body["discovered"] == 0 and body["created"] == []
     assert "ConnectError" in body["error"]
+    refresh.assert_not_awaited()
+
+
+def test_rejected_key_reports_unauthorized_and_disabled_rows() -> None:
+    rejected = SyncReport(
+        error="HTTP 401: platform key rejected by nous-engine",
+        unauthorized=True,
+        disabled=("nous-qwen3-8-27b",),
+    )
+    _, _, refresh, ps = _patches([_row()], [(_BASE, rejected)])
+    with ps[0], ps[1], ps[2]:
+        resp = _client().post(_URL)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["unauthorized"] is True
+    assert body["disabled"] == ["nous-qwen3-8-27b"]
+    assert body["ready_changed"] == 0
+    assert body["error"] == "HTTP 401: platform key rejected by nous-engine"
     refresh.assert_not_awaited()

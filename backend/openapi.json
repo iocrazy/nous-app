@@ -35131,13 +35131,20 @@
         "type": "object"
       },
       "NousEngineSyncResponse": {
-        "description": "POST /admin/nous-models/sync-engine — merged over every engine endpoint.\n\n``created`` / ``updated`` are catalog names. ``error`` is set when at least\none endpoint's ``/v1/models`` could not be read (the others still synced).\nRows missing from the engine list are never disabled: the list holds only\nloaded services today.",
+        "description": "POST /admin/nous-models/sync-engine — merged over every engine endpoint.\n\n``created`` / ``updated`` / ``disabled`` are catalog names. The engine list\nis read with ``include_unready=1`` and holds every AUTHORIZED service,\nloaded or not, so an enabled platform row whose service is missing had its\ngrant revoked and is in ``disabled``. ``unauthorized`` means an endpoint\nanswered 401 (the key itself was revoked) and all its enabled platform rows\nwere disabled. Disabled rows are never re-enabled by a sync.\n``ready_changed`` counts rows whose ok/idle status followed the engine's\n``ready``. ``error`` is set when at least one endpoint's ``/v1/models``\ncould not be read (the others still synced).",
         "properties": {
           "created": {
             "items": {
               "type": "string"
             },
             "title": "Created",
+            "type": "array"
+          },
+          "disabled": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Disabled",
             "type": "array"
           },
           "discovered": {
@@ -35155,12 +35162,20 @@
             ],
             "title": "Error"
           },
+          "ready_changed": {
+            "title": "Ready Changed",
+            "type": "integer"
+          },
           "skipped": {
             "items": {
               "$ref": "#/components/schemas/NousEngineSyncSkipped"
             },
             "title": "Skipped",
             "type": "array"
+          },
+          "unauthorized": {
+            "title": "Unauthorized",
+            "type": "boolean"
           },
           "updated": {
             "items": {
@@ -35174,7 +35189,10 @@
           "discovered",
           "created",
           "updated",
-          "skipped"
+          "skipped",
+          "disabled",
+          "ready_changed",
+          "unauthorized"
         ],
         "title": "NousEngineSyncResponse",
         "type": "object"
@@ -67327,7 +67345,7 @@
     },
     "/api/v1/admin/nous-models/sync-engine": {
       "post": {
-        "description": "Mirror nous-engine's ``/v1/models`` into the catalog now.\n\nSame sync the hourly health step runs first (``nous_engine_sync``): every\nlisted service without a row gets ``nous-<id>`` (credentials copied from\nan existing engine row, zero price row), existing rows only take a newer\n``context_window``. Rows missing from the list are never disabled.\n\n400 ``no_engine_row`` when no enabled ``actual_provider='nous'`` row exists\nto take the endpoint and key from. An engine that cannot be read is NOT a\n5xx: the report comes back with ``error`` set (admin-only text, same as\nthe probe endpoints; a 5xx would be scrubbed by the error shell).",
+        "description": "Mirror nous-engine's ``/v1/models`` into the catalog now.\n\nSame sync the hourly health step runs first (``nous_engine_sync``): every\nlisted service without a row gets ``nous-<id>`` (credentials copied from\nan existing engine row, zero price row), existing rows take a newer\n``context_window`` and follow ``ready`` (ok/idle); enabled platform rows\nwhose grant was revoked (missing from the list, or the key answered 401)\nare disabled. Nothing is ever re-enabled.\n\n400 ``no_engine_row`` when no enabled ``actual_provider='nous'`` row exists\nto take the endpoint and key from. An engine that cannot be read is NOT a\n5xx: the report comes back with ``error`` set (admin-only text, same as\nthe probe endpoints; a 5xx would be scrubbed by the error shell).",
         "operationId": "sync_nous_engine_models_api_v1_admin_nous_models_sync_engine_post",
         "parameters": [
           {

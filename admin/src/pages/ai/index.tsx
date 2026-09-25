@@ -24,6 +24,10 @@ interface EngineSyncReport {
   created: string[]
   updated: string[]
   skipped: { id: string; reason: string }[]
+  // Rows the sync turned off: grant revoked, or the key itself rejected (401).
+  disabled: string[]
+  ready_changed: number
+  unauthorized: boolean
   error: string | null
 }
 
@@ -425,9 +429,11 @@ export function AIModelsPage() {
       const report = data as EngineSyncReport
       const summary =
         `Identified ${report.discovered} services · added ${report.created.length}` +
-        ` · updated ${report.updated.length}`
-      if (report.error && report.discovered === 0) Message.error(`Sync failed: ${report.error}`)
-      else if (report.error) Message.warning(`${summary} (${report.error})`)
+        ` · updated ${report.updated.length} · disabled ${report.disabled.length}`
+      if (report.error && report.discovered === 0 && !report.unauthorized) {
+        Message.error(`Sync failed: ${report.error}`)
+      } else if (report.error) Message.warning(`${summary} (${report.error})`)
+      else if (report.disabled.length > 0) Message.warning(summary)
       else Message.success(summary)
       fetchModels()
     } catch (err) {
