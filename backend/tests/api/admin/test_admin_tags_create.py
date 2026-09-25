@@ -21,11 +21,13 @@ from sqlalchemy.exc import IntegrityError
 from app.core.deps import AuthContext, get_auth
 from app.main import app
 from app.models import Tags
+from tests.api.wire_parity import sample_orm
 
 pytestmark = pytest.mark.unit
 
 ADMIN = "00000000-0000-0000-0000-0000000000ad"
 tags_router_module = importlib.import_module("app.api.admin.tags_router")
+repo_module = importlib.import_module("app.repositories.admin.tags_repository")
 
 
 class _FakeRepo:
@@ -37,7 +39,10 @@ class _FakeRepo:
         self.inserted.append(payload)
         if self.fail is not None:
             raise self.fail
-        return {"id": 1, **payload}
+        # The repository's real RETURNING shape (every column), so the
+        # route's response model sees what production hands it.
+        row = repo_module._obj_dict(sample_orm(Tags), repo_module._TAG_N2A)
+        return {**row, **payload}
 
 
 @pytest.fixture
