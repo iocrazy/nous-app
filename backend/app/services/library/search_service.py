@@ -44,8 +44,11 @@ class SearchResult:
     author: Optional[str] = None
     view_count: int = 0
     created_at: Optional[str] = None
-    # Which leg produced the hit: "text" (ILIKE) or "semantic" (vector).
+    # Which leg produced the hit: "text" (ILIKE), "semantic" (document
+    # vector) or "visual" (shot frame vector).
     layer: str = "text"
+    # ``visual`` hits: {"shot_id", "start_ms", "end_ms"} (ints); else None.
+    shot: Optional[Dict[str, int]] = None
 
 
 @dataclass
@@ -71,6 +74,9 @@ class SearchResponse:
     # find_similar_media only: whether the source resource has a vector at
     # all (False = "nothing to compare with", not "no neighbours").
     source_embedded: Optional[bool] = None
+    # Hybrid only: what the visual (shot frame) leg did, same codes as
+    # ``vector_leg``. None when the leg was not part of the search.
+    visual_leg: Optional[str] = None
 
 
 VECTOR_LEG_OUTCOMES = (
@@ -148,8 +154,27 @@ def _chip_filters_active(filters: Optional[LibraryChipFilters]) -> bool:
     return False
 
 
-def _leg_counts(results: List[SearchResult]) -> Dict[str, int]:
+# The visual leg asks for a picture, not a keyword: doubao-embedding-vision
+# embeds text and frames into one space, and a "find a frame like this"
+# instruction is what keeps a text query on the picture side of it
+# (spec 2026-09-16 §4.4: instruction per layer, query side only).
+VISUAL_QUERY_INSTRUCTION = (
+    "Instruct: Find a video frame that best matches the following description\nQuery: "
+)
+
+
+def visual_query_text(query: str) -> str:
+    return VISUAL_QUERY_INSTRUCTION + query.strip()
+
+
+def _leg_counts(
+    results: List[SearchResult], *, visual_ran: bool = False
+) -> Dict[str, int]:
+    """A present key means that leg ran (0 = ran, matched nothing); the
+    visual key appears only when its leg actually ran."""
     counts = {"text": 0, "semantic": 0}
+    if visual_ran:
+        counts["visual"] = 0
     for r in results:
         counts[r.layer] = counts.get(r.layer, 0) + 1
     return counts
@@ -177,6 +202,20 @@ def _row_to_result(r: Dict[str, Any]) -> SearchResult:
     )
 
 
+def _shot_row_to_result(r: Dict[str, Any]) -> SearchResult:
+    """A ``match_video_shot_embeddings`` row (best shot of one video)."""
+    base = _row_to_result(r)
+    return replace(
+        base,
+        layer="visual",
+        shot={
+            "shot_id": int(r["shot_id"]),
+            "start_ms": int(r["start_ms"]),
+            "end_ms": int(r["end_ms"]),
+        },
+    )
+
+
 class SearchFiltersUnavailable(RuntimeError):
     """The database does not yet have the filter-aware search function.
 
@@ -192,8 +231,18 @@ class SearchFiltersUnavailable(RuntimeError):
 class SearchService:
     """Service for semantic and hybrid video search (async optimized)."""
 
-    def __init__(self, *, space_repo: Any = None, embeddings_repo: Any = None):
+    def __init__(
+        self,
+        *,
+        space_repo: Any = None,
+        embeddings_repo: Any = None,
+        shot_embeddings_repo: Any = None,
+    ):
         self.embedding_service = EmbeddingService()
+        # Visual leg (mig 507): frame vectors of shots, same space as above.
+        self.shot_embeddings_repo = (
+            shot_embeddings_repo or get_video_shot_embeddings_repository()
+        )
         # Legacy store: read-only fallback for the deploy window before
         # migration 499, and the source of get_analysis.
         self.analysis_repo = get_analysis_repository()
@@ -455,13 +504,60 @@ class SearchService:
         hits = [_row_to_result(r) for r in rows if r.get("media_id") is not None]
         return hits, "ok"
 
+    async def _visual_hits(
+        self, query: str, user_id: str, limit: int, threshold: float
+    ) -> tuple[List[SearchResult], str]:
+        """Best shot per video whose frame looks like ``query``, for the
+        hybrid merge. Same best-effort contract and outcome codes as
+        :meth:`_vector_hits`; the query is embedded once more under the
+        visual instruction (spec §4.4: instruction per layer)."""
+        try:
+            vec, reason = await asyncio.wait_for(
+                self.embedding_service.try_embed(visual_query_text(query)),
+                timeout=HYBRID_EMBED_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"[hybrid] visual query embedding exceeded {HYBRID_EMBED_TIMEOUT_S}s")
+            return [], "timeout"
+        except Exception as e:  # noqa: BLE001 — belt to try_embed's brace
+            logger.error(f"[hybrid] visual query embedding raised: {e}")
+            return [], "embed_failed"
+        if vec is None:
+            if reason == "unconfigured":
+                return [], "unconfigured"
+            logger.error(f"[hybrid] visual query embedding skipped: {reason}")
+            if classify_embed_reason(reason) == "dimension_mismatch":
+                return [], "dimension_mismatch"
+            return [], "embed_failed"
+        try:
+            space_id = await self._store().current_space_id()
+            if space_id is None:
+                return [], "unconfigured"
+            rows = await self.shot_embeddings_repo.search(
+                embedding=vec,
+                space_id=space_id,
+                kind="frame",
+                user_id=user_id,
+                limit=limit,
+                threshold=threshold,
+            )
+        except EmbeddingStoreMissing as e:
+            logger.error(f"[hybrid] shot store missing (migration 507): {e}")
+            return [], "store_missing"
+        except Exception as e:  # noqa: BLE001 — the other legs still answer
+            logger.error(f"[hybrid] visual leg failed: {e}")
+            return [], "error"
+        hits = [_shot_row_to_result(r) for r in rows if r.get("media_id") is not None]
+        return hits, "ok"
+
     @staticmethod
     def _merge_text_and_vector(
         text_hits: List[SearchResult], vector_hits: List[SearchResult], limit: int
     ) -> List[SearchResult]:
         """Text hits first (exact substring, similarity pinned to 1.0), then
-        vector-only hits by cosine. Deduped on media_id, text wins. Inputs
-        are not mutated: pinned text hits are fresh copies."""
+        vector hits (semantic and visual together) by cosine. Deduped on
+        media_id: text wins, then the better-scoring leg keeps its layer and
+        shot. Inputs are not mutated: pinned text hits are fresh copies."""
         seen: set[int] = set()
         merged: List[SearchResult] = []
         for h in text_hits:
@@ -476,8 +572,43 @@ class SearchService:
             if h.media_id in seen:
                 continue
             seen.add(h.media_id)
-            merged.append(replace(h, layer="semantic"))
+            merged.append(replace(h, layer=h.layer or "semantic"))
         return merged[:limit]
+
+    async def visual_only(
+        self,
+        query: str,
+        *,
+        user_id: Optional[str],
+        limit: int,
+        threshold: float = 0.4,
+    ) -> SearchResponse:
+        """The visual (shot frame) leg alone — for LibrarySearch's
+        ``layers: ["visual"]``, which through hybrid could be skipped by a
+        page of text hits. ``visual_leg`` carries the outcome."""
+        query_clean = (query or "").strip()
+        if not user_id or not query_clean:
+            outcome = "skipped_no_scope" if not user_id else "skipped_no_query"
+            return SearchResponse(
+                results=[],
+                total=0,
+                query=query or "",
+                search_type="visual",
+                visual_leg=outcome,
+                legs={},
+            )
+        hits, outcome = await self._visual_hits(
+            query_clean, user_id, limit=limit, threshold=threshold
+        )
+        results = hits[:limit]
+        return SearchResponse(
+            results=results,
+            total=len(results),
+            query=query,
+            search_type="visual",
+            visual_leg=outcome,
+            legs={"visual": len(results)},
+        )
 
     async def semantic_only(
         self,
@@ -559,6 +690,7 @@ class SearchService:
                 query=query or "",
                 search_type="hybrid",
                 vector_leg="skipped_no_scope",
+                visual_leg="skipped_no_scope",
             )
 
         # Normalize query for search (handle CJK text with spaces)
@@ -582,6 +714,7 @@ class SearchService:
                 query=query or "",
                 search_type="hybrid",
                 vector_leg="skipped_no_scope",
+                visual_leg="skipped_no_scope",
             )
         scope_fields = list(fields) if fields else list(DEFAULT_SEARCH_FIELDS)
 
@@ -658,6 +791,7 @@ class SearchService:
             # so running it under a filtered query would append rows the
             # caller explicitly excluded. Text-only in that case, and say so.
             vector_hits: List[SearchResult] = []
+            visual_hits: List[SearchResult] = []
             if (
                 tag_ids
                 or author
@@ -665,23 +799,33 @@ class SearchService:
                 or date_to
                 or _chip_filters_active(filters)
             ):
-                vector_leg = "skipped_filters"
+                vector_leg = visual_leg = "skipped_filters"
             elif len(text_hits) >= limit:
                 # Vector hits only ever rank BELOW text hits, so when the text
-                # leg already fills the page the embedding call buys nothing.
-                vector_leg = "skipped_full_page"
+                # leg already fills the page the embedding calls buy nothing.
+                vector_leg = visual_leg = "skipped_full_page"
             else:
                 # Ask for a full page: neighbours that overlap the text hits
                 # are dropped in the merge, so a right-sized ask underfills.
-                vector_hits, vector_leg = await self._vector_hits(
-                    query_clean, user_id, limit=limit, threshold=threshold
+                # The two vector legs are independent calls: run together.
+                (vector_hits, vector_leg), (visual_hits, visual_leg) = (
+                    await asyncio.gather(
+                        self._vector_hits(
+                            query_clean, user_id, limit=limit, threshold=threshold
+                        ),
+                        self._visual_hits(
+                            query_clean, user_id, limit=limit, threshold=threshold
+                        ),
+                    )
                 )
-            if vector_hits:
+            if vector_hits or visual_hits:
                 logger.info(
-                    f"[hybrid] {len(vector_hits)} vector hits merged under "
-                    f"{len(text_hits)} text hits for: {query_clean}"
+                    f"[hybrid] {len(vector_hits)} semantic + {len(visual_hits)} visual "
+                    f"hits merged under {len(text_hits)} text hits for: {query_clean}"
                 )
-            results = self._merge_text_and_vector(text_hits, vector_hits, limit)
+            results = self._merge_text_and_vector(
+                text_hits, vector_hits + visual_hits, limit
+            )
 
             return SearchResponse(
                 results=results,
@@ -689,7 +833,8 @@ class SearchService:
                 query=query,
                 search_type="hybrid",
                 vector_leg=vector_leg,
-                legs=_leg_counts(results),
+                visual_leg=visual_leg,
+                legs=_leg_counts(results, visual_ran=visual_leg == "ok"),
             )
 
         # No query: filter-only path (match-all pattern + AND filters).
@@ -725,6 +870,7 @@ class SearchService:
             query=query or "",
             search_type="hybrid",
             vector_leg="skipped_no_query",
+            visual_leg="skipped_no_query",
             legs=_leg_counts(results),
         )
 

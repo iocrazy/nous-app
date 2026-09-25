@@ -142,6 +142,15 @@ class TextSearchRequest(BaseModel):
     filters: Optional[LibraryChipFilters] = None
 
 
+class SearchHitShot(BaseModel):
+    """The shot a ``visual`` hit came from: the moment to play from.
+    ``shot_id`` is a Snowflake, a string on the wire."""
+
+    shot_id: str
+    start_ms: int
+    end_ms: int
+
+
 class SearchResultItem(BaseModel):
     """A single search result item."""
 
@@ -155,9 +164,12 @@ class SearchResultItem(BaseModel):
     author: Optional[str] = None
     view_count: int = 0
     created_at: Optional[str] = None
-    #: Which leg produced the hit: "text" (ILIKE) or "semantic" (vector)
-    #: today; the other members are reserved for the shot / transcript legs.
+    #: Which leg produced the hit: "text" (ILIKE), "semantic" (document
+    #: vector) or "visual" (best shot frame, mig 507); "camera" /
+    #: "transcript" are reserved.
     layer: HitLayer = "text"
+    #: ``visual`` hits only: the matching shot (null on every other layer).
+    shot: Optional[SearchHitShot] = None
 
 
 class SearchResponse(BaseModel):
@@ -186,6 +198,9 @@ class SearchResponse(BaseModel):
     legs: Optional[Dict[str, int]] = None
     #: Whether a reranker reordered the merged list (none yet: always false).
     reranked: bool = False
+    #: Hybrid only — what the visual (shot frame) leg did, same codes as
+    #: ``vector_leg``; null when the leg was not part of this search.
+    visual_leg: Optional[str] = None
 
 
 class SpaceInfo(BaseModel):
@@ -212,7 +227,7 @@ class SpaceInfo(BaseModel):
 class LayerStatus(BaseModel):
     """Coverage of one retrieval layer for the caller, in the current space."""
 
-    layer: Literal["semantic", "transcript"]
+    layer: Literal["semantic", "visual", "transcript"]
     status: Literal["ok", "not_built"]
     covered: int
     total: int
