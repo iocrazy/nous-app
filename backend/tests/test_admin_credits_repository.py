@@ -197,11 +197,15 @@ async def test_delete_package_filters_by_id(
     repo: AdminCreditsRepository, fake_session: _FakeSession
 ) -> None:
     pid = _uuid.uuid4()
-    await repo.delete_package(str(pid))
+    assert await repo.delete_package(str(pid)) is False  # RETURNING matched nothing
 
     sql, binds = fake_session.calls[-1]
     assert "DELETE FROM public.point_packages" in sql
+    assert "RETURNING public.point_packages.id" in sql
     assert str(pid) in binds.values()
+
+    fake_session.scalar_rows = [pid]
+    assert await repo.delete_package(str(pid)) is True
 
 
 # ─── Pricing ───────────────────────────────────────────────────────

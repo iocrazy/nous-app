@@ -1,12 +1,15 @@
 """Admin API routes for Credits / Points management."""
 
 import asyncio
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
+from app.api.row_guard import require_row
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.credits_repository import get_admin_credits_repository
 from app.schemas.admin import (
@@ -40,6 +43,51 @@ from app.utils.admin_helpers import (
 )
 
 router = APIRouter()
+
+
+def _order_not_found() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
+    )
+
+
+def _require_order_id(order_id: str) -> str:
+    """Order ids are Snowflake BIGINTs; anything else names no order (it used
+    to reach ``int()`` in the repository and come back as a 500)."""
+    if parse_team_id(order_id) is None:
+        raise _order_not_found()
+    return order_id
+
+
+def _require_package_id(package_id: str) -> str:
+    """Package ids are uuids; anything else names no package (it used to reach
+    the uuid bind and come back as a 500)."""
+    try:
+        uuid.UUID(package_id)
+    except ValueError:
+        require_row(None)
+    return package_id
+
+
+def _validate_package(body: AdminPackageRequest) -> None:
+    """``orders`` CHECKs ``points_amount > 0`` and ``amount_cents > 0``: a
+    package outside those bounds could be saved but never bought (the order
+    insert fails), so refuse it here."""
+    if body.points_amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="points_amount must be positive",
+        )
+    if body.price_cents <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="price_cents must be positive",
+        )
+
+
+def _package_conflict(e: IntegrityError, message: str) -> HTTPException:
+    logger.warning(f"[Admin] point_packages write refused: {e.orig}")
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
 
 
 # ============================================
@@ -356,11 +404,9 @@ async def confirm_order(
     """Manually confirm payment for a pending order."""
     repo = get_admin_credits_repository()
 
-    order = await repo.get_order(order_id)
+    order = await repo.get_order(_require_order_id(order_id))
     if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
-        )
+        raise _order_not_found()
 
     if order["payment_status"] != "pending":
         raise HTTPException(
@@ -405,11 +451,9 @@ async def refund_order(
     """Refund a paid order (deduct points, mark as refunded)."""
     repo = get_admin_credits_repository()
 
-    order = await repo.get_order(order_id)
+    order = await repo.get_order(_require_order_id(order_id))
     if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
-        )
+        raise _order_not_found()
 
     if order["payment_status"] != "paid":
         raise HTTPException(
@@ -473,6 +517,7 @@ async def create_package(
     request: Request,
 ):
     """Create a new point package."""
+    _validate_package(body)
     repo = get_admin_credits_repository()
 
     payload = {
@@ -483,13 +528,21 @@ async def create_package(
         "sort_order": body.sort_order,
         "is_active": body.is_active,
     }
-    created = await repo.create_package(payload)
+    try:
+        created = await repo.create_package(payload)
+    except IntegrityError as e:
+        raise _package_conflict(e, "A package with this name already exists")
+    if not created:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Package was not created",
+        )
 
     await create_audit_log(
         admin_id=auth.user_id,
         action="package_create",
         target_type="point_package",
-        target_id=str(created["id"]) if created else "unknown",
+        target_id=str(created["id"]),
         details=payload,
         ip_address=request.client.host if request.client else None,
     )
@@ -505,6 +558,8 @@ async def update_package(
     request: Request,
 ):
     """Update an existing point package."""
+    _require_package_id(package_id)
+    _validate_package(body)
     repo = get_admin_credits_repository()
 
     payload = {
@@ -515,12 +570,11 @@ async def update_package(
         "sort_order": body.sort_order,
         "is_active": body.is_active,
     }
-    updated = await repo.update_package(package_id, payload)
-
-    if not updated:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Package not found"
-        )
+    try:
+        updated = await repo.update_package(package_id, payload)
+    except IntegrityError as e:
+        raise _package_conflict(e, "A package with this name already exists")
+    require_row(updated)
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -540,9 +594,22 @@ async def delete_package(
     auth: AdminAuthDep,
     request: Request,
 ):
-    """Delete a point package."""
+    """Delete a point package.
+
+    A package that orders point at cannot be deleted (``orders.package_id`` has
+    no ON DELETE): that is a 409 telling the admin to deactivate it instead,
+    not a 500. A package that is not there is a 404, not ``ok``.
+    """
+    _require_package_id(package_id)
     repo = get_admin_credits_repository()
-    await repo.delete_package(package_id)
+    try:
+        deleted = await repo.delete_package(package_id)
+    except IntegrityError as e:
+        raise _package_conflict(
+            e, "This package has orders; deactivate it instead of deleting it"
+        )
+    if not deleted:
+        require_row(None)
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -575,6 +642,12 @@ async def update_pricing(
     request: Request,
 ):
     """Update pricing for a specific action type."""
+    if body.points_cost < 0:
+        # A negative cost would make every consume of this action CREDIT points.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="points_cost must not be negative",
+        )
     repo = get_admin_credits_repository()
 
     payload: dict = {"points_cost": body.points_cost}
@@ -582,11 +655,7 @@ async def update_pricing(
         payload["description"] = body.description
 
     updated = await repo.update_pricing(action_type, payload)
-
-    if not updated:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Action type not found"
-        )
+    require_row(updated)
 
     await create_audit_log(
         admin_id=auth.user_id,
