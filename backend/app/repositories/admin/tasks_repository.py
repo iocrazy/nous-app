@@ -224,24 +224,30 @@ class AdminTasksRepository:
             "task_type": row.task_type,
         }
 
-    async def update(self, task_id: str, changes: dict[str, Any]) -> None:
+    async def update(self, task_id: str, changes: dict[str, Any]) -> bool:
         """UPDATE task_tracking by ``dbos_workflow_id`` with the EXACT ``changes``
         dict (verbatim — including trigger-owned columns; see the module docstring's
         task_tracking-discipline CONCERN). COMMITS via write_scope(). Reproduces
-        the legacy ``.update(changes).eq("dbos_workflow_id", task_id)``."""
+        the legacy ``.update(changes).eq("dbos_workflow_id", task_id)``.
+
+        Returns whether a row matched (``RETURNING`` the key), so a row that
+        vanished between the route's read and this write is a 404, not a
+        success. An empty change set writes nothing and returns False."""
         if not changes:
-            return
+            return False
         # Resolve attribute names so a renamed column (e.g. "metadata" →
         # "metadata_") binds correctly; the legacy's keys are real DB column names.
         values: Dict[str, Any] = {
             _TASK_N2A.get(key, key): value for key, value in changes.items()
         }
         async with write_scope() as session:
-            await session.execute(
+            result = await session.execute(
                 update(TaskTracking)
                 .where(TaskTracking.dbos_workflow_id == task_id)
                 .values(**values)
+                .returning(TaskTracking.dbos_workflow_id)
             )
+            return result.first() is not None
 
 
 def get_admin_tasks_repository() -> "AdminTasksRepository":

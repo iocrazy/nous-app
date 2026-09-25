@@ -357,5 +357,19 @@ async def test_update_renames_metadata_column(
 async def test_update_empty_changes_is_noop(
     repo: AdminTasksRepository, fake_session: _FakeSession
 ) -> None:
-    await repo.update("w1", {})
+    assert await repo.update("w1", {}) is False
     assert fake_session.calls == []  # no SQL emitted for an empty change set
+
+
+@pytest.mark.asyncio
+async def test_update_reports_whether_a_row_matched(
+    repo: AdminTasksRepository, fake_session: _FakeSession
+) -> None:
+    """``RETURNING`` the key lets the route tell a vanished row (404) from a
+    landed write; the bare UPDATE could not."""
+    fake_session.first_row = ("w1",)
+    assert await repo.update("w1", {"status": "cancelled"}) is True
+    assert "RETURNING" in fake_session.calls[-1][0]
+
+    fake_session.first_row = None
+    assert await repo.update("w1", {"status": "cancelled"}) is False

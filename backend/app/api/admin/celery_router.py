@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
+from app.schemas.admin_ops import AdminQueuesResponse, AdminWorkersResponse
 
 router = APIRouter()
 
@@ -34,7 +35,7 @@ def _list_workflows(**kwargs):
     return DBOS.list_workflows(**kwargs)
 
 
-@router.get("/workers")
+@router.get("/workers", response_model=AdminWorkersResponse)
 async def get_celery_workers(auth: AdminAuthDep):
     """Return DBOS worker info. Single in-process 'worker' since DBOS
     runs in the FastAPI host process. Payload mirrors the legacy
@@ -63,7 +64,7 @@ async def get_celery_workers(auth: AdminAuthDep):
     return {"online": 1, "total": 1, "workers": workers}
 
 
-@router.get("/queues")
+@router.get("/queues", response_model=AdminQueuesResponse)
 async def get_celery_queues(auth: AdminAuthDep):
     """Return queue depths. PR-D7: there are no Celery queues. We
     report the DBOS `agent_workforce` queue depth instead, plus an

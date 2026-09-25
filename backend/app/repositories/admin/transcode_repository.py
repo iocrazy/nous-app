@@ -272,13 +272,17 @@ class AdminTranscodeRepository:
             "mime_type": row.mime_type,
         }
 
-    async def mark_pending(self, version_id: str) -> None:
+    async def mark_pending(self, version_id: str) -> bool:
+        """Set ``transcode_status='pending'``; True when a row matched (a version
+        deleted since the caller read it is False, and must not be dispatched)."""
         async with write_scope() as session:
-            await session.execute(
+            result = await session.execute(
                 sa_update(ResourceVersions)
                 .where(ResourceVersions.id == _bigint(version_id))
                 .values(transcode_status="pending")
+                .returning(ResourceVersions.id)
             )
+            return result.first() is not None
 
     async def list_versions_for_batch(
         self, action: str, limit: int = BATCH_VERSIONS_LIMIT

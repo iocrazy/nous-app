@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.tasks_repository import get_admin_tasks_repository
 from app.schemas.admin import (
@@ -13,6 +14,7 @@ from app.schemas.admin import (
     AdminTaskResponse,
     AdminTaskStatsResponse,
 )
+from app.schemas.admin_ops import AdminTaskActionResponse
 from app.utils.admin_helpers import batch_get_user_auth_info, create_audit_log
 
 router = APIRouter()
@@ -125,7 +127,7 @@ async def list_tasks(
     )
 
 
-@router.post("/{task_id}/cancel")
+@router.post("/{task_id}/cancel", response_model=AdminTaskActionResponse)
 async def cancel_task(
     task_id: str,
     auth: AdminAuthDep,
@@ -157,7 +159,9 @@ async def cancel_task(
             "(Celery removed)"
         )
 
-    await repo.update(task_id, {"status": "cancelled", "phase": "cancelled"})
+    # A row deleted since the read above matches nothing: 404, not a success.
+    if not await repo.update(task_id, {"status": "cancelled", "phase": "cancelled"}):
+        require_row(None)
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -172,7 +176,7 @@ async def cancel_task(
     return {"message": "Task cancelled", "task_id": task_id}
 
 
-@router.post("/{task_id}/retry")
+@router.post("/{task_id}/retry", response_model=AdminTaskActionResponse)
 async def retry_task(
     task_id: str,
     auth: AdminAuthDep,
@@ -197,7 +201,7 @@ async def retry_task(
             ),
         )
 
-    await repo.update(
+    matched = await repo.update(
         task_id,
         {
             "status": "pending",
@@ -209,6 +213,8 @@ async def retry_task(
             "completed_at": None,
         },
     )
+    if not matched:
+        require_row(None)
 
     await create_audit_log(
         admin_id=auth.user_id,

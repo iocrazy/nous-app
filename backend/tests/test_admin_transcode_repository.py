@@ -360,10 +360,20 @@ async def test_list_versions_for_batch_respects_custom_limit(
 async def test_mark_pending_updates_status(
     repo: AdminTranscodeRepository, fake_session: _FakeSession
 ) -> None:
-    await repo.mark_pending("1")
+    fake_session.rows = [_Row(id=1)]
+    assert await repo.mark_pending("1") is True
     sql = _all_sql(fake_session)
     assert "resource_versions SET transcode_status" in sql
+    assert "RETURNING" in sql
     assert "pending" in _all_binds(fake_session)
+
+
+@pytest.mark.asyncio
+async def test_mark_pending_reports_a_vanished_version(
+    repo: AdminTranscodeRepository, fake_session: _FakeSession
+) -> None:
+    fake_session.rows = []
+    assert await repo.mark_pending("1") is False
 
 
 # ─── Settings ──────────────────────────────────────────────────────

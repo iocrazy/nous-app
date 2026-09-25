@@ -62,10 +62,13 @@ def test_reload_seeds_runs_loader_for_admin(client: TestClient, fake_auth):
 
     app.dependency_overrides[get_admin_auth] = _grant
 
+    # The full shape ``SeedLoader.load_all()`` returns (the route now declares it).
     fake_results = {
         "agents": 1,
         "skills": 3,
         "agent_skill_bindings": 3,
+        "skipped": {"agents": 0, "skills": 1, "skill_files": 2},
+        "upserted": {"agents": 1, "skills": 2, "skill_files": 4},
         "errors": [],
     }
 

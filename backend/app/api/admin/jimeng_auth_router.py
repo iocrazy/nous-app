@@ -32,6 +32,11 @@ from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.admin_deps import AdminAuthDep
+from app.schemas.admin_ops import (
+    AdminJimengLoginResponse,
+    AdminJimengLogoutResponse,
+    AdminJimengStatus,
+)
 from app.services.media.parsers.video_providers.jimeng_cli import JimengCliProvider
 
 router = APIRouter()
@@ -196,7 +201,9 @@ async def _run_cli_once(args: list, timeout: float) -> tuple[Optional[int], str,
     return proc.returncode, out, err
 
 
-@router.get("/status")
+@router.get(
+    "/status", response_model=AdminJimengStatus, response_model_exclude_unset=True
+)
 async def jimeng_status(auth: AdminAuthDep) -> dict:
     """Login state + credit balance, via the provider's ``user_credit`` health.
 
@@ -211,7 +218,11 @@ async def jimeng_status(auth: AdminAuthDep) -> dict:
     return result
 
 
-@router.post("/login")
+@router.post(
+    "/login",
+    response_model=AdminJimengLoginResponse,
+    response_model_exclude_unset=True,
+)
 async def jimeng_login(auth: AdminAuthDep) -> dict:
     """Start the OAuth device flow and return the authorization material.
 
@@ -267,7 +278,7 @@ async def jimeng_login(auth: AdminAuthDep) -> dict:
         }
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=AdminJimengLogoutResponse)
 async def jimeng_logout(auth: AdminAuthDep) -> dict:
     """Clear the login session: kill any in-flight device flow + ``dreamina logout``."""
     global _current_login
