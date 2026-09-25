@@ -27,8 +27,8 @@ class IssueRollupCurrentRun(BaseModel):
     status: Optional[str]
     started_at: Optional[IssueRollupInstant]
     model: Optional[str]
-    view: Any
-    cost: Any
+    view: dict[str, Any]
+    cost: dict[str, Any]
     last_seq: Optional[int]
 
 
