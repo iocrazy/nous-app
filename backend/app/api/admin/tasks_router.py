@@ -6,7 +6,6 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
-from app.api.row_guard import require_row
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.tasks_repository import get_admin_tasks_repository
 from app.schemas.admin import (
@@ -15,6 +14,7 @@ from app.schemas.admin import (
     AdminTaskStatsResponse,
 )
 from app.schemas.admin_ops import AdminTaskActionResponse
+from app.services.infra import dbos_orchestrator
 from app.utils.admin_helpers import batch_get_user_auth_info, create_audit_log
 
 router = APIRouter()
@@ -133,7 +133,19 @@ async def cancel_task(
     auth: AdminAuthDep,
     request: Request,
 ):
-    """Cancel a pending or processing task."""
+    """Request cancellation of a pending or processing task's workflow.
+
+    Goes through DBOS, the same native cancel the Task Center uses
+    (``POST /workflows/{id}/cancel``). ``task_tracking`` is NOT written here:
+    ``phase`` / ``status`` belong to the ``mirror_dbos_lifecycle_to_tracking``
+    trigger, which records CANCELLED once DBOS does (CLAUDE.md, 任务系统架构
+    纪律 §2). This used to PATCH the row to ``cancelled`` and never touch the
+    workflow — it kept running, and the trigger could flip the row back.
+
+    There is no admin retry: re-dispatching needs the owner's per-type dispatch
+    and request scope (``POST /task-manager/tasks/{id}/retry``). The old route
+    reset the row to ``pending`` and started nothing, so it was removed.
+    """
     repo = get_admin_tasks_repository()
 
     task = await repo.get(task_id)
@@ -149,81 +161,27 @@ async def cancel_task(
             detail=f"Cannot cancel task with status '{task['status']}'",
         )
 
-    dbos_workflow_id = task.get("dbos_workflow_id")
-    if dbos_workflow_id:
-        # PR-D7 phase 3: Celery is gone — no broker to revoke from.
-        # Log + skip; the task_tracking row still gets marked cancelled
-        # below.
-        logger.debug(
-            f"[Admin] Skipped Celery revoke for legacy {dbos_workflow_id} "
-            "(Celery removed)"
-        )
+    if not dbos_orchestrator.is_enabled():
+        raise HTTPException(status_code=503, detail="DBOS not enabled")
 
-    # A row deleted since the read above matches nothing: 404, not a success.
-    if not await repo.update(task_id, {"status": "cancelled", "phase": "cancelled"}):
-        require_row(None)
+    # Lazy: app.api's package __init__ rebinds ``workflows_router`` to the
+    # APIRouter, and importing it at module load would run during that init.
+    from app.api.workflows_router import _cancel as cancel_dbos_workflow
+
+    try:
+        await cancel_dbos_workflow(task_id)
+    except Exception as e:
+        logger.warning(f"[Admin] cancel({task_id}) failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     await create_audit_log(
         admin_id=auth.user_id,
         action="task_cancel",
         target_type="unified_task",
         target_id=task_id,
-        details={"dbos_workflow_id": dbos_workflow_id},
+        details={"dbos_workflow_id": task_id},
         ip_address=request.client.host if request.client else None,
     )
 
-    logger.info(f"[Admin] Task cancelled: {task_id} by admin={auth.user_id}")
-    return {"message": "Task cancelled", "task_id": task_id}
-
-
-@router.post("/{task_id}/retry", response_model=AdminTaskActionResponse)
-async def retry_task(
-    task_id: str,
-    auth: AdminAuthDep,
-    request: Request,
-):
-    """Retry a failed task by resetting its status."""
-    repo = get_admin_tasks_repository()
-
-    task = await repo.get(task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found",
-        )
-
-    if task["status"] != "failed":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Cannot retry task with status '{task['status']}', "
-                f"only failed tasks can be retried"
-            ),
-        )
-
-    matched = await repo.update(
-        task_id,
-        {
-            "status": "pending",
-            "phase": "queued",
-            "progress": 0,
-            "error_msg": None,
-            "error_code": None,
-            "started_at": None,
-            "completed_at": None,
-        },
-    )
-    if not matched:
-        require_row(None)
-
-    await create_audit_log(
-        admin_id=auth.user_id,
-        action="task_retry",
-        target_type="unified_task",
-        target_id=task_id,
-        details={"task_type": task["task_type"]},
-        ip_address=request.client.host if request.client else None,
-    )
-
-    logger.info(f"[Admin] Task retry: {task_id} by admin={auth.user_id}")
-    return {"message": "Task reset to pending", "task_id": task_id}
+    logger.info(f"[Admin] Task cancel requested: {task_id} by admin={auth.user_id}")
+    return {"message": "Cancel requested", "task_id": task_id}

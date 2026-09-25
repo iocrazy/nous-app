@@ -62,18 +62,3 @@ export function useCancelTask() {
     },
   })
 }
-
-export function useRetryTask() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: async (taskId: string) => {
-      const { data } = await apiClient.post<AdminTaskActionResult>(
-        `/api/v1/admin/tasks/${taskId}/retry`,
-      )
-      return data
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-    },
-  })
-}

@@ -1,10 +1,10 @@
-"""Unit tests for AdminTasksRepository (ORM 2.0, model-backed reads + writes).
+"""Unit tests for AdminTasksRepository (ORM 2.0, model-backed reads; no writes).
 
 Post-rollout the repository is the SQLAlchemy 2.0 implementation — reads go
 through ``read_scope()`` with ``select(TaskTracking)`` statements (rows converted
-to LIST_COLUMNS-shaped dicts by ``_list_row``) and cancel/retry writes go through
-``write_scope()`` with a generic ``update(TaskTracking)``. These tests mock
-``read_scope`` / ``write_scope`` with a fake session that captures every emitted
+to LIST_COLUMNS-shaped dicts by ``_list_row``). The repository has no write
+path since P8 (task_tracking status columns are trigger-owned). These tests mock
+``read_scope`` with a fake session that captures every emitted
 ``(sql, binds)`` pair and returns in-memory ``TaskTracking`` instances, so the
 compiled SQL shape + bind params AND the ``_list_row`` value-type sweep are
 asserted WITHOUT a live database (the DSN-gated integration suite in
@@ -80,7 +80,6 @@ class _ScopeCM:
 def fake_session(monkeypatch: pytest.MonkeyPatch) -> _FakeSession:
     session = _FakeSession()
     monkeypatch.setattr(mod, "read_scope", lambda: _ScopeCM(session))
-    monkeypatch.setattr(mod, "write_scope", lambda: _ScopeCM(session))
     return session
 
 
@@ -311,65 +310,3 @@ async def test_get_absent_returns_none(
 ) -> None:
     fake_session.first_row = None
     assert await repo.get("nope") is None
-
-
-# ─── update (write path — verbatim, incl. trigger-owned columns) ──────────
-
-
-@pytest.mark.asyncio
-async def test_update_writes_changes_verbatim(
-    repo: AdminTasksRepository, fake_session: _FakeSession
-) -> None:
-    # Reproduces the legacy admin retry write — incl. trigger-owned columns.
-    await repo.update(
-        "w1",
-        {
-            "status": "pending",
-            "phase": "queued",
-            "progress": 0,
-            "error_msg": None,
-            "started_at": None,
-        },
-    )
-    sql, binds = fake_session.calls[-1]
-    assert "UPDATE" in sql and "task_tracking" in sql
-    # trigger-owned columns are written verbatim (no discipline "fix")
-    assert "status" in sql and "phase" in sql and "progress" in sql
-    assert binds.get("status") == "pending"
-    assert binds.get("phase") == "queued"
-    # WHERE binds the PK dbos_workflow_id
-    assert "w1" in binds.values()
-
-
-@pytest.mark.asyncio
-async def test_update_renames_metadata_column(
-    repo: AdminTasksRepository, fake_session: _FakeSession
-) -> None:
-    await repo.update("w1", {"metadata": {"k": "v"}})
-    sql, binds = fake_session.calls[-1]
-    # DB-column key "metadata" resolves to the renamed attr and compiles to the
-    # real "metadata" column (not "metadata_").
-    assert "metadata" in sql
-    assert {"k": "v"} in binds.values()
-
-
-@pytest.mark.asyncio
-async def test_update_empty_changes_is_noop(
-    repo: AdminTasksRepository, fake_session: _FakeSession
-) -> None:
-    assert await repo.update("w1", {}) is False
-    assert fake_session.calls == []  # no SQL emitted for an empty change set
-
-
-@pytest.mark.asyncio
-async def test_update_reports_whether_a_row_matched(
-    repo: AdminTasksRepository, fake_session: _FakeSession
-) -> None:
-    """``RETURNING`` the key lets the route tell a vanished row (404) from a
-    landed write; the bare UPDATE could not."""
-    fake_session.first_row = ("w1",)
-    assert await repo.update("w1", {"status": "cancelled"}) is True
-    assert "RETURNING" in fake_session.calls[-1][0]
-
-    fake_session.first_row = None
-    assert await repo.update("w1", {"status": "cancelled"}) is False

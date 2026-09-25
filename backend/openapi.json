@@ -67681,7 +67681,7 @@
     },
     "/api/v1/admin/tasks/{task_id}/cancel": {
       "post": {
-        "description": "Cancel a pending or processing task.",
+        "description": "Request cancellation of a pending or processing task's workflow.\n\nGoes through DBOS, the same native cancel the Task Center uses\n(``POST /workflows/{id}/cancel``). ``task_tracking`` is NOT written here:\n``phase`` / ``status`` belong to the ``mirror_dbos_lifecycle_to_tracking``\ntrigger, which records CANCELLED once DBOS does (CLAUDE.md, 任务系统架构\n纪律 §2). This used to PATCH the row to ``cancelled`` and never touch the\nworkflow — it kept running, and the trigger could flip the row back.\n\nThere is no admin retry: re-dispatching needs the owner's per-type dispatch\nand request scope (``POST /task-manager/tasks/{id}/retry``). The old route\nreset the row to ``pending`` and started nothing, so it was removed.",
         "operationId": "cancel_task_api_v1_admin_tasks__task_id__cancel_post",
         "parameters": [
           {
@@ -67749,83 +67749,6 @@
           }
         },
         "summary": "Cancel Task",
-        "tags": [
-          "Admin",
-          "Admin",
-          "Admin - Tasks"
-        ]
-      }
-    },
-    "/api/v1/admin/tasks/{task_id}/retry": {
-      "post": {
-        "description": "Retry a failed task by resetting its status.",
-        "operationId": "retry_task_api_v1_admin_tasks__task_id__retry_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "task_id",
-            "required": true,
-            "schema": {
-              "title": "Task Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminTaskActionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Retry Task",
         "tags": [
           "Admin",
           "Admin",

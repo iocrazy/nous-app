@@ -2,7 +2,7 @@
 gained response models, the admin gate on every one, and the typed 404s.
 
 Routes: ``/admin/transcode/{id}/retry`` + ``/batch``, ``/admin/tasks/{id}/
-cancel`` + ``/retry``, ``/admin/jimeng/status`` + ``/login`` + ``/logout``,
+cancel``, ``/admin/jimeng/status`` + ``/login`` + ``/logout``,
 ``/admin/celery/workers`` + ``/queues``, ``/ai-library/admin/reload-seeds`` +
 ``/telemetry``.
 
@@ -51,7 +51,6 @@ ROUTES = [
     ("POST", f"/api/v1/admin/transcode/{VERSION_ID}/retry"),
     ("POST", "/api/v1/admin/transcode/batch?action=retry_failed"),
     ("POST", f"/api/v1/admin/tasks/{TASK_ID}/cancel"),
-    ("POST", f"/api/v1/admin/tasks/{TASK_ID}/retry"),
     ("GET", "/api/v1/admin/jimeng/status"),
     ("POST", "/api/v1/admin/jimeng/login"),
     ("POST", "/api/v1/admin/jimeng/logout"),
@@ -83,6 +82,7 @@ class _Result:
 class _Db:
     role: str | None = "admin"
     reads: list[_Result] = []
+    statements: list[str] = []
 
 
 @pytest.fixture(autouse=True)
@@ -93,6 +93,7 @@ def _wiring(monkeypatch):
     app.dependency_overrides[get_auth] = _auth
     _Db.role = "admin"
     _Db.reads = []
+    _Db.statements = []
 
     class _Session:
         def __init__(self) -> None:
@@ -100,6 +101,7 @@ def _wiring(monkeypatch):
 
         async def execute(self, stmt, *a, **kw):
             sql = str(stmt)
+            _Db.statements.append(sql)
             if "user_profiles" in sql:
                 return _Result((_Db.role,) if _Db.role is not None else None)
             return _Db.reads.pop(0) if _Db.reads else _Result()
@@ -278,52 +280,103 @@ async def test_transcode_batch_skips_a_vanished_version(
 
 
 class _TasksRepo:
-    def __init__(self, task: dict | None, *, matched: bool = True):
+    def __init__(self, task: dict | None):
         self.task = task
-        self.matched = matched
-        self.updates: list[dict] = []
 
     async def get(self, task_id: str):
         return self.task
-
-    async def update(self, task_id: str, changes: dict) -> bool:
-        self.updates.append(changes)
-        return self.matched
 
 
 def _task(status: str) -> dict:
     return {"dbos_workflow_id": TASK_ID, "status": status, "task_type": "download"}
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "action,status,message",
-    [
-        ("cancel", "processing", "Task cancelled"),
-        ("retry", "failed", "Task reset to pending"),
-    ],
-)
-async def test_task_action_wire(client, monkeypatch, action, status, message):
-    repo = _TasksRepo(_task(status))
-    monkeypatch.setattr(tasks_mod, "get_admin_tasks_repository", lambda: repo)
-    resp = await client.post(f"/api/v1/admin/tasks/{TASK_ID}/{action}")
-    assert_wire_unchanged(resp, {"message": message, "task_id": TASK_ID})
-    assert len(repo.updates) == 1
+@pytest.fixture
+def dbos_cancel(monkeypatch) -> list[str]:
+    """The DBOS-native cancel the Task Center uses; records workflow ids."""
+    import app.services.infra.dbos_orchestrator as orch
+
+    workflows_mod = sys.modules["app.api.workflows_router"]
+    cancelled: list[str] = []
+
+    async def _cancel(workflow_id: str) -> None:
+        cancelled.append(workflow_id)
+
+    monkeypatch.setattr(orch, "is_enabled", lambda: True)
+    monkeypatch.setattr(workflows_mod, "_cancel", _cancel)
+    return cancelled
+
+
+def _task_tracking_writes() -> list[str]:
+    return [
+        s
+        for s in _Db.statements
+        if s.lstrip().upper().startswith(("UPDATE", "INSERT", "DELETE"))
+        and "task_tracking" in s
+    ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "action,status", [("cancel", "processing"), ("retry", "failed")]
-)
-async def test_task_action_vanished_row_is_typed_404(
-    client, monkeypatch, action, status
+async def test_task_cancel_wire_goes_through_dbos(client, monkeypatch, dbos_cancel):
+    """Cancel asks DBOS and leaves ``task_tracking`` to the lifecycle trigger.
+    It used to PATCH ``status/phase='cancelled'`` and never touch the
+    workflow, which kept running."""
+    monkeypatch.setattr(
+        tasks_mod, "get_admin_tasks_repository", lambda: _TasksRepo(_task("processing"))
+    )
+    resp = await client.post(f"/api/v1/admin/tasks/{TASK_ID}/cancel")
+    assert_wire_unchanged(resp, {"message": "Cancel requested", "task_id": TASK_ID})
+    assert dbos_cancel == [TASK_ID]
+    assert _task_tracking_writes() == []
+
+
+@pytest.mark.asyncio
+async def test_task_cancel_refuses_a_terminal_task(client, monkeypatch, dbos_cancel):
+    monkeypatch.setattr(
+        tasks_mod, "get_admin_tasks_repository", lambda: _TasksRepo(_task("failed"))
+    )
+    resp = await client.post(f"/api/v1/admin/tasks/{TASK_ID}/cancel")
+    assert resp.status_code == 400, resp.text
+    assert dbos_cancel == []
+
+
+@pytest.mark.asyncio
+async def test_task_cancel_dbos_refusal_is_not_a_success(
+    client, monkeypatch, dbos_cancel
 ):
-    """The row went away between the read and the UPDATE: it used to answer
-    200 as if the write had landed."""
-    repo = _TasksRepo(_task(status), matched=False)
-    monkeypatch.setattr(tasks_mod, "get_admin_tasks_repository", lambda: repo)
-    resp = await client.post(f"/api/v1/admin/tasks/{TASK_ID}/{action}")
-    _assert_typed_404(resp)
+    workflows_mod = sys.modules["app.api.workflows_router"]
+
+    async def _boom(workflow_id: str) -> None:
+        raise RuntimeError("no such workflow")
+
+    monkeypatch.setattr(workflows_mod, "_cancel", _boom)
+    monkeypatch.setattr(
+        tasks_mod, "get_admin_tasks_repository", lambda: _TasksRepo(_task("pending"))
+    )
+    resp = await client.post(f"/api/v1/admin/tasks/{TASK_ID}/cancel")
+    assert resp.status_code == 400, resp.text
+    assert _task_tracking_writes() == []
+
+
+@pytest.mark.asyncio
+async def test_task_cancel_without_dbos_is_503(client, monkeypatch, dbos_cancel):
+    import app.services.infra.dbos_orchestrator as orch
+
+    monkeypatch.setattr(orch, "is_enabled", lambda: False)
+    monkeypatch.setattr(
+        tasks_mod, "get_admin_tasks_repository", lambda: _TasksRepo(_task("pending"))
+    )
+    resp = await client.post(f"/api/v1/admin/tasks/{TASK_ID}/cancel")
+    assert resp.status_code == 503, resp.text
+    assert dbos_cancel == []
+
+
+@pytest.mark.asyncio
+async def test_admin_task_retry_route_is_gone(client):
+    """It reset the row to pending/queued and dispatched nothing, so the task
+    sat in pending for ever. Retry lives in the owner's Task Center."""
+    resp = await client.post(f"/api/v1/admin/tasks/{TASK_ID}/retry")
+    assert resp.status_code in (404, 405), resp.text
 
 
 # ── /admin/jimeng ─────────────────────────────────────────────────────────
