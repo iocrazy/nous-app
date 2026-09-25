@@ -132,3 +132,52 @@ async def test_list_templates_with_team_id_unchanged_for_a_member(app, monkeypat
     assert resp.json()["data"] == [
         {"id": "tpl-team", "name": "Long-form", "node_count": 11}
     ]
+
+
+# ── non-numeric ids (used to 500 in int()) ──────────────────────────────────
+
+
+def _fail_repo(monkeypatch):
+    class _Repo:
+        def __getattr__(self, name):
+            raise AssertionError(f"a non-numeric id must not reach the repo ({name})")
+
+    monkeypatch.setattr(wtr, "get_workflow_templates_repository", lambda: _Repo())
+
+    async def fail_role(*args, **kwargs):
+        raise AssertionError("a non-numeric id must not reach the role lookup")
+
+    monkeypatch.setattr(wtr, "resolve_effective_role", fail_role)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("get", "/api/v1/workflows/runs"),
+        ("get", "/api/v1/workflows/not-an-id"),
+        ("patch", "/api/v1/workflows/12ab"),
+        ("delete", "/api/v1/workflows/%C2%B2"),
+    ],
+)
+async def test_non_numeric_template_id_is_a_typed_404(app, monkeypatch, method, path):
+    _fail_repo(monkeypatch)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        kwargs = {"json": {"name": "X"}} if method == "patch" else {}
+        resp = await getattr(c, method)(path, **kwargs)
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"]["code"] == "not_found_or_out_of_scope"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["get", "post"])
+async def test_non_numeric_team_id_is_a_403(app, monkeypatch, method):
+    _fail_repo(monkeypatch)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        kwargs = {"json": {"name": "X"}} if method == "post" else {}
+        resp = await getattr(c, method)(
+            "/api/v1/workflows", params={"team_id": "abc"}, **kwargs
+        )
+    assert resp.status_code == 403, resp.text
