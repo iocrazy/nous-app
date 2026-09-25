@@ -163,12 +163,15 @@ class AgentRuns(Base):
         ForeignKeyConstraint(
             ["parent_run_id"],
             ["public.agent_runs.id"],
-            ondelete="CASCADE",
+            ondelete="SET NULL",
             name="agent_runs_parent_run_id_fkey",
         ),
+        # mig 505: a deleted root leaves its descendants self-rooted; every
+        # reader keys trees on COALESCE(root_run_id, id).
         ForeignKeyConstraint(
             ["root_run_id"],
             ["public.agent_runs.id"],
+            ondelete="SET NULL",
             name="agent_runs_root_run_id_fkey",
         ),
         ForeignKeyConstraint(
