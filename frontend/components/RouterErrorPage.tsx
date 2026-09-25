@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { useRouteError } from 'react-router-dom';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 import { isStaleChunkError, forceFreshReload } from '../utils/staleChunkReload';
+import { reportError } from '../services/errorReporter';
 
 /**
  * Root `errorElement` for the router. Without one, any render/loader error —
@@ -27,6 +29,19 @@ export default function RouterErrorPage() {
         ? error
         : JSON.stringify(error ?? 'Unknown error');
   const stale = isStaleChunkError(message);
+
+  // Report the crash ourselves. This page is a React Router error boundary, so
+  // the error is *caught*: React 19 never hands it to the window 'error'
+  // listener `installErrorReporter()` relies on, and we render outside every
+  // provider, so no `ErrorBoundary` above us sees it either. Without this line
+  // a production render crash leaves zero rows in `frontend_error_logs` — the
+  // 2026-09-25 tiptap crash on script editor → materials navigation was found
+  // only because e2e:prod happened to hit it. Stale-chunk errors are deploy
+  // noise with their own CTA and are deliberately not reported.
+  useEffect(() => {
+    if (stale) return;
+    void reportError(error, { type: 'react_boundary', component: 'RouterErrorPage' });
+  }, [error, stale]);
 
   const title = stale ? 'A new version is available' : 'Something went wrong';
   const description = stale
