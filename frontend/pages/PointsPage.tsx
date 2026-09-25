@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { PointPackage } from '../types';
+import type { PointPackage } from '../types/api';
 import { PointsCenter } from '../components/PointsCenter';
 import { PaymentModal } from '../components/PaymentModal';
 import { useTeamContext } from '../contexts/TeamContext';

@@ -646,3 +646,17 @@ export type JimengCliStatus = Schemas['JimengCliStatusEnvelope']['data'];
  * or `already_logged_in` when the CLI reused its token. */
 export type JimengCliLoginResult = Schemas['JimengCliLoginEnvelope']['data'];
 // —— end P9 codex/keys/misc ——
+// —— P9 payment/cleanup/probes ——
+// `/api/v1/payment/*`: `{ success, data }` envelopes. Order `id` / `team_id`
+// are Snowflake BIGINTs sent as JSON **numbers** (package ids are uuid strings).
+/** One purchasable package from `GET /payment/packages`. */
+export type PointPackage = Schemas['PaymentPackageRow'];
+/** One `orders` row (`GET /payment/orders`, `POST /payment/create-order`). */
+export type PaymentOrder = Schemas['PaymentOrderRow'];
+/** `GET /payment/order/{id}/status`. */
+export type PaymentOrderStatus = Schemas['PaymentOrderStatus'];
+export type PaymentPackagesResponse = Schemas['Envelope_list_PaymentPackageRow__'];
+export type PaymentOrdersResponse = Schemas['Envelope_list_PaymentOrderRow__'];
+export type PaymentOrderResponse = Schemas['Envelope_PaymentOrderRow_'];
+export type PaymentOrderStatusResponse = Schemas['Envelope_PaymentOrderStatus_'];
+// —— end P9 payment/cleanup/probes ——
