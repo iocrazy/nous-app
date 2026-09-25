@@ -58,7 +58,6 @@ from app.api.projects_router import router as projects_router
 # Aliased for the same reason as ``assets_api_router`` above: the bare
 # basename would shadow the ``app.api.prompts_router`` module attribute.
 from app.api.prompts_router import router as prompts_api_router
-from app.api.realtime_router import router as realtime_router
 from app.api.resources_router import router as resources_router
 from app.api.reviews_router import router as reviews_router
 
@@ -219,7 +218,6 @@ api_router.include_router(router=modules_router, tags=["Modules"])
 api_router.include_router(router=notifications_router, tags=["Notifications"])
 api_router.include_router(router=inbox_router, tags=["Inbox"])
 
-api_router.include_router(router=realtime_router, tags=["Realtime"])
 
 api_router.include_router(router=error_report_router, tags=["Error Reporting"])
 
