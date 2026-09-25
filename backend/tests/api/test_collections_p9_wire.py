@@ -177,3 +177,84 @@ async def test_init_presets_existing_wire(client) -> None:
     assert_wire_unchanged(
         resp, {"message": "Preset collections already exist", "count": 2}
     )
+
+
+# ── list / get / media: the row model (id is a BIGINT, not a UUID) ────────
+#
+# ``CollectionResponse.id`` was declared ``UUID`` while ``smart_collections.id``
+# is a Snowflake BIGINT, so every route returning a real row answered 500.
+# These run the real repository conversion on a row whose id is past 2^53 and
+# on a legacy row with every nullable column NULL.
+
+RULES = {
+    "match": "any",
+    "conditions": [{"field": "tag", "operator": "in", "value": ["a"]}],
+}
+_NULLABLE = (
+    "icon",
+    "description",
+    "cached_count",
+    "cached_at",
+    "is_preset",
+    "sort_by",
+    "sort_order",
+    "created_at",
+    "updated_at",
+    "is_active",
+    "color",
+    "scope_id",
+    "cached_video_ids",
+)
+
+
+def _row_dict(obj: SmartCollections) -> dict:
+    """What the route builds for ``obj``: the repository's own conversion
+    followed by the router's projection."""
+    router_mod = sys.modules["app.api.collections_router"]
+    return router_mod._collection_out(repo_mod._sc_to_dict(obj))
+
+
+@pytest.mark.asyncio
+async def test_list_wire_keeps_bigint_id_a_number(client) -> None:
+    full = _collection(id=SAMPLE_BIGINT, rules=RULES)
+    legacy = _collection(id=SAMPLE_BIGINT + 1, rules=RULES, **dict.fromkeys(_NULLABLE))
+    _Db.results = [_Result([full, legacy])]
+    resp = await client.get("/api/v1/collections")
+    raw = {"collections": [_row_dict(full), _row_dict(legacy)], "total": 2}
+    assert_wire_unchanged(resp, raw)
+    body = resp.json()["collections"]
+    assert body[0]["id"] == SAMPLE_BIGINT and SAMPLE_BIGINT > 2**53
+    # The legacy row's NULLs fell back instead of failing validation.
+    assert body[1]["icon"] == "📁" and body[1]["media_count"] == 0
+    assert body[1]["is_active"] is True and body[1]["is_preset"] is False
+    assert body[1]["sort_by"] == "created_at" and body[1]["sort_order"] == "desc"
+
+
+@pytest.mark.asyncio
+async def test_get_wire(client) -> None:
+    row = _collection(id=SAMPLE_BIGINT, rules=RULES)
+    _Db.results = [_Result([row])]
+    resp = await client.get(f"/api/v1/collections/{COLLECTION_ID}")
+    assert_wire_unchanged(resp, _row_dict(row))
+    assert resp.json()["id"] == SAMPLE_BIGINT
+
+
+@pytest.mark.asyncio
+async def test_media_wire_collection_id_is_a_number(client, monkeypatch) -> None:
+    row = _collection(id=SAMPLE_BIGINT, rules=RULES)
+    _Db.results = [_Result([row])]
+
+    async def _media(self, **_kw):
+        return [{"id": 1}], 1
+
+    monkeypatch.setattr(svc_mod.CollectionsService, "get_collection_media", _media)
+    resp = await client.get(f"/api/v1/collections/{COLLECTION_ID}/media")
+    raw = {
+        "collection_id": SAMPLE_BIGINT,
+        "collection_name": row.name,
+        "media": [{"id": 1}],
+        "total": 1,
+        "page": 1,
+        "page_size": 20,
+    }
+    assert_wire_unchanged(resp, raw)

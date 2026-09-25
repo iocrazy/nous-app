@@ -7,6 +7,8 @@ import { ParsedMedia } from '../types';
 import type {
   CollectionInitPresetsResult,
   CollectionRefreshResult,
+  SmartCollectionMediaPage,
+  SmartCollectionRow,
 } from '../types/api';
 
 // Types
@@ -36,21 +38,8 @@ export interface CollectionRules {
   conditions: CollectionCondition[];
 }
 
-export interface SmartCollection {
-  id: string; // UUID from backend
-  name: string;
-  description: string | null;
-  icon: string | null;
-  color: string | null;
-  rules: CollectionRules;
-  is_preset: boolean;
-  is_active: boolean;
-  sort_by: string;
-  sort_order: 'asc' | 'desc';
-  video_count: number;
-  created_at: string;
-  updated_at: string;
-}
+/** One ``smart_collections`` row. ``id`` is a Snowflake BIGINT: a JSON number. */
+export type SmartCollection = SmartCollectionRow;
 
 export interface SmartCollectionCreate {
   name: string;
@@ -73,14 +62,9 @@ export interface SmartCollectionUpdate {
   sort_order?: 'asc' | 'desc';
 }
 
-export interface SmartCollectionVideosResponse {
+export type SmartCollectionVideosResponse = Omit<SmartCollectionMediaPage, 'media'> & {
   media: ParsedMedia[];
-  total: number;
-  page: number;
-  page_size: number;
-  collection_id: string;
-  collection_name: string;
-}
+};
 
 export const fetchSmartCollections = async (): Promise<SmartCollection[]> => {
   const data = await apiClient.get<{ collections?: SmartCollection[] }>(

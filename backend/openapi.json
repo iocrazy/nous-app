@@ -16430,9 +16430,8 @@
         "description": "Response schema for media in a collection.",
         "properties": {
           "collection_id": {
-            "format": "uuid",
             "title": "Collection Id",
-            "type": "string"
+            "type": "integer"
           },
           "collection_name": {
             "title": "Collection Name",
@@ -16514,12 +16513,11 @@
         "type": "object"
       },
       "CollectionResponse": {
-        "description": "Response schema for a smart collection.",
+        "description": "One ``smart_collections`` row as the collections routes return it.\n\n``id`` is the Snowflake BIGINT primary key: a JSON **number** (it was\ndeclared ``UUID``, so every route returning a real row answered 500).\nThe repository already turns ``user_id`` and the timestamps into strings,\nso they are declared ``str``. Nullable columns fall back to the documented\ndefaults in ``app/api/collections_router.py::_collection_out`` before they\nreach this model, so a legacy row with NULLs still validates.",
         "properties": {
           "cached_at": {
             "anyOf": [
               {
-                "format": "date-time",
                 "type": "string"
               },
               {
@@ -16540,9 +16538,15 @@
             "title": "Color"
           },
           "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "description": {
             "anyOf": [
@@ -16560,12 +16564,10 @@
             "type": "string"
           },
           "id": {
-            "format": "uuid",
             "title": "Id",
-            "type": "string"
+            "type": "integer"
           },
           "is_active": {
-            "default": true,
             "description": "Whether the collection is active",
             "title": "Is Active",
             "type": "boolean"
@@ -16575,7 +16577,6 @@
             "type": "boolean"
           },
           "media_count": {
-            "default": 0,
             "description": "Number of media matching this collection",
             "title": "Media Count",
             "type": "integer"
@@ -16596,12 +16597,17 @@
             "type": "string"
           },
           "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
           },
           "user_id": {
-            "format": "uuid",
             "title": "User Id",
             "type": "string"
           }
@@ -16613,8 +16619,10 @@
           "icon",
           "description",
           "rules",
+          "media_count",
           "cached_at",
           "is_preset",
+          "is_active",
           "sort_by",
           "sort_order",
           "created_at",

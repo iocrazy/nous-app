@@ -680,3 +680,6 @@ export type CollectionRefreshResult = Schemas['CollectionRefreshResult'];
 /** `presets` is absent when the user already had presets. */
 export type CollectionInitPresetsResult = Schemas['CollectionInitPresetsResult'];
 // —— end P9 payment/cleanup/probes ——
+// —— P9 collections row (id is a BIGINT: JSON number) ——
+export type SmartCollectionRow = Schemas['CollectionResponse'];
+export type SmartCollectionMediaPage = Schemas['CollectionMediaResponse'];

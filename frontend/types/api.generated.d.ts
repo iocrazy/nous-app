@@ -22585,11 +22585,8 @@ export interface components {
          * @description Response schema for media in a collection.
          */
         CollectionMediaResponse: {
-            /**
-             * Collection Id
-             * Format: uuid
-             */
-            collection_id: string;
+            /** Collection Id */
+            collection_id: number;
             /** Collection Name */
             collection_name: string;
             /** Media */
@@ -22634,31 +22631,31 @@ export interface components {
         };
         /**
          * CollectionResponse
-         * @description Response schema for a smart collection.
+         * @description One ``smart_collections`` row as the collections routes return it.
+         *
+         *     ``id`` is the Snowflake BIGINT primary key: a JSON **number** (it was
+         *     declared ``UUID``, so every route returning a real row answered 500).
+         *     The repository already turns ``user_id`` and the timestamps into strings,
+         *     so they are declared ``str``. Nullable columns fall back to the documented
+         *     defaults in ``app/api/collections_router.py::_collection_out`` before they
+         *     reach this model, so a legacy row with NULLs still validates.
          */
         CollectionResponse: {
             /** Cached At */
             cached_at: string | null;
             /** Color */
             color?: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
+            /** Created At */
+            created_at: string | null;
             /** Description */
             description: string | null;
             /** Icon */
             icon: string;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
+            /** Id */
+            id: number;
             /**
              * Is Active
              * @description Whether the collection is active
-             * @default true
              */
             is_active: boolean;
             /** Is Preset */
@@ -22666,7 +22663,6 @@ export interface components {
             /**
              * Media Count
              * @description Number of media matching this collection
-             * @default 0
              */
             media_count: number;
             /** Name */
@@ -22676,15 +22672,9 @@ export interface components {
             sort_by: string;
             /** Sort Order */
             sort_order: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /**
-             * User Id
-             * Format: uuid
-             */
+            /** Updated At */
+            updated_at: string | null;
+            /** User Id */
             user_id: string;
         };
         /**
