@@ -68,6 +68,7 @@ const step = (children: SubagentChild[]): StepNode => ({
     todo: null, durationMs: null, costCents: null, finishReason: null,
   },
   children,
+  outputs: [],
 });
 
 function withChildRun(node: StepNode, open: (o: ChildRunOrigin) => void, runId: string | null = null) {
