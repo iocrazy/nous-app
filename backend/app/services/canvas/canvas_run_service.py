@@ -34,6 +34,7 @@ from uuid import UUID
 from loguru import logger
 
 from app.schemas.canvas_run import CanvasPromptRunResult
+from app.services.ai.default_model_pick import rank_default_candidates
 
 # ``nous/<workflow>`` slugs used to route to the legacy nous-center workflow
 # bridge. That bridge was retired on 2026-09-24 (never configured in
@@ -227,38 +228,18 @@ def _extract_video_gen_params(node: Optional[Mapping[str, Any]]) -> dict:
     }
 
 
-# Probe statuses a "Catalog default" may land on, best first. ``idle`` (local
-# nous-engine row authorized but not loaded — a real chat got 503 "not loaded"
-# on 2026-09-24) and ``fail`` are skipped: the user pickers grey / hide those
-# rows, so the implicit default must not quietly pick one either.
-_DEFAULT_STATUS_RANK = {"ok": 0, None: 1, "not_probed": 1}
-
-
 def _row_name(row: Dict[str, Any]) -> Optional[str]:
     name = row.get("name")
     return name.strip() if isinstance(name, str) and name.strip() else None
 
 
 def _pick_default_row(rows: List[Dict[str, Any]]) -> Optional[str]:
-    """``ok`` row first, then never-probed / ``not_probed``, catalog order
-    within a rank. When every named row is ``idle``/``fail``, keep the old
-    first-row behaviour (a guess beats no model) and say so in a WARN."""
-    named = [(row, n) for row in rows if (n := _row_name(row))]
-    ranked = [
-        (_DEFAULT_STATUS_RANK[row.get("last_test_status")], i, n)
-        for i, (row, n) in enumerate(named)
-        if row.get("last_test_status") in _DEFAULT_STATUS_RANK
-    ]
-    if ranked:
-        return min(ranked)[2]
-    if not named:
-        return None
-    row, name = named[0]
-    logger.warning(
-        "canvas: no enabled llm row is ok or unprobed; default falls back to "
-        f"{name!r} (last_test_status={row.get('last_test_status')!r})"
-    )
-    return name
+    """First named row under the shared implicit-default rule
+    (``app.services.ai.default_model_pick``: ok → unprobed, idle/fail skipped,
+    catalog order + WARN when nothing qualifies)."""
+    named = [row for row in rows if _row_name(row)]
+    ranked = rank_default_candidates(named, context="canvas catalog default")
+    return _row_name(ranked[0]) if ranked else None
 
 
 class CanvasRunService:
