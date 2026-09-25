@@ -228,3 +228,88 @@ async def test_healthz_never_echoes_the_driver_message(client, monkeypatch):
     assert resp.status_code == 200, resp.text
     assert resp.json()["supabase"] == {"reachable": False, "error": "_Boom"}
     assert "55434" not in resp.text
+
+
+class _Workforce:
+    """Scripted ``get_task`` answers plus a record of lifecycle writes."""
+
+    def __init__(self, *tasks: dict[str, Any] | None, cas: bool = True) -> None:
+        self._tasks = list(tasks)
+        self.cas = cas
+        self.writes: list[dict[str, Any]] = []
+
+    async def get_task(self, task_id: UUID) -> dict[str, Any] | None:
+        return self._tasks.pop(0) if len(self._tasks) > 1 else self._tasks[0]
+
+    async def update_task_status(self, **kw: Any) -> bool:
+        self.writes.append(kw)
+        return self.cas
+
+
+class _Runs:
+    def __init__(self, accepted: bool = True) -> None:
+        self.accepted = accepted
+        self.cancelled: list[str] = []
+
+    async def request_cancel(self, run_id: str, *, user_id: Any = None) -> bool:
+        self.cancelled.append(run_id)
+        return self.accepted
+
+
+def _task(phase: str, run_id: str | None = None) -> dict[str, Any]:
+    return {"id": TASK_ID, "lifecycle_status": phase, "current_run_id": run_id}
+
+
+@pytest.fixture
+def runs(monkeypatch) -> _Runs:
+    r = _Runs()
+    monkeypatch.setattr(mod, "get_agent_runs_repository", lambda: r)
+    return r
+
+
+@pytest.mark.asyncio
+async def test_a_queued_task_is_cancelled_by_compare_and_set(client, runs, monkeypatch):
+    wf = _Workforce(_task("queued"))
+    monkeypatch.setattr(mod, "get_agent_workforce_repository", lambda: wf)
+    resp = await client.post(f"{BASE}/tasks/{TASK_ID}/cancel")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"task_id": TASK_ID, "lifecycle_status": "cancelled"}
+    (write,) = wf.writes
+    assert write["only_from"] == ("queued",)
+    assert write["lifecycle_status"] == "cancelled"
+    assert runs.cancelled == []
+
+
+@pytest.mark.asyncio
+async def test_a_running_task_gets_a_run_cancel_not_a_row_write(
+    client, runs, monkeypatch
+):
+    """Writing ``cancelled`` onto a running row stopped nothing: the turn went
+    on and the worker's closing write put ``done`` back."""
+    wf = _Workforce(_task("in_progress", "7300000000000000001"))
+    monkeypatch.setattr(mod, "get_agent_workforce_repository", lambda: wf)
+    resp = await client.post(f"{BASE}/tasks/{TASK_ID}/cancel")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["lifecycle_status"] == "in_progress"
+    assert wf.writes == []
+    assert runs.cancelled == ["7300000000000000001"]
+
+
+@pytest.mark.asyncio
+async def test_a_claimed_task_without_a_run_is_a_typed_409(client, runs, monkeypatch):
+    wf = _Workforce(_task("queued"), _task("assigned"), cas=False)
+    monkeypatch.setattr(mod, "get_agent_workforce_repository", lambda: wf)
+    resp = await client.post(f"{BASE}/tasks/{TASK_ID}/cancel")
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["details"]["code"] == "task_not_cancellable_yet"
+    assert runs.cancelled == []
+
+
+@pytest.mark.asyncio
+async def test_a_finished_task_is_left_alone(client, runs, monkeypatch):
+    wf = _Workforce(_task("done"))
+    monkeypatch.setattr(mod, "get_agent_workforce_repository", lambda: wf)
+    resp = await client.post(f"{BASE}/tasks/{TASK_ID}/cancel")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["lifecycle_status"] == "done"
+    assert wf.writes == [] and runs.cancelled == []

@@ -49,6 +49,7 @@ from app.models import (
 )
 from app.repositories._orm_helpers import _plain
 from app.repositories.agent_repository import get_agent_repository
+from app.repositories.agent_runs_repository import get_agent_runs_repository
 from app.repositories.agent_workforce_repository import (
     TASK_KIND_AGENT,
     get_agent_workforce_repository,
@@ -707,41 +708,85 @@ async def get_agent_detail(
     }
 
 
+_TERMINAL_LIFECYCLES = ("done", "failed", "cancelled")
+
+
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(
     task_id: UUID,
     auth: AdminAuthDep,
 ) -> dict[str, Any]:
-    """Mark an in-flight or queued task as cancelled.
+    """Cancel a queued task, or ask a running one to stop.
 
-    The DB transition is the source of truth — once
-    ``lifecycle_status='cancelled'``, the worker checks (and the
-    RunRecorder cancel poll) will refuse to keep going. Already-done
-    tasks are left alone.
+    ``task_tracking`` rows of kind ``agent_task`` are not mirrored from DBOS
+    (their ``dbos_workflow_id`` is the task id; the workflow that runs them is
+    ``workforce-<task>-<attempt>``), so their lifecycle belongs to the
+    workforce subsystem — the worker files ``done`` / ``cancelled`` itself.
+    This route used to write ``cancelled`` straight onto the row whatever its
+    phase: on a running task the turn went on, and the worker's closing write
+    turned the row back to ``done``. A cancel that does not stop anything.
+
+    * ``queued`` — nobody has claimed it, and ``claim_task`` only takes
+      ``queued`` rows, so a compare-and-set to ``cancelled`` through the
+      workforce repository is final.
+    * a run in flight — ``cancel_requested`` on that run, the same signal
+      ``POST /ai-library/runs/{id}/cancel`` sends. The runner stops at its next
+      step and the worker files the task ``cancelled``.
+    * claimed but no run yet — typed 409 ``task_not_cancellable_yet``; there
+      is nothing to signal for a moment.
+
+    Terminal tasks are a no-op.
     """
     workforce = get_agent_workforce_repository()
     task = await workforce.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail=f"task {task_id} not found")
-    if task.get("lifecycle_status") in ("done", "failed", "cancelled"):
+    lifecycle = task.get("lifecycle_status")
+    if lifecycle in _TERMINAL_LIFECYCLES:
+        return {
+            "task_id": str(task_id),
+            "lifecycle_status": lifecycle,
+            "note": "task already in terminal state — no-op",
+        }
+
+    if lifecycle == "queued" and await workforce.update_task_status(
+        task_id=task_id,
+        lifecycle_status="cancelled",
+        error_code="user_cancel",
+        error_message="Cancelled via workforce admin endpoint",
+        only_from=("queued",),
+    ):
+        logger.info(f"[workforce] task {task_id} cancelled by admin={auth.user_id}")
+        return {"task_id": str(task_id), "lifecycle_status": "cancelled"}
+
+    # Claimed between the read and the CAS, or already running: re-read so the
+    # run id is the one in flight now.
+    task = await workforce.get_task(task_id) or task
+    if task.get("lifecycle_status") in _TERMINAL_LIFECYCLES:
         return {
             "task_id": str(task_id),
             "lifecycle_status": task["lifecycle_status"],
             "note": "task already in terminal state — no-op",
         }
-    try:
-        await workforce.update_task_status(
-            task_id=task_id,
-            lifecycle_status="cancelled",
-            error_code="user_cancel",
-            error_message="Cancelled via workforce admin endpoint",
+    run_id = task.get("current_run_id")
+    if run_id and await get_agent_runs_repository().request_cancel(str(run_id)):
+        logger.info(
+            f"[workforce] task {task_id}: cancel requested on run {run_id} "
+            f"by admin={auth.user_id}"
         )
-    except Exception as err:
-        logger.exception(f"[workforce] cancel-task failed for {task_id}: {err}")
-        raise HTTPException(status_code=500, detail="cancel failed")
-
-    logger.info(f"[workforce] task {task_id} cancelled by admin={auth.user_id}")
-    return {"task_id": str(task_id), "lifecycle_status": "cancelled"}
+        return {
+            "task_id": str(task_id),
+            "lifecycle_status": task.get("lifecycle_status"),
+            "note": "cancel requested — the task turns cancelled when its run stops",
+        }
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "task_not_cancellable_yet",
+            "message": "The task is being picked up and has no running run yet; "
+            "retry in a moment.",
+        },
+    )
 
 
 # ─── Delegate sub-task lookup ───────────────────────────────────────────

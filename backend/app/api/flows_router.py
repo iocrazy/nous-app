@@ -177,17 +177,26 @@ async def get_flow(flow_id: str, auth: AuthDep) -> FlowDetailResponse:
 
 @router.post("/{flow_id}/cancel")
 async def cancel_flow(flow_id: str, auth: AuthDep) -> Dict[str, Any]:
-    """Cascade-cancel: set flow state=cancelled + signal abort on every
-    non-terminal child task. The trigger will eventually update the
-    aggregate counters as children flip to cancelled.
+    """Cascade-cancel: set flow state=cancelled + cancel every non-terminal
+    child's workflow. The aggregate trigger updates the parent counters as
+    children flip to cancelled.
 
     Implementation:
       1. Mark flow.state = cancelled (this prevents the trigger from
          regressing to running on next child phase change)
       2. Read non-terminal children
-      3. For each, signal abort via the AbortRegistry (cross-process via
-         lifecycle bus per A10) AND mark its task_tracking row cancelled
-         so UI reflects immediately
+      3. For each: cancel its DBOS workflow and kill its registered
+         subprocesses. ``phase`` /
+         ``status`` / ``error_msg`` are NOT written here — they belong to
+         ``mirror_dbos_lifecycle_to_tracking`` (CLAUDE.md 任务系统架构纪律 §2),
+         which records CANCELLED once DBOS does. This used to write them
+         directly and never cancel the workflow, so it kept running and the
+         trigger could flip the row back. Only the ``error_code`` decoration
+         is set, so the UI can say WHY the child stopped. (It also imported
+         ``app.services.abort_registry``, a module that no longer exists, so
+         every cascading cancel raised 500 after marking the flow cancelled.)
+
+    ``cascaded`` counts children whose workflow cancel was accepted.
     """
     # Verify ownership + read flow.
     try:
@@ -246,27 +255,27 @@ async def cancel_flow(flow_id: str, auth: AuthDep) -> Dict[str, Any]:
             .all()
         )
 
-    # Signal abort + mark cancelled.
-    from app.services.abort_registry import get_registry
+    # Cancel the workflow; the trigger records the outcome. Lazy import:
+    # app.api's package __init__ rebinds ``workflows_router`` to the APIRouter,
+    # and importing it at module load would run during that init.
+    from app.agent_framework import cancel_workflow_subprocesses
+    from app.api.workflows_router import _cancel as cancel_dbos_workflow
 
-    registry = get_registry()
     cancelled = 0
     for child in children:
         wf_id = child.get("dbos_workflow_id")
         if not wf_id:
             continue
         try:
-            await registry.signal(wf_id, broadcast=True)
+            await cancel_dbos_workflow(wf_id)
+            # Same as the Task Center cancel: a yt-dlp / ffmpeg child would
+            # otherwise run to completion after its workflow was cancelled.
+            await cancel_workflow_subprocesses(wf_id, grace_seconds=3.0)
             async with write_scope() as session:
                 await session.execute(
                     sa_update(TaskTracking)
                     .where(TaskTracking.dbos_workflow_id == wf_id)
-                    .values(
-                        phase="cancelled",
-                        status="cancelled",
-                        error_code="flow_cascade_cancel",
-                        error_msg=f"flow {flow_id} cancelled",
-                    )
+                    .values(error_code="flow_cascade_cancel")
                 )
             cancelled += 1
         except Exception as exc:
