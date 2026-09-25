@@ -11,8 +11,8 @@
  *     so they return the model DIRECTLY — do NOT unwrap `.data` there.
  */
 
-import { ProjectNodeCreate, ProjectNodePatch, StageLibraryItem, WorkflowCompletionPolicy, WorkflowTemplate, WorkflowTemplateNode, WorkflowTemplateNodeInput } from '../types';
-import type { AdvancePreview, FormFieldDef, NodeOut, ProjectStageNode, ProjectWorkflow, ProjectWorkflowOut, StageBoard, StageBoardData, WorkflowNodeEvents, WorkflowNodeRow } from '../types/api';
+import { ProjectNodeCreate, ProjectNodePatch, WorkflowCompletionPolicy, WorkflowTemplateNodeInput } from '../types';
+import type { AdvancePreview, FormFieldDef, NodeOut, ProjectStageNode, ProjectWorkflow, ProjectWorkflowOut, StageBoard, StageBoardData, StageLibraryItem, WorkflowNodeEvents, WorkflowNodeRow, WorkflowTemplate, WorkflowTemplateDetail, WorkflowTemplateNode, WorkflowTemplateNodeRow, WorkflowTemplateSummary } from '../types/api';
 import { apiClient } from './apiClient';
 
 interface Envelope<T> {
@@ -53,28 +53,21 @@ const normalizeEvents = (events: Partial<WorkflowNodeEvents> | null | undefined)
   auto_start: events?.auto_start ?? DEFAULT_EVENTS.auto_start,
 });
 
-/** Fill in `completion_policy`/`events`/`form_schema` on a template node
- * fetched from a payload that may predate mig 386/390 (all three optional
- * server-side too). */
-const normalizeTemplateNode = (
-  node: Partial<WorkflowTemplateNode> &
-    Omit<WorkflowTemplateNode, 'completion_policy' | 'events' | 'form_schema' | 'depends_on'>,
-): WorkflowTemplateNode => ({
+/** Narrow a template node's stored JSONB (`events` / `form_schema`) and
+ * default any key a legacy row predates (mig 386/389/395 events keys; the
+ * columns are NOT NULL, so the lists themselves are always present). */
+const normalizeTemplateNode = (node: WorkflowTemplateNodeRow): WorkflowTemplateNode => ({
   ...node,
-  completion_policy: node.completion_policy ?? DEFAULT_COMPLETION_POLICY,
-  events: normalizeEvents(node.events),
-  // mig 390 (M3 PR-I): a pre-mig-390 template node has no form_schema key at
-  // all — fall back to an empty form so the Form tab (and toDraft/toPayload
-  // in WorkflowTemplateEditor.tsx) never sees `undefined`.
-  form_schema: node.form_schema ?? [],
-  // mig 391 (M3 PR-J): dependency edges — real node ids on this GET response.
-  // A pre-mig-391 template row has no depends_on key at all.
-  depends_on: node.depends_on ?? [],
+  // The server only ever writes a `WorkflowNodeEvents` into this JSONB, and
+  // normalizeEvents defaults any key that's missing.
+  events: normalizeEvents(node.events as Partial<WorkflowNodeEvents>),
+  // Copied verbatim from validated `FormFieldDef[]` on write (mig 390).
+  form_schema: node.form_schema as FormFieldDef[],
 });
 
-const normalizeTemplate = (template: WorkflowTemplate): WorkflowTemplate => ({
+const normalizeTemplate = (template: WorkflowTemplateDetail): WorkflowTemplate => ({
   ...template,
-  nodes: template.nodes?.map(normalizeTemplateNode),
+  nodes: template.nodes.map(normalizeTemplateNode),
 });
 
 const COMPLETION_POLICIES: readonly WorkflowCompletionPolicy[] = ['owner', 'any_editor'];
@@ -145,7 +138,7 @@ const normalizeInstanceNode = (node: NodeOut | WorkflowNodeRow): ProjectStageNod
 export const fetchTemplates = async (
   teamId?: string,
 ): Promise<WorkflowTemplate[]> => {
-  const response = await apiClient.get<Envelope<WorkflowTemplate[]>>(
+  const response = await apiClient.get<Envelope<WorkflowTemplateSummary[]>>(
     '/api/v1/workflows',
     { query: { team_id: teamId || undefined } },
   );
@@ -162,25 +155,26 @@ export const fetchTemplates = async (
 export const fetchTemplate = async (
   templateId: string,
 ): Promise<WorkflowTemplate> => {
-  const response = await apiClient.get<Envelope<WorkflowTemplate>>(
+  const response = await apiClient.get<Envelope<WorkflowTemplateDetail>>(
     `/api/v1/workflows/${templateId}`,
   );
   if (!response.data) throw new Error('Empty response from fetchTemplate');
   return normalizeTemplate(response.data);
 };
 
-/** Create an empty named template (nodes are set via updateTemplate). */
+/** Create an empty named template (nodes are set via updateTemplate). The
+ * response is the list row: no `nodes` key. */
 export const createTemplate = async (
   teamId: string,
   name: string,
 ): Promise<WorkflowTemplate> => {
-  const response = await apiClient.post<Envelope<WorkflowTemplate>>(
+  const response = await apiClient.post<Envelope<WorkflowTemplateSummary>>(
     '/api/v1/workflows',
     { name },
     { query: { team_id: teamId } },
   );
   if (!response.data) throw new Error('Empty response from createTemplate');
-  return normalizeTemplate(response.data);
+  return response.data;
 };
 
 /**
@@ -195,7 +189,7 @@ export const updateTemplate = async (
     nodes?: WorkflowTemplateNodeInput[];
   },
 ): Promise<WorkflowTemplate> => {
-  const response = await apiClient.patch<Envelope<WorkflowTemplate>>(
+  const response = await apiClient.patch<Envelope<WorkflowTemplateDetail>>(
     `/api/v1/workflows/${templateId}`,
     data,
   );

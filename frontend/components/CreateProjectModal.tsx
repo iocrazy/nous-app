@@ -4,8 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { createProject } from '../services/projectsService';
 import { fetchMyTeams } from '../services/teamService';
 import { fetchTemplates } from '../services/workflowService';
-import { Team, WorkflowTemplate } from '../types';
-import type { Project } from '../types/api';
+import { Team } from '../types';
+import type { Project, WorkflowTemplate } from '../types/api';
 import { UiSelect } from './ui';
 import { WorkflowChoiceCard } from './workflow/WorkflowChoiceCard';
 

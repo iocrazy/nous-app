@@ -16,7 +16,7 @@ a non-member resolves to None → 403 on the team routes, 404 on the id routes
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -27,11 +27,18 @@ from app.repositories.team_repository import get_team_repository
 from app.repositories.workflow_templates_repository import (
     get_workflow_templates_repository,
 )
+from app.schemas.envelope import Envelope
 from app.schemas.workflow import (
     MAX_TEMPLATES_PER_TEAM,
     DepsBackwardOnly,
     TemplateCreate,
     TemplateUpdate,
+)
+from app.schemas.workflow_responses import (
+    WorkflowStageLibraryEntry,
+    WorkflowTemplateDeleted,
+    WorkflowTemplateDetail,
+    WorkflowTemplateSummary,
 )
 from app.services.workflow.template_seeder import ensure_seed_templates
 
@@ -93,7 +100,7 @@ def _not_a_member() -> HTTPException:
 # ── node bank (must precede /{template_id}) ─────────────────────────────────
 
 
-@router.get("/stage-library")
+@router.get("/stage-library", response_model=Envelope[List[WorkflowStageLibraryEntry]])
 async def list_stage_library(auth: AuthDep):
     """The 11-node workflow library (any authenticated user)."""
     repo = get_workflow_templates_repository()
@@ -103,7 +110,7 @@ async def list_stage_library(auth: AuthDep):
 # ── template collection ─────────────────────────────────────────────────────
 
 
-@router.get("")
+@router.get("", response_model=Envelope[List[WorkflowTemplateSummary]])
 async def list_templates(
     auth: AuthDep,
     team_id: Optional[str] = Query(
@@ -145,7 +152,7 @@ async def list_templates(
     return {"success": True, "data": templates}
 
 
-@router.post("")
+@router.post("", response_model=Envelope[WorkflowTemplateSummary])
 async def create_template(
     data: TemplateCreate,
     auth: AuthDep,
@@ -189,7 +196,7 @@ async def _resolve_template_role(template_id: str, user_id: str):
     return team_id, role
 
 
-@router.get("/{template_id}")
+@router.get("/{template_id}", response_model=Envelope[WorkflowTemplateDetail])
 async def get_template(template_id: str, auth: AuthDep):
     team_id, _role = await _resolve_template_role(template_id, auth.user_id)
     repo = get_workflow_templates_repository()
@@ -199,7 +206,7 @@ async def get_template(template_id: str, auth: AuthDep):
     return {"success": True, "data": tpl}
 
 
-@router.patch("/{template_id}")
+@router.patch("/{template_id}", response_model=Envelope[WorkflowTemplateDetail])
 async def update_template(template_id: str, data: TemplateUpdate, auth: AuthDep):
     team_id, role = await _resolve_template_role(template_id, auth.user_id)
     if role not in WRITE_ROLES:
@@ -232,7 +239,7 @@ async def update_template(template_id: str, data: TemplateUpdate, auth: AuthDep)
     return {"success": True, "data": tpl}
 
 
-@router.delete("/{template_id}")
+@router.delete("/{template_id}", response_model=Envelope[WorkflowTemplateDeleted])
 async def delete_template(template_id: str, auth: AuthDep):
     team_id, role = await _resolve_template_role(template_id, auth.user_id)
     if role not in WRITE_ROLES:

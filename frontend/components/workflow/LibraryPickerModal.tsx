@@ -11,7 +11,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import type { StageLibraryItem } from '../../types';
+import type { StageLibraryItem } from '../../types/api';
 
 interface LibraryPickerModalProps {
   items: StageLibraryItem[];

@@ -35,8 +35,7 @@ import {
   startEarlyNode,
 } from '../../services/workflowService';
 import { ApiError } from '../../services/apiClient';
-import type { StageLibraryItem } from '../../types';
-import type { ProjectStageNode, ProjectWorkflow } from '../../types/api';
+import type { ProjectStageNode, ProjectWorkflow, StageLibraryItem } from '../../types/api';
 import { useToast } from '../Toast';
 import { WorkflowStrip } from './WorkflowStrip';
 import { CurrentNodeCard } from './CurrentNodeCard';

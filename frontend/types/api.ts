@@ -569,3 +569,35 @@ export type BeatTemplateAnchorRow = Schemas['BeatTemplateAnchorRow'];
  * balance after the change. A debit larger than the balance stops at 0. */
 export type AdminTeamPointsAdjustResult = Schemas['AdminTeamPointsAdjustResult'];
 // —— end P8 admin: credits ——
+
+// —— P9 workflows ——
+// `/api/v1/workflows` hosts two routers. Templates: Snowflake ids are strings,
+// timestamps `isoformat()` strings, `{success, data}` envelope.
+export type WorkflowTemplateSummary = Schemas['WorkflowTemplateSummary'];
+/** Raw template node: `events` / `form_schema` are the stored JSONB, untyped. */
+export type WorkflowTemplateNodeRow = Schemas['WorkflowTemplateNodeRow'];
+export type WorkflowTemplateDetail = Schemas['WorkflowTemplateDetail'];
+/** One row of the read-only 11-node workflow node bank. */
+export type StageLibraryItem = Schemas['WorkflowStageLibraryEntry'];
+/** A template node after `workflowService.normalizeTemplateNode`: the JSONB
+ * columns narrowed, legacy keys defaulted. Wire → this only through there. */
+export type WorkflowTemplateNode = Omit<WorkflowTemplateNodeRow, 'events' | 'form_schema'> & {
+  events: WorkflowNodeEvents;
+  form_schema: FormFieldDef[];
+};
+/** A list row (no `nodes`), or a detail normalized by `workflowService`. */
+export type WorkflowTemplate = WorkflowTemplateSummary & { nodes?: WorkflowTemplateNode[] };
+// DBOS runs: timestamps are Unix epoch **ms** numbers, not ISO strings; bodies
+// carry no envelope.
+export type DbosWorkflowStep = Schemas['DbosWorkflowStep'];
+/** `GET /workflows/{id}/status`. Each SSE `event: status` push is the same
+ * snapshot, plus `steps` when the stream was opened with `include_steps`. */
+export type DbosWorkflowSnapshot = Schemas['DbosWorkflowSnapshot'] & { steps?: DbosWorkflowStep[] };
+/** A DBOS status string (PENDING, ENQUEUED, SUCCESS, ERROR, …). Not a closed
+ * set: DBOS adds states between releases. */
+export type DbosWorkflowStatus = NonNullable<DbosWorkflowSnapshot['status']>;
+export type DbosWorkflowSteps = Schemas['DbosWorkflowSteps'];
+export type DbosWorkflowCancelResult = Schemas['DbosWorkflowCancelResult'];
+export type DbosWorkflowResumeResult = Schemas['DbosWorkflowResumeResult'];
+export type DbosWorkflowRestartResult = Schemas['DbosWorkflowRestartResult'];
+// —— end P9 workflows ——
