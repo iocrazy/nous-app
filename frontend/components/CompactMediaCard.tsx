@@ -23,6 +23,28 @@ const HIT_BADGE_LABELS: Record<HitLayer, { key: string; fallback: string }> = {
 const similarityPercent = (score: number): number =>
   Math.round(Math.min(1, Math.max(0, Number.isFinite(score) ? score : 0)) * 100);
 
+/** m:ss of a millisecond offset (the hit badge's timecode). */
+const formatClock = (ms: number): string => {
+  const whole = Math.floor(ms / 1000);
+  return `${Math.floor(whole / 60)}:${(whole % 60).toString().padStart(2, '0')}`;
+};
+
+/** Where the matched shot sits in the video, as percentages of the position
+ *  bar; null without a usable duration. Width has a 2% floor so a short shot
+ *  in a long video still shows. */
+function shotPosition(
+  hit: SearchHit,
+  durationSeconds?: string | number | null,
+): { left: number; width: number } | null {
+  const dur = Number(durationSeconds);
+  if (hit.startMs == null || !Number.isFinite(dur) || dur <= 0) return null;
+  const total = dur * 1000;
+  const left = Math.min(100, Math.max(0, (hit.startMs / total) * 100));
+  const end = hit.endMs != null && hit.endMs > hit.startMs ? hit.endMs : hit.startMs;
+  const width = Math.max(2, Math.min(100 - left, ((end - hit.startMs) / total) * 100));
+  return { left, width };
+}
+
 const getPlatformLabel = (platform?: string): string => {
   if (!platform) return '';
   const labels: Record<string, string> = {
@@ -376,6 +398,9 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                 data-testid="hit-badge"
                 className="rounded px-1 text-[10px] leading-4 bg-island/95 text-content border border-line-strong whitespace-nowrap tabular-nums"
               >
+                {hit.startMs != null && (
+                  <span data-testid="hit-timecode">{`${formatClock(hit.startMs)} · `}</span>
+                )}
                 <span className="font-semibold text-[var(--accent-text)]">
                   {t(HIT_BADGE_LABELS[hit.layer]?.key ?? HIT_BADGE_LABELS.text.key,
                     HIT_BADGE_LABELS[hit.layer]?.fallback ?? HIT_BADGE_LABELS.text.fallback)}
@@ -411,14 +436,26 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         )}
       </div>
 
-      {/* Similarity bar — search hits only, 3px under the cover. */}
+      {/* Similarity bar — search hits only, 3px under the cover. A visual hit
+          also marks WHERE its shot sits (white segment) when the duration is
+          known — the same bar reads as a timeline for that case. */}
       {hit && (
-        <div className="h-[3px] w-full bg-line" aria-hidden="true">
+        <div className="relative h-[3px] w-full bg-line" aria-hidden="true">
           <div
             data-testid="similarity-bar"
             className="h-full bg-[var(--accent-text)]"
             style={{ width: `${similarityPercent(hit.score)}%` }}
           />
+          {(() => {
+            const pos = shotPosition(hit, data.duration);
+            return pos ? (
+              <div
+                data-testid="shot-position"
+                className="absolute top-0 h-full bg-white"
+                style={{ left: `${pos.left}%`, width: `${pos.width}%` }}
+              />
+            ) : null;
+          })()}
         </div>
       )}
 
@@ -486,6 +523,15 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
               </div>
             );
           })()}
+          {hit?.shotsQueued && (
+            <span
+              data-testid="shots-queued"
+              className="ml-auto text-[9px] text-content-3 whitespace-nowrap"
+              title={t('library.vectorSearch.shotsQueuedHint', 'Shot indexing is queued for this video')}
+            >
+              {t('library.vectorSearch.shotsQueued', 'shots queued')}
+            </span>
+          )}
         </div>
 
         {/* Stats Grid */}

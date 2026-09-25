@@ -51,7 +51,11 @@ export type TaskType =
   // Distribution publish batches (publish_distribution workflow, D2) —
   // task_tracking task_type='publish', per-account business state lives in
   // publish_task_accounts.
-  | 'publish';
+  | 'publish'
+  // One video cut into shots + one frame vector per shot (index_shots
+  // workflow, PR 3). The Settings backfill dispatches one per video under a
+  // flow; the Shots tab dispatches a single one.
+  | 'index_shots';
 
 export type TaskCategory = 'transfer' | 'processing' | 'ai';
 
@@ -130,6 +134,7 @@ export function getTaskCategory(type: TaskType): TaskCategory {
     case 'cover_frames':
     case 'canvas_graph_run':
     case 'canvas_timeline':
+    case 'index_shots':
       return 'ai';
     default:
       return 'processing';
@@ -920,6 +925,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     canvas_graph_run: 0,
     canvas_timeline: 0,
     publish: 0,
+    index_shots: 0,
   };
   for (const [type, n] of Object.entries(state.activeData.byType)) {
     if (type in activeCounts) {
@@ -1022,6 +1028,7 @@ export function taskTypeLabel(type: TaskType): string {
     case 'canvas_graph_run': return 'Canvas Run';
     case 'canvas_timeline': return 'Timeline Film';
     case 'publish': return 'Publish';
+    case 'index_shots': return 'Index Shots';
     default: return type;
   }
 }

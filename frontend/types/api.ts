@@ -683,3 +683,12 @@ export type CollectionInitPresetsResult = Schemas['CollectionInitPresetsResult']
 // —— P9 collections row (id is a BIGINT: JSON number) ——
 export type SmartCollectionRow = Schemas['CollectionResponse'];
 export type SmartCollectionMediaPage = Schemas['CollectionMediaResponse'];
+// —— PR 3 shot index: `/api/v1/resources/{id}/shots`, `/api/v1/ai/analyze/index-shots/{id}`,
+// `/api/v1/ai/analyze/backfill-shots`. Ids are Snowflake STRINGS on this
+// surface; every `*_ms` field is an integer millisecond count.
+export type ShotOut = Schemas['ShotOut'];
+export type ShotIndexInfo = Schemas['ShotIndexInfo'];
+export type ShotsResponse = Schemas['ShotsResponse'];
+export type IndexShotsResponse = Schemas['IndexShotsResponse'];
+export type BackfillShotsResponse = Schemas['BackfillShotsResponse'];
+export type BackfillShotsSkip = Schemas['BackfillShotsSkip'];

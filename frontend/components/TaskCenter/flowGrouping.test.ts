@@ -88,6 +88,23 @@ describe('groupTasksByFlow', () => {
 });
 
 describe('flowDisplayTitle', () => {
+  it('names a shot backfill flow by its video count, a single index by its title', () => {
+    const batch = groupTasksByFlow([
+      task({ task_type: 'index_shots', flow_id: 'f9', title: 'Index shots · Clip A', resource_id: '1' }),
+      task({ task_type: 'index_shots', flow_id: 'f9', title: 'Index shots · Clip B', resource_id: '2' }),
+    ]);
+    const flow = batch[0];
+    if (flow.kind !== 'flow') throw new Error('expected flow');
+    expect(flowDisplayTitle(flow)).toBe('Index shots · 2 videos');
+
+    const single = groupTasksByFlow([
+      task({ task_type: 'index_shots', flow_id: 'f8', title: 'Index shots · Clip A', resource_id: '1' }),
+    ]);
+    const one = single[0];
+    if (one.kind !== 'flow') throw new Error('expected flow');
+    expect(flowDisplayTitle(one)).toBe('Index shots · Clip A');
+  });
+
   it('prefers the download title stripped of its prefix', () => {
     const items = groupTasksByFlow([
       task({ task_type: 'parse', flow_id: 'f1', title: 'Parse https://v.douyin.com/xyz' }),

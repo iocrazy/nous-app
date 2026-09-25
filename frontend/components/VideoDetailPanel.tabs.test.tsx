@@ -44,6 +44,15 @@ vi.mock('../services/aiService', () => ({
 }));
 
 vi.mock('./MediaCard', () => ({ MediaCard: () => <div data-testid="media-card" /> }));
+// Shots tab boundary: a video nobody has indexed (real wire shape).
+vi.mock('../services/shotsService', async () => {
+  const actual = await vi.importActual<typeof import('../services/shotsService')>('../services/shotsService');
+  return {
+    ...actual,
+    getResourceShots: vi.fn().mockResolvedValue({ resource_id: '7002', indexed: false, index: null, shots: [] }),
+    indexShots: vi.fn(),
+  };
+});
 vi.mock('./SodaLyricsTab', () => ({ default: () => null }));
 
 import { VideoDetailPanel } from './VideoDetailPanel';
@@ -121,13 +130,12 @@ describe('VideoDetailPanel — big tabs', () => {
     expect(screen.queryByRole('button', { name: /Summarize/ })).toBeNull();
   });
 
-  it('Shots tab renders the placeholder with a disabled Index This Video button', () => {
-    render(<VideoDetailPanel video={video} onClose={() => {}} />);
+  it('Shots tab shows the not-indexed state with a live Index This Video button', async () => {
+    render(<VideoDetailPanel video={video} resourceId="7002" onClose={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: 'Shots' }));
-    const button = screen.getByRole('button', { name: 'Index This Video' });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute('title', 'Arrives with PR 3');
-    expect(screen.getByTestId('shots-estimate')).toHaveTextContent('≈ 100 shots');
+    const button = await screen.findByRole('button', { name: 'Index This Video' });
+    expect(button).toBeEnabled();
+    expect(screen.getByTestId('shots-estimate')).toHaveTextContent('≈ 100 shots · ≈ 100 embeddings');
   });
 
   it('renders the Search hit card above Overview when searchHit is given and hides it otherwise', () => {
@@ -154,21 +162,41 @@ describe('VideoDetailPanel — big tabs', () => {
     expect(screen.queryByRole('button', { name: /Play From/ })).toBeNull();
   });
 
-  it('Search hit with a start time seeks the player and Open Shots switches tab', () => {
+  it('Search hit with a shot shows its span and frame, seeks the player, and Open Shots switches tab', async () => {
     const onSeek = vi.fn();
     render(
       <VideoDetailPanel
         video={video}
+        resourceId="7002"
+        mediaToken="mt.1.2.sig"
         onClose={() => {}}
         onSeek={onSeek}
-        searchHit={{ layer: 'camera', score: 0.5, startMs: 221_000 }}
+        searchHit={{ layer: 'visual', score: 0.62, startMs: 221_000, endMs: 232_000 }}
       />,
+    );
+    expect(screen.getByTestId('search-hit-shot')).toHaveTextContent('Shot · 3:41–3:52 · 11 s');
+    // The frame is cut on demand; a bare <img> carries the media token in the URL.
+    expect(screen.getByTestId('search-hit-frame')).toHaveAttribute(
+      'src',
+      expect.stringMatching(/\/api\/v1\/resources\/7002\/frame\?ms=221000&token=mt\.1\.2\.sig$/),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Play From 3:41' }));
     expect(onSeek).toHaveBeenCalledWith(221);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Shots' }));
-    expect(screen.getByRole('button', { name: 'Index This Video' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Index This Video' })).toBeInTheDocument();
+  });
+
+  it('Search hit without a resource shows the span but no frame', () => {
+    render(
+      <VideoDetailPanel
+        video={video}
+        onClose={() => {}}
+        searchHit={{ layer: 'visual', score: 0.62, startMs: 221_000 }}
+      />,
+    );
+    expect(screen.getByTestId('search-hit-shot')).toHaveTextContent('Shot · 3:41');
+    expect(screen.queryByTestId('search-hit-frame')).toBeNull();
   });
 
   it('status dot on the AI tab reflects transcript_status or summary_status', () => {

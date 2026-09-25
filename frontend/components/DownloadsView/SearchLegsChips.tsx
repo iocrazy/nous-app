@@ -20,12 +20,14 @@ export type HitSort = 'similarity' | 'date';
 /** Fixed display order of the retrieval layers. */
 export const HIT_LAYERS: readonly HitLayer[] = ['text', 'semantic', 'visual', 'camera', 'transcript'];
 
-/** Layers whose index is built by shot indexing, not by this PR's backend. */
-const SHOT_LAYERS: ReadonlySet<HitLayer> = new Set(['visual', 'camera']);
+/** Layers whose index arrives with the camera / clip PR (PR 4). */
+const PR4_LAYERS: ReadonlySet<HitLayer> = new Set(['camera']);
 
 export interface SearchLegsChipsProps {
   legs?: Partial<Record<HitLayer, number>> | null;
   vectorLeg?: VectorLegOutcome | null;
+  /** Outcome of the visual (shot frame) leg — same codes as `vectorLeg`. */
+  visualLeg?: VectorLegOutcome | null;
   reranked?: boolean;
   layer: HitLayerFilter;
   onLayerChange: (layer: HitLayerFilter) => void;
@@ -59,14 +61,28 @@ export function hitLayerLabel(layer: HitLayer, t: Translate): string {
  * fills the page and the response is otherwise identical, so the outcome is
  * the only honest signal.
  */
+/** The outcome that judges a leg's dot: the semantic leg's is `vectorLeg`,
+ *  the visual leg's is `visualLeg`; other layers have none. */
+function legOutcome(
+  layer: HitLayer,
+  vectorLeg?: VectorLegOutcome | null,
+  visualLeg?: VectorLegOutcome | null,
+): VectorLegOutcome | null | undefined {
+  if (layer === 'semantic') return vectorLeg;
+  if (layer === 'visual') return visualLeg;
+  return undefined;
+}
+
 export function legDotClass(
   layer: HitLayer,
   built: boolean,
   vectorLeg?: VectorLegOutcome | null,
+  visualLeg?: VectorLegOutcome | null,
 ): string {
-  if (layer === 'semantic' && vectorLeg) {
-    if (vectorLeg === 'ok') return 'bg-ok';
-    if (vectorLeg.startsWith('skipped_')) return 'bg-warn';
+  const outcome = legOutcome(layer, vectorLeg, visualLeg);
+  if (outcome) {
+    if (outcome === 'ok') return 'bg-ok';
+    if (outcome.startsWith('skipped_')) return 'bg-warn';
     return 'bg-danger';
   }
   return built ? 'bg-ok' : 'bg-line-strong';
@@ -76,13 +92,15 @@ function dotTitle(
   layer: HitLayer,
   built: boolean,
   vectorLeg: VectorLegOutcome | null | undefined,
+  visualLeg: VectorLegOutcome | null | undefined,
   t: Translate,
 ): string {
-  if (layer === 'semantic' && vectorLeg) return vectorLeg;
+  const outcome = legOutcome(layer, vectorLeg, visualLeg);
+  if (outcome) return outcome;
   if (built) return hitLayerLabel(layer, t);
   const notBuilt = t('library.vectorSearch.notBuilt', 'Not built');
-  if (SHOT_LAYERS.has(layer)) {
-    return `${notBuilt} · ${t('library.vectorSearch.arrivesWithPr3', 'Arrives with PR 3')}`;
+  if (PR4_LAYERS.has(layer)) {
+    return `${notBuilt} · ${t('library.vectorSearch.arrivesWithPr4', 'Arrives with PR 4')}`;
   }
   return notBuilt;
 }
@@ -117,6 +135,7 @@ function OptionList<T extends string>({ options, value, onPick }: OptionListProp
 export const SearchLegsChips: React.FC<SearchLegsChipsProps> = ({
   legs,
   vectorLeg,
+  visualLeg,
   reranked,
   layer,
   onLayerChange,
@@ -201,12 +220,12 @@ export const SearchLegsChips: React.FC<SearchLegsChipsProps> = ({
             <span
               key={l}
               className="inline-flex items-center gap-1 whitespace-nowrap"
-              title={dotTitle(l, built, vectorLeg, tr)}
+              title={dotTitle(l, built, vectorLeg, visualLeg, tr)}
             >
               <span
                 data-testid={`leg-dot-${l}`}
                 aria-hidden="true"
-                className={`inline-block w-1.5 h-1.5 rounded-full ${legDotClass(l, built, vectorLeg)}`}
+                className={`inline-block w-1.5 h-1.5 rounded-full ${legDotClass(l, built, vectorLeg, visualLeg)}`}
               />
               <span className={built ? 'text-content' : 'text-content-3'}>
                 {built ? `${hitLayerLabel(l, tr)} ${count}` : hitLayerLabel(l, tr)}

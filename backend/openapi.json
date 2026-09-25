@@ -116438,7 +116438,7 @@
     },
     "/api/v1/resources/{resource_id}/frame": {
       "get": {
-        "description": "A single frame cut on demand (Search Hit card, Shots hero). 422 when\n``ms`` is past the end of the video, 404 when the source is gone.",
+        "description": "A single frame cut on demand (Search Hit card, Shots hero). Loaded by\na bare ``<img>``, so ``?token=`` (media token) is accepted alongside the\nheader. 422 when ``ms`` is past the end of the video, 404 when the\nsource is gone.",
         "operationId": "get_resource_frame_api_v1_resources__resource_id__frame_get",
         "parameters": [
           {
@@ -116460,6 +116460,24 @@
               "minimum": 0,
               "title": "Ms",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Signed media token",
+            "in": "query",
+            "name": "token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Signed media token",
+              "title": "Token"
             }
           },
           {

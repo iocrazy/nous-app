@@ -161,6 +161,7 @@ vi.mock('./CompactMediaCard', () => ({
       data-testid="card"
       data-title={props.data.title}
       data-hit={props.hit ? `${props.hit.layer}:${props.hit.score}` : ''}
+      data-start={props.hit?.startMs ?? ''}
       onDoubleClick={props.onDoubleClick}
     />
   ),
@@ -390,6 +391,49 @@ describe('DownloadsView — vector search hits', () => {
     } finally {
       delete row.resource_id;
     }
+  });
+
+  it('a visual hit carries its shot span onto the card and into the detail page', async () => {
+    // Real wire shape after PR 3b: `shot` on a visual row (Snowflake shot_id
+    // as a STRING, ms ints), `legs.visual`, and `visual_leg` beside `vector_leg`.
+    hybridSearchMock.mockReset().mockResolvedValue({
+      ...HYBRID_RESPONSE,
+      results: [
+        HYBRID_RESPONSE.results[0],
+        {
+          ...HYBRID_RESPONSE.results[1],
+          layer: 'visual',
+          similarity_score: 0.62,
+          shot: { shot_id: '9007199254740993', start_ms: 48000, end_ms: 59000 },
+        },
+      ],
+      videos: [
+        { id: 1, platform_id: 'a', title: 'A', resource_id: '7001' },
+        { id: 2, platform_id: 'b', title: 'B', resource_id: '7002' },
+      ],
+      legs: { text: 1, semantic: 0, visual: 1 },
+      visual_leg: 'ok',
+    });
+    navigateMock.mockReset();
+    const { container } = render(<DownloadsView />);
+    await runSmartSearch();
+
+    expect(screen.getByText('Visual 1')).toBeInTheDocument();
+    expect(screen.getByTestId('leg-dot-visual')).toHaveClass('bg-ok');
+    const cardB = Array.from(container.querySelectorAll('[data-testid="card"]')).find(
+      (c) => c.getAttribute('data-title') === 'B',
+    )!;
+    expect(cardB.getAttribute('data-hit')).toBe('visual:0.62');
+    expect(cardB.getAttribute('data-start')).toBe('48000');
+
+    await act(async () => {
+      fireEvent.doubleClick(cardB);
+    });
+    expect(navigateMock).toHaveBeenCalledWith('/resources/file/7002', {
+      state: expect.objectContaining({
+        searchHit: { layer: 'visual', score: 0.62, startMs: 48000, endMs: 59000 },
+      }),
+    });
   });
 
   it('degrades without a trace when the backend has no legs / layer', async () => {

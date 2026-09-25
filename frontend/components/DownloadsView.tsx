@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useContext, useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Filter,
@@ -73,6 +73,7 @@ import {
   type SearchHit,
   type SearchResponse,
 } from '../services/searchService';
+import { TaskManagerContext } from '../contexts/TaskManagerContext';
 import {
   SearchLegsChips,
   type HitLayerFilter,
@@ -118,6 +119,7 @@ import {
 interface SearchHitMeta {
   legs: NonNullable<SearchResponse['legs']>;
   vectorLeg: SearchResponse['vector_leg'];
+  visualLeg: SearchResponse['visual_leg'];
   reranked: boolean;
   processingMs?: number;
 }
@@ -250,6 +252,20 @@ export const DownloadsView: React.FC = () => {
   // refresh or a return from the detail page drops them.
   /** Why each hit matched, keyed by platform_id. */
   const [searchHitMap, setSearchHitMap] = useState<Map<string, SearchHit>>(() => new Map());
+  // Resource ids with a queued / running `index_shots` task (Task Center
+  // realtime). `useContext` rather than `useTaskManager` so the view still
+  // mounts where no provider exists (unit tests, storybook-style harnesses).
+  const taskManager = useContext(TaskManagerContext);
+  const shotsQueued = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of taskManager?.tasks ?? []) {
+      if (t.task_type === 'index_shots' && t.resource_id
+          && (t.status === 'pending' || t.status === 'processing')) {
+        ids.add(String(t.resource_id));
+      }
+    }
+    return ids;
+  }, [taskManager?.tasks]);
   const [searchMeta, setSearchMeta] = useState<SearchHitMeta | null>(null);
   const [hitLayerFilter, setHitLayerFilter] = useState<HitLayerFilter>('all');
   const [hitSort, setHitSort] = useState<HitSort>('similarity');
@@ -529,13 +545,19 @@ export const DownloadsView: React.FC = () => {
       new Map(
         response.results.map((r) => [
           r.platform_id,
-          { layer: r.layer ?? 'text', score: r.similarity_score },
+          {
+            layer: r.layer ?? 'text',
+            score: r.similarity_score,
+            // The matched shot (visual hits only): where to play from.
+            ...(r.shot ? { startMs: r.shot.start_ms, endMs: r.shot.end_ms } : {}),
+          },
         ]),
       ),
     );
     setSearchMeta({
       legs: response.legs,
       vectorLeg: response.vector_leg ?? null,
+      visualLeg: response.visual_leg ?? null,
       reranked: response.reranked ?? false,
       processingMs: response.processing_time_ms,
     });
@@ -670,6 +692,7 @@ export const DownloadsView: React.FC = () => {
       <SearchLegsChips
         legs={searchMeta.legs}
         vectorLeg={searchMeta.vectorLeg}
+        visualLeg={searchMeta.visualLeg}
         reranked={searchMeta.reranked}
         layer={hitLayerFilter}
         onLayerChange={setHitLayerFilter}
@@ -779,6 +802,20 @@ export const DownloadsView: React.FC = () => {
     const searchHit = isSearchActive ? searchHitMap.get(item.platform_id) : undefined;
     navigate(`${teamPath}/resources/file/${rid}`, { state: { preloaded: item, searchHit } });
   }, [selectedTeamId, navigate, addToast, isSearchActive, searchHitMap]);
+
+  // A card's hit, plus whether an `index_shots` task for that video is still
+  // queued / running — the visual leg cannot have seen it yet, and the card
+  // says so instead of looking merely unmatched.
+  const cardHit = useCallback(
+    (item: Video): SearchHit | undefined => {
+      if (!isSearchActive) return undefined;
+      const hit = searchHitMap.get(item.platform_id);
+      if (!hit) return undefined;
+      const rid = resourceIdMap[item.id];
+      return rid != null && shotsQueued.has(String(rid)) ? { ...hit, shotsQueued: true } : hit;
+    },
+    [isSearchActive, searchHitMap, resourceIdMap, shotsQueued],
+  );
 
   // ─── Multi-select ──────────────────────────────────────
   const handleToggleSelect = useCallback((platformId: string, e: React.MouseEvent) => {
@@ -1560,7 +1597,7 @@ export const DownloadsView: React.FC = () => {
                             resourceId={resourceIdMap[item.id]}
                             aiStatus={aiStatusMap[item.id]}
                             aspectRatio={width / row.height}
-                            hit={isSearchActive ? searchHitMap.get(item.platform_id) : undefined}
+                            hit={cardHit(item)}
                             onThumbnailAspect={
                               needsAspectMeasurement(item)
                                 ? (measuredAr) => {
@@ -1601,7 +1638,7 @@ export const DownloadsView: React.FC = () => {
                       data={item}
                       resourceId={resourceIdMap[item.id]}
                       aiStatus={aiStatusMap[item.id]}
-                      hit={isSearchActive ? searchHitMap.get(item.platform_id) : undefined}
+                      hit={cardHit(item)}
                       onClick={(e) => handleVideoClick(item, e)}
                       onDoubleClick={() => handleVideoDoubleClick(item)}
                       onContextMenu={handleContextMenu}

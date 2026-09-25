@@ -973,7 +973,9 @@
       "hitsLine": "{{count}} hits · best match per video · {{ms}} ms",
       "hitsLineNoTime": "{{count}} hits · best match per video",
       "notBuilt": "Not built",
-      "arrivesWithPr3": "Arrives with PR 3"
+      "arrivesWithPr4": "Arrives with PR 4",
+      "shotsQueued": "shots queued",
+      "shotsQueuedHint": "Shot indexing is queued for this video"
     }
   },
   "search": {
@@ -1106,7 +1108,6 @@
       "layerTranscript": "Transcript",
       "statusOk": "OK",
       "statusNotBuilt": "Not Built",
-      "arrivesWithPr3": "Arrives with PR 3",
       "transcriptPhase2": "Not built · Phase 2",
       "semanticSource": "title + description + tags + summary + transcript",
       "dryRun": "Dry Run",
@@ -1152,7 +1153,16 @@
       "errorSpaceNotFound": "This space no longer exists. Refresh the page.",
       "errorSpaceStoreMissing": "Vector store not migrated yet. Space changes are unavailable.",
       "errorByokRow": "A personal API key row cannot back a shared embedding space.",
-      "errorActiveUnknown": "Could not tell which space is active, so nothing was deleted. Try again."
+      "errorActiveUnknown": "Could not tell which space is active, so nothing was deleted. Try again.",
+      "arrivesWithPr4": "Arrives with PR 4",
+      "visualSource": "one keyframe per shot · hist_v1",
+      "run20": "Run 20",
+      "shotsDryRunFirst": "Run a Dry Run first — every video is a task and every shot a paid embedding",
+      "shotsDryRunLine": "Dry run · Visual",
+      "shotsLastBackfill": "Last backfill · Visual",
+      "shotsWouldIndex": "{{count}} candidates · ≈ {{shots}} shots · ≈ {{tokens}} tokens",
+      "shotsStale": "{{count}} stale",
+      "errorProviderNoImage": "The current embedding model cannot take images. Pick an image-capable model for the active space."
     },
     "localCli": {
       "modelHint": "Which Codex model runs is set on the provider card: Settings → AI → Providers → Codex (Local CLI). Its enabled models are what agents and image generation use.",
@@ -6134,15 +6144,44 @@
     "searchHit": {
       "title": "Search Hit",
       "playFrom": "Play From {{time}}",
-      "openShots": "Open Shots"
+      "openShots": "Open Shots",
+      "shotSpan": "Shot · {{from}}–{{to}} · {{seconds}} s",
+      "shotAt": "Shot · {{from}}"
     },
     "shots": {
-      "placeholder": {
-        "title": "Not Indexed Yet",
-        "estimate": "{{duration}} · ≈ {{shots}} shots · ≈ {{embeddings}} embeddings",
-        "index": "Index This Video",
-        "arrives": "Arrives with PR 3",
-        "hint": "Runs as a Task Center task · you can keep browsing"
+      "notIndexed": "Not Indexed Yet",
+      "estimate": "{{duration}} · ≈ {{shots}} shots · ≈ {{embeddings}} embeddings",
+      "index": "Index This Video",
+      "retry": "Retry",
+      "hint": "Runs as a Task Center task · you can keep browsing",
+      "notInLibrary": "Not in the library yet",
+      "loading": "Loading…",
+      "loadFailed": "Could not read the shot index.",
+      "indexing": "Indexing shots…",
+      "queued": "Queued",
+      "cancel": "Cancel",
+      "indexedLine": "indexed {{date}} · {{algo}}",
+      "reindex": "Re-index",
+      "notCovered": "No frame vectors in the current embedding space — Re-index to search it visually.",
+      "stale": "Cut by an older algorithm — Re-index for the current one.",
+      "stripLabel": "Shot strip · click to seek · outlined = search hit",
+      "shotN": "Shot {{n}}",
+      "searchHit": "search hit",
+      "stats": {
+        "shots": "Shots",
+        "vectors": "Vectors · frame",
+        "average": "Average shot",
+        "clusters": "Clusters",
+        "clustersSub": "PR 4"
+      },
+      "errors": {
+        "providerNoImage": "The current embedding model cannot take images. Pick an image-capable model in Settings → AI → Vectors.",
+        "embedderUnconfigured": "No embedding model configured. Set one in Admin → AI Models.",
+        "storeMissing": "The shot index is not ready yet (a database update is rolling out). Try again shortly.",
+        "notAVideo": "Only videos can be cut into shots.",
+        "noVideoFile": "This video has no file to cut yet. Download it first.",
+        "providerError": "The embedding provider kept failing. Try again later.",
+        "failed": "Shot indexing failed."
       }
     }
   },

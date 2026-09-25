@@ -21,6 +21,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api import ai_router
 from app.core.deps import AuthContext, get_auth
+from app.core.scope_guards import get_auth_or_media_token
 from app.main import app
 from app.repositories.video_shots_repository import ShotBackfillRow
 from app.services.distribution.cover_frames import CoverFrameError
@@ -40,9 +41,18 @@ async def _fake_auth() -> AuthContext:
 
 @pytest.fixture(autouse=True)
 def _auth():
+    # ``/frame`` declares ``get_auth_or_media_token`` (an ``<img>`` cannot send
+    # a header); it calls ``get_auth`` directly, so it needs its own override.
     app.dependency_overrides[get_auth] = _fake_auth
+    app.dependency_overrides[get_auth_or_media_token] = _fake_auth
     yield
     app.dependency_overrides.pop(get_auth, None)
+    app.dependency_overrides.pop(get_auth_or_media_token, None)
+
+
+def _drop_auth_overrides() -> None:
+    app.dependency_overrides.pop(get_auth, None)
+    app.dependency_overrides.pop(get_auth_or_media_token, None)
 
 
 @pytest_asyncio.fixture
@@ -346,6 +356,36 @@ async def test_frame_is_cut_on_demand(client, frame_stack):
     assert r.headers["cache-control"] == "private, max-age=86400"
     assert r.content == b"\xff\xd8jpeg"
     assert frame_stack.await_args.kwargs["timestamp_seconds"] == 4.5
+
+
+@pytest.mark.asyncio
+async def test_frame_accepts_the_media_token_in_the_query(
+    client, frame_stack, monkeypatch
+):
+    """A bare ``<img src>`` cannot send a header: ``?token=`` (the signed
+    media token) identifies the caller instead."""
+    _drop_auth_overrides()  # the real dependency, no header-side shortcut
+    seen = []
+
+    async def validate(value):
+        seen.append(value)
+        return USER
+
+    monkeypatch.setattr("app.api.media_auth.validate_media_cookie", validate)
+    r = await client.get(
+        f"/api/v1/resources/{RID}/frame", params={"ms": 4500, "token": "mt.1.2.sig"}
+    )
+    assert r.status_code == 200, r.text
+    assert seen == ["mt.1.2.sig"]
+    assert r.headers["content-type"] == "image/jpeg"
+
+
+@pytest.mark.asyncio
+async def test_frame_without_any_credential_is_401(client, frame_stack):
+    _drop_auth_overrides()
+    r = await client.get(f"/api/v1/resources/{RID}/frame", params={"ms": 4500})
+    assert r.status_code == 401
+    frame_stack.assert_not_awaited()
 
 
 @pytest.mark.asyncio
