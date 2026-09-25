@@ -9,11 +9,16 @@ source (never persisted — spec §4.2: thumbnails are not stored).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from collections.abc import AsyncIterator
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from loguru import logger
 
-from app.core.deps import AuthDep
+from app.core.deps import AuthContext, AuthDep
 from app.core.scope_dep import ScopedRequestDep
+from app.core.scope_guards import get_auth_or_media_token
+from app.db.scope import Scope, request_scope
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.shots import ShotIndexInfo, ShotOut, ShotsResponse
 from app.schemas.wire import binary_response
@@ -25,6 +30,20 @@ router = APIRouter(prefix="/resources")
 FRAME_WIDTH = 480
 #: One ffmpeg seek on a materialized file.
 FRAME_TIMEOUT_SECONDS = 60.0
+
+
+async def scoped_media_request(
+    auth: AuthContext = Depends(get_auth_or_media_token),
+) -> AsyncIterator[None]:
+    """``scoped_request`` for a route a bare ``<img>`` loads: the caller may
+    arrive as ``?token=`` (the signed media token, ``AuthContext.mediaToken``
+    on the frontend) instead of an ``Authorization`` header. Same tenant
+    scope as every other resource read once the caller is known."""
+    async with request_scope(Scope(user_id=auth.user_id)):
+        yield
+
+
+ScopedMediaRequestDep = Annotated[None, Depends(scoped_media_request)]
 
 
 async def _visible_resource(resource_id: str) -> dict:
@@ -118,12 +137,13 @@ async def _resource_covered(resource_id: int, space_id: int) -> bool:
 )
 async def get_resource_frame(
     resource_id: str,
-    auth: AuthDep,
-    _scope: ScopedRequestDep,
+    _scope: ScopedMediaRequestDep,
     ms: int = Query(..., ge=0, description="Timestamp in milliseconds"),
 ):
-    """A single frame cut on demand (Search Hit card, Shots hero). 422 when
-    ``ms`` is past the end of the video, 404 when the source is gone."""
+    """A single frame cut on demand (Search Hit card, Shots hero). Loaded by
+    a bare ``<img>``, so ``?token=`` (media token) is accepted alongside the
+    header. 422 when ``ms`` is past the end of the video, 404 when the
+    source is gone."""
     from app.services.distribution.cover_frames import (
         CoverFrameError,
         load_source_video,

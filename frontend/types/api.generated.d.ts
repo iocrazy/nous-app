@@ -12815,8 +12815,10 @@ export interface paths {
         };
         /**
          * Get Resource Frame
-         * @description A single frame cut on demand (Search Hit card, Shots hero). 422 when
-         *     ``ms`` is past the end of the video, 404 when the source is gone.
+         * @description A single frame cut on demand (Search Hit card, Shots hero). Loaded by
+         *     a bare ``<img>``, so ``?token=`` (media token) is accepted alongside the
+         *     header. 422 when ``ms`` is past the end of the video, 404 when the
+         *     source is gone.
          */
         get: operations["get_resource_frame_api_v1_resources__resource_id__frame_get"];
         put?: never;
@@ -63818,6 +63820,8 @@ export interface operations {
             query: {
                 /** @description Timestamp in milliseconds */
                 ms: number;
+                /** @description Signed media token */
+                token?: string | null;
             };
             header?: {
                 authorization?: string | null;
