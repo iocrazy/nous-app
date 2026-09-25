@@ -22,35 +22,20 @@ import { apiFetch } from './apiClient';
 import { promoteGeneration } from './generatedMediaService';
 import { linkExistingResource, uploadResource } from './resourceService';
 import { importResourceAsCanvasMedia } from '../features/canvas-core/smart/mediaImport';
-import type { ResourceRow } from '../types/api';
+import type {
+  CoverTemplate,
+  CoverTemplateFolder,
+  CoverTemplateList,
+  CoverTemplateUsed,
+  ResourceRow,
+} from '../types/api';
 
-/** The folder that backs the library. `adopted` = it was the user's own
- *  “封面” folder rather than one we created. */
-export interface CoverTemplateFolder {
-  folder_id: string;
-  name: string;
-  adopted: boolean;
-}
-
-/** Wire shape of one template. `resource_id` is a STRING (snowflake > 2^53). */
-export interface CoverTemplate {
-  resource_id: string;
-  name: string;
-  mime_type: string | null;
-  /** API-relative, ready for <img src> once prefixed with the API origin. */
-  thumb_url: string;
-  usage_count: number;
-  last_used_at: string | null;
-}
-
-export interface CoverTemplateList {
-  folder: CoverTemplateFolder;
-  items: CoverTemplate[];
-  /** Paging: the library grows into the hundreds, so the studio pages it. */
-  total: number;
-  limit: number;
-  offset: number;
-}
+// Wire shapes come from the backend schema (`types/api.ts`, P9). The folder's
+// `adopted` = it was the user's own “封面” folder rather than one we created;
+// `resource_id` / `folder_id` are STRINGS (snowflake > 2^53); `thumb_url` is
+// API-relative, ready for <img src> once prefixed with the API origin; the
+// list pages (the library grows into the hundreds).
+export type { CoverTemplate, CoverTemplateFolder, CoverTemplateList } from '../types/api';
 
 export interface CoverTemplateQuery {
   q?: string;
@@ -162,7 +147,7 @@ export async function listCoverTemplates(
 export async function markCoverTemplatesUsed(resourceIds: string[]): Promise<void> {
   if (resourceIds.length === 0) return;
   try {
-    await call<{ counted: number }>('/api/v1/cover-templates/use', {
+    await call<CoverTemplateUsed>('/api/v1/cover-templates/use', {
       method: 'POST',
       json: { resource_ids: resourceIds },
     });

@@ -667,4 +667,11 @@ export type CleanupMediaActionResult = Schemas['CleanupMediaActionResult'];
 export type CleanupBatchResult = Schemas['CleanupBatchResult'];
 /** `GET /cleanup/storage`: over the caller's non-trashed media only. */
 export type CleanupStorageBreakdown = Schemas['CleanupStorageBreakdown'];
+// `/api/v1/cover-templates`: `{ data }` envelopes (no `success`). Folder and
+// resource ids are Snowflake STRINGS here; `last_used_at` is `+00:00` ISO.
+export type CoverTemplateFolder = Schemas['CoverTemplateFolderOut'];
+export type CoverTemplate = Schemas['CoverTemplateOut'];
+export type CoverTemplateList = Schemas['CoverTemplateListOut'];
+/** `POST /cover-templates/use`: how many ids were counted. */
+export type CoverTemplateUsed = Schemas['CoverTemplateUseOut'];
 // —— end P9 payment/cleanup/probes ——
