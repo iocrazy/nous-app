@@ -10,16 +10,21 @@
 //     are admin-only (`can_manage`); filling one's own coverage is not.
 //   • Retrieval Layers — per-layer coverage of the ACTIVE space, with the
 //     semantic layer's backfill (Dry Run / Run 200) wired to
-//     POST /ai/analyze/backfill-embeddings.
+//     POST /ai/analyze/backfill-embeddings and the visual layer's
+//     (Dry Run / Run 20) to POST /ai/analyze/backfill-shots. Run 20 stays
+//     disabled until a Dry Run has been seen in this session: every video is
+//     a task and every shot a paid image embedding, so the estimate comes
+//     first. Coverage there counts VIDEOS, not resources.
 //
-// Visual / Camera rows are DELIBERATE disabled placeholders (they arrive with
-// shot indexing), the same way the asset page's `Send To Canvas` is.
+// The Camera row is a DELIBERATE disabled placeholder (clip vectors arrive
+// with PR 4), the same way the asset page's `Send To Canvas` is.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { backfillEmbeddings } from '../../services/aiService';
-import type { BackfillResult } from '../../types/api';
+import { SHOTS_BACKFILL_BATCH, backfillShots } from '../../services/shotsService';
+import type { BackfillResult, BackfillShotsResponse } from '../../types/api';
 import { ApiError } from '../../services/apiClient';
 import {
   activateVectorSpace,
@@ -95,7 +100,7 @@ function errorLine(err: unknown, t: TFn): string {
   return t('settings.vectors.errorGeneric', { message });
 }
 
-function skippedReasons(skipped: BackfillResult['skipped']): string {
+function skippedReasons(skipped: BackfillResult['skipped'] | BackfillShotsResponse['skipped']): string {
   const counts = new Map<string, number>();
   for (const s of skipped) counts.set(s.reason, (counts.get(s.reason) ?? 0) + 1);
   return Array.from(counts, ([reason, n]) => `${reason} ×${n}`).join(', ');
@@ -125,6 +130,39 @@ function formatBackfillResult(r: BackfillResult, t: TFn): string {
   return parts.join(' · ');
 }
 
+/** One line for the visual layer's last backfill (dry run or real). */
+function formatShotsResult(r: BackfillShotsResponse, t: TFn): string {
+  const parts: string[] = [];
+  const count = (n: number) => ({ count: NUM.format(n) });
+  if (r.dry_run) {
+    parts.push(
+      t('settings.vectors.shotsWouldIndex', {
+        count: NUM.format(r.candidates.length),
+        shots: NUM.format(r.estimated_shots),
+        tokens: NUM.format(r.estimated_tokens),
+      }),
+    );
+  } else {
+    parts.push(t('settings.vectors.resultDispatched', count(r.dispatched.length)));
+  }
+  if (r.skipped.length) {
+    parts.push(
+      t('settings.vectors.resultSkipped', {
+        count: NUM.format(r.skipped.length),
+        reasons: skippedReasons(r.skipped),
+      }),
+    );
+  }
+  if (r.stale) parts.push(t('settings.vectors.shotsStale', count(r.stale)));
+  parts.push(t('settings.vectors.resultRemaining', count(Math.max(0, r.total_pending - r.dispatched.length))));
+  return parts.join(' · ');
+}
+
+function shotsErrorLine(err: unknown, t: TFn): string {
+  if (typedErrorCode(err) === 'provider_no_image') return t('settings.vectors.errorProviderNoImage');
+  return errorLine(err, t);
+}
+
 export function VectorsPanel() {
   const { t } = useTranslation();
   const [status, setStatus] = useState<VectorsStatus | null>(null);
@@ -135,6 +173,10 @@ export function VectorsPanel() {
   const [busy, setBusy] = useState(false);
   const [lastResult, setLastResult] = useState<BackfillResult | null>(null);
   const [backfillError, setBackfillError] = useState<string | null>(null);
+  // Visual layer (shot backfill): its own line, and the Dry Run gate.
+  const [shotsResult, setShotsResult] = useState<BackfillShotsResponse | null>(null);
+  const [shotsError, setShotsError] = useState<string | null>(null);
+  const [shotsDryRunSeen, setShotsDryRunSeen] = useState(false);
   // Space switching: one action at a time; its outcome is one line.
   const [spaceBusy, setSpaceBusy] = useState(false);
   const [spaceError, setSpaceError] = useState<string | null>(null);
@@ -181,6 +223,22 @@ export function VectorsPanel() {
     } catch (err) {
       console.error('VectorsPanel: backfill failed', err);
       setBackfillError(errorLine(err, t));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runShotsBackfill = async (dryRun: boolean) => {
+    setBusy(true);
+    setShotsError(null);
+    try {
+      const result = await backfillShots({ limit: SHOTS_BACKFILL_BATCH, dry_run: dryRun });
+      setShotsResult(result);
+      if (dryRun) setShotsDryRunSeen(true);
+      else await loadStatus();
+    } catch (err) {
+      console.error('VectorsPanel: shot backfill failed', err);
+      setShotsError(shotsErrorLine(err, t));
     } finally {
       setBusy(false);
     }
@@ -286,6 +344,10 @@ export function VectorsPanel() {
         onBackfill={runBackfill}
         lastResult={lastResult}
         backfillError={backfillError}
+        onShotsBackfill={runShotsBackfill}
+        shotsResult={shotsResult}
+        shotsError={shotsError}
+        shotsDryRunSeen={shotsDryRunSeen}
       />
     </div>
   );
@@ -425,6 +487,10 @@ interface LayersSectionProps {
   onBackfill: (dryRun: boolean) => void;
   lastResult: BackfillResult | null;
   backfillError: string | null;
+  onShotsBackfill: (dryRun: boolean) => void;
+  shotsResult: BackfillShotsResponse | null;
+  shotsError: string | null;
+  shotsDryRunSeen: boolean;
 }
 
 function LayersSection({
@@ -435,8 +501,13 @@ function LayersSection({
   onBackfill,
   lastResult,
   backfillError,
+  onShotsBackfill,
+  shotsResult,
+  shotsError,
+  shotsDryRunSeen,
 }: LayersSectionProps) {
   const semantic = status.layers.find((l) => l.layer === 'semantic');
+  const visual = status.layers.find((l) => l.layer === 'visual');
   const transcript = status.layers.find((l) => l.layer === 'transcript');
   const total = semantic?.total ?? transcript?.total;
   const totalText = total === undefined ? '—' : NUM.format(total);
@@ -498,7 +569,41 @@ function LayersSection({
                 </span>
               </td>
             </tr>
-            <PlaceholderRow id="visual" label={t('settings.vectors.layerVisual')} t={t} totalText={totalText} />
+            <tr data-testid="vector-layer-visual">
+              <td className="py-2 pr-3">{t('settings.vectors.layerVisual')}</td>
+              <td className="py-2 pr-3">
+                <StatusCell
+                  ok={visual?.status === 'ok'}
+                  label={t(visual?.status === 'ok' ? 'settings.vectors.statusOk' : 'settings.vectors.statusNotBuilt')}
+                />
+              </td>
+              <td className="py-2 pr-3">
+                <Coverage covered={visual?.covered} total={visual?.total} stale={visual?.stale} t={t} />
+              </td>
+              <td className="py-2 pr-3 text-xs text-ink-400">{t('settings.vectors.visualSource')}</td>
+              <td className="py-2">
+                <span className="flex gap-1.5">
+                  <button
+                    type="button"
+                    className={btn}
+                    disabled={!canBackfill}
+                    title={disabledHint}
+                    onClick={() => onShotsBackfill(true)}
+                  >
+                    {t('settings.vectors.dryRun')}
+                  </button>
+                  <button
+                    type="button"
+                    className={btn}
+                    disabled={!canBackfill || !shotsDryRunSeen}
+                    title={disabledHint ?? (shotsDryRunSeen ? undefined : t('settings.vectors.shotsDryRunFirst'))}
+                    onClick={() => onShotsBackfill(false)}
+                  >
+                    {t('settings.vectors.run20')}
+                  </button>
+                </span>
+              </td>
+            </tr>
             <PlaceholderRow id="camera" label={t('settings.vectors.layerCamera')} t={t} totalText={totalText} />
             <tr data-testid="vector-layer-transcript">
               <td className="py-2 pr-3">{t('settings.vectors.layerTranscript')}</td>
@@ -525,6 +630,19 @@ function LayersSection({
           {backfillError}
         </p>
       )}
+      {shotsResult && (
+        <p className="text-xs text-ink-400" data-testid="vectors-shots-result">
+          <span className="text-ink-500">
+            {t(shotsResult.dry_run ? 'settings.vectors.shotsDryRunLine' : 'settings.vectors.shotsLastBackfill')} ·{' '}
+          </span>
+          <span>{formatShotsResult(shotsResult, t)}</span>
+        </p>
+      )}
+      {shotsError && (
+        <p className="text-xs text-danger" data-testid="vectors-shots-error">
+          {shotsError}
+        </p>
+      )}
     </section>
   );
 }
@@ -534,7 +652,7 @@ function PlaceholderRow({ id, label, t, totalText }: { id: string; label: string
     <tr data-testid={`vector-layer-${id}`} className="text-ink-500">
       <td className="py-2 pr-3">{label}</td>
       <td className="py-2 pr-3">
-        <StatusCell ok={false} label={t('settings.vectors.arrivesWithPr3')} />
+        <StatusCell ok={false} label={t('settings.vectors.arrivesWithPr4')} />
       </td>
       <td className="py-2 pr-3 tabular-nums">{`— / ${totalText}`}</td>
       <td className="py-2 pr-3" />

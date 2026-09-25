@@ -32,6 +32,40 @@ vi.mock('../../services/searchService', () => ({
 vi.mock('../../services/aiService', () => ({
   backfillEmbeddings: (...args: unknown[]) => backfillMock(...args),
 }));
+const backfillShotsMock = vi.fn();
+vi.mock('../../services/shotsService', async () => {
+  const actual = await vi.importActual<typeof import('../../services/shotsService')>(
+    '../../services/shotsService',
+  );
+  return { ...actual, backfillShots: (...args: unknown[]) => backfillShotsMock(...args) };
+});
+
+// Real wire shape of POST /api/v1/search/... backfill-shots: ids are strings,
+// `parent_task_id` is the flow id on a real run and null on a dry run.
+const SHOTS_DRY_RUN = {
+  success: true,
+  dry_run: true,
+  space_id: '352590227796039',
+  total_pending: 1371,
+  stale: 2,
+  candidates: Array.from({ length: 20 }, (_, i) => String(9007199254740993 + i)),
+  estimated_shots: 1120,
+  estimated_tokens: 336000,
+  parent_task_id: null,
+  dispatched: [],
+  skipped: [
+    { resource_id: '9007199254741100', reason: 'no_video_file' },
+    { resource_id: '9007199254741101', reason: 'no_video_file' },
+    { resource_id: '9007199254741102', reason: 'already_indexed' },
+  ],
+};
+const SHOTS_RUN = {
+  ...SHOTS_DRY_RUN,
+  dry_run: false,
+  parent_task_id: '4e7c9a1e-0000-4000-8000-000000000001',
+  dispatched: Array.from({ length: 18 }, (_, i) => `wf-${i}`),
+  skipped: [{ resource_id: '9007199254741100', reason: 'dispatch_failed' }],
+};
 
 // Real wire shape of GET /api/v1/search/vectors/status: the Snowflake space id
 // is a string; `stale` counts covered vectors the next backfill re-embeds.
@@ -47,6 +81,7 @@ const OK_STATUS = {
   },
   layers: [
     { layer: 'semantic', status: 'ok', covered: 20, total: 1409, stale: 0 },
+    { layer: 'visual', status: 'ok', covered: 38, total: 1200, stale: 2 },
     { layer: 'transcript', status: 'not_built', covered: 0, total: 1409, stale: 0 },
   ],
 };
@@ -93,6 +128,7 @@ describe('VectorsPanel', () => {
     activateSpaceMock.mockReset();
     deleteSpaceMock.mockReset();
     getCatalogMock.mockReset();
+    backfillShotsMock.mockReset();
   });
 
   it('renders the current space card from /vectors/status', async () => {
@@ -106,7 +142,7 @@ describe('VectorsPanel', () => {
       expect(screen.getByTestId(`vector-capability-${m}`)).toHaveClass('text-ok');
     }
     expect(screen.getByText('20 / 1,409')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Dry Run' })).toBeEnabled();
+    expect(within(screen.getByTestId('vector-layer-semantic')).getByRole('button', { name: 'Dry Run' })).toBeEnabled();
   });
 
   it('coverage shows stale vectors only when there are some', async () => {
@@ -140,7 +176,7 @@ describe('VectorsPanel', () => {
     expect(
       await screen.findByText('No embedding model configured. Set one in Admin → AI Models.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Dry Run' })).toBeDisabled();
+    expect(within(screen.getByTestId('vector-layer-semantic')).getByRole('button', { name: 'Dry Run' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Run 200' })).toBeDisabled();
   });
 
@@ -151,7 +187,7 @@ describe('VectorsPanel', () => {
       layers: [{ layer: 'semantic', status: 'not_built', covered: 0, total: 1409 }],
     });
     render(<VectorsPanel />);
-    const dry = await screen.findByRole('button', { name: 'Dry Run' });
+    const dry = within(await screen.findByTestId('vector-layer-semantic')).getByRole('button', { name: 'Dry Run' });
     expect(dry).toHaveAttribute('title', 'Configure an embedding model first');
     expect(screen.getByRole('button', { name: 'Run 200' })).toHaveAttribute(
       'title',
@@ -162,7 +198,7 @@ describe('VectorsPanel', () => {
   it('enabled backfill buttons carry no disabled hint', async () => {
     getVectorsStatusMock.mockResolvedValue(OK_STATUS);
     render(<VectorsPanel />);
-    const dry = await screen.findByRole('button', { name: 'Dry Run' });
+    const dry = within(await screen.findByTestId('vector-layer-semantic')).getByRole('button', { name: 'Dry Run' });
     expect(dry).not.toHaveAttribute('title');
   });
 
@@ -178,14 +214,14 @@ describe('VectorsPanel', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText('Could not load vector status')).toBeNull();
     expect(screen.getByTestId('vector-layer-semantic')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Dry Run' })).toBeEnabled();
+    expect(within(screen.getByTestId('vector-layer-semantic')).getByRole('button', { name: 'Dry Run' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Run 200' })).toBeEnabled();
 
     backfillMock.mockResolvedValueOnce({
       success: true, dry_run: true, reembedded: ['1'], dispatched: [], skipped: [],
       in_flight: 0, remaining: 10, total_missing: 10, stale: 0,
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Dry Run' }));
+    fireEvent.click(within(screen.getByTestId('vector-layer-semantic')).getByRole('button', { name: 'Dry Run' }));
     expect(await screen.findByText('1 would be embedded · 10 remaining')).toBeInTheDocument();
     spy.mockRestore();
   });
@@ -224,7 +260,7 @@ describe('VectorsPanel', () => {
       success: true, dry_run: true, reembedded: ['352590227796039123', '352590227796039124'], dispatched: [], skipped: [],
       in_flight: 0, remaining: 1389, total_missing: 1389, stale: 0,
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Dry Run' }));
+    fireEvent.click(within(screen.getByTestId('vector-layer-semantic')).getByRole('button', { name: 'Dry Run' }));
     expect(await screen.findByText('2 would be embedded · 1,389 remaining')).toBeInTheDocument();
     expect(backfillMock).toHaveBeenLastCalledWith({ limit: 200, dry_run: true });
     expect(getVectorsStatusMock).toHaveBeenCalledTimes(1);
@@ -308,28 +344,111 @@ describe('VectorsPanel', () => {
         details: { code: 'vector_store_missing' },
       }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Dry Run' }));
+    fireEvent.click(within(screen.getByTestId('vector-layer-semantic')).getByRole('button', { name: 'Dry Run' }));
     expect(await screen.findByTestId('vectors-backfill-error')).toHaveTextContent(
       'Vector store not migrated yet. Backfill is unavailable.',
     );
     spy.mockRestore();
   });
 
-  it('Visual / Camera rows read Arrives with PR 3 and have no buttons; Add Space is admin-only', async () => {
+  it('Camera row reads Arrives with PR 4 and has no buttons; Add Space is admin-only', async () => {
     getVectorsStatusMock.mockResolvedValue(OK_STATUS);
     render(<VectorsPanel />);
     await screen.findByText('doubao-embedding-vision-251215');
-    for (const layer of ['visual', 'camera']) {
-      const row = screen.getByTestId(`vector-layer-${layer}`);
-      expect(row).toHaveTextContent('Arrives with PR 3');
-      expect(row).toHaveTextContent('— / 1,409');
-      expect(row.querySelectorAll('button')).toHaveLength(0);
-    }
+    const row = screen.getByTestId('vector-layer-camera');
+    expect(row).toHaveTextContent('Arrives with PR 4');
+    expect(row).toHaveTextContent('— / 1,409');
+    expect(row.querySelectorAll('button')).toHaveLength(0);
     expect(screen.getByTestId('vector-layer-transcript')).toHaveTextContent('Not built · Phase 2');
     // An old backend (no can_manage) cannot be managed from here.
     const add = screen.getByRole('button', { name: 'Add Space' });
     expect(add).toBeDisabled();
     expect(add).toHaveAttribute('title', 'Only an admin can change embedding spaces');
+  });
+
+  describe('visual layer (shot backfill)', () => {
+    const visualRow = () => screen.getByTestId('vector-layer-visual');
+    const dryRun = () => within(visualRow()).getByRole('button', { name: 'Dry Run' });
+    const run20 = () => within(visualRow()).getByRole('button', { name: 'Run 20' });
+
+    it('reads coverage against VIDEOS with its stale count; Run 20 waits for a Dry Run', async () => {
+      getVectorsStatusMock.mockResolvedValue(OK_STATUS);
+      render(<VectorsPanel />);
+      await screen.findByText('doubao-embedding-vision-251215');
+      expect(visualRow()).toHaveTextContent('Visual · Frame');
+      expect(visualRow()).toHaveTextContent('OK');
+      expect(visualRow()).toHaveTextContent('38 / 1,200 · 2 stale');
+      expect(visualRow()).toHaveTextContent('one keyframe per shot');
+      expect(dryRun()).toBeEnabled();
+      expect(run20()).toBeDisabled();
+      expect(run20()).toHaveAttribute('title', 'Run a Dry Run first — every video is a task and every shot a paid embedding');
+    });
+
+    it('a backend without the visual row shows Not Built and no coverage', async () => {
+      getVectorsStatusMock.mockResolvedValue({
+        ...OK_STATUS,
+        layers: OK_STATUS.layers.filter((l) => l.layer !== 'visual'),
+      });
+      render(<VectorsPanel />);
+      await screen.findByText('doubao-embedding-vision-251215');
+      expect(visualRow()).toHaveTextContent('Not Built');
+      expect(within(visualRow()).getByText('—')).toBeInTheDocument();
+    });
+
+    it('Dry Run reports candidates, the shot / token estimate and the typed skips, then unlocks Run 20', async () => {
+      getVectorsStatusMock.mockResolvedValue(OK_STATUS);
+      backfillShotsMock.mockResolvedValue(SHOTS_DRY_RUN);
+      render(<VectorsPanel />);
+      await screen.findByText('doubao-embedding-vision-251215');
+      fireEvent.click(dryRun());
+      const line = await screen.findByTestId('vectors-shots-result');
+      expect(backfillShotsMock).toHaveBeenCalledWith({ limit: 20, dry_run: true });
+      expect(line).toHaveTextContent('Dry run · Visual');
+      expect(line).toHaveTextContent('20 candidates · ≈ 1,120 shots · ≈ 336,000 tokens');
+      expect(line).toHaveTextContent('3 skipped (no_video_file ×2, already_indexed ×1)');
+      expect(line).toHaveTextContent('2 stale');
+      expect(line).toHaveTextContent('1,371 remaining');
+      expect(run20()).toBeEnabled();
+      // A dry run creates nothing, so the status is not re-read.
+      expect(getVectorsStatusMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('Run 20 after a Dry Run dispatches, reports the batch and re-reads the status', async () => {
+      getVectorsStatusMock.mockResolvedValue(OK_STATUS);
+      backfillShotsMock.mockResolvedValueOnce(SHOTS_DRY_RUN).mockResolvedValueOnce(SHOTS_RUN);
+      render(<VectorsPanel />);
+      await screen.findByText('doubao-embedding-vision-251215');
+      fireEvent.click(dryRun());
+      await screen.findByTestId('vectors-shots-result');
+      fireEvent.click(run20());
+      await waitFor(() => expect(backfillShotsMock).toHaveBeenLastCalledWith({ limit: 20, dry_run: false }));
+      const line = await screen.findByTestId('vectors-shots-result');
+      await waitFor(() => expect(line).toHaveTextContent('Last backfill · Visual'));
+      expect(line).toHaveTextContent('18 dispatched');
+      expect(line).toHaveTextContent('1 skipped (dispatch_failed ×1)');
+      expect(line).toHaveTextContent('1,353 remaining');
+      expect(getVectorsStatusMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('a refusal of the shot backfill reads as its typed line, separate from the semantic line', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      getVectorsStatusMock.mockResolvedValue(OK_STATUS);
+      backfillShotsMock.mockRejectedValue(
+        new ApiError('409 Conflict', 409, {
+          code: 'http_409',
+          details: { code: 'provider_no_image', message: 'The current embedding model cannot take images; …' },
+        }),
+      );
+      render(<VectorsPanel />);
+      await screen.findByText('doubao-embedding-vision-251215');
+      fireEvent.click(dryRun());
+      expect(await screen.findByTestId('vectors-shots-error')).toHaveTextContent(
+        'The current embedding model cannot take images. Pick an image-capable model for the active space.',
+      );
+      expect(screen.queryByTestId('vectors-backfill-error')).toBeNull();
+      expect(run20()).toBeDisabled();
+      spy.mockRestore();
+    });
   });
 
   describe('space switching', () => {

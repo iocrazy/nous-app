@@ -973,7 +973,9 @@
       "hitsLine": "{{count}} 条命中 · 每个视频取最佳匹配 · {{ms}} ms",
       "hitsLineNoTime": "{{count}} 条命中 · 每个视频取最佳匹配",
       "notBuilt": "未建立",
-      "arrivesWithPr3": "PR 3 提供"
+      "arrivesWithPr4": "PR 4 提供",
+      "shotsQueued": "镜头排队中",
+      "shotsQueuedHint": "这支视频的镜头索引已排队"
     }
   },
   "search": {
@@ -1106,7 +1108,6 @@
       "layerTranscript": "转录",
       "statusOk": "正常",
       "statusNotBuilt": "未构建",
-      "arrivesWithPr3": "PR 3 上线后可用",
       "transcriptPhase2": "未构建 · 第二期",
       "semanticSource": "标题 + 描述 + 标签 + 摘要 + 转录",
       "dryRun": "预演",
@@ -1152,7 +1153,16 @@
       "errorSpaceNotFound": "该空间已不存在，请刷新页面。",
       "errorSpaceStoreMissing": "向量库尚未迁移，暂时无法更改空间。",
       "errorByokRow": "个人 API Key 的模型行不能用于共享向量空间。",
-      "errorActiveUnknown": "无法确定当前空间，未删除任何内容。请重试。"
+      "errorActiveUnknown": "无法确定当前空间，未删除任何内容。请重试。",
+      "arrivesWithPr4": "PR 4 上线后可用",
+      "visualSource": "每个镜头一帧关键帧 · hist_v1",
+      "run20": "回填 20 支",
+      "shotsDryRunFirst": "请先预演——每支视频是一个任务，每个镜头是一次付费嵌入",
+      "shotsDryRunLine": "预演 · 视觉",
+      "shotsLastBackfill": "最近一次回填 · 视觉",
+      "shotsWouldIndex": "{{count}} 支候选 · 约 {{shots}} 个镜头 · 约 {{tokens}} tokens",
+      "shotsStale": "{{count}} 支待重切",
+      "errorProviderNoImage": "当前向量模型不支持图片。请为当前空间选择支持图片的模型。"
     },
     "localCli": {
       "modelHint": "用哪个 Codex 模型在服务商卡上设置：设置 → AI → 服务商 → Codex (Local CLI)。那里启用的模型就是 agent 和出图使用的。",
@@ -6134,15 +6144,44 @@
     "searchHit": {
       "title": "搜索命中",
       "playFrom": "从 {{time}} 播放",
-      "openShots": "打开镜头"
+      "openShots": "打开镜头",
+      "shotSpan": "镜头 · {{from}}–{{to}} · {{seconds}} 秒",
+      "shotAt": "镜头 · {{from}}"
     },
     "shots": {
-      "placeholder": {
-        "title": "尚未建立镜头索引",
-        "estimate": "{{duration}} · 约 {{shots}} 个镜头 · 约 {{embeddings}} 条向量",
-        "index": "为此视频建立索引",
-        "arrives": "随 PR 3 上线",
-        "hint": "作为任务中心任务运行 · 可以继续浏览"
+      "notIndexed": "尚未建立镜头索引",
+      "estimate": "{{duration}} · 约 {{shots}} 个镜头 · 约 {{embeddings}} 条向量",
+      "index": "为此视频建立索引",
+      "retry": "重试",
+      "hint": "作为任务中心任务运行 · 可以继续浏览",
+      "notInLibrary": "尚未进入资源库",
+      "loading": "加载中…",
+      "loadFailed": "读取镜头索引失败。",
+      "indexing": "正在建立镜头索引…",
+      "queued": "排队中",
+      "cancel": "取消",
+      "indexedLine": "索引于 {{date}} · {{algo}}",
+      "reindex": "重新索引",
+      "notCovered": "当前向量空间没有这支视频的帧向量——重新索引后才能按画面搜到。",
+      "stale": "切镜算法已更新——重新索引以使用当前版本。",
+      "stripLabel": "镜头条 · 点击跳转 · 描边 = 搜索命中",
+      "shotN": "镜头 {{n}}",
+      "searchHit": "搜索命中",
+      "stats": {
+        "shots": "镜头",
+        "vectors": "向量 · 帧",
+        "average": "平均镜头",
+        "clusters": "簇",
+        "clustersSub": "PR 4"
+      },
+      "errors": {
+        "providerNoImage": "当前向量模型不支持图片。请在 设置 → AI → 向量 中选择支持图片的模型。",
+        "embedderUnconfigured": "尚未配置向量模型。请先在 Admin → AI Models 中设置。",
+        "storeMissing": "镜头索引尚未就绪（数据库更新正在上线）。请稍后再试。",
+        "notAVideo": "只有视频可以切镜。",
+        "noVideoFile": "这支视频还没有文件可切。请先下载。",
+        "providerError": "向量服务商连续失败。请稍后再试。",
+        "failed": "镜头索引失败。"
       }
     }
   },
