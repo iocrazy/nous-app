@@ -569,3 +569,117 @@ export type BeatTemplateAnchorRow = Schemas['BeatTemplateAnchorRow'];
  * balance after the change. A debit larger than the balance stops at 0. */
 export type AdminTeamPointsAdjustResult = Schemas['AdminTeamPointsAdjustResult'];
 // —— end P8 admin: credits ——
+
+// —— P9 workflows ——
+// `/api/v1/workflows` hosts two routers. Templates: Snowflake ids are strings,
+// timestamps `isoformat()` strings, `{success, data}` envelope.
+export type WorkflowTemplateSummary = Schemas['WorkflowTemplateSummary'];
+/** Raw template node: `events` / `form_schema` are the stored JSONB, untyped. */
+export type WorkflowTemplateNodeRow = Schemas['WorkflowTemplateNodeRow'];
+export type WorkflowTemplateDetail = Schemas['WorkflowTemplateDetail'];
+/** One row of the read-only 11-node workflow node bank. */
+export type StageLibraryItem = Schemas['WorkflowStageLibraryEntry'];
+/** A template node after `workflowService.normalizeTemplateNode`: the JSONB
+ * columns narrowed, legacy keys defaulted. Wire → this only through there. */
+export type WorkflowTemplateNode = Omit<WorkflowTemplateNodeRow, 'events' | 'form_schema'> & {
+  events: WorkflowNodeEvents;
+  form_schema: FormFieldDef[];
+};
+/** A list row (no `nodes`), or a detail normalized by `workflowService`. */
+export type WorkflowTemplate = WorkflowTemplateSummary & { nodes?: WorkflowTemplateNode[] };
+// DBOS runs: timestamps are Unix epoch **ms** numbers, not ISO strings; bodies
+// carry no envelope.
+export type DbosWorkflowStep = Schemas['DbosWorkflowStep'];
+/** `GET /workflows/{id}/status`. Each SSE `event: status` push is the same
+ * snapshot, plus `steps` when the stream was opened with `include_steps`. */
+export type DbosWorkflowSnapshot = Schemas['DbosWorkflowSnapshot'] & { steps?: DbosWorkflowStep[] };
+/** A DBOS status string (PENDING, ENQUEUED, SUCCESS, ERROR, …). Not a closed
+ * set: DBOS adds states between releases. */
+export type DbosWorkflowStatus = NonNullable<DbosWorkflowSnapshot['status']>;
+export type DbosWorkflowSteps = Schemas['DbosWorkflowSteps'];
+export type DbosWorkflowCancelResult = Schemas['DbosWorkflowCancelResult'];
+export type DbosWorkflowResumeResult = Schemas['DbosWorkflowResumeResult'];
+export type DbosWorkflowRestartResult = Schemas['DbosWorkflowRestartResult'];
+// —— end P9 workflows ——
+// —— P9 workforce/tasks/issues ——
+/** `GET /workforce/board`. `recent_runs[].id` is an `agent_runs` Snowflake sent
+ * as a JSON **number**; `slug` / `name` are nullable columns. */
+export type WorkforceBoard = Schemas['WorkforceBoard'];
+export type WorkforceAgentEntry = Schemas['WorkforceBoardAgent'];
+export type WorkforceWorkerRow = Schemas['WorkforceWorkerRow'];
+export type WorkforceQueueCounts = Schemas['WorkforceQueueCounts'];
+export type WorkforceRecentRun = Schemas['WorkforceBoardRun'];
+export type WorkforceStateHistoryRow = Schemas['WorkforceStateHistoryRow'];
+/** `GET /workforce/agents/{slug}/detail` (platform admin only). */
+export type WorkforceAgentDetail = Schemas['WorkforceAgentDetail'];
+export type WorkforceInboxRow = Schemas['WorkforceInboxRow'];
+export type WorkforceOutboxRow = Schemas['WorkforceOutboxRow'];
+export type WorkforceDetailRun = Schemas['WorkforceDetailRun'];
+export type WorkforceInboxClearResult = Schemas['WorkforceInboxClearResult'];
+/** `GET /workforce/tasks/by-inbox/{id}`: `task` is null until the recipient
+ * picks the Delegate up; `outbox_response` is null until the task is terminal. */
+export type DelegateTaskLookup = Schemas['WorkforceDelegateTaskLookup'];
+export type DelegateTaskRow = Schemas['WorkforceDelegateTask'];
+export type DelegateOutboxResponse = Schemas['WorkforceDelegateOutboxResponse'];
+/** `GET /issues/{id}/progress` — computed from the runs, never from
+ * `execution_state` alone. */
+export type IssueProgress = Schemas['IssueRollup'];
+export type IssueProgressRun = Schemas['IssueRollupRun'];
+/** One row of `GET /issues/{id}/schedules`. */
+export type IssueScheduleItem = Schemas['IssueScheduleItem'];
+export type PipelineRun = Schemas['PipelineRun'];
+export type PipelineRunList = Schemas['PipelineRunListResponse'];
+/** `POST /flows/{id}/cancel`: only the keys of the branch taken are present. */
+export type FlowCancelResult = Schemas['FlowCancelResult'];
+export type ScheduleFireNowResult = Schemas['ScheduleFireNowResult'];
+// —— end P9 workforce/tasks/issues ——
+// —— P9 codex/keys/misc ——
+// `/api/v1/codex-daemon/*` ids are strings on the wire; the bodies have no
+// `success` key (`{"data": ...}`).
+/** One live paired device; `env_report` is whatever the daemon last reported. */
+export type CodexDevice = Schemas['CodexDaemonDevice'];
+export type CodexDaemonPairCode = Schemas['CodexDaemonPairCode'];
+/** `GET /jimeng-cli/status` `data`: logged in (with credits) or logged out
+ * (with a `reason`); narrow on `logged_in`. */
+export type JimengCliStatus = Schemas['JimengCliStatusEnvelope']['data'];
+/** `POST /jimeng-cli/login` `data` (platform admins only): a device-flow link,
+ * or `already_logged_in` when the CLI reused its token. */
+export type JimengCliLoginResult = Schemas['JimengCliLoginEnvelope']['data'];
+// —— end P9 codex/keys/misc ——
+// —— P9 payment/cleanup/probes ——
+// `/api/v1/payment/*`: `{ success, data }` envelopes. Order `id` / `team_id`
+// are Snowflake BIGINTs sent as JSON **numbers** (package ids are uuid strings).
+/** One purchasable package from `GET /payment/packages`. */
+export type PointPackage = Schemas['PaymentPackageRow'];
+/** One `orders` row (`GET /payment/orders`, `POST /payment/create-order`). */
+export type PaymentOrder = Schemas['PaymentOrderRow'];
+/** `GET /payment/order/{id}/status`. */
+export type PaymentOrderStatus = Schemas['PaymentOrderStatus'];
+export type PaymentPackagesResponse = Schemas['Envelope_list_PaymentPackageRow__'];
+export type PaymentOrdersResponse = Schemas['Envelope_list_PaymentOrderRow__'];
+export type PaymentOrderResponse = Schemas['Envelope_PaymentOrderRow_'];
+export type PaymentOrderStatusResponse = Schemas['Envelope_PaymentOrderStatus_'];
+// `/api/v1/cleanup/*`: bare bodies (no envelope). Media ids are Snowflake
+// BIGINTs sent as JSON **numbers**.
+/** `POST /cleanup/media/{id}/action` and `POST|DELETE /cleanup/media/{id}/keep`. */
+export type CleanupMediaActionResult = Schemas['CleanupMediaActionResult'];
+/** `POST /cleanup/batch`: `failed_ids` = media the caller owns no resource for. */
+export type CleanupBatchResult = Schemas['CleanupBatchResult'];
+/** `GET /cleanup/storage`: over the caller's non-trashed media only. */
+export type CleanupStorageBreakdown = Schemas['CleanupStorageBreakdown'];
+// `/api/v1/cover-templates`: `{ data }` envelopes (no `success`). Folder and
+// resource ids are Snowflake STRINGS here; `last_used_at` is `+00:00` ISO.
+export type CoverTemplateFolder = Schemas['CoverTemplateFolderOut'];
+export type CoverTemplate = Schemas['CoverTemplateOut'];
+export type CoverTemplateList = Schemas['CoverTemplateListOut'];
+/** `POST /cover-templates/use`: how many ids were counted. */
+export type CoverTemplateUsed = Schemas['CoverTemplateUseOut'];
+// `/api/v1/collections`: `collection_id` echoes the path (string); preset
+// ids are Snowflake BIGINTs sent as JSON **numbers**.
+export type CollectionRefreshResult = Schemas['CollectionRefreshResult'];
+/** `presets` is absent when the user already had presets. */
+export type CollectionInitPresetsResult = Schemas['CollectionInitPresetsResult'];
+// —— end P9 payment/cleanup/probes ——
+// —— P9 collections row (id is a BIGINT: JSON number) ——
+export type SmartCollectionRow = Schemas['CollectionResponse'];
+export type SmartCollectionMediaPage = Schemas['CollectionMediaResponse'];

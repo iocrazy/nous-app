@@ -68,11 +68,11 @@ describe('cleanupService API', () => {
     );
   });
 
-  it('takeCleanupAction POSTs to videos/:id/action with action body', async () => {
+  it('takeCleanupAction POSTs to media/:id/action with action body', async () => {
     const spy = stubJson({ message: 'ok', media_id: 42 });
     await takeCleanupAction(42, 'delete');
     expect(spy.mock.calls[0][0]).toBe(
-      'https://api.test/api/v1/cleanup/videos/42/action',
+      'https://api.test/api/v1/cleanup/media/42/action',
     );
     const body = JSON.parse((spy.mock.calls[0][1] as RequestInit).body as string);
     expect(body.action).toBe('delete');
@@ -96,7 +96,7 @@ describe('cleanupService API', () => {
     const spy = stubJson({ message: 'ok', media_id: 7 });
     await markKeepForever(7);
     expect(spy.mock.calls[0][0]).toBe(
-      'https://api.test/api/v1/cleanup/videos/7/keep',
+      'https://api.test/api/v1/cleanup/media/7/keep',
     );
     expect((spy.mock.calls[0][1] as RequestInit).method).toBe('POST');
   });
@@ -104,6 +104,9 @@ describe('cleanupService API', () => {
   it('unmarkKeepForever DELETEs /:id/keep', async () => {
     const spy = stubJson({ message: 'ok', media_id: 7 });
     await unmarkKeepForever(7);
+    expect(spy.mock.calls[0][0]).toBe(
+      'https://api.test/api/v1/cleanup/media/7/keep',
+    );
     expect((spy.mock.calls[0][1] as RequestInit).method).toBe('DELETE');
   });
 });

@@ -271,6 +271,10 @@ async def test_update_and_delete_commit(
     other = await _repo().update(created["key_id"], str(uuid.uuid4()), {"name": "x"})
     assert other is None
 
+    # Wrong user_id → nothing deleted, and the key is still there.
+    assert await _repo().delete(created["key_id"], str(uuid.uuid4())) is False
+    assert await _repo().get_by_key_id(created["key_id"]) is not None
+
     # delete (hard) committed.
     ok = await _repo().delete(created["key_id"], user_id)
     assert ok is True

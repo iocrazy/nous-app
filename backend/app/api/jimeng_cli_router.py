@@ -35,6 +35,7 @@ from loguru import logger
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
+from app.schemas.jimeng_cli import JimengCliLoginEnvelope, JimengCliStatusEnvelope
 
 router = APIRouter(prefix="/jimeng-cli", tags=["Jimeng CLI"])
 
@@ -98,7 +99,7 @@ async def _start_login_flow() -> Optional[dict]:
     return None
 
 
-@router.get("/status")
+@router.get("/status", response_model=JimengCliStatusEnvelope)
 async def jimeng_status(auth: AuthDep) -> dict:
     """Login + credit state of the server's shared dreamina account."""
     try:
@@ -132,7 +133,7 @@ async def jimeng_status(auth: AuthDep) -> dict:
     }
 
 
-@router.post("/login")
+@router.post("/login", response_model=JimengCliLoginEnvelope)
 async def jimeng_login(auth: AdminAuthDep) -> dict:
     """Start the dreamina device-flow login; returns the link + user code
     (valid ~10 minutes). Approve it in a browser on any device."""

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Wallet, CreditCard, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { createOrder, pollOrderStatus } from '../services/paymentService';
-import { PointPackage } from '../types';
+import type { PointPackage } from '../types/api';
 
 const MAX_POLL_ATTEMPTS = 100; // 100 × 3s = 5 minutes max
 
@@ -108,7 +108,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       const order = await createOrder(pkg.id, paymentMethod, teamId);
       setPaymentUrl(order.payment_url || null);
       setStep('processing');
-      startPolling(order.id);
+      // `order.id` is a Snowflake BIGINT sent as a JSON number, so above 2^53
+      // it may already be rounded here; see the P9 PR notes (ticketed).
+      startPolling(String(order.id));
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
       setErrorMessage(errorObj?.message || 'Failed to create order');

@@ -94,17 +94,31 @@ describe('smart collection CRUD', () => {
   });
 
   it('refreshSmartCollection POSTs /:id/refresh', async () => {
-    const spy = stubJson({ message: 'ok', video_count: 5 });
-    await refreshSmartCollection('c1');
+    const spy = stubJson({
+      message: 'Collection refreshed',
+      collection_id: 'c1',
+      media_count: 5,
+    });
+    expect((await refreshSmartCollection('c1')).media_count).toBe(5);
     expect(spy.mock.calls[0][0]).toBe(
       'https://api.test/api/v1/collections/c1/refresh',
     );
     expect((spy.mock.calls[0][1] as RequestInit).method).toBe('POST');
   });
 
-  it('initPresetCollections returns [] when missing', async () => {
-    stubJson({});
-    expect(await initPresetCollections()).toEqual([]);
+  it('initPresetCollections returns the created presets', async () => {
+    const body = {
+      message: 'Preset collections created',
+      count: 1,
+      presets: [{ id: 1234567890123, name: 'Recent Downloads' }],
+    };
+    stubJson(body);
+    expect(await initPresetCollections()).toEqual(body);
+  });
+
+  it('initPresetCollections has no presets when they already exist', async () => {
+    stubJson({ message: 'Preset collections already exist', count: 4 });
+    expect((await initPresetCollections()).presets).toBeUndefined();
   });
 });
 

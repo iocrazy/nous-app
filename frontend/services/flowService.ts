@@ -8,6 +8,7 @@
 
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import type { FlowCancelResult } from '../types/api';
 
 const base = (): string => `${getApiUrl()}/api/v1/flows`;
 
@@ -73,8 +74,6 @@ export const flowService = {
   get: (flowId: string): Promise<FlowDetailResponse> =>
     request<FlowDetailResponse>(`/${flowId}`),
 
-  cancel: (flowId: string): Promise<{ flow_id: string; state: string }> =>
+  cancel: (flowId: string): Promise<FlowCancelResult> =>
     request(`/${flowId}/cancel`, { method: 'POST' }),
-
-  remove: (flowId: string): Promise<void> => request(`/${flowId}`, { method: 'DELETE' }),
 };

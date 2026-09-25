@@ -14,33 +14,22 @@ import { useTranslation } from 'react-i18next';
 
 import { useOptionalAuth } from '../../contexts/AuthContext';
 import { apiFetch } from '../../services/apiClient';
+import type { JimengCliLoginResult, JimengCliStatus } from '../../types/api';
 
 const BTN_PRIMARY =
   'flex items-center gap-1.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-xs font-bold disabled:opacity-50';
 const BTN_SECONDARY =
   'flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-xs font-semibold text-content';
 
-interface JimengStatus {
-  available: boolean;
-  logged_in: boolean;
-  total_credit?: number | null;
-  vip_level?: string;
-  reason?: string;
-}
-
 export function JimengCliCard() {
   const { t } = useTranslation();
   // Logging in re-points the SHARED server account, so the backend only lets
   // a platform admin start it; everyone else just sees the status.
   const isPlatformAdmin = useOptionalAuth()?.userProfile?.role === 'admin';
-  const [status, setStatus] = useState<JimengStatus | null>(null);
+  const [status, setStatus] = useState<JimengCliStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [loginInfo, setLoginInfo] = useState<{
-    verification_uri?: string;
-    user_code?: string | null;
-    already_logged_in?: boolean;
-  } | null>(null);
+  const [loginInfo, setLoginInfo] = useState<JimengCliLoginResult | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +38,7 @@ export function JimengCliCard() {
     try {
       const res = await apiFetch('/api/v1/jimeng-cli/status');
       if (!res.ok) throw new Error(`status ${res.status}`);
-      const body = (await res.json()) as { data?: JimengStatus };
+      const body = (await res.json()) as { data?: JimengCliStatus };
       setStatus(body.data ?? null);
       setError(null);
     } catch (err) {
@@ -70,9 +59,9 @@ export function JimengCliCard() {
     try {
       const res = await apiFetch('/api/v1/jimeng-cli/login', { method: 'POST' });
       if (!res.ok) throw new Error(`login ${res.status}`);
-      const body = (await res.json()) as { data?: typeof loginInfo };
+      const body = (await res.json()) as { data?: JimengCliLoginResult };
       setLoginInfo(body.data ?? null);
-      if (body.data?.already_logged_in) void refresh();
+      if (body.data && 'already_logged_in' in body.data) void refresh();
     } catch (err) {
       console.error('[jimeng-cli] login failed:', err);
       setError(t('settings.localCli.errLogin'));
@@ -96,7 +85,7 @@ export function JimengCliCard() {
         )}
         {status?.logged_in && status.total_credit != null && (
           <span className="inline-flex items-center gap-1 text-xs text-content-2">
-            <Coins size={12} /> {t('settings.localCli.credits', { count: status.total_credit })}
+            <Coins size={12} /> {t('settings.localCli.credits', { count: Number(status.total_credit) })}
           </span>
         )}
       </div>
@@ -144,7 +133,7 @@ export function JimengCliCard() {
         </div>
       )}
 
-      {loginInfo && !loginInfo.already_logged_in && loginInfo.verification_uri && (
+      {loginInfo && 'verification_uri' in loginInfo && loginInfo.verification_uri && (
         <div className="rounded-xl border border-line p-3 text-xs">
           <div className="text-content-3">
             {t('settings.localCli.loginLink')}

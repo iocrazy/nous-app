@@ -19,7 +19,13 @@ from fastapi import APIRouter, HTTPException, Query
 from app.core.deps import AuthDep
 from app.db.scope import Scope, request_scope
 from app.repositories.cover_templates_repository import CoverTemplatesRepository
-from app.schemas.cover_template import CoverTemplateUseRequest
+from app.schemas.cover_template import (
+    CoverTemplateFolderOut,
+    CoverTemplateListOut,
+    CoverTemplateUseOut,
+    CoverTemplateUseRequest,
+)
+from app.schemas.wire import DataEnvelope
 from app.services.library.resources_service import _resolve_personal_team_id
 
 router = APIRouter(prefix="/cover-templates", tags=["cover-templates"])
@@ -47,7 +53,7 @@ def _present(item: dict) -> dict:
     }
 
 
-@router.get("/folder")
+@router.get("/folder", response_model=DataEnvelope[CoverTemplateFolderOut])
 async def get_cover_template_folder(auth: AuthDep) -> dict:
     """The scope's template folder — created or adopted on first call."""
     scope_id = await _scope(auth)
@@ -64,7 +70,7 @@ async def get_cover_template_folder(auth: AuthDep) -> dict:
     }
 
 
-@router.get("")
+@router.get("", response_model=DataEnvelope[CoverTemplateListOut])
 async def list_cover_templates(
     auth: AuthDep,
     q: str = Query(default="", max_length=120),
@@ -98,7 +104,7 @@ async def list_cover_templates(
     }
 
 
-@router.post("/use")
+@router.post("/use", response_model=DataEnvelope[CoverTemplateUseOut])
 async def mark_cover_templates_used(
     payload: CoverTemplateUseRequest, auth: AuthDep
 ) -> dict:

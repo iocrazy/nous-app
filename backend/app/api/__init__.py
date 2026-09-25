@@ -58,7 +58,6 @@ from app.api.projects_router import router as projects_router
 # Aliased for the same reason as ``assets_api_router`` above: the bare
 # basename would shadow the ``app.api.prompts_router`` module attribute.
 from app.api.prompts_router import router as prompts_api_router
-from app.api.realtime_router import router as realtime_router
 from app.api.resources_router import router as resources_router
 from app.api.reviews_router import router as reviews_router
 
@@ -82,7 +81,6 @@ from app.api.supabase_auth_router import router as auth_router
 from app.api.system_router import router as system_router
 from app.api.tags_router import router as tags_router
 from app.api.task_manager_router import router as task_manager_router
-from app.api.task_router import router as task_router
 from app.api.teams_router import router as teams_router
 from app.api.temp_token_router import router as temp_token_router
 from app.api.topics_router import router as _topics_router
@@ -117,8 +115,6 @@ api_router.include_router(router=api_key_router, tags=["API 密钥管理"])
 api_router.include_router(router=settings_router, tags=["用户设置"])
 
 api_router.include_router(router=frontend_config_router, tags=["前端配置"])
-
-api_router.include_router(router=task_router, tags=["任务管理"])
 
 api_router.include_router(router=tags_router, tags=["Tags"])
 
@@ -222,7 +218,6 @@ api_router.include_router(router=modules_router, tags=["Modules"])
 api_router.include_router(router=notifications_router, tags=["Notifications"])
 api_router.include_router(router=inbox_router, tags=["Inbox"])
 
-api_router.include_router(router=realtime_router, tags=["Realtime"])
 
 api_router.include_router(router=error_report_router, tags=["Error Reporting"])
 

@@ -44,7 +44,6 @@ vi.mock('../../services/issueMessageService', async (importOriginal) => ({
   listIssueMessages: vi.fn(async () => ({ messages: [] })),
   postIssueMessage: vi.fn(async () => ({})),
   getCommentTriggerPreview: vi.fn(async () => null),
-  simulateAgentRunComplete: vi.fn(),
   AgentNotDispatchedError: class extends Error {},
 }));
 

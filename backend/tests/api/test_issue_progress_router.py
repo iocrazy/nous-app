@@ -8,11 +8,24 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.testclient import TestClient
+
+from app.services.issues.issue_rollup import compute_rollup
 
 r = importlib.import_module("app.api.issue_progress_router")
 pytestmark = pytest.mark.unit
 ME = "11111111-1111-1111-1111-111111111111"
+# A real rollup, not a hand-trimmed dict: the route declares IssueRollup now.
+ROLLUP = compute_rollup(
+    {"id": 7, "status": "in_progress"},
+    [],
+    [],
+    0,
+    {"kind": "manual", "origin_id": None},
+    spent_cents=0.0,
+    tree_cost_cents={},
+)
 
 
 def _client(monkeypatch, visible=True):
@@ -38,18 +51,13 @@ def _client(monkeypatch, visible=True):
             else AsyncMock(side_effect=HTTPException(404, "not found"))
         ),
     )
-    monkeypatch.setattr(
-        r, "load_rollup", AsyncMock(return_value={"issue_id": "7", "phase": "running"})
-    )
+    monkeypatch.setattr(r, "load_rollup", AsyncMock(return_value=ROLLUP))
     return TestClient(app)
 
 
 def test_progress_returns_the_rollup(monkeypatch):
     resp = _client(monkeypatch).get("/api/v1/issues/7/progress")
-    assert resp.status_code == 200 and resp.json() == {
-        "issue_id": "7",
-        "phase": "running",
-    }
+    assert resp.status_code == 200 and resp.json() == jsonable_encoder(ROLLUP)
     r.load_rollup.assert_awaited_once_with({"id": 7, "status": "in_progress"})
 
 

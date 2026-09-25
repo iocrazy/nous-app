@@ -15,8 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { GitBranch, X } from 'lucide-react';
 import { fetchTemplates, attachProjectWorkflow } from '../../services/workflowService';
 import { ApiError } from '../../services/apiClient';
-import type { WorkflowTemplate } from '../../types';
-import type { ProjectStageNode } from '../../types/api';
+import type { ProjectStageNode, WorkflowTemplate } from '../../types/api';
 import { WorkflowChoiceCard } from './WorkflowChoiceCard';
 
 type WorkflowMethod = 'live' | 'ai' | 'hybrid';

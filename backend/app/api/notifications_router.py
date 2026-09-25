@@ -76,12 +76,3 @@ async def delete_notification(notification_id: str, auth: AuthDep):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete notification",
         )
-
-
-@router.get("/unread-count")
-async def get_unread_count(auth: AuthDep):
-    """Get count of unread notifications."""
-    repo = get_notification_repository()
-    count = await repo.get_unread_count(auth.user_id)
-
-    return {"unread_count": count}

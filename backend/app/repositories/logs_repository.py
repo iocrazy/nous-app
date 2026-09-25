@@ -45,6 +45,7 @@ from sqlalchemy import delete, func, insert, select
 from app.db.session import read_scope, write_scope
 from app.models import UserLogs
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+from app.services.library.like_escape import LIKE_ESCAPE_CHAR, escape_like
 
 _USER_LOGS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(UserLogs)
 
@@ -94,7 +95,11 @@ def _apply_filters(
         end_dt = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
         stmt = stmt.where(UserLogs.created_at <= end_dt)
     if search:
-        stmt = stmt.where(UserLogs.message.ilike(f"%{search}%"))
+        # The search box text is a literal: a typed ``%`` or ``_`` must match
+        # itself, not every row (CLAUDE.md「ILIKE 模式的转义责任要跟着模式走」).
+        stmt = stmt.where(
+            UserLogs.message.ilike(f"%{escape_like(search)}%", escape=LIKE_ESCAPE_CHAR)
+        )
     return stmt
 
 

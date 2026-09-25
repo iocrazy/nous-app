@@ -13,12 +13,17 @@ admin-only via the workforce drawer.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
+
+from app.core.deps import AuthContext
+
+
+def _as(user_id) -> AuthContext:
+    return AuthContext(user_id=str(user_id), auth_type="jwt")
 
 
 class _Mappings:
@@ -133,13 +138,13 @@ async def test_returns_task_and_outbox_when_done() -> None:
         executed,
     )
 
-    fake_user = SimpleNamespace(id=user_id)
+    fake_user = _as(user_id)
     import importlib
 
     wf_mod = importlib.import_module("app.api.workforce_router")
 
     with patch.object(wf_mod, "read_scope", scope):
-        out = await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
+        out = await get_task_by_inbox(inbox_message_id=inbox_id, auth=fake_user)
 
     assert out["inbox_message_id"] == str(inbox_id)
     assert out["task"]["lifecycle_status"] == "done"
@@ -199,9 +204,7 @@ async def test_returns_outbox_when_cancelled() -> None:
 
     wf_mod = importlib.import_module("app.api.workforce_router")
     with patch.object(wf_mod, "read_scope", scope):
-        out = await get_task_by_inbox(
-            inbox_message_id=inbox_id, user=SimpleNamespace(id=user_id)
-        )
+        out = await get_task_by_inbox(inbox_message_id=inbox_id, auth=_as(user_id))
 
     assert out["task"]["lifecycle_status"] == "cancelled"
     assert "agent_outbox" in executed
@@ -235,13 +238,13 @@ async def test_no_task_yet_when_recipient_hasnt_ticked() -> None:
         executed,
     )
 
-    fake_user = SimpleNamespace(id=user_id)
+    fake_user = _as(user_id)
     import importlib
 
     wf_mod = importlib.import_module("app.api.workforce_router")
 
     with patch.object(wf_mod, "read_scope", scope):
-        out = await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
+        out = await get_task_by_inbox(inbox_message_id=inbox_id, auth=fake_user)
 
     assert out["task"] is None
     assert out["outbox_response"] is None
@@ -285,13 +288,13 @@ async def test_outbox_skipped_when_task_in_progress() -> None:
         executed,
     )
 
-    fake_user = SimpleNamespace(id=user_id)
+    fake_user = _as(user_id)
     import importlib
 
     wf_mod = importlib.import_module("app.api.workforce_router")
 
     with patch.object(wf_mod, "read_scope", scope):
-        out = await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
+        out = await get_task_by_inbox(inbox_message_id=inbox_id, auth=fake_user)
 
     assert out["task"]["lifecycle_status"] == "in_progress"
     assert out["outbox_response"] is None
@@ -325,14 +328,14 @@ async def test_403_when_caller_not_sender() -> None:
         executed,
     )
 
-    fake_user = SimpleNamespace(id=user_id)
+    fake_user = _as(user_id)
     import importlib
 
     wf_mod = importlib.import_module("app.api.workforce_router")
 
     with patch.object(wf_mod, "read_scope", scope):
         with pytest.raises(HTTPException) as exc:
-            await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
+            await get_task_by_inbox(inbox_message_id=inbox_id, auth=fake_user)
     assert exc.value.status_code == 403
 
 
@@ -361,14 +364,14 @@ async def test_403_when_agent_to_agent_delegate() -> None:
         executed,
     )
 
-    fake_user = SimpleNamespace(id=user_id)
+    fake_user = _as(user_id)
     import importlib
 
     wf_mod = importlib.import_module("app.api.workforce_router")
 
     with patch.object(wf_mod, "read_scope", scope):
         with pytest.raises(HTTPException) as exc:
-            await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
+            await get_task_by_inbox(inbox_message_id=inbox_id, auth=fake_user)
     assert exc.value.status_code == 403
 
 
@@ -380,12 +383,12 @@ async def test_404_when_inbox_message_does_not_exist() -> None:
     executed: list = []
     scope = _read_scope_for({"agent_inbox": [None]}, executed)
 
-    fake_user = SimpleNamespace(id=uuid4())
+    fake_user = _as(uuid4())
     import importlib
 
     wf_mod = importlib.import_module("app.api.workforce_router")
 
     with patch.object(wf_mod, "read_scope", scope):
         with pytest.raises(HTTPException) as exc:
-            await get_task_by_inbox(inbox_message_id=inbox_id, user=fake_user)
+            await get_task_by_inbox(inbox_message_id=inbox_id, auth=fake_user)
     assert exc.value.status_code == 404

@@ -57,13 +57,56 @@ class CleanupStats(BaseModel):
     reclaimable_bytes: int
 
 
-class StorageBreakdown(BaseModel):
-    """Storage usage breakdown."""
+class CleanupMediaActionResult(BaseModel):
+    """``POST /cleanup/media/{id}/action`` and ``POST|DELETE .../keep``."""
 
-    by_type: dict  # video, image, audio
-    by_month: List[dict]  # [{month, count, bytes}]
-    by_tag: List[dict]  # [{tag, count, bytes}]
-    largest_videos: List[dict]  # top 10 by size
+    message: str
+    media_id: int
+
+
+class CleanupBatchResult(BaseModel):
+    """``POST /cleanup/batch``: per-id outcome counts; ``failed_ids`` are the
+    media ids the caller owns no resource for (or whose action raised)."""
+
+    message: str
+    action: Literal["delete", "keep_forever", "dismiss"]
+    success_count: int
+    failed_count: int
+    failed_ids: List[int]
+
+
+class CleanupStorageByType(BaseModel):
+    """Bytes per bucket: ``video`` (video/special), ``image`` (carousel /
+    image_text), ``other`` (everything else, including a NULL media_type)."""
+
+    video: int
+    image: int
+    other: int
+
+
+class CleanupStorageMonth(BaseModel):
+    month: str  # YYYY-MM
+    count: int
+    bytes: int
+
+
+class CleanupStorageItem(BaseModel):
+    """One of the ten largest owned media (``parsed_media`` columns)."""
+
+    id: int
+    storage_size: int
+    media_type: Optional[str]
+    created_at: Optional[str]  # ISO string (``isoformat()`` in the route)
+
+
+class CleanupStorageBreakdown(BaseModel):
+    """``GET /cleanup/storage``: storage over the caller's non-trashed media."""
+
+    by_type: CleanupStorageByType
+    by_month: List[CleanupStorageMonth]
+    largest_videos: List[CleanupStorageItem]
+    total_bytes: int
+    total_videos: int
 
 
 class CleanupDataResponse(BaseModel):

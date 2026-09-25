@@ -1,8 +1,6 @@
 """Pydantic schemas for Smart Collections API."""
 
-from datetime import datetime
 from typing import Any, List, Literal, Optional
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -51,30 +49,31 @@ class CollectionUpdate(BaseModel):
 
 
 class CollectionResponse(BaseModel):
-    """Response schema for a smart collection."""
+    """One ``smart_collections`` row as the collections routes return it.
 
-    id: UUID
-    user_id: UUID
+    ``id`` is the Snowflake BIGINT primary key: a JSON **number** (it was
+    declared ``UUID``, so every route returning a real row answered 500).
+    The repository already turns ``user_id`` and the timestamps into strings,
+    so they are declared ``str``. Nullable columns fall back to the documented
+    defaults in ``app/api/collections_router.py::_collection_out`` before they
+    reach this model, so a legacy row with NULLs still validates.
+    """
+
+    id: int
+    user_id: str
     name: str
     icon: str
     color: Optional[str] = None
     description: Optional[str]
     rules: CollectionRules
-    media_count: int = Field(
-        default=0, description="Number of media matching this collection"
-    )
-    cached_at: Optional[datetime]
+    media_count: int = Field(description="Number of media matching this collection")
+    cached_at: Optional[str]
     is_preset: bool
-    is_active: bool = Field(
-        default=True, description="Whether the collection is active"
-    )
+    is_active: bool = Field(description="Whether the collection is active")
     sort_by: str
     sort_order: str
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
+    created_at: Optional[str]
+    updated_at: Optional[str]
 
 
 class CollectionListResponse(BaseModel):
@@ -87,9 +86,46 @@ class CollectionListResponse(BaseModel):
 class CollectionMediaResponse(BaseModel):
     """Response schema for media in a collection."""
 
-    collection_id: UUID
+    collection_id: int
     collection_name: str
     media: List[dict]
     total: int
     page: int
     page_size: int
+
+
+class CollectionRefreshResult(BaseModel):
+    """``POST /collections/{id}/refresh``.
+
+    ``collection_id`` echoes the path segment (a string); ``media_count`` is
+    the number of media now matching the rules (the cache keeps the first
+    1000 ids).
+    """
+
+    message: str
+    collection_id: str
+    media_count: int
+
+
+class CollectionPresetRef(BaseModel):
+    """One preset created by ``POST /collections/init-presets``.
+
+    ``id`` is the Snowflake BIGINT as the repository returns it: a JSON
+    **number**.
+    """
+
+    id: int
+    name: str
+
+
+class CollectionInitPresetsResult(BaseModel):
+    """``POST /collections/init-presets``.
+
+    ``presets`` is only present when this call created them; when the user
+    already had presets the body is ``{message, count}`` (the route declares
+    ``response_model_exclude_unset`` so the key stays absent).
+    """
+
+    message: str
+    count: int
+    presets: Optional[List[CollectionPresetRef]] = None

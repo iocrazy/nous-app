@@ -7,8 +7,11 @@ from app.core.deps import AuthDep
 from app.schemas.cleanup import (
     CleanupAction,
     CleanupBatchAction,
+    CleanupBatchResult,
     CleanupDataResponse,
+    CleanupMediaActionResult,
     CleanupStats,
+    CleanupStorageBreakdown,
 )
 from app.schemas.cleanup import CleanupSuggestion as CleanupSuggestionSchema
 from app.schemas.cleanup import (
@@ -164,7 +167,7 @@ async def get_cleanup_stats(auth: AuthDep):
     return CleanupStats(**stats)
 
 
-@router.post("/media/{media_id}/action")
+@router.post("/media/{media_id}/action", response_model=CleanupMediaActionResult)
 async def take_cleanup_action(
     auth: AuthDep,
     media_id: int,
@@ -204,7 +207,7 @@ async def take_cleanup_action(
         raise HTTPException(status_code=404, detail="Media not found")
 
 
-@router.post("/batch")
+@router.post("/batch", response_model=CleanupBatchResult)
 async def batch_cleanup_action(
     auth: AuthDep,
     action: CleanupBatchAction,
@@ -249,7 +252,7 @@ async def batch_cleanup_action(
     }
 
 
-@router.post("/media/{media_id}/keep")
+@router.post("/media/{media_id}/keep", response_model=CleanupMediaActionResult)
 async def mark_keep_forever(
     auth: AuthDep,
     media_id: int,
@@ -264,7 +267,7 @@ async def mark_keep_forever(
     raise HTTPException(status_code=404, detail="Media not found")
 
 
-@router.delete("/media/{media_id}/keep")
+@router.delete("/media/{media_id}/keep", response_model=CleanupMediaActionResult)
 async def unmark_keep_forever(
     auth: AuthDep,
     media_id: int,
@@ -279,7 +282,7 @@ async def unmark_keep_forever(
     raise HTTPException(status_code=404, detail="Media not found")
 
 
-@router.get("/storage")
+@router.get("/storage", response_model=CleanupStorageBreakdown)
 async def get_storage_breakdown(auth: AuthDep):
     """
     Get storage usage breakdown.

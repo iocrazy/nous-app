@@ -62,7 +62,8 @@ export function EnvReportLine({ report }: { report: DaemonEnvReport | null | und
 }
 
 export function deviceEnvReport(device: CodexDevice): DaemonEnvReport | null {
-  return ((device as { env_report?: DaemonEnvReport | null }).env_report) ?? null;
+  // The server stores the daemon's report as free-form JSONB.
+  return (device.env_report as DaemonEnvReport | null) ?? null;
 }
 
 export function LocalCliSettings() {

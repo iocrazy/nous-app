@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Coins, Package, CreditCard, HardDrive, TrendingUp, BarChart3, Loader2, MessageSquare, Settings } from 'lucide-react';
 import { Loading } from './common/Loading';
-import type { PointPackage, PaymentOrder } from '../types';
+import type { PointPackage, PaymentOrder } from '../types/api';
 import type { PointsBalance, PointsPricing, PointsUsageStats } from '../types/api';
 import { fetchPointsBalance, fetchPointsPricing, fetchUsageStats, adjustPoints } from '../services/pointsService';
 import { fetchPackages, fetchOrders } from '../services/paymentService';

@@ -3,6 +3,11 @@
  */
 
 import { apiClient } from './apiClient';
+import type {
+  CleanupBatchResult,
+  CleanupMediaActionResult,
+  CleanupStorageBreakdown,
+} from '../types/api';
 
 // Types
 export type CleanupReason = 'never_viewed' | 'duplicate_content' | 'old_unused' | 'large_file';
@@ -58,40 +63,6 @@ export interface CleanupDataResponse {
   stats: CleanupStats;
 }
 
-export interface StorageBreakdown {
-  by_type: {
-    video: number;
-    image: number;
-    other: number;
-  };
-  by_month: Array<{
-    month: string;
-    count: number;
-    bytes: number;
-  }>;
-  largest_videos: Array<{
-    id: number;
-    storage_size: number;
-    media_type: number;
-    created_at: string;
-  }>;
-  total_bytes: number;
-  total_videos: number;
-}
-
-export interface CleanupActionResponse {
-  message: string;
-  media_id: number;
-}
-
-export interface BatchCleanupResponse {
-  message: string;
-  action: CleanupActionType;
-  success_count: number;
-  failed_count: number;
-  failed_ids: number[];
-}
-
 /**
  * Get all cleanup data in a single optimized call.
  * This is the preferred method as it reduces network round trips.
@@ -118,39 +89,39 @@ export const getCleanupSuggestions = async (
 export const getCleanupStats = async (): Promise<CleanupStats> =>
   apiClient.get<CleanupStats>('/api/v1/cleanup/stats');
 
-export const getStorageBreakdown = async (): Promise<StorageBreakdown> =>
-  apiClient.get<StorageBreakdown>('/api/v1/cleanup/storage');
+export const getStorageBreakdown = async (): Promise<CleanupStorageBreakdown> =>
+  apiClient.get<CleanupStorageBreakdown>('/api/v1/cleanup/storage');
 
 export const takeCleanupAction = async (
   mediaId: number,
   action: CleanupActionType,
-): Promise<CleanupActionResponse> =>
-  apiClient.post<CleanupActionResponse>(
-    `/api/v1/cleanup/videos/${mediaId}/action`,
+): Promise<CleanupMediaActionResult> =>
+  apiClient.post<CleanupMediaActionResult>(
+    `/api/v1/cleanup/media/${mediaId}/action`,
     { action },
   );
 
 export const batchCleanupAction = async (
   mediaIds: number[],
   action: CleanupActionType,
-): Promise<BatchCleanupResponse> =>
-  apiClient.post<BatchCleanupResponse>('/api/v1/cleanup/batch', {
+): Promise<CleanupBatchResult> =>
+  apiClient.post<CleanupBatchResult>('/api/v1/cleanup/batch', {
     media_ids: mediaIds,
     action,
   });
 
 export const markKeepForever = async (
   mediaId: number,
-): Promise<CleanupActionResponse> =>
-  apiClient.post<CleanupActionResponse>(
-    `/api/v1/cleanup/videos/${mediaId}/keep`,
+): Promise<CleanupMediaActionResult> =>
+  apiClient.post<CleanupMediaActionResult>(
+    `/api/v1/cleanup/media/${mediaId}/keep`,
   );
 
 export const unmarkKeepForever = async (
   mediaId: number,
-): Promise<CleanupActionResponse> =>
-  apiClient.delete<CleanupActionResponse>(
-    `/api/v1/cleanup/videos/${mediaId}/keep`,
+): Promise<CleanupMediaActionResult> =>
+  apiClient.delete<CleanupMediaActionResult>(
+    `/api/v1/cleanup/media/${mediaId}/keep`,
   );
 
 // Utility functions

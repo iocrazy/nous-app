@@ -162,3 +162,14 @@ class ApiKeyScopesResponse(BaseModel):
 
     success: bool = True
     scopes: List[ApiKeyScopeInfo] = Field(..., description="可用权限范围列表")
+
+
+class ApiKeyActionResponse(BaseModel):
+    """``DELETE /api-keys/{key_id}`` and ``POST /api-keys/{key_id}/revoke``.
+
+    ``success`` is always True on this path (a miss is a typed 404) and
+    ``message`` is a fixed Chinese sentence. Carries nothing about the key.
+    """
+
+    success: bool
+    message: str

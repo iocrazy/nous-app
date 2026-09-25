@@ -29,11 +29,6 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('../../services/issueMessageService', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../services/issueMessageService')>();
-  return { ...actual, simulateAgentRunComplete: vi.fn() };
-});
 // Both hooks: a subtree here may use the optional one (it also mounts where
 // no provider is above it). Exporting only `useToast` makes that subtree
 // throw — the note on `useOptionalToast` in components/Toast.tsx says so.

@@ -2818,6 +2818,8 @@ export interface paths {
          *
          *     Only succeeds if the row is owned by the authenticated user.
          *     A teammate's shared row cannot be deleted by another team member.
+         *     Unknown, not the caller's, or a failed delete: typed 404 — it used to be
+         *     ``200 {"deleted": false}``, which the settings page read as success.
          */
         delete: operations["delete_my_memory_api_v1_agent_memory__memory_id__delete"];
         options?: never;
@@ -7158,6 +7160,9 @@ export interface paths {
          * Dbos Routing
          * @description Snapshot of routing decisions per task_type. Useful for ops dashboard
          *     to see what's celery / shadow / dbos at a glance.
+         *
+         *     Platform admins only: every call forces a database refresh of the routing
+         *     cache, and the task-type table is internal configuration.
          */
         get: operations["dbos_routing_api_v1_dbos_routing_get"];
         put?: never;
@@ -8060,12 +8065,7 @@ export interface paths {
         get: operations["get_flow_api_v1_flows__flow_id__get"];
         put?: never;
         post?: never;
-        /**
-         * Delete Flow
-         * @description Hard delete a flow row. Child task_tracking rows survive (FK is
-         *     ON DELETE SET NULL) so historical task records aren't lost.
-         */
-        delete: operations["delete_flow_api_v1_flows__flow_id__delete"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -8082,17 +8082,26 @@ export interface paths {
         put?: never;
         /**
          * Cancel Flow
-         * @description Cascade-cancel: set flow state=cancelled + signal abort on every
-         *     non-terminal child task. The trigger will eventually update the
-         *     aggregate counters as children flip to cancelled.
+         * @description Cascade-cancel: set flow state=cancelled + cancel every non-terminal
+         *     child's workflow. The aggregate trigger updates the parent counters as
+         *     children flip to cancelled.
          *
          *     Implementation:
          *       1. Mark flow.state = cancelled (this prevents the trigger from
          *          regressing to running on next child phase change)
          *       2. Read non-terminal children
-         *       3. For each, signal abort via the AbortRegistry (cross-process via
-         *          lifecycle bus per A10) AND mark its task_tracking row cancelled
-         *          so UI reflects immediately
+         *       3. For each: cancel its DBOS workflow and kill its registered
+         *          subprocesses. ``phase`` /
+         *          ``status`` / ``error_msg`` are NOT written here — they belong to
+         *          ``mirror_dbos_lifecycle_to_tracking`` (CLAUDE.md 任务系统架构纪律 §2),
+         *          which records CANCELLED once DBOS does. This used to write them
+         *          directly and never cancel the workflow, so it kept running and the
+         *          trigger could flip the row back. Only the ``error_code`` decoration
+         *          is set, so the UI can say WHY the child stopped. (It also imported
+         *          ``app.services.abort_registry``, a module that no longer exists, so
+         *          every cascading cancel raised 500 after marking the flow cancelled.)
+         *
+         *     ``cascaded`` counts children whose workflow cancel was accepted.
          */
         post: operations["cancel_flow_api_v1_flows__flow_id__cancel_post"];
         delete?: never;
@@ -8461,6 +8470,12 @@ export interface paths {
         /**
          * Per-subsystem deep health snapshot
          * @description Run all subsystem probes in parallel + return aggregate report.
+         *
+         *     Platform admins only. The report carries raw client exception text from
+         *     the database / Redis probes, model names and in-process registry state,
+         *     and every call runs a database read -- none of which an anonymous caller
+         *     should get (same reasoning that removed the anonymous ``/admin/health``).
+         *     Container healthchecks and the deploy smoke use ``/api/v1/readyz``.
          */
         get: operations["health_deep_api_v1_health_deep_get"];
         put?: never;
@@ -8975,35 +8990,6 @@ export interface paths {
          *     fire correctly.
          */
         patch: operations["update_issue_api_v1_issues__issue_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/issues/{issue_id}/agent-runs/{run_id}/simulate-complete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Simulate Agent Run Complete
-         * @description Dev/demo helper: flip an issue-scoped agent_run from running →
-         *     completed with a sample summary. The mig 208 terminal trigger then
-         *     UPDATEs the chat row in place; Realtime delivers it to subscribers.
-         *
-         *     Nous doesn't have a real agent runtime listening for
-         *     issue_reply-triggered runs yet, so without this endpoint the chat
-         *     row sits at "Agent picking up…" forever. This isn't gated to admin
-         *     by intent — it's a dev tool that's safe in any environment because
-         *     it only affects rows the user can already see (issue visibility +
-         *     explicit run_id).
-         */
-        post: operations["simulate_agent_run_complete_api_v1_issues__issue_id__agent_runs__run_id__simulate_complete_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/issues/{issue_id}/comment-trigger-preview": {
@@ -10156,26 +10142,6 @@ export interface paths {
          * @description Mark all notifications as read.
          */
         put: operations["mark_all_as_read_api_v1_notifications_read_all_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/notifications/unread-count": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Unread Count
-         * @description Get count of unread notifications.
-         */
-        get: operations["get_unread_count_api_v1_notifications_unread_count_get"];
-        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -11993,41 +11959,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/realtime/subscribe": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Subscribe To Realtime
-         * @description Subscribe to realtime updates via Server-Sent Events.
-         *
-         *     Authentication (preferred): one-shot 30s ticket from POST
-         *     `/api/v1/ws/ticket`, passed as `?ticket=<random>`. The JWT itself
-         *     never enters the URL (which would otherwise leak into nginx /
-         *     uvicorn / Sentry access logs and the Referer header).
-         *
-         *     Authentication (deprecated): `?token=<JWT>`. Still accepted while
-         *     legacy clients migrate; logs a WARNING on every use because the JWT
-         *     is now in the URL and therefore in access logs.
-         *
-         *     Events:
-         *     - video, collection_video, video_tag — DB changes
-         *     - heartbeat — keep-alive every 30 s
-         *     - connected — initial ack
-         *     - error — subscription errors
-         */
-        get: operations["subscribe_to_realtime_api_v1_realtime_subscribe_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/resources": {
         parameters: {
             query?: never;
@@ -13593,7 +13524,14 @@ export interface paths {
         get: operations["get_schedule_api_v1_schedules__schedule_id__get"];
         put?: never;
         post?: never;
-        /** Delete Schedule */
+        /**
+         * Delete Schedule
+         * @description Delete one of the caller's schedules.
+         *
+         *     An id that matched nothing — someone else's schedule, or one already gone
+         *     — is a typed 404. It used to answer ``200 {"ok": true, "deleted": 0}``, a
+         *     success the UI could not tell from a real delete.
+         */
         delete: operations["delete_schedule_api_v1_schedules__schedule_id__delete"];
         options?: never;
         head?: never;
@@ -13615,9 +13553,15 @@ export interface paths {
         put?: never;
         /**
          * Fire Schedule Now
-         * @description Manual one-shot trigger. Bypasses cron, dispatches immediately
-         *     AND advances next_fire_at as if the cron had just fired (so the
-         *     next regular tick still fires on schedule).
+         * @description Manual one-shot trigger: set ``next_fire_at`` to now so the master
+         *     scheduler fires it on its next tick (within a minute). Cleaner than
+         *     duplicating dispatch here; ``_dispatch_one`` stays the single owner of
+         *     "fire a schedule", and it advances ``next_fire_at`` from the cron as usual.
+         *
+         *     The master only scans ``enabled`` rows, so on a disabled (or auto-paused)
+         *     schedule this used to answer ``queued_for_next_tick: true`` and then never
+         *     fire — "Routine fired" in the UI, nothing on the server. That is a typed
+         *     409 ``schedule_disabled`` now; resume the schedule first.
          */
         post: operations["fire_schedule_now_api_v1_schedules__schedule_id__fire_now_post"];
         delete?: never;
@@ -15088,91 +15032,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/tasks/active": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Active Tasks */
-        get: operations["list_active_tasks_api_v1_tasks_active_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tasks/stats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Task Stats */
-        get: operations["get_task_stats_api_v1_tasks_stats_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tasks/{task_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Task Status */
-        get: operations["get_task_status_api_v1_tasks__task_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tasks/{task_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel Task */
-        post: operations["cancel_task_api_v1_tasks__task_id__cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tasks/{task_id}/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Task Events */
-        get: operations["get_task_events_api_v1_tasks__task_id__events_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/teams": {
         parameters: {
             query?: never;
@@ -15607,38 +15466,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workflows/runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Workflows
-         * @description List the authenticated user's workflows from task_tracking.
-         *
-         *     Reads task_tracking (CLAUDE.md 路线 C rule 1 — task_tracking is the
-         *     UI source of truth). Previously this endpoint read dbos.workflow_status
-         *     directly, which could diverge from the trigger-mirrored task_tracking
-         *     state during the brief sync window — risking the same dual-source
-         *     inconsistency that motivated 路线 C ("Engine 108 queued but Settings
-         *     only 38 rows", 2026-05-05).
-         *
-         *     Per-workflow detail / control endpoints (/status, /events, /steps,
-         *     /cancel, /resume, /restart) still call DBOS directly because they
-         *     need execution-engine state (input/output, step list, cancel signals)
-         *     that task_tracking deliberately does NOT carry.
-         */
-        get: operations["list_workflows_api_v1_workflows_runs_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/workflows/stage-library": {
         parameters: {
             query?: never;
@@ -15779,6 +15606,11 @@ export interface paths {
         /**
          * Get Workflow Status
          * @description One-shot status snapshot. Use the SSE endpoint for live updates.
+         *
+         *     ``input`` / ``output`` are arbitrary workflow values, so the snapshot is
+         *     encoded here (as FastAPI did for the bare dict) before the model sees it:
+         *     Pydantic would render a nested datetime differently, and cannot serialize
+         *     an arbitrary object at all.
          */
         get: operations["get_workflow_status_api_v1_workflows__workflow_id__status_get"];
         put?: never;
@@ -16035,12 +15867,26 @@ export interface paths {
         put?: never;
         /**
          * Cancel Task
-         * @description Mark an in-flight or queued task as cancelled.
+         * @description Cancel a queued task, or ask a running one to stop.
          *
-         *     The DB transition is the source of truth — once
-         *     ``lifecycle_status='cancelled'``, the worker checks (and the
-         *     RunRecorder cancel poll) will refuse to keep going. Already-done
-         *     tasks are left alone.
+         *     ``task_tracking`` rows of kind ``agent_task`` are not mirrored from DBOS
+         *     (their ``dbos_workflow_id`` is the task id; the workflow that runs them is
+         *     ``workforce-<task>-<attempt>``), so their lifecycle belongs to the
+         *     workforce subsystem — the worker files ``done`` / ``cancelled`` itself.
+         *     This route used to write ``cancelled`` straight onto the row whatever its
+         *     phase: on a running task the turn went on, and the worker's closing write
+         *     turned the row back to ``done``. A cancel that does not stop anything.
+         *
+         *     * ``queued`` — nobody has claimed it, and ``claim_task`` only takes
+         *       ``queued`` rows, so a compare-and-set to ``cancelled`` through the
+         *       workforce repository is final.
+         *     * a run in flight — ``cancel_requested`` on that run, the same signal
+         *       ``POST /ai-library/runs/{id}/cancel`` sends. The runner stops at its next
+         *       step and the worker files the task ``cancelled``.
+         *     * claimed but no run yet — typed 409 ``task_not_cancellable_yet``; there
+         *       is nothing to signal for a moment.
+         *
+         *     Terminal tasks are a no-op.
          */
         post: operations["cancel_task_api_v1_workforce_tasks__task_id__cancel_post"];
         delete?: never;
@@ -18797,6 +18643,17 @@ export interface components {
              */
             kind: "budget" | "manual" | "dead_runs";
         };
+        /**
+         * AgentMemoryDeleteResponse
+         * @description ``DELETE /agent-memory/{memory_id}``: always ``{"deleted": true}``.
+         *
+         *     A row that is not there, or not the caller's, is a typed 404
+         *     (``not_found_or_out_of_scope``) rather than ``{"deleted": false}``.
+         */
+        AgentMemoryDeleteResponse: {
+            /** Deleted */
+            deleted: boolean;
+        };
         /** AgentOut */
         AgentOut: {
             /** Agent Group */
@@ -19811,6 +19668,19 @@ export interface components {
             tool_type: string;
         };
         /**
+         * ApiKeyActionResponse
+         * @description ``DELETE /api-keys/{key_id}`` and ``POST /api-keys/{key_id}/revoke``.
+         *
+         *     ``success`` is always True on this path (a miss is a typed 404) and
+         *     ``message`` is a fixed Chinese sentence. Carries nothing about the key.
+         */
+        ApiKeyActionResponse: {
+            /** Message */
+            message: string;
+            /** Success */
+            success: boolean;
+        };
+        /**
          * ApiKeyCreate
          * @description 创建 API 密钥请求
          * @example {
@@ -20127,6 +19997,26 @@ export interface components {
             name: string;
             /** Revoked At */
             revoked_at?: string | null;
+        };
+        /**
+         * ApiVersionResponse
+         * @description ``GET /api/version``: build identity from ``/app/build-info.json``.
+         *
+         *     Without that file (every gpupc image today) the body is only
+         *     ``{commit_sha: null, available: false}``; the route declares
+         *     ``response_model_exclude_unset`` so the other keys stay absent.
+         */
+        ApiVersionResponse: {
+            /** Available */
+            available: boolean;
+            /** Commit Count */
+            commit_count?: number | null;
+            /** Commit Sha */
+            commit_sha: string | null;
+            /** Service */
+            service?: string | null;
+            /** Version */
+            version?: string | null;
         };
         /** AppLogItem */
         AppLogItem: {
@@ -22369,6 +22259,26 @@ export interface components {
             media_ids: number[];
         };
         /**
+         * CleanupBatchResult
+         * @description ``POST /cleanup/batch``: per-id outcome counts; ``failed_ids`` are the
+         *     media ids the caller owns no resource for (or whose action raised).
+         */
+        CleanupBatchResult: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "delete" | "keep_forever" | "dismiss";
+            /** Failed Count */
+            failed_count: number;
+            /** Failed Ids */
+            failed_ids: number[];
+            /** Message */
+            message: string;
+            /** Success Count */
+            success_count: number;
+        };
+        /**
          * CleanupDataResponse
          * @description Combined response with suggestions, stats, and categories in one call.
          */
@@ -22384,6 +22294,16 @@ export interface components {
             total_count: number;
             /** Total Reclaimable Bytes */
             total_reclaimable_bytes: number;
+        };
+        /**
+         * CleanupMediaActionResult
+         * @description ``POST /cleanup/media/{id}/action`` and ``POST|DELETE .../keep``.
+         */
+        CleanupMediaActionResult: {
+            /** Media Id */
+            media_id: number;
+            /** Message */
+            message: string;
         };
         /** CleanupRequest */
         CleanupRequest: {
@@ -22417,6 +22337,57 @@ export interface components {
             videos_never_viewed: number;
             /** Videos Not Viewed 30 Days */
             videos_not_viewed_30_days: number;
+        };
+        /**
+         * CleanupStorageBreakdown
+         * @description ``GET /cleanup/storage``: storage over the caller's non-trashed media.
+         */
+        CleanupStorageBreakdown: {
+            /** By Month */
+            by_month: components["schemas"]["CleanupStorageMonth"][];
+            by_type: components["schemas"]["CleanupStorageByType"];
+            /** Largest Videos */
+            largest_videos: components["schemas"]["CleanupStorageItem"][];
+            /** Total Bytes */
+            total_bytes: number;
+            /** Total Videos */
+            total_videos: number;
+        };
+        /**
+         * CleanupStorageByType
+         * @description Bytes per bucket: ``video`` (video/special), ``image`` (carousel /
+         *     image_text), ``other`` (everything else, including a NULL media_type).
+         */
+        CleanupStorageByType: {
+            /** Image */
+            image: number;
+            /** Other */
+            other: number;
+            /** Video */
+            video: number;
+        };
+        /**
+         * CleanupStorageItem
+         * @description One of the ten largest owned media (``parsed_media`` columns).
+         */
+        CleanupStorageItem: {
+            /** Created At */
+            created_at: string | null;
+            /** Id */
+            id: number;
+            /** Media Type */
+            media_type: string | null;
+            /** Storage Size */
+            storage_size: number;
+        };
+        /** CleanupStorageMonth */
+        CleanupStorageMonth: {
+            /** Bytes */
+            bytes: number;
+            /** Count */
+            count: number;
+            /** Month */
+            month: string;
         };
         /**
          * CleanupSuggestion
@@ -22468,6 +22439,73 @@ export interface components {
             total_reclaimable_bytes: number;
         };
         /**
+         * CodexDaemonDevice
+         * @description One live (not revoked) paired device of the caller.
+         *
+         *     Timestamps are the repository's ``isoformat()`` strings.
+         */
+        CodexDaemonDevice: {
+            /** Created At */
+            created_at: string | null;
+            /** Device Name */
+            device_name: string;
+            /** Env Report */
+            env_report: {
+                [key: string]: unknown;
+            } | null;
+            /** Id */
+            id: string;
+            /** Last Seen At */
+            last_seen_at: string | null;
+            /** Platform */
+            platform: string;
+        };
+        /** CodexDaemonDeviceRevoked */
+        CodexDaemonDeviceRevoked: {
+            /** Revoked */
+            revoked: boolean;
+        };
+        /**
+         * CodexDaemonDistVersion
+         * @description ``GET /codex-daemon/dist/version.json``: what ``--update`` compares to.
+         */
+        CodexDaemonDistVersion: {
+            /** Version */
+            version: string;
+        };
+        /**
+         * CodexDaemonPairCode
+         * @description ``POST /codex-daemon/pair-code``: a one-shot code typed into the daemon.
+         */
+        CodexDaemonPairCode: {
+            /** Code */
+            code: string;
+            /** Expires In Seconds */
+            expires_in_seconds: number;
+        };
+        /**
+         * CodexDaemonPairResult
+         * @description ``POST /codex-daemon/pair``: the device credential, sent exactly once.
+         *
+         *     ``device_token`` is the daemon's own credential, handed to the caller that
+         *     just proved possession of the pairing code; the server keeps only its
+         *     sha256. It is not an echo of anything the server stores.
+         */
+        CodexDaemonPairResult: {
+            /** Device Id */
+            device_id: string;
+            /** Device Token */
+            device_token: string;
+        };
+        /**
+         * CodexDaemonUploadResult
+         * @description ``POST /codex-daemon/upload``: the ``generated_media`` row it became.
+         */
+        CodexDaemonUploadResult: {
+            /** Gen Id */
+            gen_id: string;
+        };
+        /**
          * CollectionCondition
          * @description A single condition in a collection rule.
          */
@@ -22517,6 +22555,22 @@ export interface components {
             sort_order: "asc" | "desc";
         };
         /**
+         * CollectionInitPresetsResult
+         * @description ``POST /collections/init-presets``.
+         *
+         *     ``presets`` is only present when this call created them; when the user
+         *     already had presets the body is ``{message, count}`` (the route declares
+         *     ``response_model_exclude_unset`` so the key stays absent).
+         */
+        CollectionInitPresetsResult: {
+            /** Count */
+            count: number;
+            /** Message */
+            message: string;
+            /** Presets */
+            presets?: components["schemas"]["CollectionPresetRef"][] | null;
+        };
+        /**
          * CollectionListResponse
          * @description Response schema for list of collections.
          */
@@ -22531,11 +22585,8 @@ export interface components {
          * @description Response schema for media in a collection.
          */
         CollectionMediaResponse: {
-            /**
-             * Collection Id
-             * Format: uuid
-             */
-            collection_id: string;
+            /** Collection Id */
+            collection_id: number;
             /** Collection Name */
             collection_name: string;
             /** Media */
@@ -22550,32 +22601,61 @@ export interface components {
             total: number;
         };
         /**
+         * CollectionPresetRef
+         * @description One preset created by ``POST /collections/init-presets``.
+         *
+         *     ``id`` is the Snowflake BIGINT as the repository returns it: a JSON
+         *     **number**.
+         */
+        CollectionPresetRef: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
+        /**
+         * CollectionRefreshResult
+         * @description ``POST /collections/{id}/refresh``.
+         *
+         *     ``collection_id`` echoes the path segment (a string); ``media_count`` is
+         *     the number of media now matching the rules (the cache keeps the first
+         *     1000 ids).
+         */
+        CollectionRefreshResult: {
+            /** Collection Id */
+            collection_id: string;
+            /** Media Count */
+            media_count: number;
+            /** Message */
+            message: string;
+        };
+        /**
          * CollectionResponse
-         * @description Response schema for a smart collection.
+         * @description One ``smart_collections`` row as the collections routes return it.
+         *
+         *     ``id`` is the Snowflake BIGINT primary key: a JSON **number** (it was
+         *     declared ``UUID``, so every route returning a real row answered 500).
+         *     The repository already turns ``user_id`` and the timestamps into strings,
+         *     so they are declared ``str``. Nullable columns fall back to the documented
+         *     defaults in ``app/api/collections_router.py::_collection_out`` before they
+         *     reach this model, so a legacy row with NULLs still validates.
          */
         CollectionResponse: {
             /** Cached At */
             cached_at: string | null;
             /** Color */
             color?: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
+            /** Created At */
+            created_at: string | null;
             /** Description */
             description: string | null;
             /** Icon */
             icon: string;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
+            /** Id */
+            id: number;
             /**
              * Is Active
              * @description Whether the collection is active
-             * @default true
              */
             is_active: boolean;
             /** Is Preset */
@@ -22583,7 +22663,6 @@ export interface components {
             /**
              * Media Count
              * @description Number of media matching this collection
-             * @default 0
              */
             media_count: number;
             /** Name */
@@ -22593,15 +22672,9 @@ export interface components {
             sort_by: string;
             /** Sort Order */
             sort_order: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /**
-             * User Id
-             * Format: uuid
-             */
+            /** Updated At */
+            updated_at: string | null;
+            /** User Id */
             user_id: string;
         };
         /**
@@ -23270,6 +23343,62 @@ export interface components {
             /** Styles */
             styles: components["schemas"]["CoverStyleOut"][];
         };
+        /** CoverTemplateFolderOut */
+        CoverTemplateFolderOut: {
+            /**
+             * Adopted
+             * @default false
+             */
+            adopted: boolean;
+            /** Folder Id */
+            folder_id: string;
+            /** Name */
+            name: string;
+        };
+        /** CoverTemplateListOut */
+        CoverTemplateListOut: {
+            folder: components["schemas"]["CoverTemplateFolderOut"];
+            /** Items */
+            items: components["schemas"]["CoverTemplateOut"][];
+            /**
+             * Limit
+             * @default 48
+             */
+            limit: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /** CoverTemplateOut */
+        CoverTemplateOut: {
+            /** Last Used At */
+            last_used_at?: string | null;
+            /** Mime Type */
+            mime_type?: string | null;
+            /** Name */
+            name: string;
+            /** Resource Id */
+            resource_id: string;
+            /** Thumb Url */
+            thumb_url: string;
+            /** Usage Count */
+            usage_count: number;
+        };
+        /**
+         * CoverTemplateUseOut
+         * @description ``POST /cover-templates/use``: how many ids were counted.
+         */
+        CoverTemplateUseOut: {
+            /** Counted */
+            counted: number;
+        };
         /** CoverTemplateUseRequest */
         CoverTemplateUseRequest: {
             /** Resource Ids */
@@ -23437,6 +23566,34 @@ export interface components {
             /** Y */
             y: number;
         };
+        /** DataEnvelope[CodexDaemonDeviceRevoked] */
+        DataEnvelope_CodexDaemonDeviceRevoked_: {
+            data: components["schemas"]["CodexDaemonDeviceRevoked"];
+        };
+        /** DataEnvelope[CodexDaemonPairCode] */
+        DataEnvelope_CodexDaemonPairCode_: {
+            data: components["schemas"]["CodexDaemonPairCode"];
+        };
+        /** DataEnvelope[CodexDaemonPairResult] */
+        DataEnvelope_CodexDaemonPairResult_: {
+            data: components["schemas"]["CodexDaemonPairResult"];
+        };
+        /** DataEnvelope[CodexDaemonUploadResult] */
+        DataEnvelope_CodexDaemonUploadResult_: {
+            data: components["schemas"]["CodexDaemonUploadResult"];
+        };
+        /** DataEnvelope[CoverTemplateFolderOut] */
+        DataEnvelope_CoverTemplateFolderOut_: {
+            data: components["schemas"]["CoverTemplateFolderOut"];
+        };
+        /** DataEnvelope[CoverTemplateListOut] */
+        DataEnvelope_CoverTemplateListOut_: {
+            data: components["schemas"]["CoverTemplateListOut"];
+        };
+        /** DataEnvelope[CoverTemplateUseOut] */
+        DataEnvelope_CoverTemplateUseOut_: {
+            data: components["schemas"]["CoverTemplateUseOut"];
+        };
         /** DataEnvelope[GeneratedMediaDeleted] */
         DataEnvelope_GeneratedMediaDeleted_: {
             data: components["schemas"]["GeneratedMediaDeleted"];
@@ -23461,6 +23618,11 @@ export interface components {
         DataEnvelope_GeneratedMediaUpscaled_: {
             data: components["schemas"]["GeneratedMediaUpscaled"];
         };
+        /** DataEnvelope[list[CodexDaemonDevice]] */
+        DataEnvelope_list_CodexDaemonDevice__: {
+            /** Data */
+            data: components["schemas"]["CodexDaemonDevice"][];
+        };
         /** DatesResponse */
         DatesResponse: {
             /** Dates */
@@ -23470,6 +23632,203 @@ export interface components {
              * @default true
              */
             success: boolean;
+        };
+        /**
+         * DbosHealthResponse
+         * @description ``GET /api/v1/dbos/health``.
+         *
+         *     ``enabled`` is ``is_enabled()``: a handle exists, NOT that the engine
+         *     launched. The readiness verdict is ``/api/v1/readyz``'s ``dbos`` field.
+         */
+        DbosHealthResponse: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
+         * DbosRoutingResponse
+         * @description ``GET /api/v1/dbos/routing`` (platform admins).
+         *
+         *     ``loaded_at`` is the event-loop clock (seconds, monotonic) of the last
+         *     refresh; ``task_types`` is sorted ``[task_type, mode]`` pairs.
+         */
+        DbosRoutingResponse: {
+            /** Loaded At */
+            loaded_at: number;
+            /** Task Types */
+            task_types: [
+                string,
+                string
+            ][];
+        };
+        /** DbosWorkflowCancelResult */
+        DbosWorkflowCancelResult: {
+            /**
+             * Status
+             * @constant
+             */
+            status: "cancel_requested";
+            /** Workflow Id */
+            workflow_id: string;
+        };
+        /**
+         * DbosWorkflowRestartResult
+         * @description The fork runs under a NEW id; the original stays as it was.
+         */
+        DbosWorkflowRestartResult: {
+            /** New Workflow Id */
+            new_workflow_id: string;
+            /** Original Workflow Id */
+            original_workflow_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "restarted";
+        };
+        /** DbosWorkflowResumeResult */
+        DbosWorkflowResumeResult: {
+            /**
+             * Status
+             * @constant
+             */
+            status: "resumed";
+            /** Workflow Id */
+            workflow_id: string;
+        };
+        /**
+         * DbosWorkflowSnapshot
+         * @description ``GET /workflows/{id}/status``, and each SSE ``event: status`` push.
+         */
+        DbosWorkflowSnapshot: {
+            /** App Version */
+            app_version: string | null;
+            /** Authenticated User */
+            authenticated_user: string | null;
+            /**
+             * Created At
+             * @description Unix epoch ms.
+             */
+            created_at: number | null;
+            /** Error */
+            error: string | null;
+            /** Executor Id */
+            executor_id: string | null;
+            /**
+             * Input
+             * @description The workflow's arguments ({args, kwargs}).
+             */
+            input: unknown;
+            /** Name */
+            name: string | null;
+            /** Output */
+            output: unknown;
+            /** Queue Name */
+            queue_name: string | null;
+            /**
+             * Status
+             * @description DBOS status string: PENDING, ENQUEUED, SUCCESS, ERROR …
+             */
+            status: string | null;
+            /**
+             * Updated At
+             * @description Unix epoch ms.
+             */
+            updated_at: number | null;
+            /** Workflow Id */
+            workflow_id: string | null;
+        };
+        /** DbosWorkflowStep */
+        DbosWorkflowStep: {
+            /** Child Workflow Id */
+            child_workflow_id: string | null;
+            /** Completed At Epoch Ms */
+            completed_at_epoch_ms: number | null;
+            /** Error */
+            error: string | null;
+            /** Function Id */
+            function_id: number | null;
+            /** Function Name */
+            function_name: string | null;
+            /** Output */
+            output: unknown;
+            /** Started At Epoch Ms */
+            started_at_epoch_ms: number | null;
+        };
+        /**
+         * DbosWorkflowSteps
+         * @description ``GET /workflows/{id}/steps``. Empty when DBOS cannot list them.
+         */
+        DbosWorkflowSteps: {
+            /** Steps */
+            steps: components["schemas"]["DbosWorkflowStep"][];
+            /** Workflow Id */
+            workflow_id: string;
+        };
+        /**
+         * DeepHealthInProcess
+         * @description In-process registry snapshots. A snapshot that raised is reported as
+         *     ``{"error": "<Type>: <message>"}`` in place of its value, and one whose
+         *     registry is not on ``app.state`` is ``null``.
+         */
+        DeepHealthInProcess: {
+            /** Agent Metrics Keys In Use */
+            agent_metrics_keys_in_use: number | {
+                [key: string]: unknown;
+            } | null;
+            /** Bounds */
+            bounds: {
+                [key: string]: unknown;
+            } | null;
+            /** Context Engines */
+            context_engines: string[];
+            /** Hooks Registered */
+            hooks_registered: number;
+            /** Lane Queue Depth */
+            lane_queue_depth: {
+                [key: string]: unknown;
+            } | null;
+            /** Model Health Snapshot */
+            model_health_snapshot: {
+                [key: string]: unknown;
+            } | null;
+            /** Process Role */
+            process_role: string | null;
+            /** Prometheus Pusher Active */
+            prometheus_pusher_active: boolean;
+            /** Root Aborts Count */
+            root_aborts_count: number | {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** DeepHealthProbe */
+        DeepHealthProbe: {
+            /** Message */
+            message: string;
+            /** Ms */
+            ms: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "degraded" | "down";
+        };
+        /**
+         * DeepHealthResponse
+         * @description ``GET /api/v1/health/deep`` (platform admins).
+         */
+        DeepHealthResponse: {
+            in_process: components["schemas"]["DeepHealthInProcess"];
+            /** Probes */
+            probes: {
+                [key: string]: components["schemas"]["DeepHealthProbe"];
+            };
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "healthy" | "degraded" | "unhealthy";
+            /** Version */
+            version: string;
         };
         /** DeletedResponse */
         DeletedResponse: {
@@ -24218,9 +24577,47 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[List[WorkflowStageLibraryEntry]] */
+        Envelope_List_WorkflowStageLibraryEntry__: {
+            /** Data */
+            data: components["schemas"]["WorkflowStageLibraryEntry"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[List[WorkflowTemplateSummary]] */
+        Envelope_List_WorkflowTemplateSummary__: {
+            /** Data */
+            data: components["schemas"]["WorkflowTemplateSummary"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[LoadoutResponse] */
         Envelope_LoadoutResponse_: {
             data: components["schemas"]["LoadoutResponse"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[PaymentOrderRow] */
+        Envelope_PaymentOrderRow_: {
+            data: components["schemas"]["PaymentOrderRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[PaymentOrderStatus] */
+        Envelope_PaymentOrderStatus_: {
+            data: components["schemas"]["PaymentOrderStatus"];
             /**
              * Success
              * @default true
@@ -24808,6 +25205,33 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[WorkflowTemplateDeleted] */
+        Envelope_WorkflowTemplateDeleted_: {
+            data: components["schemas"]["WorkflowTemplateDeleted"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[WorkflowTemplateDetail] */
+        Envelope_WorkflowTemplateDetail_: {
+            data: components["schemas"]["WorkflowTemplateDetail"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[WorkflowTemplateSummary] */
+        Envelope_WorkflowTemplateSummary_: {
+            data: components["schemas"]["WorkflowTemplateSummary"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[dict[str, CanvasGenerationCapability]] */
         Envelope_dict_str__CanvasGenerationCapability__: {
             /** Data */
@@ -24854,6 +25278,26 @@ export interface components {
         Envelope_list_EpisodeProgressRow__: {
             /** Data */
             data: components["schemas"]["EpisodeProgressRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[PaymentOrderRow]] */
+        Envelope_list_PaymentOrderRow__: {
+            /** Data */
+            data: components["schemas"]["PaymentOrderRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[PaymentPackageRow]] */
+        Envelope_list_PaymentPackageRow__: {
+            /** Data */
+            data: components["schemas"]["PaymentPackageRow"][];
             /**
              * Success
              * @default true
@@ -25214,6 +25658,25 @@ export interface components {
             /** Module */
             module: string;
         };
+        /** ErrorResponse */
+        ErrorResponse: {
+            /**
+             * Code
+             * @default internal_error
+             */
+            code: string;
+            /** Details */
+            details?: unknown | null;
+            /** Error */
+            error: string;
+            /** Request Id */
+            request_id?: string | null;
+            /**
+             * Success
+             * @default false
+             */
+            success: boolean;
+        };
         /**
          * ExpandChapterRequest
          * @description Request body for AI chapter expansion.
@@ -25260,6 +25723,23 @@ export interface components {
             status_codes: {
                 [key: string]: number;
             };
+        };
+        /**
+         * FlowCancelResult
+         * @description ``POST /flows/{id}/cancel``. The route is ``exclude_unset``: an already
+         *     finished flow answers ``{ok, noop, reason}``; ``cascade_cancel=false``
+         *     answers ``{ok, cascaded: 0, reason}``; a cascade answers
+         *     ``{ok, cascaded}``.
+         */
+        FlowCancelResult: {
+            /** Cascaded */
+            cascaded?: number | null;
+            /** Noop */
+            noop?: boolean | null;
+            /** Ok */
+            ok: boolean;
+            /** Reason */
+            reason?: string | null;
         };
         /** FlowCreatePayload */
         FlowCreatePayload: {
@@ -27051,6 +27531,187 @@ export interface components {
             workflow_id?: string | null;
         };
         /**
+         * IssueRollup
+         * @description ``phase`` is derived from the runs: paused > waiting_input > running >
+         *     blocked > done > idle.
+         */
+        IssueRollup: {
+            budget: components["schemas"]["IssueRollupBudget"];
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
+            current_run: components["schemas"]["IssueRollupCurrentRun"] | null;
+            efficiency: components["schemas"]["IssueRollupEfficiency"];
+            /** Execution State */
+            execution_state: {
+                [key: string]: unknown;
+            };
+            /** Inbox Pending */
+            inbox_pending: number;
+            /** Issue Id */
+            issue_id: string;
+            origin: components["schemas"]["IssueRollupOrigin"];
+            /** Paused At */
+            paused_at: string | null;
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "paused" | "waiting_input" | "running" | "blocked" | "done" | "idle";
+            /** Runs */
+            runs: components["schemas"]["IssueRollupRun"][];
+            /** Status */
+            status: string | null;
+            sub_issues: components["schemas"]["IssueRollupSubIssues"];
+        };
+        /**
+         * IssueRollupBudget
+         * @description ``budget_cents`` null = unlimited; ``pct`` null then too.
+         */
+        IssueRollupBudget: {
+            /** Budget Cents */
+            budget_cents: number | null;
+            /** Pct */
+            pct: number | null;
+            /** Spent Cents */
+            spent_cents: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ok" | "warn" | "over";
+        };
+        /** IssueRollupCurrentRun */
+        IssueRollupCurrentRun: {
+            /** Cost */
+            cost: {
+                [key: string]: unknown;
+            };
+            /** Id */
+            id: string;
+            /** Last Seq */
+            last_seq: number | null;
+            /** Model */
+            model: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Status */
+            status: string | null;
+            /** View */
+            view: {
+                [key: string]: unknown;
+            };
+        };
+        /** IssueRollupEfficiency */
+        IssueRollupEfficiency: {
+            /** Avg Run Ms */
+            avg_run_ms: number | null;
+            /** Cost Per Deliverable Cents */
+            cost_per_deliverable_cents: number | null;
+            /** Deliverables */
+            deliverables: number;
+            /** Runs */
+            runs: number;
+            /** Steps */
+            steps: number;
+            /** Tool Calls */
+            tool_calls: number;
+            /** Tool Errors */
+            tool_errors: number;
+            /** Turn End Reasons */
+            turn_end_reasons: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * IssueRollupOrigin
+         * @description ``origin_resolvers.resolve_origin``: ``kind`` + ``origin_id`` always,
+         *     plus whatever the kind's resolver adds (passed through).
+         */
+        IssueRollupOrigin: {
+            /** Kind */
+            kind: string;
+            /** Origin Id */
+            origin_id: string | number | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * IssueRollupRun
+         * @description ``cost_cents`` is the run TREE's total (Σ own_cost_cents).
+         */
+        IssueRollupRun: {
+            /** Charged Points */
+            charged_points: number | null;
+            /** Cost Cents */
+            cost_cents: number;
+            /** Ended */
+            ended: unknown;
+            /** Ended At */
+            ended_at: string | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Id */
+            id: string;
+            /** Model */
+            model: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Status */
+            status: string | null;
+            /** Step */
+            step: unknown;
+        };
+        /** IssueRollupSubIssue */
+        IssueRollupSubIssue: {
+            /** Id */
+            id: string;
+            /** Identifier */
+            identifier: string | null;
+            /** Status */
+            status: string | null;
+            /** Title */
+            title: string | null;
+        };
+        /** IssueRollupSubIssues */
+        IssueRollupSubIssues: {
+            /** Done */
+            done: number;
+            /** Items */
+            items: components["schemas"]["IssueRollupSubIssue"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * IssueScheduleItem
+         * @description One wake-up pointing at the issue, or the routine that created it.
+         */
+        IssueScheduleItem: {
+            /** Created By */
+            created_by: string;
+            /** Cron Expr */
+            cron_expr: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Fire At */
+            fire_at: string | null;
+            /** Id */
+            id: string;
+            /** Pause Reason */
+            pause_reason: string | null;
+            /** Task Type */
+            task_type: string;
+            /** Text */
+            text: string;
+        };
+        /** IssueScheduleList */
+        IssueScheduleList: {
+            /** Items */
+            items: components["schemas"]["IssueScheduleItem"][];
+        };
+        /**
          * IssueStatus
          * @enum {string}
          */
@@ -27117,6 +27778,83 @@ export interface components {
              * @default 0
              */
             total_tokens: number;
+        };
+        /**
+         * JimengCliAlreadyLoggedIn
+         * @description The CLI reused a stored token: nothing to approve.
+         */
+        JimengCliAlreadyLoggedIn: {
+            /**
+             * Already Logged In
+             * @constant
+             */
+            already_logged_in: true;
+        };
+        /**
+         * JimengCliDeviceLink
+         * @description The device-flow link to approve in a browser (valid ~10 minutes).
+         */
+        JimengCliDeviceLink: {
+            /** User Code */
+            user_code: string | null;
+            /** Verification Uri */
+            verification_uri: string;
+        };
+        /** JimengCliLoginEnvelope */
+        JimengCliLoginEnvelope: {
+            /** Data */
+            data: components["schemas"]["JimengCliDeviceLink"] | components["schemas"]["JimengCliAlreadyLoggedIn"];
+        };
+        /** JimengCliStatusEnvelope */
+        JimengCliStatusEnvelope: {
+            /** Data */
+            data: components["schemas"]["JimengCliStatusLoggedIn"] | components["schemas"]["JimengCliStatusLoggedOut"];
+        };
+        /**
+         * JimengCliStatusLoggedIn
+         * @description ``dreamina user_credit`` succeeded.
+         *
+         *     ``total_credit`` is passed through from the CLI's JSON untouched (a number
+         *     in every output seen so far; ``None`` when the CLI omits it).
+         *     ``user_id`` is the dreamina account id, not a nous user. Numbers pass
+         *     through as the CLI wrote them (``vip_level`` has only been seen as a
+         *     string; an int would otherwise fail validation).
+         */
+        JimengCliStatusLoggedIn: {
+            /**
+             * Available
+             * @constant
+             */
+            available: true;
+            /**
+             * Logged In
+             * @constant
+             */
+            logged_in: true;
+            /** Total Credit */
+            total_credit: number | string | null;
+            /** User Id */
+            user_id: string;
+            /** Vip Level */
+            vip_level: string | number;
+        };
+        /**
+         * JimengCliStatusLoggedOut
+         * @description Not logged in, or the CLI could not be asked.
+         *
+         *     ``reason`` is ``cli_missing`` / ``timeout`` or the first 200 characters of
+         *     the CLI's own output.
+         */
+        JimengCliStatusLoggedOut: {
+            /** Available */
+            available: boolean;
+            /**
+             * Logged In
+             * @constant
+             */
+            logged_in: false;
+            /** Reason */
+            reason: string;
         };
         /**
          * JoinTeamRequest
@@ -29869,6 +30607,98 @@ export interface components {
             items: components["schemas"]["PausedIssueItem"][];
         };
         /**
+         * PaymentOrderRow
+         * @description One ``orders`` row (``SELECT *``) as the payment routes send it.
+         *
+         *     ``id`` / ``team_id`` are Snowflake BIGINTs and stay JSON **numbers**
+         *     (``payment_repository._parity`` keeps them native). uuids and timestamps
+         *     are already ISO / uuid strings.
+         */
+        PaymentOrderRow: {
+            /** Amount Cents */
+            amount_cents: number;
+            /** Created At */
+            created_at: string;
+            /** Currency */
+            currency: string;
+            /** Expired At */
+            expired_at: string;
+            /** Id */
+            id: number;
+            /** Package Id */
+            package_id: string | null;
+            /** Paid At */
+            paid_at: string | null;
+            /**
+             * Payment Method
+             * @enum {string}
+             */
+            payment_method: "wechat" | "alipay";
+            /**
+             * Payment Status
+             * @enum {string}
+             */
+            payment_status: "pending" | "paid" | "failed" | "expired" | "refunded";
+            /** Payment Url */
+            payment_url: string | null;
+            /** Points Amount */
+            points_amount: number;
+            /** Team Id */
+            team_id: number;
+            /** Trade No */
+            trade_no: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** User Id */
+            user_id: string;
+        };
+        /**
+         * PaymentOrderStatus
+         * @description ``GET /payment/order/{id}/status``: the lightweight polling view.
+         */
+        PaymentOrderStatus: {
+            /** Order Id */
+            order_id: number;
+            /** Paid At */
+            paid_at: string | null;
+            /**
+             * Payment Status
+             * @enum {string}
+             */
+            payment_status: "pending" | "paid" | "failed" | "expired" | "refunded";
+            /** Points Amount */
+            points_amount: number;
+        };
+        /**
+         * PaymentPackageRow
+         * @description One ``point_packages`` row as ``GET /payment/packages`` sends it.
+         *
+         *     The repository (``points_repository._parity``) has already turned the uuid
+         *     id and both timestamps into strings (``+00:00`` ISO), so they are ``str``.
+         */
+        PaymentPackageRow: {
+            /** Created At */
+            created_at: string;
+            /** Currency */
+            currency: string;
+            /** Description */
+            description: string | null;
+            /** Id */
+            id: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Name */
+            name: string;
+            /** Points Amount */
+            points_amount: number;
+            /** Price Cents */
+            price_cents: number;
+            /** Sort Order */
+            sort_order: number;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
          * PendingDownloadsResponse
          * @description ``GET /media/pending`` — the caller's media still waiting to download.
          */
@@ -30063,6 +30893,11 @@ export interface components {
         PipelineRunCreate: {
             /** Parent Issue Id */
             parent_issue_id: number;
+        };
+        /** PipelineRunListResponse */
+        PipelineRunListResponse: {
+            /** Items */
+            items: components["schemas"]["PipelineRun"][];
         };
         /**
          * PipelineRunStatus
@@ -31763,6 +32598,70 @@ export interface components {
             /** Give Up After Seconds */
             give_up_after_seconds: number;
         };
+        /**
+         * ReadyzConnections
+         * @description Postgres connection-slot pressure, read from the sampler's cache.
+         *
+         *     REPORTED, never gated. ``{"status": "unknown", "reason": …}`` when there
+         *     is no recent sample; otherwise the five reading keys.
+         */
+        ReadyzConnections: {
+            /** Max */
+            max?: number | null;
+            /** Percent */
+            percent?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /** Sampled At */
+            sampled_at?: number | null;
+            /** Status */
+            status: string;
+            /** Used */
+            used?: number | null;
+        };
+        /**
+         * ReadyzResponse
+         * @description ``GET /api/v1/readyz`` — 200 when ``status == "ready"``, else 503.
+         *
+         *     ``dbos`` is three-state; ``configured_but_disabled`` is always a fault.
+         *     ``not_ready`` (lifespan never ran) carries only ``status`` / ``reason`` /
+         *     ``tasks``; every other verdict carries ``dbos`` / ``connections`` /
+         *     ``tasks`` and no ``reason``.
+         */
+        ReadyzResponse: {
+            connections?: components["schemas"]["ReadyzConnections"] | null;
+            /** Dbos */
+            dbos?: ("enabled" | "not_configured" | "configured_but_disabled") | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "starting" | "degraded" | "not_ready";
+            /** Tasks */
+            tasks: components["schemas"]["ReadyzTask"][];
+        };
+        /**
+         * ReadyzTask
+         * @description One background task from ``BackgroundTaskRegistry.status_snapshot``.
+         */
+        ReadyzTask: {
+            /** Done */
+            done: boolean;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Error */
+            error: string | null;
+            /** Fatal */
+            fatal: boolean;
+            /** Gates Readiness */
+            gates_readiness: boolean;
+            /** Long Running */
+            long_running: boolean;
+            /** Name */
+            name: string;
+        };
         /** RecentErrorEntry */
         RecentErrorEntry: {
             /** Level */
@@ -32903,6 +33802,18 @@ export interface components {
              */
             review_status?: string | null;
         };
+        /**
+         * RootHealthResponse
+         * @description ``GET /health``: hard-coded liveness string (Dockerfile HEALTHCHECK).
+         *
+         *     Not a readiness signal — see ``/api/v1/readyz``.
+         */
+        RootHealthResponse: {
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
         /** RunCancelResult */
         RunCancelResult: {
             /** Run Id */
@@ -33431,6 +34342,27 @@ export interface components {
              * @default UTC
              */
             timezone: string;
+        };
+        /**
+         * ScheduleDeleteResult
+         * @description ``DELETE /schedules/{id}``: always ``deleted: 1`` — a miss is a 404.
+         */
+        ScheduleDeleteResult: {
+            /** Deleted */
+            deleted: number;
+            /** Ok */
+            ok: boolean;
+        };
+        /**
+         * ScheduleFireNowResult
+         * @description ``POST /schedules/{id}/fire-now``: the master scheduler fires it on its
+         *     next tick (within a minute); nothing has run yet when this returns.
+         */
+        ScheduleFireNowResult: {
+            /** Ok */
+            ok: boolean;
+            /** Queued For Next Tick */
+            queued_for_next_tick: boolean;
         };
         /** ScheduleResponse */
         ScheduleResponse: {
@@ -36611,13 +37543,6 @@ export interface components {
             /** Upload */
             upload: number;
         };
-        /** TaskStatusResponse */
-        TaskStatusResponse: {
-            /** Status */
-            status: string;
-            /** Task Id */
-            task_id: string;
-        };
         /**
          * TaskTrackingRow
          * @description Every ``task_tracking`` column, as the task manager serializes it.
@@ -38218,6 +39143,518 @@ export interface components {
             converted: false;
             /** Reason */
             reason: string;
+        };
+        /**
+         * WorkflowStageLibraryEntry
+         * @description One node-bank row (``project_stages`` with ``phase IS NOT NULL``).
+         */
+        WorkflowStageLibraryEntry: {
+            /** Default Role Label */
+            default_role_label: string | null;
+            /** Deliverable Label */
+            deliverable_label: string | null;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Phase */
+            phase: string;
+            /** Review Required */
+            review_required: boolean;
+            /** Slug */
+            slug: string;
+            /** Sort Order */
+            sort_order: number;
+        };
+        /** WorkflowTemplateDeleted */
+        WorkflowTemplateDeleted: {
+            /**
+             * Deleted
+             * @constant
+             */
+            deleted: true;
+        };
+        /**
+         * WorkflowTemplateDetail
+         * @description ``GET`` / ``PATCH /workflows/{id}``: the template with ordered nodes.
+         */
+        WorkflowTemplateDetail: {
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Id */
+            id: string;
+            /** Is Default */
+            is_default: boolean;
+            /** Name */
+            name: string;
+            /** Node Count */
+            node_count: number;
+            /** Nodes */
+            nodes: components["schemas"]["WorkflowTemplateNodeRow"][];
+            /** Team Id */
+            team_id: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * WorkflowTemplateNodeMember
+         * @description A default member of a template node: exactly one of user / agent.
+         */
+        WorkflowTemplateNodeMember: {
+            /** Agent Id */
+            agent_id: string | null;
+            /** Id */
+            id: string;
+            /** Node Id */
+            node_id: string;
+            /** User Id */
+            user_id: string | null;
+        };
+        /**
+         * WorkflowTemplateNodeRow
+         * @description One ``workflow_template_nodes`` row with its members and dependencies.
+         */
+        WorkflowTemplateNodeRow: {
+            /**
+             * Completion Policy
+             * @enum {string}
+             */
+            completion_policy: "owner" | "any_editor";
+            /** Default Owner Agent Id */
+            default_owner_agent_id: string | null;
+            /** Default Owner User Id */
+            default_owner_user_id: string | null;
+            /** Deliverable Label */
+            deliverable_label: string | null;
+            /** Deliverable Required */
+            deliverable_required: boolean;
+            /**
+             * Depends On
+             * @description Real ids of the nodes this one depends on.
+             */
+            depends_on: string[];
+            /** Duration Days */
+            duration_days: number | null;
+            /**
+             * Events
+             * @description Stored JSONB as written (see WorkflowNodeEvents).
+             */
+            events: {
+                [key: string]: unknown;
+            };
+            /**
+             * Form Schema
+             * @description Stored JSONB as written (see FormFieldDef).
+             */
+            form_schema: {
+                [key: string]: unknown;
+            }[];
+            /** Id */
+            id: string;
+            /** Members */
+            members: components["schemas"]["WorkflowTemplateNodeMember"][];
+            /** Name */
+            name: string;
+            /** Parallel Group */
+            parallel_group: number | null;
+            /** Review Required */
+            review_required: boolean;
+            /** Skip Default */
+            skip_default: boolean;
+            /** Sort Order */
+            sort_order: number;
+            /** Source Stage Id */
+            source_stage_id: string | null;
+            /** Surface */
+            surface: ("script" | "storyboard" | "renders") | null;
+            /** Template Id */
+            template_id: string;
+        };
+        /**
+         * WorkflowTemplateSummary
+         * @description A ``workflow_templates`` row with its node count (list / create).
+         */
+        WorkflowTemplateSummary: {
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Id */
+            id: string;
+            /** Is Default */
+            is_default: boolean;
+            /** Name */
+            name: string;
+            /** Node Count */
+            node_count: number;
+            /** Team Id */
+            team_id: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /** WorkforceAgentDetail */
+        WorkforceAgentDetail: {
+            agent: components["schemas"]["WorkforceAgentSummary"];
+            /** Inbox */
+            inbox: components["schemas"]["WorkforceInboxRow"][];
+            /** Outbox */
+            outbox: components["schemas"]["WorkforceOutboxRow"][];
+            /** Runs */
+            runs: components["schemas"]["WorkforceDetailRun"][];
+        };
+        /**
+         * WorkforceAgentPauseResult
+         * @description ``POST .../pause`` → ``status='paused'``; ``.../resume`` → ``'resumed'``
+         *     with ``paused_reason`` null.
+         */
+        WorkforceAgentPauseResult: {
+            /** Paused Reason */
+            paused_reason: string | null;
+            /** Slug */
+            slug: string;
+            /** Status */
+            status: string;
+        };
+        /** WorkforceAgentSummary */
+        WorkforceAgentSummary: {
+            /** Icon */
+            icon: string | null;
+            /** Id */
+            id: string;
+            /** Model */
+            model: string | null;
+            /** Name */
+            name: string | null;
+            /** Paused Reason */
+            paused_reason: string | null;
+            /** Persistent */
+            persistent: boolean;
+            /** Slug */
+            slug: string;
+        };
+        /** WorkforceBoard */
+        WorkforceBoard: {
+            /** Agents */
+            agents: components["schemas"]["WorkforceBoardAgent"][];
+            /** Recent State History */
+            recent_state_history: components["schemas"]["WorkforceStateHistoryRow"][];
+        };
+        /**
+         * WorkforceBoardAgent
+         * @description ``slug`` is a nullable column; ``name`` falls back to it.
+         */
+        WorkforceBoardAgent: {
+            /** Icon */
+            icon: string | null;
+            /** Id */
+            id: string;
+            /** Model */
+            model: string | null;
+            /** Name */
+            name: string | null;
+            /** Paused Reason */
+            paused_reason: string | null;
+            /** Persistent */
+            persistent: boolean;
+            queue: components["schemas"]["WorkforceQueueCounts"];
+            /** Recent Runs */
+            recent_runs: components["schemas"]["WorkforceBoardRun"][];
+            /** Slug */
+            slug: string | null;
+            worker: components["schemas"]["WorkforceWorkerRow"] | null;
+        };
+        /**
+         * WorkforceBoardRun
+         * @description One of an agent's last five runs. ``id`` is a BIGINT Snowflake.
+         */
+        WorkforceBoardRun: {
+            /** Agent Id */
+            agent_id: string;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Cost Cents */
+            cost_cents: number | null;
+            /** Ended At */
+            ended_at: string | null;
+            /** Id */
+            id: number;
+            /** Model */
+            model: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Started At */
+            started_at: string;
+            /** Status */
+            status: string;
+            /** Trigger */
+            trigger: string;
+        };
+        /** WorkforceDelegateOutboxResponse */
+        WorkforceDelegateOutboxResponse: {
+            /** Created At */
+            created_at: string;
+            /** Delivered */
+            delivered: boolean;
+            /** Delivered At */
+            delivered_at: string | null;
+            /** Id */
+            id: string;
+            /** Message Type */
+            message_type: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Sender Agent Id */
+            sender_agent_id: string;
+        };
+        /**
+         * WorkforceDelegateTask
+         * @description ``tt_row_to_task_shape`` over the columns the route selects. Keys the
+         *     route does not select (``user_id``, ``title``, ``parent_task_id``,
+         *     ``root_task_id``, ``updated_at``) are always present and null.
+         *     ``payload`` / ``current_run_id`` / ``result`` / ``assigned_at`` /
+         *     ``workforce_workflow_id`` come out of the row's ``metadata`` jsonb.
+         */
+        WorkforceDelegateTask: {
+            /** Agent Id */
+            agent_id: string | null;
+            /** Assigned At */
+            assigned_at: string | null;
+            /** Created At */
+            created_at: string | null;
+            /** Current Run Id */
+            current_run_id: string | number | null;
+            /** Dispatch Attempt */
+            dispatch_attempt: number;
+            /** Ended At */
+            ended_at: string | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Id */
+            id: string;
+            /** Inbox Message Id */
+            inbox_message_id: string | null;
+            /** Lifecycle Status */
+            lifecycle_status: string;
+            /** Parent Task Id */
+            parent_task_id: string | null;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Result */
+            result: unknown;
+            /** Root Task Id */
+            root_task_id: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Title */
+            title: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** User Id */
+            user_id: string | null;
+            /** Workforce Workflow Id */
+            workforce_workflow_id: string | null;
+        };
+        /** WorkforceDelegateTaskLookup */
+        WorkforceDelegateTaskLookup: {
+            /** Inbox Message Id */
+            inbox_message_id: string;
+            outbox_response: components["schemas"]["WorkforceDelegateOutboxResponse"] | null;
+            task: components["schemas"]["WorkforceDelegateTask"] | null;
+        };
+        /**
+         * WorkforceDetailRun
+         * @description ``id`` is a BIGINT Snowflake, sent as a JSON number.
+         */
+        WorkforceDetailRun: {
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Cost Cents */
+            cost_cents: number | null;
+            /** Ended At */
+            ended_at: string | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Id */
+            id: number;
+            /** Input Summary */
+            input_summary: string | null;
+            /** Model */
+            model: string | null;
+            /** Output Summary */
+            output_summary: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Provider */
+            provider: string | null;
+            /** Started At */
+            started_at: string;
+            /** Status */
+            status: string;
+            /** Trigger */
+            trigger: string;
+        };
+        /** WorkforceHealth */
+        WorkforceHealth: {
+            dispatcher: components["schemas"]["WorkforceHealthDispatcher"];
+            /** Issues */
+            issues: string[];
+            /** Status */
+            status: string;
+            supabase: components["schemas"]["WorkforceHealthDatabase"];
+        };
+        /**
+         * WorkforceHealthDatabase
+         * @description Reachable: the three counts. Unreachable: ``error`` (an exception class
+         *     name). The route is ``exclude_unset``, so only the keys of the branch taken
+         *     are sent.
+         */
+        WorkforceHealthDatabase: {
+            /** Error */
+            error?: string | null;
+            /** Pending Depth */
+            pending_depth?: number | null;
+            /** Persistent Agents */
+            persistent_agents?: number | null;
+            /** Reachable */
+            reachable: boolean;
+            /** Recent Processed 5M */
+            recent_processed_5m?: number | null;
+        };
+        /** WorkforceHealthDispatcher */
+        WorkforceHealthDispatcher: {
+            /** Engine */
+            engine: string;
+            /** Inflight Agent Tasks */
+            inflight_agent_tasks: number | null;
+            /** Launched */
+            launched: boolean;
+            /** Oldest Undispatched Age S */
+            oldest_undispatched_age_s: number | null;
+        };
+        /** WorkforceInboxClearResult */
+        WorkforceInboxClearResult: {
+            /** Cleared */
+            cleared: number;
+            /** Slug */
+            slug: string;
+        };
+        /** WorkforceInboxRow */
+        WorkforceInboxRow: {
+            /** Created At */
+            created_at: string;
+            /** Dedup Key */
+            dedup_key: string | null;
+            /** Id */
+            id: string;
+            /** Message Type */
+            message_type: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Priority */
+            priority: number;
+            /** Processed At */
+            processed_at: string | null;
+            /** Reply To Message Id */
+            reply_to_message_id: string | null;
+            /** Sender Agent Id */
+            sender_agent_id: string | null;
+            /** Sender Kind */
+            sender_kind: string;
+            /** Sender User Id */
+            sender_user_id: string | null;
+            /** Status */
+            status: string;
+        };
+        /** WorkforceOutboxRow */
+        WorkforceOutboxRow: {
+            /** Created At */
+            created_at: string;
+            /** Delivered */
+            delivered: boolean;
+            /** Delivered At */
+            delivered_at: string | null;
+            /** Id */
+            id: string;
+            /** Message Type */
+            message_type: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Recipient Agent Id */
+            recipient_agent_id: string | null;
+            /** Recipient Kind */
+            recipient_kind: string;
+            /** Recipient User Id */
+            recipient_user_id: string | null;
+            /** Task Id */
+            task_id: string | null;
+        };
+        /** WorkforceQueueCounts */
+        WorkforceQueueCounts: {
+            /** Inbox Reading */
+            inbox_reading: number;
+            /** Inbox Unread */
+            inbox_unread: number;
+            /** Outbox Undelivered */
+            outbox_undelivered: number;
+        };
+        /**
+         * WorkforceStateHistoryRow
+         * @description ``agent_slug`` is the agent's slug (nullable column).
+         */
+        WorkforceStateHistoryRow: {
+            /** Agent Slug */
+            agent_slug: string | null;
+            /** Changed At */
+            changed_at: string;
+            /** From State */
+            from_state: string | null;
+            /** Task Id */
+            task_id: string | null;
+            /** To State */
+            to_state: string;
+            /** Trigger */
+            trigger: string;
+        };
+        /**
+         * WorkforceTaskCancelResult
+         * @description ``note`` is present when nothing was cancelled outright: the task was
+         *     already terminal, or its run was asked to stop. Absent (not null) on a
+         *     queued task cancelled on the spot — the route is ``exclude_unset``.
+         */
+        WorkforceTaskCancelResult: {
+            /** Lifecycle Status */
+            lifecycle_status: string | null;
+            /** Note */
+            note?: string | null;
+            /** Task Id */
+            task_id: string;
+        };
+        /** WorkforceWorkerRow */
+        WorkforceWorkerRow: {
+            /** Agent Id */
+            agent_id: string;
+            /** Current Task Id */
+            current_task_id: string | null;
+            /** Heartbeat At */
+            heartbeat_at: string;
+            /** State */
+            state: string;
+            /** State Changed At */
+            state_changed_at: string;
         };
         /** _ApprovalDecision */
         _ApprovalDecision: {
@@ -43529,9 +44966,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentMemoryDeleteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -46924,7 +48359,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ApiKeyActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -47030,7 +48465,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ApiKeyActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -50339,7 +51774,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["CleanupBatchResult"];
                 };
             };
             /** @description Validation Error */
@@ -50413,7 +51848,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["CleanupMediaActionResult"];
                 };
             };
             /** @description Validation Error */
@@ -50447,7 +51882,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["CleanupMediaActionResult"];
                 };
             };
             /** @description Validation Error */
@@ -50481,7 +51916,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["CleanupMediaActionResult"];
                 };
             };
             /** @description Validation Error */
@@ -50545,7 +51980,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["CleanupStorageBreakdown"];
                 };
             };
             /** @description Validation Error */
@@ -50613,9 +52048,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_list_CodexDaemonDevice__"];
                 };
             };
             /** @description Validation Error */
@@ -50649,9 +52082,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_CodexDaemonDeviceRevoked_"];
                 };
             };
             /** @description Validation Error */
@@ -50680,7 +52111,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["CodexDaemonDistVersion"];
                 };
             };
         };
@@ -50696,13 +52127,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description One allowlisted daemon file, as text */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "text/javascript": string;
+                    "text/markdown": string;
+                    "text/plain": string;
+                    "text/x-shellscript": string;
                 };
             };
             /** @description Validation Error */
@@ -50735,9 +52169,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_CodexDaemonPairResult_"];
                 };
             };
             /** @description Validation Error */
@@ -50769,9 +52201,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_CodexDaemonPairCode_"];
                 };
             };
             /** @description Validation Error */
@@ -50804,9 +52234,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_CodexDaemonUploadResult_"];
                 };
             };
             /** @description Validation Error */
@@ -50909,7 +52337,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["CollectionInitPresetsResult"];
                 };
             };
             /** @description Validation Error */
@@ -51086,7 +52514,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["CollectionRefreshResult"];
                 };
             };
             /** @description Validation Error */
@@ -51872,9 +53300,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_CoverTemplateListOut_"];
                 };
             };
             /** @description Validation Error */
@@ -51906,9 +53332,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_CoverTemplateFolderOut_"];
                 };
             };
             /** @description Validation Error */
@@ -51944,9 +53368,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataEnvelope_CoverTemplateUseOut_"];
                 };
             };
             /** @description Validation Error */
@@ -51975,9 +53397,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DbosHealthResponse"];
                 };
             };
         };
@@ -51985,7 +53405,10 @@ export interface operations {
     dbos_routing_api_v1_dbos_routing_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -51997,9 +53420,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DbosRoutingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -53237,42 +54667,6 @@ export interface operations {
             };
         };
     };
-    delete_flow_api_v1_flows__flow_id__delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                flow_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     cancel_flow_api_v1_flows__flow_id__cancel_post: {
         parameters: {
             query?: never;
@@ -53293,9 +54687,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["FlowCancelResult"];
                 };
             };
             /** @description Validation Error */
@@ -54181,7 +55573,10 @@ export interface operations {
     health_deep_api_v1_health_deep_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -54193,9 +55588,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DeepHealthResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -55296,45 +56698,6 @@ export interface operations {
             };
         };
     };
-    simulate_agent_run_complete_api_v1_issues__issue_id__agent_runs__run_id__simulate_complete_post: {
-        parameters: {
-            query?: {
-                output_summary?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                issue_id: number;
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     comment_trigger_preview_api_v1_issues__issue_id__comment_trigger_preview_post: {
         parameters: {
             query?: never;
@@ -55601,7 +56964,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["PipelineRunListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -55635,9 +56998,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["IssueRollup"];
                 };
             };
             /** @description Validation Error */
@@ -55705,9 +57066,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["IssueScheduleList"];
                 };
             };
             /** @description Validation Error */
@@ -55777,9 +57136,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["JimengCliLoginEnvelope"];
                 };
             };
             /** @description Validation Error */
@@ -55811,9 +57168,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["JimengCliStatusEnvelope"];
                 };
             };
             /** @description Validation Error */
@@ -56072,13 +57427,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The caller's own logs as a file attachment (JSON or CSV) */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": string;
+                    "text/csv": string;
                 };
             };
             /** @description Validation Error */
@@ -57123,38 +58479,6 @@ export interface operations {
             };
         };
     };
-    get_unread_count_api_v1_notifications_unread_count_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     delete_notification_api_v1_notifications__notification_id__delete: {
         parameters: {
             query?: never;
@@ -57342,13 +58666,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Callback disabled: signature verification not implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -57362,13 +58686,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Callback disabled: signature verification not implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -57395,7 +58719,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_PaymentOrderRow_"];
                 };
             };
             /** @description Validation Error */
@@ -57429,7 +58753,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_PaymentOrderStatus_"];
                 };
             };
             /** @description Validation Error */
@@ -57468,7 +58792,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_PaymentOrderRow__"];
                 };
             };
             /** @description Validation Error */
@@ -57497,7 +58821,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_PaymentPackageRow__"];
                 };
             };
         };
@@ -60509,50 +61833,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Ready */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ReadyzResponse"];
                 };
             };
-        };
-    };
-    subscribe_to_realtime_api_v1_realtime_subscribe_get: {
-        parameters: {
-            query?: {
-                ticket?: string;
-                token?: string;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Starting, degraded, or lifespan never ran (not_ready) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ReadyzResponse"];
                 };
             };
         };
@@ -63589,9 +64885,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScheduleDeleteResult"];
                 };
             };
             /** @description Validation Error */
@@ -63663,9 +64957,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ScheduleFireNowResult"];
                 };
             };
             /** @description Validation Error */
@@ -66605,172 +67897,6 @@ export interface operations {
             };
         };
     };
-    list_active_tasks_api_v1_tasks_active_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_task_stats_api_v1_tasks_stats_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_task_status_api_v1_tasks__task_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskStatusResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    cancel_task_api_v1_tasks__task_id__cancel_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_task_events_api_v1_tasks__task_id__events_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_teams_api_v1_teams_get: {
         parameters: {
             query?: never;
@@ -67673,7 +68799,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_WorkflowTemplateSummary__"];
                 };
             };
             /** @description Validation Error */
@@ -67712,50 +68838,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_workflows_api_v1_workflows_runs_get: {
-        parameters: {
-            query?: {
-                /** @description Filter by task_type (e.g. download / parse / ai_transcription) */
-                name?: string | null;
-                /** @description Status filter (task_tracking values): pending / processing / completed / failed / cancelled / lost. Legacy DBOS names (PENDING / SUCCESS / ERROR / ...) are still accepted and mapped. */
-                workflow_status?: string | null;
-                limit?: number;
-                offset?: number;
-                /** @description Newest first */
-                sort_desc?: boolean;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_WorkflowTemplateSummary_"];
                 };
             };
             /** @description Validation Error */
@@ -67787,7 +68870,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_WorkflowStageLibraryEntry__"];
                 };
             };
             /** @description Validation Error */
@@ -67821,7 +68904,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_WorkflowTemplateDetail_"];
                 };
             };
             /** @description Validation Error */
@@ -67855,7 +68938,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_WorkflowTemplateDeleted_"];
                 };
             };
             /** @description Validation Error */
@@ -67893,7 +68976,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_WorkflowTemplateDetail_"];
                 };
             };
             /** @description Validation Error */
@@ -67927,9 +69010,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DbosWorkflowCancelResult"];
                 };
             };
             /** @description Validation Error */
@@ -67963,13 +69044,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Server-Sent Events: `event: status` carries a DbosWorkflowSnapshot (plus `steps`, a DbosWorkflowStep list, when include_steps=true) on every change; then `event: done`, `event: timeout` or `event: not_found`. `: ping` comments keep proxies from closing an idle stream. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "text/event-stream": string;
                 };
             };
             /** @description Validation Error */
@@ -68003,9 +69084,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DbosWorkflowRestartResult"];
                 };
             };
             /** @description Validation Error */
@@ -68039,9 +69118,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DbosWorkflowResumeResult"];
                 };
             };
             /** @description Validation Error */
@@ -68075,9 +69152,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DbosWorkflowSnapshot"];
                 };
             };
             /** @description Validation Error */
@@ -68111,9 +69186,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DbosWorkflowSteps"];
                 };
             };
             /** @description Validation Error */
@@ -68130,8 +69203,9 @@ export interface operations {
     clear_inbox_api_v1_workforce_agents__slug__clear_inbox_post: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
             };
             path: {
                 slug: string;
@@ -68146,9 +69220,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WorkforceInboxClearResult"];
                 };
             };
             /** @description Validation Error */
@@ -68165,8 +69237,9 @@ export interface operations {
     get_agent_detail_api_v1_workforce_agents__slug__detail_get: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
             };
             path: {
                 slug: string;
@@ -68181,9 +69254,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WorkforceAgentDetail"];
                 };
             };
             /** @description Validation Error */
@@ -68200,8 +69271,9 @@ export interface operations {
     pause_agent_api_v1_workforce_agents__slug__pause_post: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
             };
             path: {
                 slug: string;
@@ -68220,9 +69292,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WorkforceAgentPauseResult"];
                 };
             };
             /** @description Validation Error */
@@ -68239,8 +69309,9 @@ export interface operations {
     resume_agent_api_v1_workforce_agents__slug__resume_post: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
             };
             path: {
                 slug: string;
@@ -68255,9 +69326,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WorkforceAgentPauseResult"];
                 };
             };
             /** @description Validation Error */
@@ -68274,8 +69343,9 @@ export interface operations {
     get_workforce_board_api_v1_workforce_board_get: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -68288,9 +69358,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WorkforceBoard"];
                 };
             };
             /** @description Validation Error */
@@ -68319,9 +69387,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WorkforceHealth"];
                 };
             };
         };
@@ -68329,8 +69395,9 @@ export interface operations {
     get_task_by_inbox_api_v1_workforce_tasks_by_inbox__inbox_message_id__get: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
             };
             path: {
                 inbox_message_id: string;
@@ -68345,9 +69412,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WorkforceDelegateTaskLookup"];
                 };
             };
             /** @description Validation Error */
@@ -68364,8 +69429,9 @@ export interface operations {
     cancel_task_api_v1_workforce_tasks__task_id__cancel_post: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
             };
             path: {
                 task_id: string;
@@ -68380,9 +69446,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WorkforceTaskCancelResult"];
                 };
             };
             /** @description Validation Error */
@@ -68443,7 +69507,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ApiVersionResponse"];
                 };
             };
         };
@@ -68463,7 +69527,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["RootHealthResponse"];
                 };
             };
         };

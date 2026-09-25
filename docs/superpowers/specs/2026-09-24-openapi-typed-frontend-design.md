@@ -76,6 +76,9 @@
 - 棘轮门禁：`backend/tests/test_openapi_untyped_ratchet.py` 读离线 OpenAPI，统计
   200 响应无 schema 的操作数，与 `backend/tests/snapshots/openapi_untyped_count.txt`
   比：**只许减少**；减少时要同步改快照（与 ORM 索引棘轮同一做法）。
+- **P9（2026-09-24）清零后升级为零容忍**：快照文件删除，测试改名
+  `backend/tests/test_openapi_all_responses_typed.py`，任何未类型化的 JSON 成功响应
+  即失败；`export_openapi.py --write-ratchet` 随之移除。
 - 分批按路由域推进，每批一个 PR：projects / resources / canvases / ai / admin …
   优先做前端真正消费、且 `types.ts` 有手写副本的那些。
 

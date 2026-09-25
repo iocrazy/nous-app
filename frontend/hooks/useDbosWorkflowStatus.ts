@@ -15,11 +15,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import {
-  DbosWorkflowSnapshot,
-  TERMINAL_STATES,
-  subscribeWorkflow,
-} from '../services/dbosWorkflowService';
+import { TERMINAL_STATES, subscribeWorkflow } from '../services/dbosWorkflowService';
+import type { DbosWorkflowSnapshot } from '../types/api';
 
 export type DbosWorkflowError =
   | { kind: 'not_found' }

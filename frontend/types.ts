@@ -535,33 +535,8 @@ export interface ProviderHealthEntry {
 // CHECK constraint through the backend's `NousModelType` literal.
 export type NousModelType = import('./types/api').NousModelPublic['type'];
 
-// Points System Types
-export interface PointPackage {
-  id: string;
-  name: string;
-  description: string | null;
-  points_amount: number;
-  price_cents: number;
-  currency: string;
-  sort_order: number;
-}
-
-export interface PaymentOrder {
-  id: string;
-  team_id: string;
-  user_id: string;
-  package_id: string;
-  points_amount: number;
-  amount_cents: number;
-  currency: string;
-  payment_method: 'wechat' | 'alipay';
-  payment_status: 'pending' | 'paid' | 'failed' | 'expired' | 'refunded';
-  payment_url: string | null;
-  trade_no: string | null;
-  paid_at: string | null;
-  expired_at: string;
-  created_at: string;
-}
+// Point packages and payment orders are API shapes: `PointPackage` /
+// `PaymentOrder` in `types/api.ts` (P9).
 
 // ── Ideation topic pool (M1.5) ───────────────────────────────────────────────
 
@@ -650,36 +625,6 @@ export const FORM_FIELD_TYPES: FormFieldType[] = [
   'date',
 ];
 
-/** One node in a team workflow template (`workflow_template_nodes`). */
-export interface WorkflowTemplateNode {
-  id: string;
-  template_id: string;
-  name: string;
-  sort_order: number;
-  parallel_group: number | null;
-  default_owner_user_id: string | null;
-  default_owner_agent_id: string | null;
-  skip_default: boolean;
-  review_required: boolean;
-  deliverable_required: boolean;
-  deliverable_label: string | null;
-  source_stage_id: string | null;
-  duration_days: number | null;
-  members: WorkflowMemberRef[];
-  completion_policy: WorkflowCompletionPolicy;
-  events: WorkflowNodeEvents;
-  /** Deliverable form fields (mig 390, M3 PR-I) — template-layer config,
-   * copied verbatim into `project_stage_nodes.form_schema` at instantiation
-   * (spec §2; not open for in-place instance tweaks, same idiom as
-   * `completion_policy`/`events`). */
-  form_schema: FormFieldDef[];
-  /** Dependency edges (mig 391, M3 PR-J) — REAL node ids on this GET response
-   * (contrast `WorkflowTemplateNodeInput.depends_on`, which is a
-   * payload-index contract on PATCH). Stable only until the *next* save —
-   * see the editor's toDraft/toPayload for the id → position conversion. */
-  depends_on: string[];
-}
-
 /** A template node as sent on PATCH (full node-list replacement). */
 export interface WorkflowTemplateNodeInput {
   name: string;
@@ -705,31 +650,8 @@ export interface WorkflowTemplateNodeInput {
   depends_on?: string[];
 }
 
-/** A team workflow template list row (`node_count` on the collection). */
-export interface WorkflowTemplate {
-  id: string;
-  team_id: string;
-  name: string;
-  is_default: boolean;
-  created_by: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-  node_count: number;
-  /** Present on the detail (GET /{id}) payload only. */
-  nodes?: WorkflowTemplateNode[];
-}
-
-/** One row of the read-only 11-node workflow node bank. */
-export interface StageLibraryItem {
-  id: string;
-  slug: string;
-  name: string;
-  sort_order: number;
-  phase: string;
-  default_role_label: string | null;
-  deliverable_label: string | null;
-  review_required: boolean;
-}
+// `WorkflowTemplate` / `WorkflowTemplateNode` / `StageLibraryItem` are response
+// shapes: aliased from the generated schemas in `types/api.ts` (P9).
 
 /** POST body to add a node to a live instance (M2-W3-1). Exactly one of
  * `source_stage_id` (from the node bank) or `name` (blank). */

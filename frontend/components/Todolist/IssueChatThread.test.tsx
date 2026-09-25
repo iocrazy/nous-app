@@ -4,15 +4,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { IssueChatThread } from './IssueChatThread';
 import type { AgentRef } from './types';
 
-// Silence the simulateAgentRunComplete import — it only needs the service shape.
-vi.mock('../../services/issueMessageService', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../services/issueMessageService')>();
-  return {
-    ...actual,
-    simulateAgentRunComplete: vi.fn(),
-  };
-});
-
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 
 function _comment(opts: { author_user_id: string | null; content: string; id?: string }) {

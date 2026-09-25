@@ -119,8 +119,15 @@ class CollectionsRepository:
     async def get_collection_by_id(
         self, collection_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Get a single collection by ID, scoped to the owning user."""
-        cid = _parse_collection_id(collection_id)
+        """Get a single collection by ID, scoped to the owning user.
+
+        A non-numeric id names no collection: ``None`` (the routes' 404), not
+        a ``ValueError`` from ``int()`` that surfaced as a 500.
+        """
+        try:
+            cid = _parse_collection_id(collection_id)
+        except (TypeError, ValueError):
+            return None
         uid = _parse_user_id(user_id)
         async with read_scope() as session:
             result = await session.execute(

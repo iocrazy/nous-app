@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Coins, Package, ArrowUpRight, ArrowDownRight, TrendingUp, HardDrive, Search, ExternalLink } from 'lucide-react';
 import { UiSelect } from './ui';
-import type { PointPackage } from '../types';
+import type { PointPackage } from '../types/api';
 import type { PointsBalance, PointsPricing, PointsTransaction } from '../types/api';
 import {
   fetchPointsBalance,

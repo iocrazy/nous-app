@@ -458,22 +458,26 @@ class ApiKeyRepository:
             user_id: 用户 ID（用于权限验证）
 
         Returns:
-            是否删除成功
+            是否真的删掉了一行。密钥不存在或不属于 ``user_id`` 时为 False
+            （此前无论命中与否一律返回 True，路由据此对别人的 / 不存在的
+            key_id 也回「密钥已删除」）。数据库错误照常抛出，不伪装成未命中。
         """
-        try:
-            from sqlalchemy import delete as sa_delete
+        from sqlalchemy import delete as sa_delete
 
+        try:
             async with write_scope() as session:
-                await session.execute(
+                result = await session.execute(
                     sa_delete(ApiKeys)
                     .where(ApiKeys.key_id == key_id)
                     .where(ApiKeys.user_id == user_id)
                 )
-            logger.info(f"删除 API 密钥成功: {key_id}")
-            return True
+                deleted = (result.rowcount or 0) > 0
         except Exception as e:
             logger.error(f"删除 API 密钥失败: {e}")
-            return False
+            raise
+        if deleted:
+            logger.info(f"删除 API 密钥成功: {key_id}")
+        return deleted
 
     async def revoke(self, key_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """

@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from app.core.deps import AuthDep
+from app.schemas.issue_progress_responses import IssueRollup
 from app.services.issues.issue_rollup import load_rollup
 from app.services.issues.issue_visibility import assert_issue_visible
 from app.services.modules.gate import require_module
@@ -23,7 +24,7 @@ router = APIRouter(
 )
 
 
-@router.get("/{issue_id}/progress")
+@router.get("/{issue_id}/progress", response_model=IssueRollup)
 async def issue_progress(issue_id: int, auth: AuthDep) -> dict[str, Any]:
     issue = await assert_issue_visible(issue_id, auth)
     return await load_rollup(issue)

@@ -14,9 +14,16 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.exceptions import ErrorResponse
 from app.core.scope_guards import _is_team_member
 from app.repositories.points_repository import get_points_repository
-from app.schemas.payment import CreateOrderRequest
+from app.schemas.envelope import Envelope
+from app.schemas.payment import (
+    CreateOrderRequest,
+    PaymentOrderRow,
+    PaymentOrderStatus,
+    PaymentPackageRow,
+)
 from app.services.billing.payment_service import PaymentService
 
 router = APIRouter(prefix="/payment")
@@ -60,7 +67,11 @@ async def _resolve_team_id(
 # ---------------------------------------------------------------------- #
 
 
-@router.get("/packages", summary="Get active point packages")
+@router.get(
+    "/packages",
+    summary="Get active point packages",
+    response_model=Envelope[list[PaymentPackageRow]],
+)
 async def get_packages():
     """
     Return all active purchasable point packages.
@@ -71,7 +82,11 @@ async def get_packages():
     return {"success": True, "data": packages}
 
 
-@router.post("/create-order", summary="Create a payment order")
+@router.post(
+    "/create-order",
+    summary="Create a payment order",
+    response_model=Envelope[PaymentOrderRow],
+)
 async def create_order(body: CreateOrderRequest, auth: AuthDep):
     """
     Create a new payment order for the specified package and payment method.
@@ -94,7 +109,11 @@ async def create_order(body: CreateOrderRequest, auth: AuthDep):
     return result
 
 
-@router.get("/order/{order_id}/status", summary="Poll order status")
+@router.get(
+    "/order/{order_id}/status",
+    summary="Poll order status",
+    response_model=Envelope[PaymentOrderStatus],
+)
 async def get_order_status(order_id: str, auth: AuthDep):
     """
     Lightweight endpoint for the frontend to poll payment status.
@@ -118,7 +137,11 @@ async def get_order_status(order_id: str, auth: AuthDep):
     return result
 
 
-@router.get("/orders", summary="Get team order history")
+@router.get(
+    "/orders",
+    summary="Get team order history",
+    response_model=Envelope[list[PaymentOrderRow]],
+)
 async def get_orders(
     auth: AuthDep,
     team_id: Optional[str] = Query(None, description="Team ID"),
@@ -139,8 +162,27 @@ async def get_orders(
 # Payment Provider Callbacks (NO auth -- called by external providers)
 # ---------------------------------------------------------------------- #
 
+# Both callbacks are switched off until signature verification lands: every
+# request gets the 501 ``ErrorResponse`` shell, never a provider receipt
+# (Alipay's ``success`` text / WeChat's JSON ack). The contract says exactly
+# that, so the generated types do not advertise a 200 body that is never sent.
+# When a callback goes live, declare the receipt the provider expects instead
+# (``response_class=PlainTextResponse`` for Alipay) -- byte for byte.
+_CALLBACK_DISABLED = {
+    501: {
+        "model": ErrorResponse,
+        "description": "Callback disabled: signature verification not implemented",
+    }
+}
 
-@router.post("/callback/wechat", summary="WeChat Pay callback")
+
+@router.post(
+    "/callback/wechat",
+    summary="WeChat Pay callback",
+    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+    response_model=None,
+    responses=_CALLBACK_DISABLED,
+)
 async def wechat_callback(request: Request):
     """
     Receive payment result notification from WeChat Pay.
@@ -171,7 +213,13 @@ async def wechat_callback(request: Request):
     )
 
 
-@router.post("/callback/alipay", summary="Alipay callback")
+@router.post(
+    "/callback/alipay",
+    summary="Alipay callback",
+    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+    response_model=None,
+    responses=_CALLBACK_DISABLED,
+)
 async def alipay_callback(request: Request):
     """
     Receive payment result notification from Alipay.

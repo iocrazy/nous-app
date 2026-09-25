@@ -21,6 +21,8 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.deps import AuthContext, get_auth
 from app.main import app
+from app.models import Orders
+from tests.api.wire_parity import sample_orm
 
 r = sys.modules["app.api.payment_router"]
 
@@ -46,7 +48,14 @@ class _Svc:
 
     async def create_order(self, **kwargs: Any) -> Dict[str, Any]:
         self.calls.append(f"create:{kwargs['team_id']}")
-        return {"success": True, "data": {"order_id": ORDER_ID}}
+        # A real order row: the route now declares ``PaymentOrderRow``.
+        repo_mod = sys.modules["app.repositories.payment_repository"]
+        return {
+            "success": True,
+            "data": repo_mod._order_row(
+                sample_orm(Orders, payment_method="wechat", payment_status="pending")
+            ),
+        }
 
     async def get_order_status(self, order_id: str) -> Dict[str, Any]:
         self.calls.append(f"status:{order_id}")

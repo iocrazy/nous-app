@@ -1,15 +1,18 @@
 """Pydantic models for the cover-template library (migration 441).
 
 The library is a system folder; these are the wire shapes for reading it.
-Snowflake ids cross the wire as STRINGS (they exceed 2^53).
+Snowflake ids cross the wire as STRINGS (they exceed 2^53). Every route wraps
+its payload as ``{"data": ...}`` (no ``success``), i.e. ``DataEnvelope``;
+wire parity is pinned by ``tests/api/test_cover_templates_wire.py``.
 """
 
 from __future__ import annotations
 
-import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+from app.schemas.wire import WireDatetime
 
 # The reference pool is capped at nine server-side (canvas_generation.py and
 # codex_cli.py, independently). A usage call carrying more than nine means the
@@ -34,7 +37,9 @@ class CoverTemplateOut(BaseModel):
     # /generated-media/import-from-resource.
     thumb_url: str
     usage_count: int
-    last_used_at: Optional[datetime.datetime] = None
+    # Native datetime from the usage join: ``isoformat()`` on the wire
+    # (``+00:00``), exactly what the bare dict sent. NULL = never used.
+    last_used_at: Optional[WireDatetime] = None
 
 
 class CoverTemplateListOut(BaseModel):
@@ -44,6 +49,12 @@ class CoverTemplateListOut(BaseModel):
     total: int = 0
     limit: int = 48
     offset: int = 0
+
+
+class CoverTemplateUseOut(BaseModel):
+    """``POST /cover-templates/use``: how many ids were counted."""
+
+    counted: int
 
 
 class CoverTemplateUseRequest(BaseModel):

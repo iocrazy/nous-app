@@ -41,6 +41,7 @@ import { LiveRunsStrip } from '../components/AILibrary/LiveRunsStrip';
 import { getSupabaseClient } from '../supabaseClient';
 import { AgentDetailDrawer } from '../components/Workforce/AgentDetailDrawer';
 import { PageHeader } from '../components/layout/PageHeader';
+import { useOptionalAuth } from '../contexts/AuthContext';
 
 // Realtime is the primary refresh trigger; the safety poll covers the
 // case where a Realtime subscription drops silently (Supabase gateway
@@ -61,6 +62,11 @@ const WATCHED_TABLES = [
 
 export const WorkforcePage: React.FC = () => {
   const { t } = useTranslation();
+  // The persistent agents are shared by every user: pausing one, clearing its
+  // inbox or cancelling its task hits everyone, and the drawer shows other
+  // users' payloads. The backend lets only a platform admin do any of it, so
+  // everyone else gets the read-only board.
+  const canManage = useOptionalAuth()?.userProfile?.role === 'admin';
   const [board, setBoard] = useState<WorkforceBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
@@ -234,6 +240,7 @@ export const WorkforcePage: React.FC = () => {
                 key={agent.id}
                 agent={agent}
                 busy={busySlug === agent.slug}
+                canManage={canManage}
                 onOpen={setOpenSlug}
                 onPause={onPause}
                 onResume={onResume}
@@ -247,7 +254,7 @@ export const WorkforcePage: React.FC = () => {
         </>
       )}
 
-      {openSlug && (
+      {canManage && openSlug && (
         <AgentDetailDrawer slug={openSlug} onClose={() => setOpenSlug(null)} />
       )}
     </div>
@@ -259,6 +266,8 @@ export const WorkforcePage: React.FC = () => {
 interface AgentCardProps {
   agent: WorkforceAgentEntry;
   busy: boolean;
+  /** Platform admin: may open the drawer and run the actions. */
+  canManage: boolean;
   onOpen: (slug: string) => void;
   onPause: (slug: string) => void;
   onResume: (slug: string) => void;
@@ -269,6 +278,7 @@ interface AgentCardProps {
 const AgentCard: React.FC<AgentCardProps> = ({
   agent,
   busy,
+  canManage,
   onOpen,
   onPause,
   onResume,
@@ -292,8 +302,9 @@ const AgentCard: React.FC<AgentCardProps> = ({
         <button
           type="button"
           onClick={() => onOpen(agent.slug)}
-          className="flex items-start gap-3 flex-1 min-w-0 text-left hover:opacity-90"
-          title="Open detail drawer"
+          disabled={!canManage}
+          className="flex items-start gap-3 flex-1 min-w-0 text-left hover:opacity-90 disabled:hover:opacity-100 disabled:cursor-default"
+          title={canManage ? 'Open detail drawer' : undefined}
         >
           <Icon size={20} className="text-ink-300 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
@@ -307,51 +318,53 @@ const AgentCard: React.FC<AgentCardProps> = ({
           </div>
         </button>
         {/* Admin actions */}
-        <div className="flex items-center gap-1 shrink-0">
-          {isPaused ? (
+        {canManage && (
+          <div className="flex items-center gap-1 shrink-0">
+            {isPaused ? (
+              <IconButton
+                icon={PlayCircle}
+                label="Resume"
+                disabled={busy}
+                onClick={() => onResume(agent.slug)}
+                tone="emerald"
+              />
+            ) : (
+              <IconButton
+                icon={PauseCircle}
+                label="Pause"
+                disabled={busy}
+                onClick={() => onPause(agent.slug)}
+                tone="amber"
+              />
+            )}
             <IconButton
-              icon={PlayCircle}
-              label="Resume"
-              disabled={busy}
-              onClick={() => onResume(agent.slug)}
-              tone="emerald"
+              icon={Trash2}
+              label="Clear inbox"
+              disabled={busy || queue.inbox_unread + queue.inbox_reading === 0}
+              onClick={() => {
+                if (
+                  confirm(
+                    `Dismiss all ${queue.inbox_unread + queue.inbox_reading} pending inbox messages for ${agent.name}?`,
+                  )
+                ) {
+                  onClearInbox(agent.slug);
+                }
+              }}
+              tone="zinc"
             />
-          ) : (
             <IconButton
-              icon={PauseCircle}
-              label="Pause"
-              disabled={busy}
-              onClick={() => onPause(agent.slug)}
-              tone="amber"
+              icon={StopCircle}
+              label="Cancel current task"
+              disabled={busy || !currentTaskId}
+              onClick={() => {
+                if (currentTaskId && confirm(`Cancel task ${currentTaskId.slice(0, 8)}…?`)) {
+                  onCancelTask(agent.slug, currentTaskId);
+                }
+              }}
+              tone="red"
             />
-          )}
-          <IconButton
-            icon={Trash2}
-            label="Clear inbox"
-            disabled={busy || queue.inbox_unread + queue.inbox_reading === 0}
-            onClick={() => {
-              if (
-                confirm(
-                  `Dismiss all ${queue.inbox_unread + queue.inbox_reading} pending inbox messages for ${agent.name}?`,
-                )
-              ) {
-                onClearInbox(agent.slug);
-              }
-            }}
-            tone="zinc"
-          />
-          <IconButton
-            icon={StopCircle}
-            label="Cancel current task"
-            disabled={busy || !currentTaskId}
-            onClick={() => {
-              if (currentTaskId && confirm(`Cancel task ${currentTaskId.slice(0, 8)}…?`)) {
-                onCancelTask(agent.slug, currentTaskId);
-              }
-            }}
-            tone="red"
-          />
-        </div>
+          </div>
+        )}
       </div>
 
       {agent.paused_reason && (
