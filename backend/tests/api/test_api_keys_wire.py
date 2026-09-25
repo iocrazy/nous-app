@@ -24,7 +24,7 @@ from httpx import ASGITransport, AsyncClient
 from app.core.deps import AuthContext, get_auth
 from app.main import app
 from app.models import ApiKeys
-from tests.api.wire_parity import sample_orm
+from tests.api.wire_parity import assert_wire_unchanged, sample_orm
 
 repo_mod = sys.modules["app.repositories.api_key_repository"]
 
@@ -93,33 +93,40 @@ async def client() -> AsyncClient:
         yield ac
 
 
+def _assert_typed_404(resp) -> None:
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["details"]["code"] == "not_found_or_out_of_scope"
+
+
 @pytest.mark.asyncio
 async def test_owner_deletes_own_key(client):
     resp = await client.delete(f"/api/v1/api-keys/{KEY_ID}")
-    assert resp.status_code == 200, resp.text
+    assert_wire_unchanged(resp, {"success": True, "message": "密钥已删除"})
 
 
 @pytest.mark.asyncio
 async def test_stranger_delete_is_404_not_a_false_success(client):
     _CALLER["user_id"] = STRANGER
     resp = await client.delete(f"/api/v1/api-keys/{KEY_ID}")
-    assert resp.status_code == 404, resp.text
+    _assert_typed_404(resp)
 
 
 @pytest.mark.asyncio
 async def test_unknown_key_delete_is_404(client):
     resp = await client.delete("/api/v1/api-keys/key_live_nope")
-    assert resp.status_code == 404, resp.text
+    _assert_typed_404(resp)
 
 
 @pytest.mark.asyncio
 async def test_owner_revokes_own_key(client):
     resp = await client.post(f"/api/v1/api-keys/{KEY_ID}/revoke")
-    assert resp.status_code == 200, resp.text
+    assert_wire_unchanged(resp, {"success": True, "message": "密钥已撤销"})
+    # The body says nothing about the key: no id, prefix or secret.
+    assert set(resp.json()) == {"success", "message"}
 
 
 @pytest.mark.asyncio
 async def test_stranger_revoke_is_404(client):
     _CALLER["user_id"] = STRANGER
     resp = await client.post(f"/api/v1/api-keys/{KEY_ID}/revoke")
-    assert resp.status_code == 404, resp.text
+    _assert_typed_404(resp)
