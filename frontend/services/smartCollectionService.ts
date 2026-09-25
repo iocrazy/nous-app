@@ -4,6 +4,10 @@
 
 import { apiClient } from './apiClient';
 import { ParsedMedia } from '../types';
+import type {
+  CollectionInitPresetsResult,
+  CollectionRefreshResult,
+} from '../types/api';
 
 // Types
 export interface CollectionCondition {
@@ -125,17 +129,15 @@ export const getSmartCollectionVideos = async (
 
 export const refreshSmartCollection = async (
   collectionId: string,
-): Promise<{ message: string; video_count: number }> =>
-  apiClient.post<{ message: string; video_count: number }>(
+): Promise<CollectionRefreshResult> =>
+  apiClient.post<CollectionRefreshResult>(
     `/api/v1/collections/${collectionId}/refresh`,
   );
 
-export const initPresetCollections = async (): Promise<SmartCollection[]> => {
-  const data = await apiClient.post<{ collections?: SmartCollection[] }>(
-    '/api/v1/collections/init-presets',
-  );
-  return data.collections || [];
-};
+/** `presets` is only present when this call created them; the endpoint never
+ *  returned full collection rows (the old `collections` read was always []). */
+export const initPresetCollections = async (): Promise<CollectionInitPresetsResult> =>
+  apiClient.post<CollectionInitPresetsResult>('/api/v1/collections/init-presets');
 
 // Helper function to build rules
 export const buildCollectionRules = (

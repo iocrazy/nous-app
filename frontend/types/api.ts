@@ -674,4 +674,9 @@ export type CoverTemplate = Schemas['CoverTemplateOut'];
 export type CoverTemplateList = Schemas['CoverTemplateListOut'];
 /** `POST /cover-templates/use`: how many ids were counted. */
 export type CoverTemplateUsed = Schemas['CoverTemplateUseOut'];
+// `/api/v1/collections`: `collection_id` echoes the path (string); preset
+// ids are Snowflake BIGINTs sent as JSON **numbers**.
+export type CollectionRefreshResult = Schemas['CollectionRefreshResult'];
+/** `presets` is absent when the user already had presets. */
+export type CollectionInitPresetsResult = Schemas['CollectionInitPresetsResult'];
 // —— end P9 payment/cleanup/probes ——

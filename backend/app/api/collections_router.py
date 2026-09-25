@@ -6,8 +6,10 @@ from app.core.deps import AuthDep
 from app.repositories.collections_repository import get_collections_repository
 from app.schemas.collections import (
     CollectionCreate,
+    CollectionInitPresetsResult,
     CollectionListResponse,
     CollectionMediaResponse,
+    CollectionRefreshResult,
     CollectionResponse,
     CollectionRules,
     CollectionUpdate,
@@ -272,7 +274,7 @@ async def get_collection_media(
     )
 
 
-@router.post("/{collection_id}/refresh")
+@router.post("/{collection_id}/refresh", response_model=CollectionRefreshResult)
 async def refresh_collection(
     auth: AuthDep,
     collection_id: str,
@@ -296,7 +298,11 @@ async def refresh_collection(
     }
 
 
-@router.post("/init-presets")
+@router.post(
+    "/init-presets",
+    response_model=CollectionInitPresetsResult,
+    response_model_exclude_unset=True,
+)
 async def initialize_preset_collections(auth: AuthDep):
     """
     Initialize preset collections for the current user.

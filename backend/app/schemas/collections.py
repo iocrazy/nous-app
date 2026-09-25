@@ -93,3 +93,40 @@ class CollectionMediaResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class CollectionRefreshResult(BaseModel):
+    """``POST /collections/{id}/refresh``.
+
+    ``collection_id`` echoes the path segment (a string); ``media_count`` is
+    the number of media now matching the rules (the cache keeps the first
+    1000 ids).
+    """
+
+    message: str
+    collection_id: str
+    media_count: int
+
+
+class CollectionPresetRef(BaseModel):
+    """One preset created by ``POST /collections/init-presets``.
+
+    ``id`` is the Snowflake BIGINT as the repository returns it: a JSON
+    **number**.
+    """
+
+    id: int
+    name: str
+
+
+class CollectionInitPresetsResult(BaseModel):
+    """``POST /collections/init-presets``.
+
+    ``presets`` is only present when this call created them; when the user
+    already had presets the body is ``{message, count}`` (the route declares
+    ``response_model_exclude_unset`` so the key stays absent).
+    """
+
+    message: str
+    count: int
+    presets: Optional[List[CollectionPresetRef]] = None
