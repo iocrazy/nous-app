@@ -40,10 +40,11 @@ const SUBVIEW_TABS: SubViewTab[] = [
 export function DashboardPage() {
   const { t } = useTranslation();
   const { userProfile } = useAuth();
-  const { selectedTeamId } = useTeamContext();
+  const { selectedTeamId, personalTeamId } = useTeamContext();
   const { dashboardSubView, setDashboardSubView, dashboardStats } = useNavigation({
     isAuthenticated: true,
     selectedTeamId,
+    personalTeamId,
   });
 
   const isAdmin = userProfile.role === 'admin';

@@ -453,7 +453,7 @@ export const ResourcesViewInner: React.FC = () => {
 
   const infoPanelProps = useMemo(() => ({
     trashedFolderPreviews,
-    onRenameFolder: async (folderId: string | number, name: string) => {
+    onRenameFolder: async (folderId: string, name: string) => {
       try {
         await renameFolder(folderId, name);
         setSelectedFolder((prev: Folder | null) => prev ? { ...prev, name } : null);

@@ -180,11 +180,15 @@ export function AuthProvider({
         // missing. user_profiles can lag auth.users for legacy users whose
         // profile-creation trigger didn't fire (e.g. accounts created
         // before the trigger was added, or migration backfill misses).
-        supabase
-          .from('user_profiles')
-          .select('role')
-          .eq('id', session.user.id)
-          .maybeSingle()
+        // The query builder is only PromiseLike (no `.catch`); lift it into a
+        // real Promise so a network-level rejection is still logged.
+        Promise.resolve(
+          supabase
+            .from('user_profiles')
+            .select('role')
+            .eq('id', session.user.id)
+            .maybeSingle()
+        )
           .then(({ data: profile }) => {
             if (profile?.role) {
               setUserProfile(prev => ({ ...prev, role: profile.role }));

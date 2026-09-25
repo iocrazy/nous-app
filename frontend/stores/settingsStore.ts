@@ -163,7 +163,10 @@ export const useSettingsStore = create<SettingsState>()(
       onRehydrateStorage: () => {
         return (_state, error) => {
           if (error) {
-            console.warn('[settingsStore] hydration skipped (first load):', error?.message);
+            console.warn(
+              '[settingsStore] hydration skipped (first load):',
+              error instanceof Error ? error.message : error,
+            );
           }
           // The rehydration callback can fire BEFORE the `useSettingsStore`
           // binding has been assigned (TDZ — Zustand persist middleware

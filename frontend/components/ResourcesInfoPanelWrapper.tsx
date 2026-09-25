@@ -17,7 +17,7 @@ interface ResourcesInfoPanelWrapperProps {
   /** Preview map for trashed folders (keyed by folder id as string) */
   trashedFolderPreviews: Record<string, FolderPreviewItem[]>;
   /** Callback fired when user renames a folder from within the panel */
-  onRenameFolder: (folderId: string | number, name: string) => Promise<void>;
+  onRenameFolder: (folderId: string, name: string) => Promise<void>;
 }
 
 // ─── Component ───────────────────────────────────────────
