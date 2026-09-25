@@ -55,6 +55,15 @@ from app.repositories.agent_workforce_repository import (
     get_agent_workforce_repository,
     tt_row_to_task_shape,
 )
+from app.schemas.workforce_responses import (
+    WorkforceAgentDetail,
+    WorkforceAgentPauseResult,
+    WorkforceBoard,
+    WorkforceDelegateTaskLookup,
+    WorkforceHealth,
+    WorkforceInboxClearResult,
+    WorkforceTaskCancelResult,
+)
 from app.services.infra.dbos_orchestrator import is_launched as dbos_is_launched
 from app.services.workforce.dbos_pool import DbosAgentWorkforcePool
 
@@ -141,7 +150,7 @@ async def _resolve_persistent_agent(slug: str) -> dict[str, Any]:
     return agent
 
 
-@router.get("/board")
+@router.get("/board", response_model=WorkforceBoard)
 async def get_workforce_board(
     _auth: AuthDep,
 ) -> dict[str, Any]:
@@ -373,7 +382,7 @@ class PauseAgentBody(BaseModel):
     reason: Optional[str] = None  # caller-supplied; default 'manual'
 
 
-@router.post("/agents/{slug}/pause")
+@router.post("/agents/{slug}/pause", response_model=WorkforceAgentPauseResult)
 async def pause_agent(
     slug: str,
     auth: AdminAuthDep,
@@ -394,7 +403,7 @@ async def pause_agent(
     return {"slug": slug, "paused_reason": reason, "status": "paused"}
 
 
-@router.post("/agents/{slug}/resume")
+@router.post("/agents/{slug}/resume", response_model=WorkforceAgentPauseResult)
 async def resume_agent(
     slug: str,
     auth: AdminAuthDep,
@@ -407,7 +416,7 @@ async def resume_agent(
     return {"slug": slug, "paused_reason": None, "status": "resumed"}
 
 
-@router.post("/agents/{slug}/clear-inbox")
+@router.post("/agents/{slug}/clear-inbox", response_model=WorkforceInboxClearResult)
 async def clear_inbox(
     slug: str,
     auth: AdminAuthDep,
@@ -437,7 +446,9 @@ async def clear_inbox(
     return {"slug": slug, "cleared": cleared}
 
 
-@router.get("/healthz")
+@router.get(
+    "/healthz", response_model=WorkforceHealth, response_model_exclude_unset=True
+)
 async def workforce_healthz() -> dict[str, Any]:
     """Operational health snapshot for the workforce runtime.
 
@@ -594,7 +605,7 @@ async def workforce_healthz() -> dict[str, Any]:
     return response
 
 
-@router.get("/agents/{slug}/detail")
+@router.get("/agents/{slug}/detail", response_model=WorkforceAgentDetail)
 async def get_agent_detail(
     slug: str,
     auth: AdminAuthDep,
@@ -711,7 +722,11 @@ async def get_agent_detail(
 _TERMINAL_LIFECYCLES = ("done", "failed", "cancelled")
 
 
-@router.post("/tasks/{task_id}/cancel")
+@router.post(
+    "/tasks/{task_id}/cancel",
+    response_model=WorkforceTaskCancelResult,
+    response_model_exclude_unset=True,
+)
 async def cancel_task(
     task_id: UUID,
     auth: AdminAuthDep,
@@ -799,7 +814,9 @@ async def cancel_task(
 # on agent_tasks (filter by inbox_message_id) for live updates.
 
 
-@router.get("/tasks/by-inbox/{inbox_message_id}")
+@router.get(
+    "/tasks/by-inbox/{inbox_message_id}", response_model=WorkforceDelegateTaskLookup
+)
 async def get_task_by_inbox(
     inbox_message_id: UUID,
     auth: AuthDep,

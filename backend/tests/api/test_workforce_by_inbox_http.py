@@ -70,7 +70,7 @@ class _Session:
                         "sender_agent_id": AGENT,
                         "message_type": "task_result",
                         "payload": {"content": "done"},
-                        "created_at": None,
+                        "created_at": "2026-09-24T01:02:03+00:00",
                         "delivered": True,
                         "delivered_at": None,
                     }
@@ -96,7 +96,7 @@ class _Session:
                 "completed_at": None,
                 "error_code": None,
                 "error_msg": None,
-                "created_at": None,
+                "created_at": "2026-09-24T01:02:03+00:00",
                 "inbox_message_id": INBOX,
                 "metadata": {},
             }
