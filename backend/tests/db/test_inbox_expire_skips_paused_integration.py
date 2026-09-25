@@ -257,3 +257,153 @@ async def test_the_drain_scan_skips_a_paused_issue(orm_dsn, pg):
             "DELETE FROM issues WHERE id = ANY($1::bigint[])", [paused, idle]
         )
         await pg.execute("DELETE FROM auth.users WHERE id = $1", user_id)
+
+
+# ── FH3 T1: parked-on-input issues, bounded by the gate TTL ──────────────
+
+
+async def _parked_issue(pg, user_id, *, locked: bool, marker: dict | None) -> int:
+    import json
+
+    return await pg.fetchval(
+        """INSERT INTO issues (issue_number, identifier, title, status, priority,
+                               origin_kind, created_by_user_id,
+                               execution_locked_at, execution_state)
+           VALUES ((SELECT COALESCE(MAX(issue_number), 0) + 1 FROM issues),
+                   $1, $2, 'needs_followup', 'medium', 'manual', $3, $4,
+                   $5::jsonb)
+           RETURNING id""",
+        f"FH3T1-{uuid.uuid4().hex[:8]}",
+        "Parked sweep fixture",
+        user_id,
+        dt.datetime.now(dt.timezone.utc) if locked else None,
+        json.dumps({"awaiting_input": marker} if marker is not None else {}),
+    )
+
+
+def _since(age: dt.timedelta) -> str:
+    return (dt.datetime.now(dt.timezone.utc) - age).isoformat()
+
+
+@_skip
+async def test_sweep_keeps_items_of_a_parked_issue_and_expires_the_look_alikes(
+    orm_dsn, pg
+):
+    """A wake-up queued while a person is being asked outlives the 24 h orphan
+    cutoff for as long as the gate is still waiting — and ONLY then. Every
+    look-alike (answered marker, lock without marker, marker without lock, a
+    ``since`` older than the TTL — the dead-workflow shape production holds —
+    and a marker with no ``since`` at all) expires exactly as before."""
+    from app.repositories.agent_run_inbox_repository import (
+        get_agent_run_inbox_repository,
+    )
+
+    user_id = uuid.uuid4()
+    await pg.execute("INSERT INTO auth.users (id) VALUES ($1)", user_id)
+    fresh = {"prompt": "q", "since": _since(dt.timedelta(hours=30))}
+    shapes = {
+        "parked": (True, fresh),
+        "answered": (True, {**fresh, "answered_at": _since(dt.timedelta(hours=1))}),
+        "lock_no_marker": (True, None),
+        "marker_no_lock": (False, fresh),
+        "zombie": (True, {"prompt": "q", "since": _since(dt.timedelta(days=16))}),
+        "no_since": (True, {"prompt": "q"}),
+    }
+    issues = {
+        name: await _parked_issue(pg, user_id, locked=locked, marker=marker)
+        for name, (locked, marker) in shapes.items()
+    }
+    plain = await _issue(pg, user_id, paused=False)
+    two_days = dt.timedelta(days=2)
+    items = {
+        name: await _item(pg, target_kind="issue", target_id=iid, age=two_days)
+        for name, iid in issues.items()
+    }
+    items["plain"] = await _item(pg, target_kind="issue", target_id=plain, age=two_days)
+    # a conversation target sharing the parked issue's id is not an issue
+    items["conv"] = await _item(
+        pg, target_kind="conversation", target_id=issues["parked"], age=two_days
+    )
+    try:
+        now = dt.datetime.now(dt.timezone.utc)
+        n = await get_agent_run_inbox_repository().expire_stale(
+            older_than=now - dt.timedelta(days=1),
+            skip_paused_issues=True,
+            skip_parked_issues=True,
+            parked_floor=now - dt.timedelta(hours=73),
+        )
+        rows = await pg.fetch(
+            "SELECT id, expired_at FROM agent_run_inbox WHERE id = ANY($1::bigint[])",
+            list(items.values()),
+        )
+        expired = {r["id"] for r in rows if r["expired_at"] is not None}
+        assert expired == set(items.values()) - {items["parked"]}
+        assert n == len(items) - 1
+    finally:
+        await pg.execute(
+            "DELETE FROM agent_run_inbox WHERE id = ANY($1::bigint[])",
+            list(items.values()),
+        )
+        await pg.execute(
+            "DELETE FROM issues WHERE id = ANY($1::bigint[])",
+            [*issues.values(), plain],
+        )
+        await pg.execute("DELETE FROM auth.users WHERE id = $1", user_id)
+
+
+@_skip
+async def test_the_scan_expires_only_the_agent_items_of_one_issue(orm_dsn, pg):
+    """``expire_agent_items_for_target``: the agent's scheduled wake-up goes,
+    a person's scheduled wake-up, a plain steer (no source) and a
+    ``subagent_result`` stay — and another issue's agent item is untouched."""
+    import json
+
+    from app.repositories.agent_run_inbox_repository import (
+        get_agent_run_inbox_repository,
+    )
+
+    user_id = uuid.uuid4()
+    await pg.execute("INSERT INTO auth.users (id) VALUES ($1)", user_id)
+    target = await _issue(pg, user_id, paused=False)
+    other = await _issue(pg, user_id, paused=False)
+
+    async def _with(tid, kind, content):
+        return await pg.fetchval(
+            "INSERT INTO agent_run_inbox(target_kind, target_id, user_id, kind,"
+            " content) VALUES ('issue', $1, $2, $3, $4::jsonb) RETURNING id",
+            tid,
+            user_id,
+            kind,
+            json.dumps(content),
+        )
+
+    def _src(by):
+        return {"text": "t", "source": {"kind": "schedule", "created_by": by}}
+
+    ids = {
+        "agent": await _with(target, "steer", _src("agent")),
+        "user": await _with(target, "steer", _src("user")),
+        "plain": await _with(target, "steer", {"text": "t"}),
+        "subagent": await _with(target, "subagent_result", {"summary": "s"}),
+        "other_agent": await _with(other, "steer", _src("agent")),
+    }
+    try:
+        n = await get_agent_run_inbox_repository().expire_agent_items_for_target(
+            target_kind="issue", target_id=target, reason="issue_not_active"
+        )
+        rows = await pg.fetch(
+            "SELECT id, expired_at FROM agent_run_inbox WHERE id = ANY($1::bigint[])",
+            list(ids.values()),
+        )
+        expired = {r["id"] for r in rows if r["expired_at"] is not None}
+        assert expired == {ids["agent"]}
+        assert n == 1
+    finally:
+        await pg.execute(
+            "DELETE FROM agent_run_inbox WHERE id = ANY($1::bigint[])",
+            list(ids.values()),
+        )
+        await pg.execute(
+            "DELETE FROM issues WHERE id = ANY($1::bigint[])", [target, other]
+        )
+        await pg.execute("DELETE FROM auth.users WHERE id = $1", user_id)

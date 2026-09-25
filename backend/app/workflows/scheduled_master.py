@@ -39,6 +39,8 @@ from typing import Any, Dict, Final, List, Optional
 from dbos import DBOS
 from loguru import logger
 
+from app.repositories.user_schedules_repository import AGENT_WAKEUP_INACTIVE_STATUSES
+
 _MIN_REFIRE_GAP_MS = 100
 _BATCH_SIZE = 100  # don't dispatch more than this per tick
 
@@ -675,13 +677,10 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 _WAKEUP_TERMINAL_STATUSES = ("done", "cancelled")
 
-#: Statuses where an issue waits on a PERSON (review, an answer). An AGENT's
-#: wake-up on one would only start a billed run whose status write is skipped
-#: (defect B, prod S2: the chain kept re-arming itself on an in_review issue).
-#: A user's wake-up still fires there — spec §5 only promised "no fire once
-#: the issue has ended". ``in_progress`` is not listed: a live issue takes the
-#: wake-up into its inbox (``deliver_or_dispatch``), unchanged.
-_AGENT_WAKEUP_INACTIVE_STATUSES = ("in_review", "needs_followup")
+#: Statuses where an issue waits on a PERSON — an agent's wake-up there is
+#: disabled with ``issue_not_active``. Defined in the DBOS-free repository
+#: module because the sweeper's idle-drain reads the same tuple (FH3 T1).
+_AGENT_WAKEUP_INACTIVE_STATUSES = AGENT_WAKEUP_INACTIVE_STATUSES
 #: Same spelling as ``user_schedules_repository.ISSUE_NOT_ACTIVE`` (the disarm
 #: on completion writes it too), so the Schedules block shows one label.
 _WAKEUP_ISSUE_NOT_ACTIVE = "issue_not_active"

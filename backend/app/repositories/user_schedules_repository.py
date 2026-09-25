@@ -34,6 +34,19 @@ from app.models import Issues, Messages, UserSchedules
 ISSUE_NOT_ACTIVE = "issue_not_active"
 #: The existing reason for "the issue is done/cancelled" (scheduled_master).
 ISSUE_TERMINAL = "issue_terminal"
+#: Statuses where an issue waits on a PERSON (review, an answer). An AGENT's
+#: wake-up on one would only start a billed run whose status write is skipped
+#: (defect B, prod S2: the chain kept re-arming itself on an in_review issue).
+#: A user's wake-up still fires there — spec §5 only promised "no fire once
+#: the issue has ended". ``in_progress`` is not listed: a live issue takes the
+#: wake-up into its inbox (``deliver_or_dispatch``), unchanged.
+#:
+#: Two readers: the firing guard (``scheduled_master._fire_issue_wakeup``) and
+#: the sweeper's idle-drain scan, which expires an agent wake-up that reached
+#: the inbox while the issue was parked (FH3 T1). It lives here, not in
+#: ``scheduled_master``, so the sweeper need not import a module that
+#: registers DBOS workflows.
+AGENT_WAKEUP_INACTIVE_STATUSES = ("in_review", "needs_followup")
 
 WAKEUP_TASK_TYPE = "issue_wakeup"
 AGENT_CREATOR = "agent"
@@ -139,6 +152,7 @@ async def count_agent_wakeups_since_human(issue_id: int) -> int:
 
 __all__ = [
     "AGENT_CREATOR",
+    "AGENT_WAKEUP_INACTIVE_STATUSES",
     "ISSUE_NOT_ACTIVE",
     "ISSUE_TERMINAL",
     "SYSTEM_USER_MESSAGE_META_KEYS",

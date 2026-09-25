@@ -14,7 +14,19 @@ import datetime as dt
 from typing import Any, Optional, Sequence
 
 from loguru import logger
-from sqlalchemy import and_, func, insert, not_, select, tuple_, update
+from sqlalchemy import (
+    TIMESTAMP,
+    and_,
+    case,
+    cast,
+    func,
+    insert,
+    not_,
+    null,
+    select,
+    tuple_,
+    update,
+)
 from sqlalchemy.exc import IntegrityError
 
 from app.db.session import in_unit_of_work, read_scope, write_scope
@@ -57,14 +69,32 @@ def pending_summary_stmt(user_id: str):
     )
 
 
-def expire_stale_stmt(older_than: dt.datetime, *, skip_paused_issues: bool):
+def expire_stale_stmt(
+    older_than: dt.datetime,
+    *,
+    skip_paused_issues: bool,
+    skip_parked_issues: bool = False,
+    parked_floor: Optional[dt.datetime] = None,
+):
     """UPDATE … SET expired_at = now() for pending items older than the
     cutoff. With ``skip_paused_issues`` the issue targets whose issue has
     ``paused_at`` set are left alone (``NOT (kind='issue' AND id IN (paused))``
     — a non-issue target is never excluded). Pure builder: the shape is
     pinned by a compile test and executed by the schema-drift integration
-    test."""
+    test.
+
+    ``skip_parked_issues`` (FH3 T1) also leaves alone the issues that are
+    GENUINELY parked on the needs_input gate — see ``_parked_issue_ids``. The
+    gate waits ``NEEDS_INPUT_RECV_TTL_HOURS`` (72 h) per round, so a wake-up
+    queued while a person is being asked used to be thrown away at 24 h, long
+    before the answer that would have claimed it. ``parked_floor`` is required
+    with it: it is the upper bound that keeps a dead workflow's marker from
+    pinning its items forever.
+    """
     from app.models import Issues
+
+    if skip_parked_issues and parked_floor is None:
+        raise ValueError("skip_parked_issues needs a parked_floor (the TTL bound)")
 
     stmt = (
         update(AgentRunInbox)
@@ -76,17 +106,98 @@ def expire_stale_stmt(older_than: dt.datetime, *, skip_paused_issues: bool):
         # lost what (Task 7a defect 2 — the discard used to be silent).
         .returning(AgentRunInbox.target_kind, AgentRunInbox.target_id)
     )
+    excluded = []
     if skip_paused_issues:
-        paused_issue_ids = select(Issues.id).where(Issues.paused_at.isnot(None))
+        excluded.append(select(Issues.id).where(Issues.paused_at.isnot(None)))
+    if skip_parked_issues:
+        excluded.append(_parked_issue_ids(parked_floor))
+    for issue_ids in excluded:
         stmt = stmt.where(
             not_(
                 and_(
                     AgentRunInbox.target_kind == "issue",
-                    AgentRunInbox.target_id.in_(paused_issue_ids),
+                    AgentRunInbox.target_id.in_(issue_ids),
                 )
             )
         )
     return stmt
+
+
+#: ``awaiting_input.since`` is written by ``input_gate.mark_awaiting_input`` as
+#: ``datetime.isoformat()``. Only a value of that shape is cast: Postgres does
+#: not promise to evaluate ``AND`` operands in order, so one malformed marker
+#: would otherwise fail the whole UPDATE — every minute, for every issue.
+_ISO_TIMESTAMP_PREFIX = r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}"
+
+
+def _parked_issue_ids(parked_floor: dt.datetime):
+    """``SELECT id FROM issues`` that are parked on the needs_input gate and
+    still inside its wait: the SQL form of ``is_parked_on_input`` plus a bound.
+
+    * lock held — a workflow is (or was) running the issue;
+    * ``execution_state.awaiting_input`` present with no ``answered_at`` —
+      the question is still open;
+    * ``awaiting_input.since`` newer than ``parked_floor`` (the sweeper passes
+      now − (TTL + 1 h)) — the gate has not timed out yet.
+
+    NOT the bare lock (recon §4): on 2026-09-25 production held five locks,
+    four of them 16 days old, behind DBOS workflows that were all CANCELLED —
+    no reaper releases those (both only look at PENDING/ENQUEUED). Skipping on
+    the lock would leave their items unexpired AND undrained (the drain scan
+    excludes locked issues too), silently, forever. The ``since`` bound ends
+    that at the TTL; a marker without ``since`` is not skipped at all — fail
+    toward expiry, which WARNs. No JOIN to ``dbos.*``: the bound is enough, and
+    a new engine-schema access point is exactly what the raw-SQL rule forbids.
+    """
+    from app.models import Issues
+
+    marker = Issues.execution_state["awaiting_input"]
+    since = marker["since"].astext
+    since_ts = case(
+        (
+            since.op("~")(_ISO_TIMESTAMP_PREFIX),
+            cast(since, TIMESTAMP(timezone=True)),
+        ),
+        else_=null(),
+    )
+    return select(Issues.id).where(
+        Issues.execution_locked_at.isnot(None),
+        Issues.execution_state.has_key("awaiting_input"),
+        marker["answered_at"].astext.is_(None),
+        since_ts > parked_floor,
+    )
+
+
+def expire_agent_items_stmt(target_kind: str, target_id: int):
+    """UPDATE … SET expired_at = now() for the PENDING items on one target that
+    the AGENT scheduled for itself (``content.source.created_by = 'agent'``),
+    RETURNING their ids.
+
+    The idle-drain scan runs this on an issue waiting on a person (FH3 T1).
+    Only the agent's own wake-ups match: a person's scheduled wake-up says
+    ``created_by = 'user'``, and a plain steer or a ``subagent_result`` has no
+    ``source`` at all (the historical shape — 21 of 27 items in production) —
+    none of them is touched. Same cut as ``_fire_issue_wakeup``'s guard.
+    """
+    return (
+        update(AgentRunInbox)
+        .where(*_pending())
+        .where(AgentRunInbox.target_kind == target_kind)
+        .where(AgentRunInbox.target_id == int(target_id))
+        .where(AgentRunInbox.content["source"]["created_by"].astext == "agent")
+        .values(expired_at=dt.datetime.now(dt.timezone.utc))
+        .returning(AgentRunInbox.id)
+    )
+
+
+def issue_activity_stmt(issue_id: int):
+    """What the idle-drain scan needs to know about one issue: its status and
+    the two columns ``is_parked_on_input`` reads."""
+    from app.models import Issues
+
+    return select(
+        Issues.status, Issues.execution_state, Issues.execution_locked_at
+    ).where(Issues.id == int(issue_id))
 
 
 def pending_issue_targets_stmt(limit: int):
@@ -386,13 +497,22 @@ class AgentRunInboxRepository:
         ]
 
     async def expire_stale(
-        self, *, older_than: dt.datetime, skip_paused_issues: bool = True
+        self,
+        *,
+        older_than: dt.datetime,
+        skip_paused_issues: bool = True,
+        skip_parked_issues: bool = False,
+        parked_floor: Optional[dt.datetime] = None,
     ) -> int:
         """Sweeper: a steer nobody claimed for a day is an orphan (its run
         ended before the next step boundary). Marked, never deleted.
 
         ``skip_paused_issues`` (phase 2a): an item queued on a PAUSED issue is
         waiting for resume, not orphaned — however old it gets.
+
+        ``skip_parked_issues`` + ``parked_floor`` (FH3 T1): an item queued on an
+        issue parked on the needs_input gate waits for the answer turn, until
+        the gate's own TTL (``expire_stale_stmt`` / ``_parked_issue_ids``).
 
         Every expiry is WARNED with its target and count. A day-old unclaimed
         item is still an orphan and expiry is still the right end state, but
@@ -405,7 +525,10 @@ class AgentRunInboxRepository:
                 rows = (
                     await session.execute(
                         expire_stale_stmt(
-                            older_than, skip_paused_issues=skip_paused_issues
+                            older_than,
+                            skip_paused_issues=skip_paused_issues,
+                            skip_parked_issues=skip_parked_issues,
+                            parked_floor=parked_floor,
                         )
                     )
                 ).all()
@@ -424,6 +547,46 @@ class AgentRunInboxRepository:
                 "— they were delivered to the inbox and nobody ever consumed them"
             )
         return len(rows)
+
+    async def expire_agent_items_for_target(
+        self, *, target_kind: str, target_id: int, reason: str
+    ) -> int:
+        """Expire the pending items the agent scheduled for itself on one
+        target (``expire_agent_items_stmt``); return how many, WARN if any.
+
+        Raises on a database error instead of answering 0: the caller is about
+        to decide whether to buy a billed turn, and "nothing was expired"
+        would send it straight to dispatching the very item this was meant to
+        stop.
+        """
+        async with write_scope() as session:
+            ids = (
+                (
+                    await session.execute(
+                        expire_agent_items_stmt(target_kind, int(target_id))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        if ids:
+            logger.warning(
+                f"[agent_run_inbox] {target_kind} {target_id}: {len(ids)} pending "
+                f"agent wake-up item(s) expired unclaimed ({reason}) — the issue "
+                "is waiting on a person, so they will not start a turn"
+            )
+        return len(ids)
+
+    async def issue_activity(self, issue_id: int) -> Optional[dict[str, Any]]:
+        """``{status, execution_state, execution_locked_at}`` of one issue, or
+        None when it does not exist (``issue_activity_stmt``)."""
+        async with read_scope() as session:
+            row = (
+                (await session.execute(issue_activity_stmt(issue_id)))
+                .mappings()
+                .first()
+            )
+        return dict(row) if row is not None else None
 
     # ── target lookups (the hook resolves its targets once per run) ──────
 
@@ -476,6 +639,9 @@ __all__ = [
     "AgentRunInboxRepository",
     "Target",
     "claim_stmt",
+    "expire_agent_items_stmt",
+    "expire_stale_stmt",
     "get_agent_run_inbox_repository",
+    "issue_activity_stmt",
     "pending_issue_targets_stmt",
 ]

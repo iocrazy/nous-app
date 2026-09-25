@@ -77,11 +77,18 @@ async def test_the_step_only_scans_and_returns_orders(monkeypatch):
         assert (target_kind, target_id) == ("issue", 348020765598796)
         return {"id": 5, "kind": "steer", "user_id": "u-1"}
 
+    async def _activity(issue_id):
+        # FH3 T1: the scan reads the issue before ordering a turn; a live one
+        # is ordered exactly as before (the inactive case has its own file).
+        return {"status": "in_progress", "execution_locked_at": None}
+
     monkeypatch.setattr(
         inbox_mod,
         "get_agent_run_inbox_repository",
         lambda: SimpleNamespace(
-            pending_issue_targets=_targets, oldest_pending_for_target=_oldest
+            pending_issue_targets=_targets,
+            oldest_pending_for_target=_oldest,
+            issue_activity=_activity,
         ),
     )
     assert await sw.scan_idle_inbox_step() == [ORDER]
