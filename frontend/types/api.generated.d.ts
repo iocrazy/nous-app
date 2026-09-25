@@ -28223,7 +28223,7 @@ export interface components {
              * Layer
              * @enum {string}
              */
-            layer: "semantic" | "transcript";
+            layer: "semantic" | "visual" | "transcript";
             /**
              * Stale
              * @default 0
@@ -35649,6 +35649,19 @@ export interface components {
             title: string;
         };
         /**
+         * SearchHitShot
+         * @description The shot a ``visual`` hit came from: the moment to play from.
+         *     ``shot_id`` is a Snowflake, a string on the wire.
+         */
+        SearchHitShot: {
+            /** End Ms */
+            end_ms: number;
+            /** Shot Id */
+            shot_id: string;
+            /** Start Ms */
+            start_ms: number;
+        };
+        /**
          * SearchResponse
          * @description Response schema for search results.
          */
@@ -35676,6 +35689,8 @@ export interface components {
             videos?: {
                 [key: string]: unknown;
             }[];
+            /** Visual Leg */
+            visual_leg?: string | null;
         };
         /**
          * SearchResultItem
@@ -35700,6 +35715,7 @@ export interface components {
             media_id: number;
             /** Platform Id */
             platform_id: string;
+            shot?: components["schemas"]["SearchHitShot"] | null;
             /**
              * Similarity Score
              * @description Similarity score

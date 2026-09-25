@@ -20,12 +20,17 @@ from app.repositories.resource_embeddings_repository import (
     EmbeddingStoreMissing,
     get_resource_embeddings_repository,
 )
+from app.repositories.video_shots_repository import (
+    FRAME_KIND,
+    get_video_shot_embeddings_repository,
+)
 from app.schemas.ai_settings_responses import AiNousModelsResponse
 from app.schemas.search import (
     CreateSpaceRequest,
     DeleteSpaceResponse,
     HybridSearchRequest,
     LayerStatus,
+    SearchHitShot,
     SearchResponse,
     SearchResultItem,
     SemanticSearchRequest,
@@ -60,6 +65,7 @@ from app.services.library.search_service import (
     SearchFiltersUnavailable,
     SearchService,
 )
+from app.services.library.shot_cut import ALGO_VERSION as SHOT_ALGO_VERSION
 from app.services.search.service import ALL_SEARCH_KINDS, unified_search
 from app.utils.admin_helpers import create_audit_log
 
@@ -281,6 +287,7 @@ async def hybrid_search(
                     view_count=r.view_count,
                     created_at=r.created_at,
                     layer=r.layer,
+                    shot=_shot_out(r),
                 )
                 for r in response.results
             ],
@@ -289,6 +296,7 @@ async def hybrid_search(
             query=response.query,
             search_type=response.search_type,
             vector_leg=response.vector_leg,
+            visual_leg=response.visual_leg,
             legs=response.legs,
             reranked=response.reranked,
         )
@@ -424,12 +432,53 @@ async def text_search(
     )
 
 
+def _shot_out(r: Any) -> Optional[SearchHitShot]:
+    """``SearchResult.shot`` (ints) → wire shape (string Snowflake id)."""
+    shot = getattr(r, "shot", None)
+    if not shot:
+        return None
+    return SearchHitShot(
+        shot_id=str(shot["shot_id"]),
+        start_ms=int(shot["start_ms"]),
+        end_ms=int(shot["end_ms"]),
+    )
+
+
 # ``embedding_spaces.id`` is a positive Snowflake, never 0: counting coverage
 # against 0 yields "covered 0 of the caller's total" without any space.
 NO_SPACE_ID = 0
 
 
-def _layers(covered: int, total: int, stale: int = 0) -> List[LayerStatus]:
+#: ``(covered, total, stale)`` of the visual layer, or None when the shot
+#: store is not there (migration 507 not applied).
+VisualCoverage = Optional[tuple[int, int, int]]
+
+
+async def _visual_coverage(user_id: str, space_id: int) -> VisualCoverage:
+    """Videos of ``user_id`` with a frame vector in ``space_id`` (mig 507).
+    Its own try: a missing shot store must not take the semantic row down
+    with it."""
+    repo = get_video_shot_embeddings_repository()
+    try:
+        covered, total = await repo.coverage(
+            user_id=user_id, space_id=space_id, kind=FRAME_KIND
+        )
+        stale = await repo.stale_count(
+            user_id=user_id,
+            space_id=space_id,
+            kind=FRAME_KIND,
+            algo_version=SHOT_ALGO_VERSION,
+        )
+    except EmbeddingStoreMissing as e:
+        logger.warning(f"Vector status: shot store missing (migration 507): {e}")
+        return None
+    return covered, total, stale
+
+
+def _layers(
+    covered: int, total: int, stale: int = 0, visual: VisualCoverage = None
+) -> List[LayerStatus]:
+    v_covered, v_total, v_stale = visual if visual is not None else (0, 0, 0)
     return [
         LayerStatus(
             layer="semantic",
@@ -437,6 +486,15 @@ def _layers(covered: int, total: int, stale: int = 0) -> List[LayerStatus]:
             covered=covered,
             total=total,
             stale=stale,
+        ),
+        # Visual = one frame vector per shot (mig 507); counted against the
+        # caller's VIDEOS, not every resource.
+        LayerStatus(
+            layer="visual",
+            status="ok" if v_covered else "not_built",
+            covered=v_covered,
+            total=v_total,
+            stale=v_stale,
         ),
         # Enum slot only until the transcript layer ships.
         LayerStatus(layer="transcript", status="not_built", covered=0, total=total),
@@ -466,12 +524,13 @@ async def _space_statuses(
             layer=SEMANTIC_LAYER,
             doc_version=DOC_VERSION,
         )
+        visual = await _visual_coverage(user_id, int(space["id"]))
         out.append(
             SpaceStatus(
                 **SpaceInfo.from_row(space).model_dump(),
                 active=int(space["id"]) == active_id,
                 catalog_name=await catalog_name_for(space["actual_model"]),
-                layers=_layers(covered, total, stale),
+                layers=_layers(covered, total, stale, visual),
             )
         )
     return out
@@ -505,7 +564,9 @@ async def vectors_status(auth: AuthDep):
         return VectorsStatusResponse(
             space=None,
             status="unconfigured",
-            layers=_layers(0, total),
+            layers=_layers(
+                0, total, visual=await _visual_coverage(auth.user_id, NO_SPACE_ID)
+            ),
             spaces=spaces,
             can_manage=can_manage,
         )

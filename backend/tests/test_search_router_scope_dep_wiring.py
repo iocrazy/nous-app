@@ -76,6 +76,24 @@ def test_vectors_status_runs_repo_under_user_scope(client, monkeypatch):
         search_router_mod.EmbeddingService, "space_spec", _fake_space_spec
     )
     monkeypatch.setattr(rer.ResourceEmbeddingsRepository, "coverage", _fake_coverage)
+
+    # The visual row (mig 507) reads ``resources`` through the shot repo the
+    # same way; it must see the same scope.
+    from app.repositories import video_shots_repository as vsr
+
+    async def _fake_shot_coverage(self, *, user_id, space_id, kind):
+        seen.append(current_scope())
+        return 0, 0
+
+    async def _fake_shot_stale(self, **kwargs):
+        return 0
+
+    monkeypatch.setattr(
+        vsr.VideoShotEmbeddingsRepository, "coverage", _fake_shot_coverage
+    )
+    monkeypatch.setattr(
+        vsr.VideoShotEmbeddingsRepository, "stale_count", _fake_shot_stale
+    )
     # The spaces listing and the admin check have no DB here; this test is
     # about the scope around the resources read only.
     from app.repositories import embedding_space_repository as esr
@@ -92,5 +110,5 @@ def test_vectors_status_runs_repo_under_user_scope(client, monkeypatch):
     resp = client.get("/api/v1/search/vectors/status")
 
     assert resp.status_code == 200, resp.text
-    assert seen == [Scope(user_id=_USER_A)]
+    assert seen == [Scope(user_id=_USER_A), Scope(user_id=_USER_A)]
     assert current_scope() is None  # reset after the request

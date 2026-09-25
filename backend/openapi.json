@@ -29195,6 +29195,7 @@
           "layer": {
             "enum": [
               "semantic",
+              "visual",
               "transcript"
             ],
             "title": "Layer",
@@ -50911,6 +50912,30 @@
         "title": "SearchHit",
         "type": "object"
       },
+      "SearchHitShot": {
+        "description": "The shot a ``visual`` hit came from: the moment to play from.\n``shot_id`` is a Snowflake, a string on the wire.",
+        "properties": {
+          "end_ms": {
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "shot_id": {
+            "title": "Shot Id",
+            "type": "string"
+          },
+          "start_ms": {
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "shot_id",
+          "start_ms",
+          "end_ms"
+        ],
+        "title": "SearchHitShot",
+        "type": "object"
+      },
       "SearchResponse": {
         "description": "Response schema for search results.",
         "properties": {
@@ -50970,6 +50995,17 @@
             },
             "title": "Videos",
             "type": "array"
+          },
+          "visual_leg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual Leg"
           }
         },
         "required": [
@@ -51047,6 +51083,16 @@
           "platform_id": {
             "title": "Platform Id",
             "type": "string"
+          },
+          "shot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchHitShot"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "similarity_score": {
             "description": "Similarity score",

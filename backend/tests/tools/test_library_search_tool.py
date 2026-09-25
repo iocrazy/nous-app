@@ -31,6 +31,7 @@ def _hit(media_id: int, layer: str, score: float, **kw: Any) -> SearchResult:
         author=kw.get("author", "someone"),
         created_at=kw.get("created_at", "2026-09-01T00:00:00Z"),
         layer=layer,
+        shot=kw.get("shot"),
     )
 
 
@@ -55,6 +56,19 @@ class _FakeSearch:
             search_type="hybrid",
             vector_leg=self.vector_leg,
             legs=counts,
+        )
+
+    async def visual_only(self, query: str, **kw: Any) -> SearchResponse:
+        self.calls.append({"query": query, "visual_only": True, **kw})
+        self.scope_seen = db_scope._scope.get()
+        res = [r for r in self.results if r.layer == "visual"][: kw.get("limit", 20)]
+        return SearchResponse(
+            results=res,
+            total=len(res),
+            query=query,
+            search_type="visual",
+            visual_leg=self.vector_leg,
+            legs={"visual": len(res)},
         )
 
     async def semantic_only(self, query: str, **kw: Any) -> SearchResponse:
@@ -186,10 +200,28 @@ async def test_semantic_without_text_skips_the_text_leg(lookup):
 async def test_only_unbuilt_layers_call_nothing(lookup):
     fake = _FakeSearch([_hit(1, "text", 1.0)])
     out = await lst.library_search(
-        query="q", layers=["visual"], user_id=USER, search_service=fake
+        query="q", layers=["camera"], user_id=USER, search_service=fake
     )
     assert fake.calls == []
     assert out["hits"] == [] and out["legs"] == {}
+
+
+async def test_visual_alone_runs_the_shot_leg_and_carries_the_moment(lookup):
+    shot = {"shot_id": BIG_MEDIA_ID + 5, "start_ms": 41000, "end_ms": 52000}
+    fake = _FakeSearch(
+        [_hit(1, "text", 1.0), _hit(BIG_MEDIA_ID, "visual", 0.62, shot=shot)]
+    )
+    out = await lst.library_search(
+        query="night street", layers=["visual"], user_id=USER, search_service=fake
+    )
+    assert fake.calls[0]["visual_only"] is True
+    assert [h["layer"] for h in out["hits"]] == ["visual"]
+    assert out["hits"][0]["shot"] == {
+        "shot_id": str(BIG_MEDIA_ID + 5),  # Snowflake survives as a string
+        "start_ms": 41000,
+        "end_ms": 52000,
+    }
+    assert out["legs"] == {"visual": 1} and out["vector_leg"] is None
 
 
 async def test_empty_layers_means_all(lookup):

@@ -19,7 +19,11 @@ from app.repositories.embedding_space_repository import (
     get_embedding_space_repository,
 )
 from app.repositories.resource_embeddings_repository import (
+    EmbeddingStoreMissing,
     get_resource_embeddings_repository,
+)
+from app.repositories.video_shots_repository import (
+    get_video_shot_embeddings_repository,
 )
 from app.schemas.search import DEFAULT_SEARCH_FIELDS, LibraryChipFilters
 from app.services.ai.providers.embedding_service import (
@@ -517,7 +521,9 @@ class SearchService:
                 timeout=HYBRID_EMBED_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
-            logger.error(f"[hybrid] visual query embedding exceeded {HYBRID_EMBED_TIMEOUT_S}s")
+            logger.error(
+                f"[hybrid] visual query embedding exceeded {HYBRID_EMBED_TIMEOUT_S}s"
+            )
             return [], "timeout"
         except Exception as e:  # noqa: BLE001 — belt to try_embed's brace
             logger.error(f"[hybrid] visual query embedding raised: {e}")
@@ -572,7 +578,10 @@ class SearchService:
             if h.media_id in seen:
                 continue
             seen.add(h.media_id)
-            merged.append(replace(h, layer=h.layer or "semantic"))
+            # A vector hit that never named its leg is a semantic one (the
+            # dataclass default is "text", which a vector row never is).
+            layer = h.layer if h.layer in ("semantic", "visual") else "semantic"
+            merged.append(replace(h, layer=layer))
         return merged[:limit]
 
     async def visual_only(
