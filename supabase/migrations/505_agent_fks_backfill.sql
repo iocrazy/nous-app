@@ -50,9 +50,14 @@
 -- same shape as the already-documented "orphan child run" limitation in
 -- tree_charge. Nothing in the app hard-deletes runs or agents (the API is soft
 -- delete since 501), so these rules fire only on manual SQL or a future purge.
--- Caveat for that purge: a survivor ended within the last 7 days with no
--- billing stamp of its own can be nominated by the stale-tree sweeper and
--- charged as its own tree. Purge settled trees whole, not their roots alone.
+-- Caveat for that purge: delete whole trees only, never a single run.
+-- Partial deletes leave two broken shapes (reachable by manual SQL only):
+--   * delete a middle node: its children get parent_run_id NULL while
+--     root_run_id still names the old root. The stale-tree sweeper nominates
+--     rows with parent_run_id NULL, so for the 7-day window each such child is
+--     re-nominated every minute and settles as "already" every time.
+--   * delete a root: grandchildren keep their parent but lose root_run_id, so
+--     the old tree splits into separate trees that never settle.
 --
 -- Row counts are tiny; plain validating ADD CONSTRAINT is fine (no NOT VALID).
 -- Order matters: orphans are cleared before the FKs that would reject them.

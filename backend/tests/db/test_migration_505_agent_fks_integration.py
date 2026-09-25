@@ -162,6 +162,10 @@ async def test_migration_cleans_orphans_and_is_rerunnable(tx):
     )
     orphan_conv = await _meta(pg, uid, team, ghost, "plain-text-probe")
     live_conv = await _meta(pg, uid, team, live, "m505-live")
+    # A soft-deleted agent's row still exists, so its binding is not an orphan.
+    tomb = await _agent(pg, uid, slug="m505-tomb")
+    await pg.execute("UPDATE ai_agents SET deleted_at = now() WHERE id = $1", tomb)
+    tomb_conv = await _meta(pg, uid, team, tomb, "m505-tomb")
 
     await pg.execute(_sql())
 
@@ -190,6 +194,13 @@ async def test_migration_cleans_orphans_and_is_rerunnable(tx):
         )
         == live
     )
+    assert (
+        await pg.fetchval(
+            "SELECT agent_id FROM conversation_ai_meta WHERE conversation_id = $1",
+            tomb_conv,
+        )
+        == tomb
+    ), "a soft-deleted agent's binding is kept (only missing rows are orphans)"
 
     # Second run: every FK already exists (the drift DB's shape).
     await pg.execute(_sql())
