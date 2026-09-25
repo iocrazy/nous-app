@@ -9,7 +9,10 @@
 import React from 'react';
 
 import { suspectedNonChatKind } from '../../utils/nonChatModel';
-import { isPlatformModelAvailable } from '../../utils/platformModel';
+import {
+  isPlatformModelAvailable,
+  platformModelAvailability,
+} from '../../utils/platformModel';
 import type {
   AIProviderConfig,
   AISettings as AISettingsType,
@@ -65,6 +68,22 @@ export function visiblePlatformModels<
   if (nousConfig.enabled === false) return [];
   const disabled = new Set(nousConfig.disabled_models ?? []);
   return available.filter((m) => !disabled.has(m.name));
+}
+
+/**
+ * Reason text per platform row that is offered but cannot be picked right now
+ * (utils/platformModel › platformModelAvailability: `idle` on nous-engine).
+ * ``notLoaded`` is the caller's already-localized string.
+ */
+export function platformNotLoadedLabels(
+  rows: { name: string; last_test_status?: NousModelPublic['last_test_status'] }[],
+  notLoaded: string,
+): Record<string, string> {
+  return Object.fromEntries(
+    rows
+      .filter((m) => platformModelAvailability(m).reason === 'not_loaded')
+      .map((m) => [m.name, notLoaded]),
+  );
 }
 
 /**
@@ -156,6 +175,12 @@ export function nonChatModelNotes(
  * probe failed on a model that was never probed: these options carry
  * ``data-note``, not ``data-health="fail"``. Both are suffixes, both stay
  * selectable, and an option can carry one of each.
+ *
+ * ``notLoadedLabels`` is the one map that DOES disable: a platform row that is
+ * `idle` on nous-engine (authorized, not loaded) cannot answer a chat — a real
+ * call got 503 "not loaded" on 2026-09-24 — so the option stays visible but
+ * unpickable, with the localized reason as ``data-description``. A saved value
+ * that is idle stays selected (UiSelect dims it and titles the trigger).
  */
 export function renderModelSelect(params: {
   value: string;
@@ -167,6 +192,7 @@ export function renderModelSelect(params: {
   unhealthyLabels?: Record<string, string>;
   noteLabels?: Record<string, string>;
   orphanLabels?: Record<string, string>;
+  notLoadedLabels?: Record<string, string>;
 }): React.ReactElement {
   const {
     value,
@@ -178,6 +204,7 @@ export function renderModelSelect(params: {
     unhealthyLabels,
     noteLabels,
     orphanLabels,
+    notLoadedLabels,
   } = params;
   const knownModels = new Set(groups.flatMap((g) => g.models));
   const showOrphan = value !== '' && !knownModels.has(value);
@@ -202,6 +229,7 @@ export function renderModelSelect(params: {
           {group.models.map((m) => {
             const warning = unhealthyLabels?.[m];
             const note = noteLabels?.[m];
+            const notLoaded = notLoadedLabels?.[m];
             const label = group.labels?.[m] ?? m;
             const suffixes = [warning, note].filter(Boolean);
             return (
@@ -210,6 +238,9 @@ export function renderModelSelect(params: {
                 value={m}
                 data-health={warning ? 'fail' : undefined}
                 data-note={note ? 'non-chat' : undefined}
+                disabled={Boolean(notLoaded)}
+                data-availability={notLoaded ? 'not_loaded' : undefined}
+                data-description={notLoaded}
               >
                 {suffixes.length > 0
                   ? `${label} — ${suffixes.join(' · ')}`

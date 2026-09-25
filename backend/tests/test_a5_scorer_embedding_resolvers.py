@@ -83,6 +83,51 @@ async def test_scorer_falls_to_first_enabled_platform_llm():
     repo.list_enabled.assert_awaited_once_with("llm")
 
 
+async def test_scorer_platform_pick_skips_idle_and_fail_rows():
+    """Same default rule as the canvas Catalog default (default_model_pick):
+    an idle (not loaded on nous-engine) or failing row is not reported as the
+    scorer's model while an ok / unprobed row exists."""
+    rows = [
+        {"name": "nous-qwen3-8-27b", "last_test_status": "idle"},
+        {"name": "broken", "last_test_status": "fail"},
+        {"name": "mediahub-deepseek-v4-flash", "last_test_status": "ok"},
+    ]
+    full = {
+        name: {
+            "name": name,
+            "actual_model": actual,
+            "base_url": "https://cat/v1",
+            "api_key": "sk-cat",
+            "app_id": "",
+        }
+        for name, actual in [
+            ("nous-qwen3-8-27b", "qwen3-8-27b"),
+            ("broken", "doubao-pro"),
+            ("mediahub-deepseek-v4-flash", "deepseek-v4-flash"),
+        ]
+    }
+    repo = MagicMock()
+    repo.list_enabled = AsyncMock(return_value=rows)
+    repo.get_by_name = AsyncMock(side_effect=lambda n: full[n])
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            AsyncMock(return_value=_gov()),
+        ),
+        patch(
+            "app.services.ai.governance.ai_governance.is_nous_allowed",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "app.repositories.nous_model_repository.get_nous_model_repository",
+            return_value=repo,
+        ),
+    ):
+        cfg = await resolve_scorer_config()
+    assert cfg.origin == "platform"
+    assert cfg.model == "deepseek-v4-flash"
+
+
 async def test_scorer_nothing_configured_degrades_not_raises():
     with (
         patch(

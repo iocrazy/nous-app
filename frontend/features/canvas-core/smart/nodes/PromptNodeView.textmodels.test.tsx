@@ -27,6 +27,8 @@ vi.mock('./useTextModels', () => ({
     // ride along; actual_provider never does (leak tripwire).
     { name: 'mediahub-doubao-llm', display_name: 'Doubao LLM', actual_model: 'doubao-seed-1-6-250615', type: 'llm', last_test_status: 'ok' },
     { name: 'mediahub-deepseek', display_name: 'DeepSeek', actual_model: 'deepseek-v4-pro', type: 'llm', last_test_status: 'not_probed' },
+    // Local nous-engine row, authorized but not loaded (mig 503).
+    { name: 'nous-qwen3-8-27b', display_name: 'Qwen3 27B', actual_model: 'qwen3-8-27b', type: 'llm', last_test_status: 'idle' },
   ],
 }));
 
@@ -91,6 +93,7 @@ describe('PromptNodeView text-model dropdown (P0-1)', () => {
       // Labelled like the admin AI Models card; the value stays the row name.
       { value: 'mediahub-doubao-llm', label: 'doubao-seed-1-6-250615 · Doubao LLM' },
       { value: 'mediahub-deepseek', label: 'deepseek-v4-pro · DeepSeek' },
+      { value: 'nous-qwen3-8-27b', label: 'qwen3-8-27b · Qwen3 27B' },
     ]);
     // The retired hardcoded values must be gone.
     const values = options.map((o) => o.value);
@@ -107,5 +110,25 @@ describe('PromptNodeView text-model dropdown (P0-1)', () => {
     seedAndRender(TEXT_DATA);
     changeUiSelect('Prompt provider', 'mediahub-deepseek');
     expect(nodeData().provider_slug).toBe('mediahub-deepseek');
+  });
+});
+
+describe('PromptNodeView text-model dropdown — idle rows', () => {
+  it('shows an idle row disabled with the not-loaded reason', () => {
+    seedAndRender(TEXT_DATA);
+    const options = Array.from(uiSelectMirror('Prompt provider').options);
+    const idle = options.find((o) => o.value === 'nous-qwen3-8-27b')!;
+    expect(idle.disabled).toBe(true);
+    // react-i18next is mocked to echo keys here.
+    expect(idle.dataset.description).toBe('platformModel.notLoaded');
+    expect(options.find((o) => o.value === 'mediahub-deepseek')!.disabled).toBe(false);
+  });
+
+  it('keeps a saved idle model selected and titles the trigger', () => {
+    seedAndRender({ ...TEXT_DATA, provider_slug: 'nous-qwen3-8-27b' });
+    expect(uiSelectMirror('Prompt provider').value).toBe('nous-qwen3-8-27b');
+    expect(screen.getByLabelText('Prompt provider').getAttribute('title')).toBe(
+      'platformModel.notLoaded',
+    );
   });
 });

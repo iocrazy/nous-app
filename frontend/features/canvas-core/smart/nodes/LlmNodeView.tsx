@@ -25,7 +25,8 @@ import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { useTextModels } from './useTextModels';
 import { UiSelect } from '../../../../components/ui';
-import { platformModelText } from '../../../../utils/platformModel';
+import { useTranslation } from 'react-i18next';
+import { platformModelText, platformOptionAttrs } from '../../../../utils/platformModel';
 
 const asObj = (n: unknown) => n as Record<string, unknown>;
 
@@ -63,6 +64,9 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
   const d = data as unknown as LlmNodeData;
   const patch = useNodeDataPatch(id);
   const textModels = useTextModels();
+  const { t } = useTranslation();
+  // Idle nous-engine rows stay listed but disabled (utils/platformModel).
+  const notLoadedText = t('platformModel.notLoaded', 'Not loaded on nous-engine');
   const agents = useAgents();
   const [copied, setCopied] = useState(false);
   // Read-only: model/agent pickers and the input all patch the node, and
@@ -127,7 +131,9 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
           >
             <option value="">Catalog default</option>
             {textModels.map((m) => (
-              <option key={m.name} value={m.name}>
+              <option key={m.name} value={m.name}
+                {...platformOptionAttrs(m, notLoadedText)}
+              >
                 {platformModelText(m)}
               </option>
             ))}

@@ -230,3 +230,70 @@ describe('AISettings — platform model health', () => {
     expect(select.value).toBe(`nous:${sickAsr.name}`);
   });
 });
+
+// ── idle: authorized on nous-engine, not loaded (mig 503) ───────────────────
+// Unlike `fail` (hidden), an idle row stays visible but cannot be picked: a
+// real chat to one got 503 "not loaded" on 2026-09-24.
+const IDLE_LLM = makeNousModel({
+  name: 'nous-qwen3-8-27b',
+  display_name: 'Qwen3 27B',
+  actual_model: 'qwen3-8-27b',
+  type: 'llm',
+  pricing_type: 'per_token',
+  pricing_value: 1,
+  last_test_status: 'idle',
+  last_tested_at: twentyMinutesAgo,
+});
+const IDLE_ASR = makeNousModel({
+  ...UNPROBED_ASR,
+  name: 'nous-local-asr',
+  last_test_status: 'idle',
+  last_tested_at: twentyMinutesAgo,
+});
+
+function optionFor(value: string): HTMLOptionElement[] {
+  return Array.from(document.querySelectorAll(`option[value="${value}"]`)) as HTMLOptionElement[];
+}
+
+describe('AISettings — platform model not loaded on nous-engine', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows an idle LLM in the task pickers, disabled, with the reason', async () => {
+    await renderWith([IDLE_LLM, WELL_LLM]);
+    const idle = optionFor(`nous:${IDLE_LLM.name}`);
+    expect(idle.length).toBeGreaterThan(0);
+    for (const o of idle) {
+      expect(o.disabled).toBe(true);
+      expect(o.dataset.description).toBe('Not loaded on nous-engine');
+    }
+    for (const o of optionFor(`nous:${WELL_LLM.name}`)) expect(o.disabled).toBe(false);
+  });
+
+  it('shows an idle ASR model in the transcription picker, disabled', async () => {
+    await renderWith([IDLE_ASR, WELL_LLM]);
+    const [idle] = optionFor(`nous:${IDLE_ASR.name}`);
+    expect(idle.disabled).toBe(true);
+    expect(idle.dataset.description).toBe('Not loaded on nous-engine');
+  });
+
+  it('keeps a saved idle value selected, dimmed and titled — never swapped', async () => {
+    await renderWith([IDLE_LLM, WELL_LLM], { summarization: `nous:${IDLE_LLM.name}` });
+    const selected = optionFor(`nous:${IDLE_LLM.name}`)
+      .map((o) => o.closest('select') as HTMLSelectElement)
+      .find((s) => s.value === `nous:${IDLE_LLM.name}`);
+    expect(selected).toBeDefined();
+    const trigger = selected!.parentElement!.querySelector('button') as HTMLButtonElement;
+    expect(trigger.getAttribute('title')).toBe('Not loaded on nous-engine');
+  });
+
+  it('lists an idle row on the platform card with a not-loaded badge', async () => {
+    await renderWith([IDLE_LLM, WELL_LLM]);
+    const badge = cardRow(IDLE_LLM.name).querySelector('[data-testid="platform-model-not-loaded"]');
+    expect(badge?.getAttribute('title')).toBe('Not loaded on nous-engine');
+    expect(
+      cardRow(WELL_LLM.name).querySelector('[data-testid="platform-model-not-loaded"]'),
+    ).toBeNull();
+  });
+});

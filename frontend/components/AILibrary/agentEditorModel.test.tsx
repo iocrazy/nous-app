@@ -9,7 +9,11 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { renderModelSelect, type ProviderModelGroup } from './agentEditorModel';
+import {
+  platformNotLoadedLabels,
+  renderModelSelect,
+  type ProviderModelGroup,
+} from './agentEditorModel';
 
 const GROUPS: ProviderModelGroup[] = [
   {
@@ -244,5 +248,45 @@ describe('renderModelSelect — orphan labels', () => {
     renderSelect({ value: 'gone-model', orphanLabels: {} });
     const opt = document.querySelector('option[data-orphan="stale"]');
     expect(opt?.textContent).toContain('gone-model');
+  });
+});
+
+// ── idle platform rows (nous-engine authorized, not loaded) ─────────────────
+// Unlike a failing probe (advice, stays selectable), an idle row answered a
+// real chat with 503 "not loaded" on 2026-09-24 — picking it cannot work, so
+// the option is visible but disabled, with the reason as its description.
+describe('renderModelSelect — not loaded on nous-engine', () => {
+  const NOT_LOADED = { 'mediahub-deepseek-v4-flash': 'Not loaded on nous-engine' };
+
+  it('disables the idle option and carries the reason', () => {
+    renderSelect({ notLoadedLabels: NOT_LOADED });
+    const flash = optionFor('mediahub-deepseek-v4-flash');
+    expect(flash.disabled).toBe(true);
+    expect(flash.dataset.availability).toBe('not_loaded');
+    expect(flash.dataset.description).toBe('Not loaded on nous-engine');
+    expect(optionFor('mediahub-deepseek-v4-pro').disabled).toBe(false);
+  });
+
+  it('keeps an idle saved value shown, dimmed, with the reason on the trigger', () => {
+    renderSelect({ value: 'mediahub-deepseek-v4-flash', notLoadedLabels: NOT_LOADED });
+    const trigger = screen.getByRole('button');
+    expect(trigger.textContent).toContain('mediahub-deepseek-v4-flash');
+    expect(trigger.getAttribute('title')).toBe('Not loaded on nous-engine');
+    // Not treated as an orphan: it is still a known row of its group.
+    expect(container.querySelectorAll('option[data-orphan]')).toHaveLength(0);
+  });
+});
+
+describe('platformNotLoadedLabels', () => {
+  it('maps only idle rows to the reason', () => {
+    const rows = [
+      { name: 'a', last_test_status: 'idle' as const },
+      { name: 'b', last_test_status: 'ok' as const },
+      { name: 'c', last_test_status: null },
+      { name: 'd', last_test_status: 'not_probed' as const },
+    ];
+    expect(platformNotLoadedLabels(rows, 'Not loaded on nous-engine')).toEqual({
+      a: 'Not loaded on nous-engine',
+    });
   });
 });

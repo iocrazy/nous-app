@@ -18,9 +18,10 @@ Timer,
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import type { NousModelPublic } from '../../../../types/api';
 import type { PromptGenSettings } from '../types';
 import { useModelCapabilities } from './useModelCapabilities';
-import { platformModelText } from '../../../../utils/platformModel';
+import { platformModelAvailability, platformModelText } from '../../../../utils/platformModel';
 
 export interface FooterModel {
   name: string;
@@ -31,6 +32,8 @@ export interface FooterModel {
    *  daemon (C 方案). Derived server-side — the raw provider name is behind
    *  the 2026-08-14 leak tripwire and never reaches the client. */
   is_local?: boolean;
+  /** Last probe verdict; `idle` rows are listed but not pickable. */
+  last_test_status?: NousModelPublic['last_test_status'];
 }
 
 /** What the picker calls a catalog row. The "(Local)" tag and the old
@@ -246,6 +249,11 @@ export function GenFooterControls({
   );
   const found = models.find((m) => m.name === gen.model);
   const selectedModelLabel = found ? modelLabel(found) : gen.model || 'Default';
+  // Idle nous-engine rows (authorized, not loaded) are listed but not pickable
+  // (utils/platformModel). A saved one stays on the pill, titled with why.
+  const notLoadedText = t('platformModel.notLoaded', 'Not loaded on nous-engine');
+  const isNotLoaded = (m: FooterModel) => platformModelAvailability(m).reason === 'not_loaded';
+  const selectedNotLoaded = found ? isNotLoaded(found) : false;
   // Resolved against the OFFERED rungs, not the full ramp: a stored quality
   // this model no longer honours is dropped server-side before dispatch, so
   // the run really will be Auto and the pill must say so. (Unlike a stranded
@@ -276,9 +284,12 @@ export function GenFooterControls({
         onHover={(e) => hoverOpen('model', e.currentTarget)}
         disabled={disabled}
         className="min-w-0 flex-1"
+        title={selectedNotLoaded ? notLoadedText : undefined}
       >
         <Sparkles size={11} />
-        <span className="truncate">{selectedModelLabel}</span>
+        <span className={`truncate ${selectedNotLoaded ? 'opacity-60' : ''}`}>
+          {selectedModelLabel}
+        </span>
       </Pill>
       <Pill
         testid="pill-size"
@@ -389,6 +400,7 @@ export function GenFooterControls({
                 label={modelLabel(m)}
                 active={gen.model === m.name}
                 onClick={() => pick({ model: m.name })}
+                unavailableReason={isNotLoaded(m) ? notLoadedText : undefined}
               />
             ))}
           </div>
@@ -543,6 +555,7 @@ function Pill({
   testid,
   ariaLabel,
   className = '',
+  title,
 }: {
   children: React.ReactNode;
   onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -552,12 +565,14 @@ function Pill({
   testid: string;
   ariaLabel?: string;
   className?: string;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       data-testid={testid}
       aria-label={ariaLabel}
+      title={title}
       onClick={onClick}
       onMouseEnter={onHover}
       disabled={disabled}
@@ -604,20 +619,33 @@ function PopRow({
   label,
   active,
   onClick,
+  unavailableReason,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
+  /** Set → the row is shown but cannot be picked; the text says why. */
+  unavailableReason?: string;
 }) {
+  const unavailable = Boolean(unavailableReason);
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={unavailable ? undefined : onClick}
+      disabled={unavailable}
+      title={unavailableReason}
       className={`nodrag flex items-center justify-between rounded-lg px-2 py-1 text-left text-xs ${
         active ? 'font-bold text-canvas-text' : 'text-canvas-text'
-      } hover:bg-canvas-card`}
+      } ${unavailable ? 'cursor-not-allowed opacity-40' : 'hover:bg-canvas-card'}`}
     >
-      <span className="truncate">{label}</span>
+      <span className="min-w-0">
+        <span className="block truncate">{label}</span>
+        {unavailable && (
+          <span className="block truncate text-[10px] font-normal text-canvas-muted">
+            {unavailableReason}
+          </span>
+        )}
+      </span>
       {active && <span className="ml-2 h-1.5 w-1.5 rounded-full bg-canvas-strong" />}
     </button>
   );

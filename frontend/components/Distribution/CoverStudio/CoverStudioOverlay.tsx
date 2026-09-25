@@ -67,7 +67,7 @@ import { CoverFrameGrabber, type CropFocus, type GrabbedFrame } from './CoverFra
 import { CoverDrafts, type CoverStage } from './CoverDrafts';
 import { HelpTip } from './HelpTip';
 import './cover-studio.css';
-import { platformModelText } from '../../../utils/platformModel';
+import { platformModelText, platformOptionAttrs } from '../../../utils/platformModel';
 
 type Orientation = 'vertical' | 'horizontal';
 
@@ -963,8 +963,13 @@ export function CoverStudioOverlay({
                     data-testid="cover-model"
                   >
                     <option value="">{t('distribution.coverStudio.modelDefault', 'Catalog default')}</option>
+                    {/* Idle nous-engine rows: listed, not pickable. */}
                     {models.map((m) => (
-                      <option key={m.name} value={m.name}>
+                      <option
+                        key={m.name}
+                        value={m.name}
+                        {...platformOptionAttrs(m, t('platformModel.notLoaded'))}
+                      >
                         {platformModelText(m)}
                       </option>
                     ))}

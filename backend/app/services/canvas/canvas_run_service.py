@@ -28,12 +28,13 @@ distinguishes ok vs failed by the body).
 
 from __future__ import annotations
 
-from typing import Any, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from uuid import UUID
 
 from loguru import logger
 
 from app.schemas.canvas_run import CanvasPromptRunResult
+from app.services.ai.default_model_pick import rank_default_candidates
 
 # ``nous/<workflow>`` slugs used to route to the legacy nous-center workflow
 # bridge. That bridge was retired on 2026-09-24 (never configured in
@@ -227,6 +228,20 @@ def _extract_video_gen_params(node: Optional[Mapping[str, Any]]) -> dict:
     }
 
 
+def _row_name(row: Dict[str, Any]) -> Optional[str]:
+    name = row.get("name")
+    return name.strip() if isinstance(name, str) and name.strip() else None
+
+
+def _pick_default_row(rows: List[Dict[str, Any]]) -> Optional[str]:
+    """First named row under the shared implicit-default rule
+    (``app.services.ai.default_model_pick``: ok → unprobed, idle/fail skipped,
+    catalog order + WARN when nothing qualifies)."""
+    named = [row for row in rows if _row_name(row)]
+    ranked = rank_default_candidates(named, context="canvas catalog default")
+    return _row_name(ranked[0]) if ranked else None
+
+
 class CanvasRunService:
     """Single entrypoint: ``await svc.run_prompt(...)`` returns a result."""
 
@@ -240,10 +255,11 @@ class CanvasRunService:
     async def _default_text_model(self) -> str:
         """The catalog model an empty ``provider_slug`` resolves to.
 
-        First enabled ``llm`` row in the platform ``nous_models`` catalog,
-        falling back to the governed maintenance model (itself a catalog
-        entry). DB-only, so the default text Run always names a model the
-        platform actually has configured — the root cause of the 2026-07-12
+        Best enabled ``llm`` row in the platform ``nous_models`` catalog (see
+        ``_pick_default_row`` for the probe-status ranking), falling back to
+        the governed maintenance model (itself a catalog entry). DB-only, so
+        the default text Run always names a model the platform actually has
+        configured — the root cause of the 2026-07-12
         "default prompt won't run" report was a hardcoded ``qwen-plus`` that
         the catalog no longer carries.
         """
@@ -261,10 +277,9 @@ class CanvasRunService:
                 "canvas: enabled-llm catalog read failed; using maintenance model"
             )
             rows = []
-        for row in rows:
-            name = row.get("name")
-            if isinstance(name, str) and name.strip():
-                return name.strip()
+        picked = _pick_default_row(rows)
+        if picked is not None:
+            return picked
         return await get_maintenance_model()
 
     async def run_prompt(

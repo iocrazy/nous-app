@@ -48,7 +48,7 @@ interface NousModel {
   //   ok         reachable
   //   fail       probed and failed
   //   idle       local nous-engine model authorized but not loaded right now;
-  //              it loads on the first request — NOT a fault (migration 503)
+  //              — NOT a fault, but not callable until loaded (migration 503)
   //   not_probed the backend probe has no protocol for this model TYPE
   //              (image / video / tts) and checked nothing — NOT a fault
   //   null       never probed
@@ -211,9 +211,9 @@ function timeAgo(iso?: string | null): string {
 //
 // `not_probed` ranks below `ok` on purpose: a provider with one working LLM and
 // one unprobeable image model is reachable, and its dot should say so. `idle`
-// is neither: an authorized-but-cold local model is healthy (it loads on the
-// first request), so it never drags the card red, but nothing is confirmed
-// loaded either, so it does not claim green.
+// is neither: an authorized-but-cold local model is not broken, so it never
+// drags the card red, but it is not loaded (and not callable) either, so it does
+// not claim green.
 function aggregateStatus(
   models: NousModel[],
 ): 'ok' | 'fail' | 'idle' | 'not_probed' | undefined {
@@ -258,7 +258,7 @@ const DOT_LABELS: Record<string, string> = {
 // read like a fault. The hourly poll writes `idle` from nous-engine's readiness
 // read, which never loads a model; the admin Test loads it for real.
 const DOT_HINTS: Record<string, string> = {
-  idle: 'Authorized on nous-engine; the model is not loaded right now and will load on the first request',
+  idle: 'Authorized on nous-engine; the model is not loaded right now',
 }
 
 // "No price row" is its own tag, not a StatusDot state: the probe answers

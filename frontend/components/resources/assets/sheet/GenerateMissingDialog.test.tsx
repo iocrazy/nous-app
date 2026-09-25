@@ -437,3 +437,36 @@ describe('Attach Now', () => {
     expect(onAttached).not.toHaveBeenCalled();
   });
 });
+
+describe('the model picker — not loaded on nous-engine', () => {
+  const IDLE = {
+    name: 'nous-studio-image',
+    display_name: 'Studio Image',
+    type: 'image' as const,
+    last_test_status: 'idle' as const,
+  };
+
+  it('lists an idle model disabled, suffixed and titled with the reason', async () => {
+    models.mockReturnValue([
+      { name: 'seedream-4', display_name: 'Seedream 4', type: 'image' as const },
+      IDLE,
+    ] as never);
+    renderDialog();
+    const select = await screen.findByTestId('generate-model');
+    const idle = select.querySelector('option[value="nous-studio-image"]') as HTMLOptionElement;
+    expect(idle.disabled).toBe(true);
+    expect(idle.textContent).toBe('Studio Image (not loaded)');
+    expect(idle.getAttribute('title')).toBe('Not loaded on nous-engine');
+    expect((select.querySelector('option[value="seedream-4"]') as HTMLOptionElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it('keeps an idle preview model as the shown value instead of snapping away', async () => {
+    models.mockReturnValue([IDLE] as never);
+    previewGenerateSlot.mockResolvedValue({ ...PREVIEW, model: 'nous-studio-image' });
+    renderDialog();
+    const select = await screen.findByTestId('generate-model');
+    await waitFor(() => expect(select).toHaveValue('nous-studio-image'));
+  });
+});

@@ -46,6 +46,7 @@ import {
   PROVIDER_DISPLAY_NAMES,
   getAvailableModels,
   nonChatModelNotes,
+  platformNotLoadedLabels,
   visiblePlatformModels,
 } from './agentEditorModel';
 import { buildModelHealth, healthReasonKey } from '../../utils/modelHealth';
@@ -214,6 +215,15 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
         ]),
     );
   }, [nousEnabled, nousLlm, t]);
+
+  // Idle on nous-engine (authorized, not loaded): listed but not pickable.
+  const notLoadedPlatformLabels = useMemo(
+    () =>
+      nousEnabled
+        ? platformNotLoadedLabels(nousLlm, t('platformModel.notLoaded', 'Not loaded on nous-engine'))
+        : {},
+    [nousEnabled, nousLlm, t],
+  );
 
   const localModelNames = useMemo(
     () => nousLlm.filter((m) => m.is_local).map((m) => m.name),
@@ -795,6 +805,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
           unhealthyModelLabels={unhealthyModelLabels}
           nonChatModelLabels={nonChatModelLabels}
           unavailableModelLabels={unavailablePlatformLabels}
+          notLoadedModelLabels={notLoadedPlatformLabels}
           localSkillIds={localSkillIds}
           allSkills={allSkills}
           skillsLoading={skillsLoading}
