@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Bot,
+  Clapperboard,
   Frame,
   Circle,
   Download,
@@ -59,6 +60,8 @@ export const TaskTypeIcon: React.FC<{ type: TaskType; size?: number }> = ({
       return <Frame size={size} />;
     case 'publish':
       return <Send size={size} />;
+    case 'index_shots':
+      return <Clapperboard size={size} />;
     default:
       return <Circle size={size} />;
   }

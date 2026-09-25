@@ -64,12 +64,52 @@ describe('SearchLegsChips', () => {
       expect(dot).not.toHaveClass('bg-ok');
       expect(dot.closest('[title]')).toHaveAttribute('title', expect.stringContaining('Not built'));
     }
-    expect(screen.getByTestId('leg-dot-visual').closest('[title]')).toHaveAttribute(
+    // Camera / clip vectors are the next PR; the visual leg is built now, so
+    // its tooltip no longer promises a date.
+    expect(screen.getByTestId('leg-dot-camera').closest('[title]')).toHaveAttribute(
       'title',
-      expect.stringContaining('Arrives with PR 3'),
+      expect.stringContaining('Arrives with PR 4'),
     );
+    expect(screen.getByTestId('leg-dot-visual').closest('[title]')).toHaveAttribute('title', 'Not built');
     // No processing time on the response → the "· N ms" tail is dropped.
     expect(screen.getByText(/3 hits/).textContent).not.toMatch(/ms/);
+  });
+
+  it('judges the visual dot by the visual leg outcome, like the semantic dot', () => {
+    const { unmount } = render(
+      <SearchLegsChips
+        legs={{ text: 2, semantic: 1, visual: 3 }}
+        vectorLeg="ok"
+        visualLeg="ok"
+        layer="all"
+        onLayerChange={noop}
+        sort="similarity"
+        onSortChange={noop}
+        hits={6}
+      />,
+    );
+    expect(screen.getByTestId('leg-dot-visual')).toHaveClass('bg-ok');
+    expect(screen.getByTestId('leg-dot-visual').closest('[title]')).toHaveAttribute('title', 'ok');
+    expect(screen.getByText('Visual 3')).toBeInTheDocument();
+    unmount();
+
+    // Store missing: the visual leg ran into a typed failure while the
+    // semantic leg was fine — the two dots must disagree.
+    render(
+      <SearchLegsChips
+        legs={{ text: 2, semantic: 1, visual: 0 }}
+        vectorLeg="ok"
+        visualLeg="store_missing"
+        layer="all"
+        onLayerChange={noop}
+        sort="similarity"
+        onSortChange={noop}
+        hits={3}
+      />,
+    );
+    expect(screen.getByTestId('leg-dot-semantic')).toHaveClass('bg-ok');
+    expect(screen.getByTestId('leg-dot-visual')).toHaveClass('bg-danger');
+    expect(screen.getByTestId('leg-dot-visual').closest('[title]')).toHaveAttribute('title', 'store_missing');
   });
 
   it('paints the vector dot danger and keeps text when the leg is unavailable', () => {

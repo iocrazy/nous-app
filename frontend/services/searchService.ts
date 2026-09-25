@@ -35,6 +35,13 @@ export type VectorLegOutcome =
 export interface SearchHit {
   layer: HitLayer;
   score: number;
+  /** `visual` hits: the matched shot's span (ms) — the moment to play from
+   *  and the segment the card's position bar marks. */
+  startMs?: number;
+  endMs?: number;
+  /** An `index_shots` task for this video is queued / running (Task Center),
+   *  so the visual leg will start seeing it shortly. */
+  shotsQueued?: boolean;
 }
 
 export interface SearchResultItem {

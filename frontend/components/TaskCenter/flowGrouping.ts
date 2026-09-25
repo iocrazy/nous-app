@@ -177,6 +177,11 @@ export function flowDisplayTitle(flow: FlowItem): string {
   if (parse?.subtitle && parse.subtitle.trim() && parse.subtitle !== 'Initializing...') {
     return parse.subtitle.trim();
   }
+  // A shot backfill is one flow of N `index_shots` children (one per video):
+  // name the batch, not its first video.
+  if (flow.steps.length > 1 && flow.steps.every((s) => s.task_type === 'index_shots')) {
+    return `Index shots · ${flow.steps.length} videos`;
+  }
   const first = flow.steps[0];
   return (first?.title || '').trim() || `Flow ${flow.flowId.slice(0, 8)}`;
 }
