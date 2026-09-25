@@ -258,3 +258,28 @@ async def test_media_wire_collection_id_is_a_number(client, monkeypatch) -> None
         "page_size": 20,
     }
     assert_wire_unchanged(resp, raw)
+
+
+@pytest.mark.asyncio
+async def test_create_wire(client) -> None:
+    row = _collection(id=SAMPLE_BIGINT, rules=RULES)
+    # INSERT ... RETURNING the new row.
+    _Db.results = [_Result([row])]
+    resp = await client.post(
+        "/api/v1/collections", json={"name": row.name, "rules": RULES}
+    )
+    assert_wire_unchanged(resp, _row_dict(row), status=201)
+    assert resp.json()["id"] == SAMPLE_BIGINT
+
+
+@pytest.mark.asyncio
+async def test_update_wire(client) -> None:
+    before = _collection(id=SAMPLE_BIGINT, rules=RULES, is_preset=False)
+    after = _collection(id=SAMPLE_BIGINT, rules=RULES, name="Renamed")
+    # get_collection_by_id (ownership) → UPDATE ... RETURNING.
+    _Db.results = [_Result([before]), _Result([after])]
+    resp = await client.put(
+        f"/api/v1/collections/{COLLECTION_ID}", json={"name": "Renamed"}
+    )
+    assert_wire_unchanged(resp, _row_dict(after))
+    assert resp.json()["id"] == SAMPLE_BIGINT
