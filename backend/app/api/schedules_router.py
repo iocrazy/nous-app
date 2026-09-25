@@ -27,6 +27,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import insert, select
 from sqlalchemy import update as sa_update
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.db.session import read_scope, write_scope
 from app.models import UserSchedules
@@ -461,7 +462,12 @@ async def update_schedule(
 
 
 @router.delete("/{schedule_id}")
-async def delete_schedule(schedule_id: str, auth: AuthDep) -> Dict[str, Any]:
+async def delete_schedule(schedule_id: UUID, auth: AuthDep) -> Dict[str, Any]:
+    """Delete one of the caller's schedules.
+
+    An id that matched nothing — someone else's schedule, or one already gone
+    — is a typed 404. It used to answer ``200 {"ok": true, "deleted": 0}``, a
+    success the UI could not tell from a real delete."""
     try:
         async with write_scope() as session:
             deleted = (
@@ -475,36 +481,59 @@ async def delete_schedule(schedule_id: str, auth: AuthDep) -> Dict[str, Any]:
     except Exception as exc:
         logger.exception(f"schedule delete failed: {exc}")
         raise HTTPException(500, "delete failed")
+    if not deleted:
+        require_row(None)
     return {"ok": True, "deleted": len(deleted)}
 
 
 @router.post("/{schedule_id}/fire-now")
-async def fire_schedule_now(schedule_id: str, auth: AuthDep) -> Dict[str, Any]:
-    """Manual one-shot trigger. Bypasses cron, dispatches immediately
-    AND advances next_fire_at as if the cron had just fired (so the
-    next regular tick still fires on schedule)."""
+async def fire_schedule_now(schedule_id: UUID, auth: AuthDep) -> Dict[str, Any]:
+    """Manual one-shot trigger: set ``next_fire_at`` to now so the master
+    scheduler fires it on its next tick (within a minute). Cleaner than
+    duplicating dispatch here; ``_dispatch_one`` stays the single owner of
+    "fire a schedule", and it advances ``next_fire_at`` from the cron as usual.
+
+    The master only scans ``enabled`` rows, so on a disabled (or auto-paused)
+    schedule this used to answer ``queued_for_next_tick: true`` and then never
+    fire — "Routine fired" in the UI, nothing on the server. That is a typed
+    409 ``schedule_disabled`` now; resume the schedule first."""
     async with read_scope() as session:
         row = (
-            await session.execute(
-                select(UserSchedules.id)
-                .where(UserSchedules.id == schedule_id)
-                .where(UserSchedules.user_id == str(auth.user_id))
-                .limit(1)
+            (
+                await session.execute(
+                    select(UserSchedules.id, UserSchedules.enabled)
+                    .where(UserSchedules.id == schedule_id)
+                    .where(UserSchedules.user_id == str(auth.user_id))
+                    .limit(1)
+                )
             )
-        ).first()
+            .mappings()
+            .first()
+        )
     if row is None:
         raise HTTPException(404, "schedule not found")
-
-    # Force next_fire_at to now so the master scheduler picks it up on
-    # next tick (within 1 min). Cleaner than duplicating dispatch logic
-    # here; the master_scheduler's _dispatch_one is the single owner of
-    # "fire a schedule".
-    async with write_scope() as session:
-        await session.execute(
-            sa_update(UserSchedules)
-            .where(UserSchedules.id == schedule_id)
-            .values(next_fire_at=datetime.now(timezone.utc))
+    if not row["enabled"]:
+        raise HTTPException(
+            409,
+            {
+                "code": "schedule_disabled",
+                "message": "This schedule is disabled; resume it before running it now.",
+            },
         )
+
+    async with write_scope() as session:
+        written = (
+            await session.execute(
+                sa_update(UserSchedules)
+                .where(UserSchedules.id == schedule_id)
+                .where(UserSchedules.user_id == str(auth.user_id))
+                .where(UserSchedules.enabled.is_(True))
+                .values(next_fire_at=datetime.now(timezone.utc))
+                .returning(UserSchedules.id)
+            )
+        ).all()
+    if not written:  # deleted or disabled between the read and the write
+        require_row(None)
     return {"ok": True, "queued_for_next_tick": True}
 
 
