@@ -40,7 +40,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { ResourceInspectorTabs, visibleInspectorTabs, type InspectorTab } from './resources/ResourceInspectorTabs';
 import { AiSubTabs, AI_SUB_TABS, busiestStatus, type AiSubTab } from './detail/AiSubTabs';
-import { ShotsTabPlaceholder } from './VideoDetailPanel/ShotsTabPlaceholder';
+import { ShotsTab } from './VideoDetailPanel/ShotsTab';
 import { ResourceItem } from '../types';
 import type { ResourceCanvasRef, ResourceRow, ResourceVersion, Tag } from '../types/api';
 import type { ResourceLyrics } from '../utils/resourceLyrics';
@@ -1980,7 +1980,12 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             />
           ) : rightTab === 'shots' ? (
             <div className="overflow-y-auto flex-1">
-              <ShotsTabPlaceholder durationSeconds={resource.duration_seconds} />
+              <ShotsTab
+                resourceId={String(resource.id)}
+                durationSeconds={resource.duration_seconds}
+                currentTimeSeconds={videoCurrentTime}
+                onSeek={(s) => { if (videoRef.current) videoRef.current.currentTime = s; }}
+              />
             </div>
           ) : rightTab === 'ai' ? (
             <div className="flex-1 min-h-0 flex flex-col">

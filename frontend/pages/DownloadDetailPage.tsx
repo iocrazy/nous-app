@@ -62,6 +62,25 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     handleRatingChange, handleNotesChange, handleNotesBlur,
     handleUpdate, handleDelete, handleBack, addToast,
   } = detail;
+  // A visual hit opens AT its shot: seek once the player has its metadata.
+  // Keyed on the hit, not the player, so a later re-render never re-seeks.
+  const hitStartMs = searchHit?.startMs;
+  useEffect(() => {
+    if (hitStartMs == null) return;
+    const el = playerRef.current;
+    if (!el) return;
+    const seek = () => {
+      el.currentTime = hitStartMs / 1000;
+    };
+    if (el.readyState >= 1) {
+      seek();
+      return;
+    }
+    el.addEventListener('loadedmetadata', seek, { once: true });
+    return () => el.removeEventListener('loadedmetadata', seek);
+    // playerRef is a ref (stable); the element appears with the video.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hitStartMs, video?.id]);
 
   // Real in-flight download state comes from task_tracking (the UI's single
   // source of truth for task state), never from parsed_media's status column —
@@ -588,6 +607,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         if (playerRef.current) playerRef.current.currentTime = seconds;
       }}
       searchHit={searchHit}
+      mediaToken={mediaToken}
       sodaTheme={sodaTheme}
       compact={isMobile && isAudio}
       onClose={handleBack}

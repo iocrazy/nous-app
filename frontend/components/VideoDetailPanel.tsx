@@ -24,14 +24,15 @@ import {
 import type { VisualAnalysisData } from '../services/aiService';
 import { useTaskManager } from '../contexts/TaskManagerContext';
 import { TaskErrorNotice } from './TaskErrorNotice';
-import { ShotsTabPlaceholder } from './VideoDetailPanel/ShotsTabPlaceholder';
+import { ShotsTab } from './VideoDetailPanel/ShotsTab';
 import { AiSubTabs, busiestStatus, type AiSubTab } from './detail/AiSubTabs';
 import { hitLayerLabel } from './DownloadsView/SearchLegsChips';
 import type { SearchHit } from '../services/searchService';
+import { getResourceFrameUrl } from '../services/shotsService';
 
-/** Why this item matched the search the user opened it from. `startMs` is
- *  the matched shot's start — absent until shot indexing (PR 3). */
-export type DetailSearchHit = SearchHit & { startMs?: number };
+/** Why this item matched the search the user opened it from. `startMs` /
+ *  `endMs` are the matched shot's span (visual hits). */
+export type DetailSearchHit = SearchHit;
 
 interface VideoDetailPanelProps {
   video: Video;
@@ -89,6 +90,9 @@ interface VideoDetailPanelProps {
   /** The search hit this item was opened from (My Downloads AI search).
    *  Renders the "Search Hit" card at the top of Overview. */
   searchHit?: DetailSearchHit;
+  /** Signed media token for `<img>` loads (the Search Hit frame); the page
+   *  that owns the player already holds it. */
+  mediaToken?: string | null;
 }
 
 type TabKey = 'overview' | 'ai' | 'shots' | 'lyrics';
@@ -160,6 +164,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   island = false,
   onCollapse,
   searchHit,
+  mediaToken,
 }) => {
   const { t } = useTranslation();
   // Island redesign: align neutral text/border to the mock --content/--line ladder.
@@ -318,6 +323,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
 
   const [transcribeStatus, setTranscribeStatus] = useState<string | null>(null);
   const { tasks } = useTaskManager();
+  const [hitFrameFailed, setHitFrameFailed] = useState(false);
 
   // Short-circuit polling when the backend transcription hits a terminal
   // failure. Without this the UI sat on "Processing…" for the full 3-minute
@@ -577,9 +583,30 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
               <Search size={12} />
               {t('detail.searchHit.title', 'Search Hit')}
             </div>
+            {/* The matched frame, cut on demand (visual hits with a resource). */}
+            {resourceId && searchHit.startMs != null && !hitFrameFailed && (
+              <img
+                data-testid="search-hit-frame"
+                src={getResourceFrameUrl(resourceId, searchHit.startMs, mediaToken)}
+                alt=""
+                className="w-full rounded object-cover max-h-40"
+                onError={() => setHitFrameFailed(true)}
+              />
+            )}
             <div className={`text-xs ${cText300}`}>
               {`${hitLayerLabel(searchHit.layer, t)} · ${searchHit.score.toFixed(2)}`}
             </div>
+            {searchHit.startMs != null && (
+              <div data-testid="search-hit-shot" className={`text-xs tabular-nums ${cText300}`}>
+                {searchHit.endMs != null && searchHit.endMs > searchHit.startMs
+                  ? t('detail.searchHit.shotSpan', 'Shot · {{from}}–{{to}} · {{seconds}} s', {
+                      from: formatClock(searchHit.startMs),
+                      to: formatClock(searchHit.endMs),
+                      seconds: Math.round((searchHit.endMs - searchHit.startMs) / 1000),
+                    })
+                  : t('detail.searchHit.shotAt', 'Shot · {{from}}', { from: formatClock(searchHit.startMs) })}
+              </div>
+            )}
             <div className="flex items-center gap-2">
               {searchHit.startMs != null && onSeek && (
                 <button
@@ -646,9 +673,15 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
           />
         )}
 
-        {/* Shots Tab — not indexed yet (shot indexing arrives with PR 3) */}
+        {/* Shots Tab — the shot index (not indexed / indexing / indexed) */}
         {activeTab === 'shots' && (
-          <ShotsTabPlaceholder durationSeconds={video.duration ? Number(video.duration) : undefined} />
+          <ShotsTab
+            resourceId={resourceId}
+            durationSeconds={video.duration ? Number(video.duration) : undefined}
+            currentTimeSeconds={playerCurrentTime}
+            onSeek={onSeek}
+            hitStartMs={searchHit?.startMs}
+          />
         )}
 
         {/* AI → Transcript */}
