@@ -494,3 +494,21 @@ async def test_executor_routes_a_timed_out_declaration_without_forcing_one(
     )
     assert out["outcome"] == "completed"
     assert out["content"] == ""
+
+
+def test_max_iterations_needs_input_declaration_followed_by_a_tool_is_stale():
+    """fh3 T4 review L1: A′ applies to a declared ``needs_input`` too. The
+    agent asked for input, then kept calling tools until the ceiling, so the
+    question is stale and the turn is ``continue``, never a park."""
+    from app.services.issues.turn_outcome import resolve_turn_outcome
+
+    got = resolve_turn_outcome(
+        _turn(
+            _trace(_finish("needs_input"), _skill(1)),
+            exit_code="max_tool_iterations_exceeded",
+        )
+    )
+    assert got.outcome == "continue"
+    assert "declaration_stale_after_tools" in got.reason
+    assert "'needs_input'" in got.reason
+    assert got.awaiting_input is False

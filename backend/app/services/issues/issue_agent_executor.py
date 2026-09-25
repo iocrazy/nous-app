@@ -309,7 +309,13 @@ async def run_issue_agent(
         # attempt_forced_finish_declaration is itself fail-open, wrap it here
         # too so a bug in that module can never turn an already-succeeded
         # turn into an unhandled exception.
-        if outcome is None and content:
+        #
+        # fh3 T5: never on an approval exit. The buffered branch prints
+        # "[awaiting approval: …]" as content, and a forced declaration read
+        # off it could close an issue whose gated tool never ran.
+        # resolve_turn_outcome already typed the outcome (needs_followup); the
+        # explicit check keeps the skip independent of that precedence.
+        if outcome is None and content and not result.get("awaiting_approval"):
             logger.info(
                 f"[issue_agent] issue={iid} session={session_id} produced "
                 f"content but declared no outcome; forcing FinishIssue "

@@ -2025,6 +2025,16 @@ class AILibraryChatService:
             # ``stop_reason``. None on a normal end and on the buffered
             # ``run_turn`` path, where such an exit raises 502 above.
             "exit_code": result.get("exit_code"),
+            # fh3 T5: a hook asked for approval (run_turn's flag, or the
+            # stream's ``hook_decision == "await_approval"``). The issue
+            # executor must route on it rather than on the bracket text the
+            # buffered branch prints — never as ``error`` (502 above).
+            "awaiting_approval": bool(result.get("awaiting_approval")),
+            "approval_reason": (
+                str(result.get("approval_reason") or "")
+                if result.get("awaiting_approval")
+                else None
+            ),
         }
 
     async def _merge_asset_primaries(

@@ -2750,7 +2750,10 @@ class AgentRunner:
     def _awaiting_approval_response(result: HookResult) -> dict[str, Any]:
         """Deliberately carries no ``tool_calls`` (user ruling B, fh3 T4): a
         pre-hook approval means the gated tool never ran, so a FinishIssue
-        declared earlier must not route the issue. Route by the exit."""
+        declared earlier must not route the issue. Route by the exit: the
+        issue path (``turn_outcome``, fh3 T5) sends ``awaiting_approval`` to
+        needs_followup with an ``awaiting_approval:`` reason and never forces a
+        FinishIssue declaration off the buffered branch's bracket text."""
         approval = result.approval_request
         return {
             "content": "",
