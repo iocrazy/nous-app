@@ -639,4 +639,10 @@ export type ScheduleFireNowResult = Schemas['ScheduleFireNowResult'];
 /** One live paired device; `env_report` is whatever the daemon last reported. */
 export type CodexDevice = Schemas['CodexDaemonDevice'];
 export type CodexDaemonPairCode = Schemas['CodexDaemonPairCode'];
+/** `GET /jimeng-cli/status` `data`: logged in (with credits) or logged out
+ * (with a `reason`); narrow on `logged_in`. */
+export type JimengCliStatus = Schemas['JimengCliStatusEnvelope']['data'];
+/** `POST /jimeng-cli/login` `data` (platform admins only): a device-flow link,
+ * or `already_logged_in` when the CLI reused its token. */
+export type JimengCliLoginResult = Schemas['JimengCliLoginEnvelope']['data'];
 // —— end P9 codex/keys/misc ——
