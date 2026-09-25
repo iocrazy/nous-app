@@ -24,6 +24,14 @@ from app.schemas.admin import (
     AdminTeamCreditsDetailResponse,
     AdminTopTeamItem,
 )
+from app.services.billing.admin_points import (
+    AdminAdjustError,
+    TeamNotFoundError,
+    admin_adjust_team_points,
+    existing_team_ids,
+    parse_team_id,
+    require_team,
+)
 from app.utils.admin_helpers import (
     batch_get_team_member_counts,
     batch_get_user_auth_info,
@@ -603,26 +611,51 @@ async def batch_gift(
     auth: AdminAuthDep,
     request: Request,
 ):
-    """Gift points to multiple teams."""
+    """Gift points to multiple teams.
+
+    A team only counts as gifted when the points really landed: an unknown or
+    non-numeric team id is reported in ``errors`` instead of failing inside
+    the quota insert, and a non-positive amount is refused up front (it used
+    to count every team as gifted while ``add_points`` credited nothing).
+    """
     from app.services.billing.points_service import PointsService
+
+    if body.amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Amount must be positive",
+        )
+
+    # One gift per team, in the order given (a repeated id is not a second gift).
+    team_ids = list(dict.fromkeys(body.team_ids))
+    numeric = {tid: parse_team_id(tid) for tid in team_ids}
+    known = await existing_team_ids([n for n in numeric.values() if n is not None])
 
     points_svc = PointsService()
 
     gifted_count = 0
     errors = []
-    for tid in body.team_ids:
+    for tid in team_ids:
+        team_num = numeric[tid]
+        if team_num is None or team_num not in known:
+            errors.append({"team_id": tid, "error": "Team not found"})
+            continue
         try:
-            await points_svc.add_points(
-                team_id=tid,
+            result = await points_svc.add_points(
+                team_id=str(team_num),
                 amount=body.amount,
                 type="gift",
                 description=body.description or f"Admin gift by {auth.user_id}",
                 user_id=auth.user_id,
             )
-            gifted_count += 1
         except Exception as e:
             logger.warning(f"[Admin] Batch gift failed for team {tid}: {e}")
             errors.append({"team_id": tid, "error": str(e)})
+            continue
+        if not result.get("success"):
+            errors.append({"team_id": tid, "error": "Points were not added"})
+            continue
+        gifted_count += 1
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -646,29 +679,35 @@ async def adjust_points(
     auth: AdminAuthDep,
     request: Request,
 ):
-    """Manually adjust points for a single team."""
-    from app.services.billing.points_service import PointsService
-
-    points_svc = PointsService()
-
-    result = await points_svc.add_points(
-        team_id=body.team_id,
-        amount=body.amount,
-        type="admin_adjust",
-        description=body.description or f"Admin adjustment by {auth.user_id}",
-        user_id=auth.user_id,
-    )
+    """Manually adjust points for a single team (positive adds, negative
+    deducts down to zero; zero is refused)."""
+    try:
+        team_id = await require_team(body.team_id)
+        result = await admin_adjust_team_points(
+            team_id=team_id,
+            amount=body.amount,
+            description=body.description or f"Admin adjustment by {auth.user_id}",
+            user_id=auth.user_id,
+        )
+    except TeamNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AdminAdjustError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     await create_audit_log(
         admin_id=auth.user_id,
         action="points_adjust",
         target_type="team_quota",
-        target_id=body.team_id,
-        details={"amount": body.amount, "description": body.description},
+        target_id=team_id,
+        details={
+            "amount": body.amount,
+            "applied": result["applied"],
+            "description": body.description,
+        },
         ip_address=request.client.host if request.client else None,
     )
 
-    return {"ok": True, "new_balance": result.get("new_balance")}
+    return {"ok": True, "new_balance": result["new_balance"]}
 
 
 @router.get("/team/{team_id}/detail", response_model=AdminTeamCreditsDetailResponse)

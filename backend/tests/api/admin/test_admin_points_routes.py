@@ -41,6 +41,14 @@ class _Row:
     def first(self) -> Any:
         return None if self._role is None else (self._role,)
 
+    def scalars(self) -> Any:
+        # The team-existence lookup in ``require_team``: TEAM_ID exists.
+        class _S:
+            def all(self):
+                return [int(TEAM_ID)]
+
+        return _S()
+
 
 @pytest.fixture
 def role(monkeypatch):

@@ -29,6 +29,12 @@ from app.schemas.points import (
     PointsTransactionsResponse,
     PointsUsageStats,
 )
+from app.services.billing.admin_points import (
+    AdminAdjustError,
+    TeamNotFoundError,
+    admin_adjust_team_points,
+    require_team,
+)
 from app.services.billing.points_service import PointsService
 
 router = APIRouter(prefix="/points")
@@ -416,63 +422,22 @@ async def admin_adjust_points(
     ``get_admin_auth`` like every other ``/admin/`` route)
     """
     try:
-        svc = PointsService()
-
-        if request.amount > 0:
-            result = await svc.add_points(
-                team_id=request.team_id,
-                amount=request.amount,
-                type="admin_adjust",
-                description=request.description,
-                user_id=auth.user_id,
-            )
-        elif request.amount < 0:
-            # For negative adjustments, deduct from balance directly
-            repo = get_points_repository()
-            team_quota = await repo.get_team_quota(request.team_id)
-            if team_quota is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Team quota not found",
-                )
-
-            current_balance = team_quota.get("points_balance", 0)
-            new_balance = current_balance + request.amount  # amount is negative
-            if new_balance < 0:
-                new_balance = 0
-
-            await repo.update_points_balance(request.team_id, new_balance)
-            await repo.create_transaction(
-                {
-                    "team_id": request.team_id,
-                    "user_id": auth.user_id,
-                    "amount": request.amount,
-                    "balance_after": new_balance,
-                    "type": "admin_adjust",
-                    "reference_type": "admin_adjust",
-                    "description": request.description,
-                }
-            )
-            result = {"success": True, "new_balance": new_balance}
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Amount must not be zero",
-            )
-
-        if not result.get("success"):
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to adjust points",
-            )
-
+        team_id = await require_team(request.team_id)
+        result = await admin_adjust_team_points(
+            team_id=team_id,
+            amount=request.amount,
+            description=request.description,
+            user_id=auth.user_id,
+        )
         return {
             "success": True,
             "message": f"Adjusted {request.amount} points for team {request.team_id}",
-            "new_balance": result.get("new_balance"),
+            "new_balance": result["new_balance"],
         }
-    except HTTPException:
-        raise
+    except TeamNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except AdminAdjustError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to adjust points: {e}")
         raise HTTPException(status_code=500, detail="Failed to adjust points")

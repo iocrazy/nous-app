@@ -644,6 +644,73 @@ class PointsRepository:
             logger.error(f"Failed to update points balance for {team_id}: {e}")
             raise
 
+    async def debit_points_clamped(
+        self,
+        team_id: str,
+        amount: int,
+        *,
+        user_id: Optional[str],
+        type: str,
+        description: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Take up to ``amount`` points off a team, never below zero, and write
+        the ledger row for what was actually taken — one transaction.
+
+        The admin "negative adjustment" used to be read balance → Python
+        subtract → write the absolute value → insert a ledger row with the
+        REQUESTED amount, in three separate transactions. Two concurrent
+        writers lost an update, and a clamp (balance 100, adjust -500) wrote
+        ``-500`` to the ledger next to a balance that only moved by 100.
+        Here the row is locked (``FOR UPDATE``), the clamp is computed under
+        the lock, and the ledger records ``new - old``. Nothing debited (the
+        balance was already 0) writes no ledger row.
+
+        Returns:
+            ``{"previous_balance", "new_balance", "debited"}``, or ``None``
+            when the team has no quota row.
+        """
+        if amount <= 0:
+            raise ValueError(f"debit amount must be positive, got {amount}")
+        async with write_scope() as session:
+            previous = (
+                await session.execute(
+                    select(TeamQuotas.points_balance)
+                    .where(TeamQuotas.team_id == int(team_id))
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if previous is None:
+                return None
+            previous = previous or 0
+            new_balance = max(previous - int(amount), 0)
+            debited = previous - new_balance
+            if debited:
+                await session.execute(
+                    sa_update(TeamQuotas)
+                    .where(TeamQuotas.team_id == int(team_id))
+                    .values(points_balance=new_balance)
+                )
+                await session.execute(
+                    insert(PointTransactions).values(
+                        team_id=int(team_id),
+                        user_id=user_id,
+                        amount=-debited,
+                        balance_after=new_balance,
+                        type=type,
+                        reference_type=type,
+                        description=description,
+                    )
+                )
+        logger.info(
+            f"Debited {debited} of {amount} requested points ({type}) from team "
+            f"{team_id}: {previous} -> {new_balance}"
+        )
+        return {
+            "previous_balance": previous,
+            "new_balance": new_balance,
+            "debited": debited,
+        }
+
     async def update_storage_used(
         self, team_id: str, storage_used_bytes: int
     ) -> Dict[str, Any]:
