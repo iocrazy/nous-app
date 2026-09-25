@@ -127,7 +127,8 @@ export interface OutputDiffMedia {
  */
 export interface OutputDiffSide {
   version: number;
-  run_id: string;
+  /** Null for a version a person wrote (revert): it has no run of its own. */
+  run_id: string | null;
   issue_id: string | null;
   /**
    * Lent by the chain for a human (revert-written) version, which has no run

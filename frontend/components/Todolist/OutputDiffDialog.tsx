@@ -404,6 +404,8 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
   }, [kind, refId, from, to]);
 
   const single = !!diff && diff.from.version === diff.to.version;
+  // A revert-written version has no run (`run_id: null`): nothing to open.
+  const toRunId = diff?.to.run_id ?? null;
   const text = useMemo(
     () => (diff && diff.content_type === 'text' ? diffWords(diff.from.text ?? '', diff.to.text ?? '') : null),
     [diff],
@@ -588,7 +590,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
         {/* `flex-wrap`, so the "edits were kept" line below can take its own
             row (`w-full`) instead of being squeezed into the button row. */}
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          {diff && (
+          {diff && toRunId && (
             <button
               type="button"
               data-testid="output-open-run"
@@ -596,7 +598,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
               title={childRun ? undefined : t('outputs.openRunHint', 'The run panel is not open here')}
               onClick={() =>
                 childRun?.open({
-                  childRunId: diff.to.run_id,
+                  childRunId: toRunId,
                   parentRunId: null,
                   // The coordinate the registry kept for this version; 0 when
                   // the chain does not carry one (the panel only labels it).
@@ -609,7 +611,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
               className="inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-1 text-[12px] text-ink-300 hover:border-info-line hover:text-info disabled:cursor-not-allowed disabled:opacity-50"
             >
               <PlayCircle size={12} />
-              {t('outputs.openRun', 'Open Run #{{run}}', { run: diff.to.run_id.slice(-6) })}
+              {t('outputs.openRun', 'Open Run #{{run}}', { run: toRunId.slice(-6) })}
             </button>
           )}
           {text && !single && (
