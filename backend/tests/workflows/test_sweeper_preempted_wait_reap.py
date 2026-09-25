@@ -51,6 +51,7 @@ async def test_tick_logs_the_reaped_count(monkeypatch):
     monkeypatch.setattr(
         sw, "reap_stale_workforce_tasks_step", AsyncMock(return_value={})
     )
+    monkeypatch.setattr(sw, "reap_zombie_locks_step", AsyncMock(return_value=0))
     seen = []
     monkeypatch.setattr(sw.logger, "info", lambda m: seen.append(m))
     await _body(sw.agent_runs_sweeper_workflow)(None, None)

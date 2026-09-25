@@ -112,6 +112,7 @@ def tick(monkeypatch):
         ("force_settle_stale_pending_trees_step", 0),
         ("reap_preempted_input_waits_step", 0),
         ("reap_stale_workforce_tasks_step", {}),
+        ("reap_zombie_locks_step", 0),
     ):
         monkeypatch.setattr(sw, name, AsyncMock(return_value=value))
 

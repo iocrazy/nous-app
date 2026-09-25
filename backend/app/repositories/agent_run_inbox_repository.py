@@ -168,6 +168,23 @@ def _parked_issue_ids(parked_floor: dt.datetime):
     )
 
 
+def parked_workflow_ids_stmt(workflow_ids: Sequence[str], parked_floor: dt.datetime):
+    """``SELECT dbos_workflow_id FROM issues`` for the given workflows whose
+    issue is parked on the needs_input gate inside its wait — the same
+    predicate as ``_parked_issue_ids``, keyed by the workflow instead.
+
+    The health sweeper's 6h age backstop (FH3 T6) asks this before it cancels
+    a same-version PENDING workflow: a parked ``execute_issue`` legitimately
+    waits NEEDS_INPUT_RECV_TTL_HOURS, and killing it with a bare status UPDATE
+    runs no ``finally`` — the lock and the marker stay forever."""
+    from app.models import Issues
+
+    return select(Issues.dbos_workflow_id).where(
+        Issues.dbos_workflow_id.in_(list(workflow_ids)),
+        Issues.id.in_(_parked_issue_ids(parked_floor)),
+    )
+
+
 def expire_agent_items_stmt(target_kind: str, target_id: int):
     """UPDATE … SET expired_at = now() for the PENDING items on one target that
     the AGENT scheduled for itself (``content.source.created_by = 'agent'``),

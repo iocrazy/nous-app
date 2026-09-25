@@ -47,6 +47,7 @@ def _quiet(monkeypatch, **over):
         ("expire_orphan_inbox_step", 0),
         ("reconcile_issue_execution_state_step", 0),
         ("reap_preempted_input_waits_step", 0),
+        ("reap_zombie_locks_step", 0),
     ):
         monkeypatch.setattr(sw, name, AsyncMock(return_value=value))
     for name, value in over.items():
@@ -105,6 +106,7 @@ STEP_NAMES = {
     "scan_idle_inbox_step",
     "recompute_monthly_budgets_step",
     "reap_preempted_input_waits_step",
+    "reap_zombie_locks_step",
 }
 
 
@@ -242,6 +244,10 @@ def test_no_step_in_this_module_dispatches_a_workflow():
     # ``reap_stale_workforce_tasks_step``（框架加固 T5）登记于此：标失败 / 回 idle /
     # ``subagent_done`` + 收口都是 ORM 写与 RPC；重排只把行改回 ``queued``，真正
     # 派发由另一个 dispatch tick 在它自己的 workflow body 里做——不派发任何 workflow。
+    #
+    # ``reap_zombie_locks_step``（框架加固 3b T6）登记于此：对 workflow 已终态 / 无
+    # 引擎行的 issue 做一条 CAS UPDATE 放锁、去掉 marker——不 cancel、不派发任何
+    # workflow；下一次派发由用户 / 收件箱扫描在各自路径里发起。
     assert {s.name for s in steps} == {
         "mark_heartbeat_lost_step",
         "reconcile_issue_execution_state_step",
@@ -251,6 +257,7 @@ def test_no_step_in_this_module_dispatches_a_workflow():
         "force_settle_stale_pending_trees_step",
         "reap_preempted_input_waits_step",
         "reap_stale_workforce_tasks_step",
+        "reap_zombie_locks_step",
     }
     for step in steps:
         called = {
