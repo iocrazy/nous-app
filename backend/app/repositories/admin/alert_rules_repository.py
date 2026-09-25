@@ -168,12 +168,16 @@ class AlertRulesRepository:
         return _row(row) if row else None
 
     async def update_rule(
-        self, rule_id: str, changes: dict[str, Any]
+        self, rule_id: int, changes: dict[str, Any]
     ) -> Optional[dict[str, Any]]:
         """UPDATE a rule by id; always stamps ``updated_at = now()`` (matches the
         legacy). COMMITS via write_scope(). Returns the full updated row (or None).
         Unknown ``changes`` keys are dropped (phantom-key guard)."""
         merged = {**changes, "updated_at": datetime.now(timezone.utc)}
+        # ``mute_until`` arrives as an ISO string (mute route, PATCH body);
+        # asyncpg only accepts a datetime for timestamptz (v3 rule).
+        if merged.get("mute_until") is not None:
+            merged["mute_until"] = _aware(merged["mute_until"])
         cols = [c for c in merged if c in _RULE_COLUMNS]
         set_clause = ", ".join(f"{c} = :{c}" for c in cols)
         stmt = text(
@@ -187,13 +191,20 @@ class AlertRulesRepository:
             row = result.mappings().first()
         return _row(row) if row else None
 
-    async def delete_rule(self, rule_id: str) -> None:
-        """DELETE a rule by id; COMMITS via write_scope()."""
-        stmt = text(f"DELETE FROM {self.RULES_TABLE} WHERE id = :rule_id")  # noqa: S608
-        async with write_scope() as session:
-            await session.execute(stmt, {"rule_id": rule_id})
+    async def delete_rule(self, rule_id: int) -> bool:
+        """DELETE a rule by id; COMMITS via write_scope(). True iff a row was
+        deleted (``alert_history`` rows go with it: FK ``ON DELETE CASCADE``).
 
-    async def auto_unmute_rule(self, rule_id: str) -> None:
+        ``rule_id`` must be an ``int``: ``text()`` binds it untyped and asyncpg
+        rejects a ``str`` for the BIGINT comparison (DataError)."""
+        stmt = text(
+            f"DELETE FROM {self.RULES_TABLE} WHERE id = :rule_id RETURNING id"  # noqa: S608
+        )
+        async with write_scope() as session:
+            result = await session.execute(stmt, {"rule_id": rule_id})
+            return result.mappings().first() is not None
+
+    async def auto_unmute_rule(self, rule_id: int) -> None:
         """Clear the mute flag when mute_until has passed (delegates to
         update_rule — unchanged from the legacy)."""
         await self.update_rule(rule_id, {"is_muted": False, "mute_until": None})
@@ -205,7 +216,7 @@ class AlertRulesRepository:
         *,
         page: int,
         page_size: int,
-        rule_id: Optional[str] = None,
+        rule_id: Optional[int] = None,
         resolved: Optional[bool] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
@@ -256,21 +267,24 @@ class AlertRulesRepository:
         async with write_scope() as session:
             await session.execute(stmt, dict(payload))
 
-    async def resolve_history(self, alert_id: str) -> None:
+    async def resolve_history(self, alert_id: int) -> bool:
         """Mark an alert_history row resolved (stamps resolved_at = now());
-        COMMITS via write_scope()."""
+        COMMITS via write_scope(). True iff the row exists. ``alert_id`` must be
+        an ``int`` (see ``delete_rule``)."""
         stmt = text(
             f"UPDATE {self.HISTORY_TABLE} "  # noqa: S608
-            "SET resolved = true, resolved_at = :resolved_at WHERE id = :alert_id"
+            "SET resolved = true, resolved_at = :resolved_at WHERE id = :alert_id "
+            "RETURNING id"
         )
         async with write_scope() as session:
-            await session.execute(
+            result = await session.execute(
                 stmt,
                 {
                     "resolved_at": datetime.now(timezone.utc),
                     "alert_id": alert_id,
                 },
             )
+            return result.mappings().first() is not None
 
     # ─── Metric queries (for alert evaluation) ─────────────────────────
 

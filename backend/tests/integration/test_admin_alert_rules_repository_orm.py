@@ -126,9 +126,18 @@ async def test_create_list_update_delete_round_trip(
     # update always stamps a fresh updated_at (legacy behaviour)
     assert type(updated["updated_at"]) is str
 
-    await repo.delete_rule(rule_id)
+    # The mute route binds mute_until as an ISO string: asyncpg rejects a str
+    # for timestamptz, so the repo must hand it a datetime (was a 500).
+    muted = await repo.update_rule(
+        rule_id, {"is_muted": True, "mute_until": "2026-09-24T01:02:03+00:00"}
+    )
+    assert muted is not None and muted["mute_until"].startswith("2026-09-24T01:02:03")
+
+    assert await repo.delete_rule(rule_id) is True
     rows2, _ = await repo.list_rules()
     assert all(r["id"] != rule_id for r in rows2)
+    # A second delete matches nothing: the route turns that into a 404.
+    assert await repo.delete_rule(rule_id) is False
 
 
 async def test_list_history_window_boundary(
@@ -191,7 +200,8 @@ async def test_resolve_history_commits(
     finally:
         await conn.close()
 
-    await repo.resolve_history(alert_id)
+    assert await repo.resolve_history(alert_id) is True
+    assert await repo.resolve_history(alert_id + 1) is False
 
     conn = await asyncpg.connect(integration_db_url)
     try:

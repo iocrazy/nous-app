@@ -6,8 +6,13 @@ from typing import List, Optional
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from app.api.row_guard import require_row
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.alert_rules_repository import get_alert_rules_repository
+from app.schemas.admin_settings_catalog import (
+    AdminAlertMuteResult,
+    AdminAlertOkResult,
+)
 
 router = APIRouter()
 
@@ -84,6 +89,18 @@ class AlertCheckResult(BaseModel):
     details: List[dict]
 
 
+_BIGINT_MAX = 2**63 - 1
+
+
+def _row_id(raw: str) -> int:
+    """Path id → BIGINT bind. ``text()`` binds untyped and asyncpg refuses a
+    ``str`` for a BIGINT comparison, so every by-id write used to 500. A
+    non-numeric or out-of-range id names no row: typed 404."""
+    if not (raw.isascii() and raw.isdigit() and int(raw) <= _BIGINT_MAX):
+        require_row(None)
+    return int(raw)
+
+
 # ============================================
 # Alert Rules CRUD
 # ============================================
@@ -119,15 +136,19 @@ async def create_alert_rule(body: AlertRuleCreate, auth: AdminAuthDep):
 async def update_alert_rule(rule_id: str, body: AlertRuleUpdate, auth: AdminAuthDep):
     """Update an alert rule."""
     repo = get_alert_rules_repository()
-    updated = await repo.update_rule(rule_id, body.model_dump(exclude_none=True))
-    return updated
+    updated = await repo.update_rule(
+        _row_id(rule_id), body.model_dump(exclude_none=True)
+    )
+    return require_row(updated)
 
 
-@router.delete("/rules/{rule_id}")
+@router.delete("/rules/{rule_id}", response_model=AdminAlertOkResult)
 async def delete_alert_rule(rule_id: str, auth: AdminAuthDep):
-    """Delete an alert rule."""
+    """Delete an alert rule (its history goes with it: FK cascade)."""
     repo = get_alert_rules_repository()
-    await repo.delete_rule(rule_id)
+    deleted = await repo.delete_rule(_row_id(rule_id))
+    if not deleted:
+        require_row(None)
     return {"ok": True}
 
 
@@ -136,7 +157,7 @@ async def delete_alert_rule(rule_id: str, auth: AdminAuthDep):
 # ============================================
 
 
-@router.post("/rules/{rule_id}/mute")
+@router.post("/rules/{rule_id}/mute", response_model=AdminAlertMuteResult)
 async def mute_alert_rule(
     rule_id: str,
     auth: AdminAuthDep,
@@ -145,18 +166,22 @@ async def mute_alert_rule(
     """Mute an alert rule for a specified duration."""
     mute_until = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
     repo = get_alert_rules_repository()
-    await repo.update_rule(
-        rule_id,
+    updated = await repo.update_rule(
+        _row_id(rule_id),
         {"is_muted": True, "mute_until": mute_until.isoformat()},
     )
+    require_row(updated)
     return {"ok": True, "mute_until": mute_until.isoformat()}
 
 
-@router.post("/rules/{rule_id}/unmute")
+@router.post("/rules/{rule_id}/unmute", response_model=AdminAlertOkResult)
 async def unmute_alert_rule(rule_id: str, auth: AdminAuthDep):
     """Unmute an alert rule."""
     repo = get_alert_rules_repository()
-    await repo.update_rule(rule_id, {"is_muted": False, "mute_until": None})
+    updated = await repo.update_rule(
+        _row_id(rule_id), {"is_muted": False, "mute_until": None}
+    )
+    require_row(updated)
     return {"ok": True}
 
 
@@ -170,17 +195,20 @@ async def list_alert_history(
     auth: AdminAuthDep,
     page: int = Query(1, ge=1),
     pageSize: int = Query(50, ge=1, le=200),
-    rule_id: Optional[str] = Query(None),
+    rule_id: Optional[str] = Query(None, pattern=r"^\d{1,19}$"),
     resolved: Optional[bool] = Query(None),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
 ):
     """List alert history with pagination and filters."""
+    if rule_id and int(rule_id) > _BIGINT_MAX:
+        return AlertHistoryListResponse(data=[], total=0)  # no such rule
     repo = get_alert_rules_repository()
     rows, total = await repo.list_history(
         page=page,
         page_size=pageSize,
-        rule_id=rule_id,
+        # int, not the query string: asyncpg refuses a str for BIGINT.
+        rule_id=int(rule_id) if rule_id else None,
         resolved=resolved,
         start_date=start_date,
         end_date=end_date,
@@ -188,11 +216,13 @@ async def list_alert_history(
     return AlertHistoryListResponse(data=rows, total=total)
 
 
-@router.post("/history/{alert_id}/resolve")
+@router.post("/history/{alert_id}/resolve", response_model=AdminAlertOkResult)
 async def resolve_alert(alert_id: str, auth: AdminAuthDep):
     """Mark an alert as resolved."""
     repo = get_alert_rules_repository()
-    await repo.resolve_history(alert_id)
+    resolved = await repo.resolve_history(_row_id(alert_id))
+    if not resolved:
+        require_row(None)
     return {"ok": True}
 
 

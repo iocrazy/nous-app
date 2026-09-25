@@ -148,7 +148,7 @@ async def test_update_rule_always_stamps_updated_at(
     repo: AlertRulesRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.rows = [{"id": 1}]
-    await repo.update_rule("r1", {"threshold": 5.0})
+    await repo.update_rule(1, {"threshold": 5.0})
 
     sql, binds = fake_session.calls[0]
     assert "UPDATE" in sql and "WHERE id = :rule_id" in sql
@@ -156,18 +156,40 @@ async def test_update_rule_always_stamps_updated_at(
     # updated_at must be auto-injected (native datetime bind for the ORM path)
     assert "updated_at" in binds
     assert isinstance(binds["updated_at"], datetime)
-    assert binds["rule_id"] == "r1"
+    assert binds["rule_id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_update_rule_binds_mute_until_as_a_datetime(
+    repo: AlertRulesRepository, fake_session: _FakeSession
+) -> None:
+    """The mute route and PATCH hand ``mute_until`` over as an ISO string;
+    asyncpg rejects a str for timestamptz, so the repo binds a datetime."""
+    fake_session.rows = [{"id": 1}]
+    await repo.update_rule(1, {"is_muted": True, "mute_until": "2026-09-24T01:02:03Z"})
+
+    _, binds = fake_session.calls[0]
+    assert binds["mute_until"] == datetime(2026, 9, 24, 1, 2, 3, tzinfo=timezone.utc)
 
 
 @pytest.mark.asyncio
 async def test_delete_rule_hits_correct_id(
     repo: AlertRulesRepository, fake_session: _FakeSession
 ) -> None:
-    await repo.delete_rule("r1")
+    fake_session.rows = [{"id": 1}]
+    assert await repo.delete_rule(1) is True
 
     sql, binds = fake_session.calls[0]
-    assert sql.startswith("DELETE FROM")
-    assert binds == {"rule_id": "r1"}
+    assert sql.startswith("DELETE FROM") and "RETURNING id" in sql
+    assert binds == {"rule_id": 1}
+
+
+@pytest.mark.asyncio
+async def test_delete_rule_reports_a_miss(
+    repo: AlertRulesRepository, fake_session: _FakeSession
+) -> None:
+    fake_session.rows = []
+    assert await repo.delete_rule(1) is False
 
 
 @pytest.mark.asyncio
@@ -175,7 +197,7 @@ async def test_auto_unmute_clears_mute_fields(
     repo: AlertRulesRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.rows = [{"id": 1}]
-    await repo.auto_unmute_rule("r1")
+    await repo.auto_unmute_rule(1)
 
     _, binds = fake_session.calls[0]
     assert binds["is_muted"] is False
@@ -197,7 +219,7 @@ async def test_list_history_filters_and_pagination(
     await repo.list_history(
         page=2,
         page_size=25,
-        rule_id="r1",
+        rule_id=7,
         resolved=False,
         start_date=start,
         end_date=end,
@@ -207,7 +229,7 @@ async def test_list_history_filters_and_pagination(
     count_sql, count_binds = fake_session.calls[0]
     list_sql, list_binds = fake_session.calls[1]
     assert count_sql.startswith("SELECT count(*)")
-    assert count_binds["rule_id"] == "r1"
+    assert count_binds["rule_id"] == 7
     assert count_binds["resolved"] is False
     assert count_binds["start_date"] == start
     assert count_binds["end_date"] == end
@@ -232,12 +254,21 @@ async def test_insert_history_sends_payload(
 async def test_resolve_history_stamps_resolved_at(
     repo: AlertRulesRepository, fake_session: _FakeSession
 ) -> None:
-    await repo.resolve_history("alert-1")
+    fake_session.rows = [{"id": 5}]
+    assert await repo.resolve_history(5) is True
 
     sql, binds = fake_session.calls[0]
-    assert "resolved = true" in sql
+    assert "resolved = true" in sql and "RETURNING id" in sql
     assert "resolved_at" in binds
-    assert binds["alert_id"] == "alert-1"
+    assert binds["alert_id"] == 5
+
+
+@pytest.mark.asyncio
+async def test_resolve_history_reports_a_miss(
+    repo: AlertRulesRepository, fake_session: _FakeSession
+) -> None:
+    fake_session.rows = []
+    assert await repo.resolve_history(5) is False
 
 
 # ─── Metric queries (for alert evaluation) ─────────────────────────
