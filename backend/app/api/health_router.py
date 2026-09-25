@@ -28,6 +28,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from app.core.admin_deps import AdminAuthDep
+from app.schemas.probes import DeepHealthResponse
 
 router = APIRouter()
 
@@ -95,7 +96,11 @@ def _aggregate_status(probes: dict[str, dict]) -> str:
     return "healthy"
 
 
-@router.get("/health/deep", summary="Per-subsystem deep health snapshot")
+@router.get(
+    "/health/deep",
+    summary="Per-subsystem deep health snapshot",
+    response_model=DeepHealthResponse,
+)
 async def health_deep(request: Request, _admin: AdminAuthDep) -> dict[str, Any]:
     """Run all subsystem probes in parallel + return aggregate report.
 

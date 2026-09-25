@@ -10,12 +10,13 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.core.admin_deps import AdminAuthDep
+from app.schemas.probes import DbosHealthResponse, DbosRoutingResponse
 from app.services.infra import dbos_orchestrator
 
 router = APIRouter(prefix="/dbos", tags=["DBOS"])
 
 
-@router.get("/health")
+@router.get("/health", response_model=DbosHealthResponse)
 async def dbos_health() -> dict:
     """Returns DBOS singleton state. Used by the deploy verifier + canary."""
     return {
@@ -23,7 +24,7 @@ async def dbos_health() -> dict:
     }
 
 
-@router.get("/routing")
+@router.get("/routing", response_model=DbosRoutingResponse)
 async def dbos_routing(_admin: AdminAuthDep) -> dict:
     """Snapshot of routing decisions per task_type. Useful for ops dashboard
     to see what's celery / shadow / dbos at a glance.

@@ -26,6 +26,8 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Request, Response, status
 
+from app.schemas.probes import ReadyzResponse
+
 router = APIRouter(tags=["Health"])
 
 
@@ -102,7 +104,25 @@ async def healthz() -> Dict[str, str]:
     return {"status": "alive"}
 
 
-@router.get("/readyz", summary="Readiness probe (200 once bg startup settles)")
+# Declared, not enforced: ``response_model=None`` keeps the handler's dict
+# going out untouched (no filtering, no validation that could turn a verdict
+# into a 500); ``responses=`` only names the shape in the OpenAPI contract.
+# ``tests/api/test_probes_wire.py`` validates real payloads against it.
+_READYZ_RESPONSES: dict[int | str, dict[str, Any]] = {
+    200: {"model": ReadyzResponse, "description": "Ready"},
+    503: {
+        "model": ReadyzResponse,
+        "description": "Starting, degraded, or lifespan never ran (not_ready)",
+    },
+}
+
+
+@router.get(
+    "/readyz",
+    summary="Readiness probe (200 once bg startup settles)",
+    response_model=None,
+    responses=_READYZ_RESPONSES,
+)
 async def readyz(request: Request, response: Response) -> Dict[str, Any]:
     """200 once finite bg tasks are done and daemons are alive; 503 otherwise.
 

@@ -24,6 +24,7 @@ from app.core.provider_errors import register_provider_error_handlers
 from app.core.utils import Utils
 from app.db.schema_assertions import assert_critical_schema_on_boot
 from app.middleware.request_logging import RequestLoggingMiddleware
+from app.schemas.probes import ApiVersionResponse, RootHealthResponse
 from app.startup import healthz_lite as _healthz_lite
 from app.startup.agent_framework_init import (
     install_agent_primitives,
@@ -684,13 +685,17 @@ except Exception as e:
     logger.warning(f"媒体文件路由注册失败: {e}")
 
 
-@app.get("/health")
+@app.get("/health", response_model=RootHealthResponse)
 async def health_check():
     """健康检查端点"""
     return {"status": "healthy", "message": "Service is running"}
 
 
-@app.get("/api/version")
+@app.get(
+    "/api/version",
+    response_model=ApiVersionResponse,
+    response_model_exclude_unset=True,
+)
 async def api_version():
     """Build identity for deploy-verify.
 
