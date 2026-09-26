@@ -6,6 +6,7 @@
 import { registerIssueBlock, registeredIssueBlocks } from '../issueBlocks';
 import { budgetBlock } from './BudgetBlock';
 import { cockpitBlock } from './CockpitBlock';
+import { criteriaBlock } from './CriteriaBlock';
 import { deliverablesBlock } from './DeliverablesBlock';
 import { linksBlock } from './LinksBlock';
 import { outputsBlock } from './OutputsBlock';
@@ -13,10 +14,13 @@ import { schedulesBlock } from './SchedulesBlock';
 import { stageBriefBlock } from './StageBriefBlock';
 import { statusBlock } from './StatusBlock';
 import { subtasksBlock } from './SubtasksBlock';
+import { verdictBlock } from './VerdictBlock';
 
 export const BUILTIN_ISSUE_BLOCKS = [
   cockpitBlock,
   statusBlock,
+  verdictBlock,
+  criteriaBlock,
   stageBriefBlock,
   deliverablesBlock,
   outputsBlock,

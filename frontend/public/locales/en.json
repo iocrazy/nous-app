@@ -152,6 +152,7 @@
     "unlimited": "Unlimited"
   },
   "common": {
+    "hide": "Hide",
     "error": "Something Went Wrong",
     "details": "Details",
     "dismiss": "Dismiss",
@@ -5779,6 +5780,19 @@
     }
   },
   "issueDetail": {
+    "criteria": "Acceptance criteria",
+    "editCriteria": "Edit",
+    "clearCriteria": "Clear",
+    "criteriaProposedByAgent": "Proposed by agent",
+    "criteriaNone": "None yet — the agent will propose criteria before it starts, or write your own.",
+    "criteriaPlaceholder": "e.g. Scenes 1-2 each get two shots with an image",
+    "criteriaRequired": "Write at least one criterion",
+    "verdict": "Completion check",
+    "verdictPass": "Verified",
+    "verdictFail": "Rejected (attempt {{n}}/{{m}})",
+    "verdictUnverified": "Unverified: {{reason}}",
+    "verdictAgentClaim": "Agent's claim",
+    "verdictDetails": "Details",
     "outputs": "Outputs",
     "outputsRevised": "{{n}} revised",
     "costPerOutput": "Cost / output",
