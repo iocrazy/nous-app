@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import io
 from typing import Any, Dict, Mapping, Optional, Tuple
-from urllib.parse import quote
 
 import httpx
 
@@ -69,30 +68,18 @@ PROBEABLE_TYPES = frozenset({"llm", "embedding", "asr"})
 LOCAL_ENGINE_PROVIDERS = frozenset({"codex-local", "jimeng-local"})
 
 # The self-hosted nous-engine gateway. One GPU card carries several
-# interchangeable 27B variants (2026-09-24: qwen3-8-27b / -orcarouter /
-# -huihui), and which one is loaded is the engine's business. A scheduled real
-# inference per row forced the engine to swap models every hour — the probe was
-# the load.
+# interchangeable 27B variants, and which one is loaded is the engine's
+# business: a scheduled real inference per row forced the engine to swap
+# models every hour — the probe was the load.
 #
-# The engine exposes a readiness read that never loads anything:
-# ``GET {base_url}/models/{actual_model}`` (base_url already ends in ``/v1``).
-#   200 → authorized and loaded                        → ``ok``
-#   503 → authorized, not loaded (ModelNotReadyError)  → ``idle`` — NOT a fault
-#         in the row, but NOT callable either: on 2026-09-24 10:00 a real chat
-#         to an ``inference``-type service answered 503 "not loaded" instead of
-#         loading on demand, so user pickers grey ``idle`` rows out
-#   404 → this key has no grant for it / no such model → ``fail`` model_not_found
-#   401/403 → bad key                                  → ``fail`` auth
-# ``GET /v1/models`` is no substitute: it lists only what is loaded right now,
-# so "absent from the list" is not a verdict in either direction.
-#
-# Only the SCHEDULED path reads readiness. The admin Test button
-# (``allow_costly=True``) still does the real call — a human clicking Test
-# wants the model loaded and exercised once, and forcing a swap on a shared
-# card is exactly the cost that flag exists to gate.
+# Since spec 2026-09-25 §3.4 the scheduled poll does not touch these rows at
+# all: the platform view reads authorization and ``ready`` from the engine's
+# own ``/v1/models`` list on every request (``engine_catalog``), so the poll
+# records ``not_probed`` with ``NOUS_ENGINE_LIVE_DETAIL``. The admin Test
+# button (``allow_costly=True``) still does the real call — a human clicking
+# Test wants the model loaded and exercised once.
 NOUS_ENGINE_PROVIDER = "nous"
-_READINESS_TIMEOUT = 15.0
-_IDLE_DETAIL = "authorized, not loaded"
+NOUS_ENGINE_LIVE_DETAIL = "live: status comes from nous-engine"
 
 # Values ``nous_models.last_test_status`` may hold. Twin of the DB CHECK in
 # migration 503 (was 428) / ``models/ai.py`` — both sides must change together, and
@@ -358,61 +345,6 @@ async def _probe_image_model(row: Dict[str, Any], prov: str) -> Dict[str, Any]:
     }
 
 
-def _readiness_failure(error: str, code: str) -> Dict[str, Any]:
-    return {
-        "ok": False,
-        "idle": False,
-        "detail": "",
-        "error": error[:200],
-        "dims": None,
-        "code": code,
-    }
-
-
-async def _probe_nous_engine_readiness(row: Dict[str, Any]) -> Dict[str, Any]:
-    """Passive readiness read for a local nous-engine row — never loads a model.
-
-    See ``NOUS_ENGINE_PROVIDER`` for the status mapping. Never raises.
-    """
-    model = (row.get("actual_model") or "").strip()
-    base = (row.get("base_url") or "").rstrip("/")
-    if not model:
-        # ``GET {base}/models/`` would be the loaded-models LIST, whose answer
-        # says nothing about this row. Refuse rather than misread it.
-        return _readiness_failure("no actual_model configured", "other")
-    url = f"{base}/models/{quote(model, safe='')}"
-    headers = {"Authorization": f"Bearer {row.get('api_key') or ''}"}
-    try:
-        async with httpx.AsyncClient(timeout=_READINESS_TIMEOUT) as c:
-            r = await c.get(url, headers=headers)
-    except Exception as e:  # noqa: BLE001 — probe is best-effort
-        reason = f"{type(e).__name__}: {str(e) or '<no message>'}"
-        return _readiness_failure(reason, classify_probe_failure(exc=e))
-    if r.status_code == 200:
-        return {
-            "ok": True,
-            "idle": False,
-            "detail": "loaded",
-            "error": None,
-            "dims": None,
-            "code": None,
-        }
-    if r.status_code == 503:
-        # Authorized but cold. No error and no code: nothing failed.
-        return {
-            "ok": False,
-            "idle": True,
-            "detail": _IDLE_DETAIL,
-            "error": None,
-            "dims": None,
-            "code": None,
-        }
-    return _readiness_failure(
-        f"HTTP {r.status_code}: {r.text[:160]}",
-        classify_probe_failure(status_code=r.status_code),
-    )
-
-
 async def probe_nous_model(
     row: Dict[str, Any], *, allow_costly: bool = False
 ) -> Dict[str, Any]:
@@ -422,9 +354,8 @@ async def probe_nous_model(
     today only text-to-image. It defaults to False so the hourly poll keeps its
     behaviour by omission rather than by remembering to opt out; the admin
     "Test" button is the single caller that passes True. It also gates the
-    real inference on a local nous-engine row: without it such a row gets the
-    passive readiness read (``_probe_nous_engine_readiness``), which may answer
-    ``idle=True`` — authorized but not loaded, not a fault.
+    real call on a nous-engine row: without it such a row is ``not_probed``
+    (``NOUS_ENGINE_LIVE_DETAIL``) — its status is read live from the engine.
 
     Returns ``{ok, detail, error, dims, code, not_probed}``. Never raises — a
     transport/HTTP failure is reported as ``ok=False`` with the error text plus
@@ -439,6 +370,18 @@ async def probe_nous_model(
     """
     typ = (row.get("type") or "").strip()
     prov = (row.get("actual_provider") or "").strip().lower()
+
+    if prov == NOUS_ENGINE_PROVIDER and not allow_costly:
+        # Before every other gate, image rows included: nothing about a
+        # nous-engine row is decided by this poll any more.
+        return {
+            "ok": False,
+            "not_probed": True,
+            "detail": NOUS_ENGINE_LIVE_DETAIL,
+            "error": None,
+            "code": None,
+            "dims": None,
+        }
 
     if prov in LOCAL_ENGINE_PROVIDERS:
         # Checked BEFORE the type gate: a local row may be a probeable type
@@ -489,11 +432,6 @@ async def probe_nous_model(
             "code": None,
             "dims": None,
         }
-
-    if prov == NOUS_ENGINE_PROVIDER and not allow_costly:
-        # After the type gate on purpose: a nous image row (studio-upscale)
-        # stays ``not_probed`` on the schedule, like every other image row.
-        return await _probe_nous_engine_readiness(row)
 
     model = (row.get("actual_model") or "").strip()
     base = (row.get("base_url") or "").rstrip("/")

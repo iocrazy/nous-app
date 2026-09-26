@@ -13,7 +13,8 @@ that background jobs kept rewriting. Here it becomes one computation:
    listed → ``ok`` / ``idle`` by ``ready``; explicitly not listed → dropped
    (grant revoked or service gone — nothing is written or disabled);
    no usable list → kept as ``not_probed`` (could not reach ≠ revoked);
-4. every other row keeps the status the hourly probe stored;
+4. every other row keeps the status the hourly probe stored (the probe
+   records nous-engine rows as ``not_probed``; their stored value is unused);
 5. ``fail`` rows are dropped;
 6. ``enabled_models`` = models − the user's ``disabled_models`` blacklist.
 

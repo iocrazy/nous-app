@@ -222,22 +222,16 @@ class NousEngineSyncSkipped(BaseModel):
 class NousEngineSyncResponse(BaseModel):
     """POST /admin/nous-models/sync-engine — merged over every engine endpoint.
 
-    ``created`` / ``updated`` / ``disabled`` are catalog names. The engine list
-    is read with ``include_unready=1`` and holds every AUTHORIZED service,
-    loaded or not, so an enabled platform row whose service is missing had its
-    grant revoked and is in ``disabled``. ``unauthorized`` means an endpoint
-    answered 401 (the key itself was revoked) and all its enabled platform rows
-    were disabled. Disabled rows are never re-enabled by a sync.
-    ``ready_changed`` counts rows whose ok/idle status followed the engine's
-    ``ready``. ``error`` is set when at least one endpoint's ``/v1/models``
-    could not be read (the others still synced).
+    ``created`` / ``updated`` are catalog names: rows created for services the
+    engine lists and the catalog lacked, and rows whose ``context_window``
+    changed. Nothing is ever disabled — whether a service is authorized and
+    loaded is read live (spec 2026-09-25 §3.4). ``error`` is set when at least
+    one endpoint's ``/v1/models`` could not be read (a refused key reads
+    ``HTTP 401: …``); the others still synced.
     """
 
     discovered: int
     created: List[str]
     updated: List[str]
     skipped: List[NousEngineSyncSkipped]
-    disabled: List[str]
-    ready_changed: int
-    unauthorized: bool
     error: Optional[str] = None

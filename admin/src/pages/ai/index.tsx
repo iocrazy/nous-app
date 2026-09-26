@@ -5,6 +5,7 @@ import {
 } from '@arco-design/web-react'
 import { IconPlus, IconDelete, IconSync, IconEdit } from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
+import type { Schema } from '../../types/api'
 import { JimengAuthCard } from './JimengAuthCard'
 import {
   CONTEXT_WINDOW_PRESETS,
@@ -18,18 +19,9 @@ import {
 const { Title, Text } = Typography
 const FormItem = Form.Item
 
-// POST /admin/nous-models/sync-engine (NousEngineSyncResponse).
-interface EngineSyncReport {
-  discovered: number
-  created: string[]
-  updated: string[]
-  skipped: { id: string; reason: string }[]
-  // Rows the sync turned off: grant revoked, or the key itself rejected (401).
-  disabled: string[]
-  ready_changed: number
-  unauthorized: boolean
-  error: string | null
-}
+// POST /admin/nous-models/sync-engine: creates rows for services nous-engine
+// lists and the catalog lacks; never disables anything (spec 2026-09-25 §3.4).
+type EngineSyncReport = Schema<'NousEngineSyncResponse'>
 
 interface NousModel {
   id: string
@@ -447,8 +439,8 @@ export function AIModelsPage() {
   useEffect(() => { fetchModels() }, [fetchModels])
 
   // Runs the backend nous-engine sync (services/ai/nous_engine_sync) once, on
-  // demand. What it does to existing rows is that module's contract; spec
-  // 2026-09-25 P3 narrows it to creating missing rows + refreshing windows.
+  // demand: create rows for newly listed services + refresh context windows.
+  // Availability itself is live (the Engine column), not written by this.
   const handleSyncEngine = async () => {
     setSyncingEngine(true)
     try {
@@ -464,12 +456,11 @@ export function AIModelsPage() {
       }
       const report = data as EngineSyncReport
       const summary =
-        `Identified ${report.discovered} services · added ${report.created.length}` +
-        ` · updated ${report.updated.length} · disabled ${report.disabled.length}`
-      if (report.error && report.discovered === 0 && !report.unauthorized) {
+        `Created ${report.created.length} new rows · ${report.discovered} services listed` +
+        ` · ${report.updated.length} windows updated`
+      if (report.error && report.discovered === 0) {
         Message.error(`Sync failed: ${report.error}`)
       } else if (report.error) Message.warning(`${summary} (${report.error})`)
-      else if (report.disabled.length > 0) Message.warning(summary)
       else Message.success(summary)
       fetchModels()
     } catch (err) {
