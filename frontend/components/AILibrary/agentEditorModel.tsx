@@ -10,14 +10,12 @@ import React from 'react';
 
 import { suspectedNonChatKind } from '../../utils/nonChatModel';
 import {
-  isPlatformModelAvailable,
   platformModelAvailability,
+  platformModelRows,
+  platformModelText,
 } from '../../utils/platformModel';
-import type {
-  AIProviderConfig,
-  AISettings as AISettingsType,
-} from '../../types';
-import type { NousModelPublic } from '../../types/api';
+import type { AISettings as AISettingsType } from '../../types';
+import type { PlatformModelStatus } from '../../types/api';
 import { UiSelect } from '../ui';
 
 /**
@@ -51,37 +49,17 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 };
 
 /**
- * Platform (Nous) rows the user may actually pick, per the Nous card on the
- * Providers page — the ONE management entry (2026-09-06). ``undefined`` config
- * = the user never touched the card = no restriction; ``enabled === false``
- * = nothing; otherwise drop the rows listed in ``disabled_models``.
- *
- * Rows whose last probe FAILED are dropped regardless of config (2026-09-24,
- * utils/platformModel): the admin page shows them as broken, so the user side
- * does not offer them. ``not_probed`` / never-probed rows stay.
- */
-export function visiblePlatformModels<
-  T extends { name: string; last_test_status?: NousModelPublic['last_test_status'] },
->(rows: T[], nousConfig: AIProviderConfig | undefined): T[] {
-  const available = rows.filter(isPlatformModelAvailable);
-  if (!nousConfig) return available;
-  if (nousConfig.enabled === false) return [];
-  const disabled = new Set(nousConfig.disabled_models ?? []);
-  return available.filter((m) => !disabled.has(m.name));
-}
-
-/**
  * Reason text per platform row that is offered but cannot be picked right now
  * (utils/platformModel › platformModelAvailability: `idle` on nous-engine).
  * ``notLoaded`` is the caller's already-localized string.
  */
 export function platformNotLoadedLabels(
-  rows: { name: string; last_test_status?: NousModelPublic['last_test_status'] }[],
+  rows: { name: string; status?: PlatformModelStatus }[],
   notLoaded: string,
 ): Record<string, string> {
   return Object.fromEntries(
     rows
-      .filter((m) => platformModelAvailability(m).reason === 'not_loaded')
+      .filter((m) => platformModelAvailability(m.status).reason === 'not_loaded')
       .map((m) => [m.name, notLoaded]),
   );
 }
@@ -103,6 +81,19 @@ export function getAvailableModels(
   return Object.entries(settings.providers)
     .filter(([, config]) => config?.enabled)
     .map(([key, config]) => {
+      // The platform card is the same shape as a BYOK card — the server
+      // computed its `enabled_models` (spec 2026-09-25 §3.1) — but it lists
+      // every platform type, so the chat picker keeps only `llm` rows and
+      // labels each one the way the admin page does (row name stays the VALUE).
+      if (key === 'nous') {
+        const rows = platformModelRows(settings, { types: ['llm'] });
+        return {
+          providerKey: key,
+          providerName: PROVIDER_DISPLAY_NAMES[key] ?? key,
+          models: rows.map((m) => m.name),
+          labels: Object.fromEntries(rows.map((m) => [m.name, platformModelText(m)])),
+        };
+      }
       const whitelist = config?.enabled_models;
       const fallback = config?.selected_model ? [config.selected_model] : [];
       const models = Array.from(new Set(whitelist ?? fallback)).filter(Boolean);

@@ -29,9 +29,9 @@ import type {
   AILibraryAgent,
   AILibrarySkill,
 } from '../../types';
-import type { NousModelPublic } from '../../types/api';
 import { aiLibraryService } from '../../services/aiLibraryService';
-import { getNousModels, getAIGovernance } from '../../services/aiService';
+import { usePlatformModels } from '../../hooks/usePlatformModels';
+import type { PlatformModelType } from '../../types/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
 import { NewAgentModal } from './NewAgentModal';
@@ -43,18 +43,15 @@ import { AgentProfileTab } from './AgentProfileTab';
 import PermissionsSection from './PermissionsSection';
 import PermissionChangeLog from './PermissionChangeLog';
 import {
-  PROVIDER_DISPLAY_NAMES,
   getAvailableModels,
   nonChatModelNotes,
   platformNotLoadedLabels,
-  visiblePlatformModels,
 } from './agentEditorModel';
-import { buildModelHealth, healthReasonKey } from '../../utils/modelHealth';
-import { isPlatformModelAvailable, platformModelText } from '../../utils/platformModel';
-import { formatRelativeTime } from '../../utils/relativeTime';
 import { GROUP_AVATAR, agentGroupOf } from './agentStatus';
 import { getAgentIcon } from './agentIcons';
 import { useGlobalChatStore } from '../../stores/globalChatStore';
+
+const PLATFORM_CHAT_TYPES: readonly PlatformModelType[] = ['llm'];
 
 type SubTab = 'workbench' | 'persona' | 'permissions' | 'cost' | 'profile';
 
@@ -166,96 +163,27 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
   // ``userProfile.role === 'admin'`` is still useful elsewhere (Workforce,
   // approval queue) — keeping the deconstruct above so callers don't break.
   void userProfile;
-  const [nousLlm, setNousLlm] = useState<NousModelPublic[]>([]);
-  const [nousEnabled, setNousEnabled] = useState(false);
+  // The picker is a pure mapping over the AI settings (spec 2026-09-25):
+  // platform rows arrive as the `nous` card's enabled_models, exactly like a
+  // BYOK card, so getAvailableModels produces the platform group itself. The
+  // live status (idle → greyed) comes from the one status request.
+  const { rows: platformLlm } = usePlatformModels(PLATFORM_CHAT_TYPES, aiSettings);
+  const modelGroups = useMemo(() => getAvailableModels(aiSettings), [aiSettings]);
 
-  useEffect(() => {
-    getNousModels('llm').then(setNousLlm).catch(() => {});
-    getAIGovernance()
-      .then((g) => setNousEnabled(Boolean(g.nous_enabled)))
-      .catch(() => setNousEnabled(false));
-  }, []);
-
-  const modelGroups = useMemo(() => {
-    const base = getAvailableModels(aiSettings);
-    // Platform rows obey the Nous card on the Providers page — the one
-    // management entry — exactly as the canvas picker does server-side.
-    const platform = visiblePlatformModels(nousLlm, aiSettings?.providers?.nous);
-    if (nousEnabled && platform.length > 0) {
-      base.push({
-        providerKey: 'nous',
-        providerName: PROVIDER_DISPLAY_NAMES.nous,
-        models: platform.map((m) => m.name),
-        // Same label as the admin AI Models card (actual_model, else the row
-        // name), with display_name alongside. The VALUE stays the row name.
-        labels: Object.fromEntries(platform.map((m) => [m.name, platformModelText(m)])),
-      });
-    }
-    return base;
-  }, [aiSettings, nousEnabled, nousLlm]);
+  // Idle on nous-engine (authorized, not loaded): listed but not pickable.
+  const notLoadedPlatformLabels = useMemo(
+    () => platformNotLoadedLabels(platformLlm, t('platformModel.notLoaded', 'Not loaded on nous-engine')),
+    [platformLlm, t],
+  );
 
   // Which platform rows actually run on the USER's machine (backend `is_local`).
   // Derived from the payload rather than matched by name here: "Codex (Local)"
   // is a display string an admin can rename, and a hint keyed on a guessed name
   // would go silent the moment they did.
-  // Platform rows hidden from the picker because their last probe failed. If
-  // the agent already uses one, the picker keeps it as a leading option that
-  // says "unavailable" instead of the generic "provider not enabled" — the
-  // saved value is never swapped out behind the user's back.
-  const unavailablePlatformLabels = useMemo(() => {
-    if (!nousEnabled) return {};
-    return Object.fromEntries(
-      nousLlm
-        .filter((m) => !isPlatformModelAvailable(m))
-        .map((m) => [
-          m.name,
-          t('aiLibrary.agents.modelUnavailableOption', '{{name}} (unavailable)', {
-            name: platformModelText(m),
-          }),
-        ]),
-    );
-  }, [nousEnabled, nousLlm, t]);
-
-  // Idle on nous-engine (authorized, not loaded): listed but not pickable.
-  const notLoadedPlatformLabels = useMemo(
-    () =>
-      nousEnabled
-        ? platformNotLoadedLabels(nousLlm, t('platformModel.notLoaded', 'Not loaded on nous-engine'))
-        : {},
-    [nousEnabled, nousLlm, t],
-  );
-
   const localModelNames = useMemo(
-    () => nousLlm.filter((m) => m.is_local).map((m) => m.name),
-    [nousLlm],
+    () => platformLlm.filter((m) => m.is_local).map((m) => m.name),
+    [platformLlm],
   );
-
-  // Platform-model self-check, surfaced next to the picker (spec
-  // 2026-08-14 §F2). Only platform models carry it — a BYOK provider's models
-  // are never probed, so they stay absent from the map and the UI silent.
-  const modelHealth = useMemo(() => buildModelHealth(nousLlm), [nousLlm]);
-  const unhealthyModelLabels = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const [name, health] of Object.entries(modelHealth)) {
-      if (health.status !== 'fail') continue;
-      const checked = health.testedAt
-        ? t('aiLibrary.agents.modelHealthCheckedAgo', 'checked {{ago}}', {
-            ago: formatRelativeTime(health.testedAt, t),
-          })
-        : '';
-      // The reason is a closed enum from the backend (mig 427), so it is safe
-      // to render inside the picker; the probe's raw text never leaves admin.
-      // A missing/unknown code degrades to the reason-less wording.
-      const reasonKey = healthReasonKey(health.code);
-      const failed = reasonKey
-        ? t('aiLibrary.agents.modelHealthFailedReasonShort', 'health check failed: {{reason}}', {
-            reason: t(reasonKey),
-          })
-        : t('aiLibrary.agents.modelHealthFailedShort', 'health check failed');
-      out[name] = checked ? `${failed}, ${checked}` : failed;
-    }
-    return out;
-  }, [modelHealth, t]);
 
   // BYOK models whose id reads as embedding / image / speech. The picker lists
   // every enabled model of every enabled provider, and a user who keeps an
@@ -801,10 +729,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
           catalogLocked={catalogLocked}
           modelGroups={modelGroups}
           localModelNames={localModelNames}
-          modelHealth={modelHealth}
-          unhealthyModelLabels={unhealthyModelLabels}
           nonChatModelLabels={nonChatModelLabels}
-          unavailableModelLabels={unavailablePlatformLabels}
           notLoadedModelLabels={notLoadedPlatformLabels}
           localSkillIds={localSkillIds}
           allSkills={allSkills}
