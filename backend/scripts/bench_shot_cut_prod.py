@@ -22,8 +22,13 @@ Options
   --min-seconds / --max-seconds   skip shorts and hour-long streams
   --seed        sample is deterministic per seed (default 7)
   --tolerance-ms  matching window (default 500, as in spec §8.1)
+  --variants    extra CutParams sets scored on the SAME sampled frames, e.g.
+                "min_shot_ms=800;min_shot_ms=800,ratio=2.0" — one decode per
+                video, one cut per variant; the per-video table is the
+                default's, the variants table compares means
   --json        write per-video rows here
-Exit 0 when mean F1 >= 0.8, 1 otherwise, 2 when nothing could be scored.
+Exit 0 when mean F1 >= 0.8 (default params), 1 otherwise, 2 when nothing
+could be scored.
 """
 
 from __future__ import annotations
@@ -35,15 +40,40 @@ import random
 import statistics
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Sequence
 
 from sqlalchemy import func, or_, select
 
+from app.services.library.shot_cut import DEFAULT_PARAMS, CutParams, cut_video
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_shot_cut import _f1  # noqa: E402 — sibling script, same matching rule
 
 F1_TARGET = 0.8
+DEFAULT_LABEL = "default"
+
+_INT_FIELDS = {"window", "min_shot_ms", "max_shot_ms", "max_shots"}
+
+
+def parse_variants(spec: str | None) -> list[tuple[str, CutParams]]:
+    """``"min_shot_ms=800;min_shot_ms=800,ratio=2.0"`` → ``[(label, params)]``,
+    always starting with ``("default", DEFAULT_PARAMS)``. Unknown field or bad
+    value is a ValueError (a typo must not silently score the defaults)."""
+    out: list[tuple[str, CutParams]] = [(DEFAULT_LABEL, DEFAULT_PARAMS)]
+    for chunk in (spec or "").split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        overrides: dict[str, Any] = {}
+        for pair in chunk.split(","):
+            key, sep, raw = pair.strip().partition("=")
+            if not sep or not hasattr(DEFAULT_PARAMS, key):
+                raise ValueError(f"unknown CutParams field in variant: {pair!r}")
+            overrides[key] = int(raw) if key in _INT_FIELDS else float(raw)
+        out.append((chunk, replace(DEFAULT_PARAMS, **overrides)))
+    return out
 
 
 def parse_duration_seconds(value: str | None) -> float | None:
@@ -140,37 +170,56 @@ def _reference_cuts_ms(path: str) -> list[int]:
     from scenedetect import ContentDetector, detect
 
     scenes = detect(path, ContentDetector())
-    return [int(round(start.get_seconds() * 1000)) for start, _ in scenes[1:]]
+    # ``seconds`` is the current property; ``get_seconds()`` the deprecated one.
+    return [
+        int(round((getattr(start, "seconds", None) or start.get_seconds()) * 1000))
+        for start, _ in scenes[1:]
+    ]
+
+
+def _cuts_of(shots) -> list[int]:
+    return [s.start_ms for s in shots[1:] if s.cut_score > 0.0]
 
 
 async def _score_one(
-    user_id: str, resource_id: int, tolerance_ms: int
+    user_id: str,
+    resource_id: int,
+    tolerance_ms: int,
+    variants: Sequence[tuple[str, CutParams]],
 ) -> dict[str, Any]:
     from app.db.scope import Scope, request_scope
     from app.repositories.resources_repository import ResourcesRepository
     from app.services.distribution.cover_frames import load_source_video
     from app.services.library.media_storage import materialize
-    from app.services.library.shot_frames import cut_video_file
+    from app.services.library.shot_frames import cut_video_file, signatures
 
     async with request_scope(Scope(user_id=user_id)):
         source = await load_source_video(ResourcesRepository(), str(resource_id))
     t0 = time.monotonic()
+    per_variant: dict[str, list[int]] = {}
     async with materialize(source.file_path) as local:
         async with cut_video_file(str(local)) as result:
-            ours = [s.start_ms for s in result.shots[1:] if s.cut_score > 0.0]
             duration_ms = result.duration_ms
+            per_variant[DEFAULT_LABEL] = _cuts_of(result.shots)
+            if len(variants) > 1:
+                # Same frames, other params: one decode, N cuts.
+                sigs = await signatures(result.frames)
+                for label, params in variants[1:]:
+                    per_variant[label] = _cuts_of(cut_video(sigs, duration_ms, params))
         # OpenCV decode is blocking CPU work; keep the loop free.
         ref = await asyncio.to_thread(_reference_cuts_ms, str(local))
-    p, r, f1 = _f1(ours, ref, tolerance_ms)
+    scored = {}
+    for label, cuts in per_variant.items():
+        p, r, f1 = _f1(cuts, ref, tolerance_ms)
+        scored[label] = {"ours": len(cuts), "precision": p, "recall": r, "f1": f1}
+    default = scored[DEFAULT_LABEL]
     return {
         "resource_id": str(resource_id),
         "duration_ms": duration_ms,
-        "ours": len(ours),
         "ref": len(ref),
-        "precision": p,
-        "recall": r,
-        "f1": f1,
         "seconds": time.monotonic() - t0,
+        **default,
+        "variants": scored,
     }
 
 
@@ -182,8 +231,10 @@ async def main() -> int:
     ap.add_argument("--max-seconds", type=float, default=900.0)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--tolerance-ms", type=int, default=500)
+    ap.add_argument("--variants", default="")
     ap.add_argument("--json", type=Path, default=None)
     args = ap.parse_args()
+    variants = parse_variants(args.variants)
 
     rows = await _list_videos(args.user_id)
     user_id = args.user_id or _top_creator(rows)
@@ -213,7 +264,7 @@ async def main() -> int:
         title = (row.get("title") or "")[:28]
         try:
             scored = await _score_one(
-                user_id, int(row["resource_id"]), args.tolerance_ms
+                user_id, int(row["resource_id"]), args.tolerance_ms, variants
             )
         except Exception as e:  # noqa: BLE001 — one bad file, keep going
             print(
@@ -249,6 +300,18 @@ async def main() -> int:
             f" · videos with reference cuts: {len(with_cuts)}, mean F1 {cut_mean:.3f}"
         )
     print(line)
+    if len(variants) > 1:
+        print(
+            f"\n{'variant':44} {'meanP':>6} {'meanR':>6} {'meanF1':>7} {'F1(ref>0)':>10}"
+        )
+        for label, _ in variants:
+            rows_v = [x["variants"][label] for x in scored_rows]
+            rows_c = [x["variants"][label] for x in with_cuts]
+            mp = statistics.mean(v["precision"] for v in rows_v)
+            mr = statistics.mean(v["recall"] for v in rows_v)
+            mf = statistics.mean(v["f1"] for v in rows_v)
+            mc = statistics.mean(v["f1"] for v in rows_c) if rows_c else float("nan")
+            print(f"{label[:44]:44} {mp:6.3f} {mr:6.3f} {mf:7.3f} {mc:10.3f}")
     return 0 if mean_f1 >= F1_TARGET else 1
 
 
