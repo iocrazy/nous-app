@@ -159,6 +159,13 @@ ORM_ALLOWED_PATHS: dict[str, str] = {
         "两道仲裁（输家 409 并整体回滚）；scene 正文只走 apply_element_ops "
         "这一条 ops 通道，其余对 script_ops 的接触全是重放用的只读。"
     ),
+    "services/issues/verification/evidence.py": (
+        "issue completion loop (2026-09-26): READ-ONLY evidence for the system "
+        "verifier. The shot/scene ids come from run_deliverables rows that the "
+        "scoped write path registered for this issue's runs, never from model "
+        "arguments; nothing here is reachable from an agent tool call and "
+        "nothing is written"
+    ),
 }
 
 # Files allowed to reach the scene/shot/episode/script-project repository
