@@ -30,6 +30,7 @@ services:
     restart: unless-stopped
 
   backend:
+    init: true  # PID 1 是 uv，不 reap 孤儿；2026-09-26 实测被杀 leader 的孙进程永久 <defunct>（fh4 recon-a H8）
     build:
       context: ../..
       dockerfile: Dockerfile
@@ -192,6 +193,7 @@ services:
     restart: unless-stopped
 
   worker:
+    init: true  # 同 backend：run_process 杀 leader 后孙进程重挂 PID 1，uv 不收尸
     image: nous-backend:local
     container_name: nous-worker
     env_file: /media/heygo/program/datahub/nous/secrets/backend.env
