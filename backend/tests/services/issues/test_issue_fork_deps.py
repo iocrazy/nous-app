@@ -106,13 +106,24 @@ async def test_list_events_reads_only_the_replayable_types_up_to_at_seq():
 
 async def test_origin_messages_stop_at_the_run_start_and_keep_only_replayable_roles():
     rows = [
-        {"role": "user", "content": "a", "created_at": "2026-09-09T09:00:00+00:00"},
+        {
+            "role": "user",
+            "content": "a",
+            "seq": 1,
+            "created_at": "2026-09-09T09:00:00+00:00",
+        },
         {
             "role": "assistant",
             "content": "b",
+            "seq": 2,
             "created_at": "2026-09-09T09:01:00+00:00",
         },
-        {"role": "user", "content": "c", "created_at": "2026-09-09T10:00:00+00:00"},
+        {
+            "role": "user",
+            "content": "c",
+            "seq": 3,
+            "created_at": "2026-09-09T10:00:00+00:00",
+        },
     ]
     store = AsyncMock()
     store.get_messages = AsyncMock(return_value=rows)
@@ -123,9 +134,11 @@ async def test_origin_messages_stop_at_the_run_start_and_keep_only_replayable_ro
         out = await f.default_deps().list_origin_messages(
             100, "2026-09-09T10:00:00+00:00"
         )
+    # fh5 A2: seq rides along so seed_messages can find the rows past a
+    # summary's watermark.
     assert out == [
-        {"role": "user", "content": "a"},
-        {"role": "assistant", "content": "b"},
+        {"role": "user", "content": "a", "seq": 1},
+        {"role": "assistant", "content": "b", "seq": 2},
     ]
     store.get_messages.assert_awaited_once_with(
         session_id=100, limit=f.ORIGIN_MESSAGE_LIMIT

@@ -9,6 +9,10 @@ from uuid import UUID
 from loguru import logger
 
 from app.repositories.agent_repository import get_agent_repository
+from app.repositories.conversation_memory_repository import (
+    ConversationMemoryRepository,
+    get_conversation_memory_repository,
+)
 from app.repositories.conversation_repository import (
     ConversationRepository,
     get_conversation_repository,
@@ -61,8 +65,14 @@ class ConversationService:
     # Conversations that are a fixed pair: nobody (user or agent) joins them.
     _FIXED_PAIR_TYPES = frozenset({"direct_agent", "dm"})
 
-    def __init__(self, repo: Optional[ConversationRepository] = None) -> None:
+    def __init__(
+        self,
+        repo: Optional[ConversationRepository] = None,
+        memory_repo: Optional[ConversationMemoryRepository] = None,
+    ) -> None:
         self._repo = repo or get_conversation_repository()
+        # Resolved lazily: most calls never touch the summary sidecar.
+        self._memory_repo = memory_repo
 
     async def create_conversation(
         self,
@@ -406,6 +416,7 @@ class ConversationService:
         )
         if row is None:
             raise PermissionError("message not found or not editable")
+        await self._drop_summary_if_covered(conversation_id, row)
         return row
 
     async def delete_message(
@@ -423,7 +434,35 @@ class ConversationService:
         )
         if row is None:
             raise PermissionError("message not found or not deletable")
+        await self._drop_summary_if_covered(conversation_id, row)
         return row
+
+    async def _drop_summary_if_covered(
+        self, conversation_id: int, row: dict[str, Any]
+    ) -> None:
+        """fh5 A2 (I8): a changed message the stored summary already covers
+        makes that summary stale — delete it so the next compaction rebuilds
+        it from the raw rows. Rows past the watermark are still sent verbatim,
+        so the summary stays. Never fails the edit: the message change has
+        already committed."""
+        seq = row.get("seq")
+        if seq is None:
+            return
+        try:
+            memory = self._memory_repo or get_conversation_memory_repository()
+            stored = await memory.load(conversation_id)
+            if stored and int(seq) <= int(stored["last_seq_summarized"]):
+                await memory.delete(conversation_id)
+                logger.info(
+                    f"[conversation] summary of conv={conversation_id} dropped: "
+                    f"seq {seq} changed at/below watermark "
+                    f"{stored['last_seq_summarized']}"
+                )
+        except Exception as exc:  # noqa: BLE001 — sidecar never fails an edit
+            logger.error(
+                f"[conversation] could not check/drop the summary of "
+                f"conv={conversation_id} after seq {seq} changed: {exc!r}"
+            )
 
     async def dispatch_summons(
         self,

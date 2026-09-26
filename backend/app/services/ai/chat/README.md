@@ -3,6 +3,7 @@
 `ai_library_chat_service.py` 把一次聊天轮次拼成请求：系统消息由 `../prompts/` 组装，这里负责两件事——**历史怎么重建**，以及**缓存边界之后的请求指令里放什么**。系统消息本身的结构、`<available_resources>` / `<referenced_outputs>` 等框见 `../prompts/README.md`；runner 在一轮之内追加的工具消息见 `../runner/README.md`。
 
 - `conversations_ai_store.py` — 读写会话消息（历史的来源）
+- `turn_history.py` — 本轮从哪段历史起跑（存储的摘要 + 水位之后的行，或最新 200 条），以及把本轮被接受的摘要写回 `conversation_memory`
 - `history_image_replay.py` — 把历史重建成消息列表，并按预算重放最近的图片
 - `ai_library_chat_service.py` — 请求指令组装、单条上限、工具挂载
 
@@ -12,26 +13,34 @@
 
 #### What the model sees
 
-每一轮都从库里读**最新 200 条**未删除消息（`get_messages(..., newest=True)`，默认 `limit=200`），按 seq 升序，再由 `build_history_messages` 转成消息列表：
+历史由 `turn_history.load_turn_history` 决定，两种形状（fh5 A2）：
+
+- **有存储摘要**（`direct_agent` 会话，且 `conversation_memory` 里有这个会话的非空行）：第 0 条是存储的摘要框（`render_summary_message(summary_md)`，逐字节与 live 压缩、replay 产出的一样，框的字面见 `app/agent_framework/README.md`），后面接 **`seq > last_seq_summarized` 的最新 200 条**未删除消息（`get_messages_after`）。
+- **其余情况**（还没压缩过、群聊会话、sidecar 读失败）：**最新 200 条**未删除消息（`get_messages(..., newest=True)`，默认 `limit=200`）。
+
+两种都按 seq 升序，再由 `build_history_messages` 转成消息列表：
 
 - 只保留 `user` / `assistant` / `system` 三种角色，每条只有 `role` + `content`。**工具调用与工具结果从不重放**——上一轮 runner 产生的 tool_call 存根不进历史，持久化的 assistant 消息只有最终文本。
 - assistant 文本是 runner 去掉 `<think>` 之后的版本（`runner/reasoning.strip_reasoning`），所以历史里只有答案。
 - 分叉出来的会话会带一条持久化的 system 消息，内容是源会话的压缩摘要（`append_system_message`，形状见 `app/agent_framework/README.md` 的摘要框）。走 `claude` 协议时这条消息被 `adapters/claude.py::_convert_messages` 原位转成一条 `<system_note>` user 轮（形状见 `app/agent_framework/README.md` 的摘要块与 `app/boundary/README.md` 的 `<system_note>` 块）。
 - 模型支持视觉时，**最新 `REPLAY_MAX_MESSAGES = 2` 条带图片附件的 user 消息**被重建成多段内容（图片字节重新从对象存储取、经调用者的 team 成员关系校验），全局最多 `REPLAY_MAX_IMAGES = 4` 张；更早的图片消息、取不到的、以及不支持视觉的模型，都保持纯文本。多段形状见 `app/agent_framework/README.md` 的「附件占位与多段内容」。
-- 然后本轮新的 user 消息接在最后。每条消息再过一遍单条上限（`cap_messages_tokens`，50k token，标记文字见 `app/agent_framework/README.md`）。
+- 然后本轮新的 user 消息接在最后（`assemble_turn_messages`，同时给出与消息 1:1 的 seq 列表：摘要框是水位、历史行是各自的 `seq`、新 user 是 `None`，交给 runner 预检让压缩器算出新摘要覆盖到哪）。每条消息再过一遍单条上限（`cap_messages_tokens`，50k token，标记文字见 `app/agent_framework/README.md`）。
+- 摘要框**不会**出现在会话视图里：它只在 sidecar 表，`GET /ai-library/sessions/{id}` 读的是 `messages`；消息 dict 里新增的 `seq` 键被 `LibraryChatMessageOut` 过滤掉，OpenAPI 不变。
 
 #### Token effect
 
-上限是 200 条消息乘单条 50k token，实际由 runner 预检里的四档压缩兜住（`app/agent_framework/README.md`）。图片重放每轮最多 4 张，每张每轮都重新取、重新内联。
+上限是（摘要框 +）200 条消息乘单条 50k token，实际由 runner 预检里的四档压缩兜住（`app/agent_framework/README.md`）。有存储摘要时历史只含水位之后的行，所以一次压缩之后的若干轮都在 orange 以下、不再调摘要；尾部再越过 orange 时新摘要把旧摘要连同头部一起吸收（取代，不链接），`conversation_memory` 始终一行。图片重放每轮最多 4 张，每张每轮都重新取、重新内联。
 
 #### KV Cache effect
 
-**本应是 append-only，但有两处结构性的前缀破坏**：
+**两次压缩之间是 append-only**：有存储摘要时第 0 条是同一个摘要框，后面按 seq 追加，前缀逐轮稳定（长会话基准 `tests/benchmarks/test_long_session_continuation.py` 断言 20 轮里前缀只在产生新摘要的轮次断开，摘要调用 ≤ 3 次；A2 之前是每轮 1 次、每轮断开）。结构性的前缀破坏还剩：
 
-1. 会话超过 200 条后窗口**每轮滑动一次**，第 0 条消息每轮都变，消息列表前缀每轮都失效。
-2. 第 3 条带图片的 user 消息出现时，最早那条被重放的图片消息**退回纯文本**，改写了更早的一条消息。
+1. **新摘要被接受的那一轮**：摘要框换成新文字，水位前进，这是设计。
+2. 还没有存储摘要、会话又超过 200 条时，窗口**每轮滑动一次**，第 0 条消息每轮都变。
+3. 第 3 条带图片的 user 消息出现时，最早那条被重放的图片消息**退回纯文本**，改写了更早的一条消息。
+4. 编辑 / 删除一条 `seq <= 水位` 的消息会删掉存储摘要（`conversation_service`），下一轮回到最新 200 条窗口。
 
-再加上压缩摘要不写回历史（见 `app/agent_framework/README.md`），越过 orange 的会话每轮重新摘要。会让复用失效的改动：窗口条数、两个重放预算、角色过滤规则、`strip_reasoning` 的规则。本模块不承诺 provider 缓存命中。
+会让复用失效的改动：窗口条数、两个重放预算、角色过滤规则、`strip_reasoning` 的规则、摘要框的渲染（见 `app/agent_framework/README.md`）。本模块不承诺 provider 缓存命中。
 
 ### 聊天 request_instructions 组装（缓存边界之后）
 
@@ -114,9 +123,10 @@ schema 固定约 140 token（紧凑 JSON 584 字符），只在有资源引用�
 
 ## Known Limitations and Deferred Work
 
-- **200 条窗口滑动**：会话一过 200 条，每轮第 0 条都变，消息列表前缀每轮失效。
+- **200 条窗口滑动（没有存储摘要时）**：会话一过 200 条而还没压缩过，每轮第 0 条都变。有存储摘要之后只读水位之后的行。
+- **水位之后超过 200 条时中间有缺口**：那段行既不在摘要里也不在窗口里，`load_turn_history` 记 warning。正常情况下压缩远早于此触发。
 - **图片重放会改写更早的消息**：第 3 条图片消息出现时，最早被重放的那条退回纯文本。
-- **压缩摘要不写回历史**，越过 orange 的会话每轮重新摘要头部；推迟项与裁定见 `app/agent_framework/README.md`。
+- **分叉会话不写 `conversation_memory`**：分叉把摘要作为一条持久化的 system 消息带过去（上文），它的第一次压缩把那条消息一起摘掉后才有自己的 sidecar 行。
 - **工具调用不跨轮**：上一轮模型读过的工具结果，下一轮只剩 assistant 的最终文本。需要再看就得再调。
 - **`<pending_followups>` 的条数与列表可能不一致**：待兑现超过 5 条时，开头说的是全部条数，列表只列 5 条，也只把这 5 条标成已兑现。标记失败时静默跳过（`except Exception: pass`），那条会在下个会话再出现。
 - **`<user_selection>` 的 id 在 #2472 之前原样进框**，客户端可以借它提前关掉框。#2472 起经 `escape_frame_attr` 并在请求模型上限长；记录在此供对照。

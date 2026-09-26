@@ -39,6 +39,11 @@ from app.services.ai.memory.agent_memory import (  # noqa: F401 (re-exported for
 COMPACT_TRIGGER = 30  # un-summarized messages (beyond the tail) that trigger compaction
 COMPACT_KEEP_TAIL = 20  # newest messages stay verbatim (= recent_messages window)
 _SUMMARY_MAX_TOKENS = 700
+# fh5 A2: a direct_agent conversation's conversation_memory row is the 1:1
+# turn summary (services/ai/chat/turn_history.py) — same table, same
+# "summary of seq <= watermark" meaning, different renderer and writer. The
+# group reader and writer stay off those rows so the two can never share one.
+_ONE_TO_ONE_TYPE = "direct_agent"
 
 _SUMMARY_SYSTEM = (
     "You maintain a rolling summary of a team chat conversation. Merge the "
@@ -121,6 +126,8 @@ async def build_memory_block(
 ) -> str:
     if not settings.FEATURE_GROUP_AGENT_MEMORY:
         return ""
+    if conversation.get("type") == _ONE_TO_ONE_TYPE:
+        return ""
     try:
         cid = int(conversation["id"])
         scope_id = int(conversation["scope_id"])
@@ -182,7 +189,7 @@ async def maybe_compact(*, conversation: dict[str, Any]) -> None:
     try:
         cid = int(conversation["id"])
         fresh = await _fresh_conversation(cid)
-        if not fresh:
+        if not fresh or fresh.get("type") == _ONE_TO_ONE_TYPE:
             return
         last_seq = int(fresh.get("last_seq") or 0)
         mem = await get_conversation_memory_repository().load(cid)

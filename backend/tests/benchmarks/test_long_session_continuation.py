@@ -67,14 +67,20 @@ N_SEED = 400
 K_TURNS = 20
 MAX_FRESH_SUMMARIES = 3
 LIVE_USER_CHARS = 800
-LIVE_ANSWER_CHARS = 4800
+# Under the transcript's per-field cap (``RunRecorder.EVENT_VALUE_MAX_CHARS`` =
+# 4000): a longer final answer is stored cut, so a fork re-seeds a cut reply.
+# That is a separate, pre-existing replay gap (it predates A2 and also applies
+# to long user messages and summaries), not what A5 measures.
+LIVE_ANSWER_CHARS = 3600
 SUMMARY_CHARS = 1200
 SYSTEM = "You are the long-session benchmark agent. Answer the user briefly."
 # Median ms per turn measured on the development machine (Mac mini, drift DB on
-# localhost) after A2. The ceiling is generous on purpose: this guards against
-# an order-of-magnitude regression (a per-turn full-history re-read, a
-# tokenizer pass per row), not against CI jitter.
-BASELINE_MEDIAN_MS = 120.0
+# localhost) after A2: 594-609 ms over three runs (master-equivalent path:
+# ~810 ms, one summary call per turn). Most of it is the real RunRecorder's
+# row + event writes, not the model stand-in. The ceiling is generous on
+# purpose: it guards against an order-of-magnitude regression (a per-turn
+# full-history re-read, a tokenizer pass per row), not against CI jitter.
+BASELINE_MEDIAN_MS = 600.0
 CEILING_FACTOR = 5
 
 
@@ -292,34 +298,55 @@ async def _cleanup(pg: Any, sid: int, agent_id: Any, team_id: Any, user_id: Any)
 # ── the turn seam ───────────────────────────────────────────────────────────
 
 
-async def _prepare_turn(ctx: _Ctx, runner: Any, user_text: str) -> list[dict]:
-    """The chat service's history load + assembly, in its order: load history,
-    persist the user message, build history messages, append the new user
-    message, per-message cap. Master-equivalent path: newest-200 rows."""
+async def _prepare_turn(ctx: _Ctx, runner: Any, user_text: str) -> tuple[list, Any]:
+    """The chat service's history load + assembly, in its order: load the turn
+    history (stored summary + rows after its watermark), persist the user
+    message, build history messages, assemble with the frame and the seq list,
+    per-message cap, hand the carried summary and seqs to the runner."""
     from app.agent_framework import cap_messages_tokens
     from app.services.ai.chat.history_image_replay import build_history_messages
+    from app.services.ai.chat.turn_history import (
+        assemble_turn_messages,
+        load_turn_history,
+    )
 
-    history = await ctx.store.get_messages(session_id=ctx.sid, newest=True)
+    history = await load_turn_history(ctx.store, ctx.sid)
     await ctx.store.append_user_message(
         session_id=ctx.sid, user_id=ctx.user_id, content=user_text
     )
-    messages = await build_history_messages(
-        history, user_id=ctx.user_id, supports_vision=False
+    built = await build_history_messages(
+        history.rows, user_id=ctx.user_id, supports_vision=False
     )
-    messages.append({"role": "user", "content": user_text})
-    return [o.message for o in cap_messages_tokens(messages)]
+    assembled = assemble_turn_messages(
+        carried=history.carried,
+        rows=history.rows,
+        history_messages=built,
+        new_user_message={"role": "user", "content": user_text},
+    )
+    runner.carried_summary = history.carried
+    runner.turn_message_seqs = assembled.message_seqs
+    return [o.message for o in cap_messages_tokens(assembled.messages)], history
 
 
-async def _after_turn(ctx: _Ctx, runner: Any, recorder: Any) -> None:
-    """Post-turn bookkeeping inside the recorder block (master: none)."""
-    return None
+async def _after_turn(ctx: _Ctx, runner: Any, recorder: Any, history: Any) -> None:
+    """Post-turn bookkeeping inside the recorder block, as the chat service
+    does it: clear the per-turn runner state, persist an accepted summary."""
+    from app.services.ai.chat.turn_history import persist_compaction_summary
+
+    runner.carried_summary = None
+    runner.turn_message_seqs = None
+    await persist_compaction_summary(
+        recorder.last_compaction,
+        conversation_id=ctx.sid,
+        memory_eligible=history.memory_eligible,
+        model=MODEL,
+    )
 
 
 def _fork_seed(origin: list[dict], events: list[dict]) -> list[dict]:
-    from app.services.ai.runner.replay import messages_from_events
-    from app.services.issues.issue_fork import _seed
+    from app.services.issues.issue_fork import seed_messages
 
-    return _seed(origin, messages_from_events(events))
+    return seed_messages(origin, events)
 
 
 # ── one turn ────────────────────────────────────────────────────────────────
@@ -366,7 +393,7 @@ async def _run_one_turn(ctx: _Ctx, runner: Any, adapter: _BenchAdapter, t: int):
     composed = _composed(ctx.agent_id)
     calls_before, summaries_before = len(adapter.calls), adapter.summaries
     started = time.perf_counter()
-    user_messages = await _prepare_turn(ctx, runner, user_text)
+    user_messages, history = await _prepare_turn(ctx, runner, user_text)
     async with RunRecorder(
         agent_id=UUID(ctx.agent_id),
         user_id=UUID(ctx.user_id),
@@ -386,7 +413,7 @@ async def _run_one_turn(ctx: _Ctx, runner: Any, adapter: _BenchAdapter, t: int):
             )
         ]
         answer = "".join(ch.delta_text or "" for ch in chunks)
-        await _after_turn(ctx, runner, recorder)
+        await _after_turn(ctx, runner, recorder, history)
         run_id = str(recorder.run_id)
     await ctx.store.append_assistant_message(
         session_id=ctx.sid,
@@ -513,9 +540,13 @@ async def _check_fork(ctx: _Ctx, pg: Any, last: _TurnRecord) -> list[str]:
     want = last.seen + [{"role": "assistant", "content": last.answer.strip()}]
     if seed == want:
         return []
+    at = _first_mismatch(seed, want)
+    got_msg = seed[at] if at < len(seed) else None
+    want_msg = want[at] if at < len(want) else None
     return [
         f"A5 fork seed differs from the model view: {len(seed)} vs {len(want)} "
-        f"messages; first mismatch at {_first_mismatch(seed, want)}"
+        f"messages; first mismatch at {at}: got {str(got_msg)[:160]!r} "
+        f"want {str(want_msg)[:160]!r}"
     ]
 
 
@@ -542,6 +573,10 @@ async def _check_memory(ctx: _Ctx, pg: Any, turns: list[_TurnRecord]) -> list[st
     last_fresh = await _last_fresh_summary(turns)
     if rows[0]["summary_md"] != last_fresh:
         errors.append("A6 stored summary is not the last fresh compaction_summary")
+    # I2: the session view reads ``messages`` only — no frame may be there.
+    view = await ctx.store.get_messages(session_id=ctx.sid, newest=True)
+    if any(_is_frame(m) for m in view):
+        errors.append("I2 a summary frame leaked into the conversation's messages")
     return errors
 
 

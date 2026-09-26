@@ -328,3 +328,34 @@ async def test_dispatch_failure_restores_the_session_pointer():
     assert (ei.value.code, ei.value.status) == ("dispatch_failed", 503)
     assert d.calls[-1] == ("restore", 9, 100, "x")
     assert "supersede" not in [c[0] for c in d.calls]
+
+
+async def test_fork_run_seeds_from_the_summary_watermark():
+    """fh5 A2 (§1.6): origin rows between the summary's watermark and the run
+    are part of what the model saw; the seed keeps them (and carries no seq)."""
+    d = _Deps()
+    d.origin = [
+        {"role": "user", "content": "old ask", "seq": 39},
+        {"role": "assistant", "content": "old reply", "seq": 40},
+        {"role": "user", "content": "recent ask", "seq": 41},
+        {"role": "user", "content": "go", "seq": 42},
+    ]
+    d.events = [
+        {
+            "seq": 1,
+            "event_type": "compaction_summary",
+            "payload": {"path": "stored", "summary": "S", "covers_up_to_seq": 40},
+        },
+        {"seq": 2, "event_type": "user", "payload": {"content": "go"}},
+        {"seq": 3, "event_type": "step_start", "payload": {}},
+        {"seq": 4, "event_type": "assistant", "payload": {"content": "act 1"}},
+        {"seq": 5, "event_type": "step_start", "payload": {}},
+    ]
+    await f.fork_run(42, at_seq=5, steer=None, user_id="u", deps=d)
+    msgs = next(c for c in d.calls if c[0] == "messages")[2]
+    assert msgs == [
+        {"role": "system", "content": frame_summary("S")},
+        {"role": "user", "content": "recent ask"},
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": "act 1"},
+    ]

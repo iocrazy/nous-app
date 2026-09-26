@@ -165,3 +165,38 @@ async def test_compact_summarizer_empty_means_no_upsert(monkeypatch):
     ):
         await svc.maybe_compact(conversation=CONV)
     mem_repo.upsert.assert_not_awaited()
+
+
+# ── fh5 A2: the 1:1 summary shares conversation_memory; never touch it ──────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_group_memory_skips_direct_agent(monkeypatch):
+    """A direct_agent conversation's row is the 1:1 turn summary (turn_history);
+    the group reader must not render it and the group writer must not
+    overwrite it."""
+    monkeypatch.setattr(svc.settings, "FEATURE_GROUP_AGENT_MEMORY", True)
+    mem_repo = AsyncMock(
+        load=AsyncMock(return_value={"summary_md": "1:1", "last_seq_summarized": 5}),
+        upsert=AsyncMock(),
+    )
+    summarize = AsyncMock(return_value="S")
+    direct = {**CONV, "type": "direct_agent"}
+    with (
+        patch.object(svc, "get_conversation_memory_repository", return_value=mem_repo),
+        patch.object(svc, "_summarize", summarize),
+        patch.object(
+            svc,
+            "_fresh_conversation",
+            AsyncMock(return_value={"id": 10, "type": "direct_agent", "last_seq": 90}),
+        ),
+    ):
+        block = await svc.build_memory_block(
+            conversation=direct, user_query="q", summoner_user_id="u1", agent={}
+        )
+        await svc.maybe_compact(conversation=direct)
+    assert block == ""
+    mem_repo.load.assert_not_awaited()
+    summarize.assert_not_awaited()
+    mem_repo.upsert.assert_not_awaited()

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
@@ -72,6 +72,21 @@ class ConversationMemoryRepository:
         )
         async with write_scope() as session:
             await session.execute(stmt)
+
+    async def delete(self, conversation_id: int) -> bool:
+        """Drop the conversation's summary row; True when a row was deleted.
+
+        fh5 A2 (I8): an edit or delete of a message the summary already covers
+        makes the summary stale. Deleting the row lets the next compaction
+        rebuild it from the raw rows — and resets the monotonic guard, so the
+        rebuilt watermark may be lower than the stale one.
+        """
+        stmt = delete(ConversationMemory).where(
+            ConversationMemory.conversation_id == int(conversation_id)
+        )
+        async with write_scope() as session:
+            result = await session.execute(stmt)
+        return bool(result.rowcount)
 
 
 _repo: Optional[ConversationMemoryRepository] = None

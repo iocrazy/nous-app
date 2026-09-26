@@ -563,6 +563,12 @@ class ConversationsAiStore:
         return {
             "id": row["id"],
             "session_id": row.get("conversation_id"),
+            # fh5 A2: the per-conversation order key. The turn-history loader
+            # keys the stored summary's watermark on it and fork uses it to
+            # find the rows past that watermark. Internal only: response
+            # models (``LibraryChatMessageOut`` / issue message mapping) do
+            # not declare it, so it never reaches the wire.
+            "seq": row.get("seq"),
             # The `sender_type` fallback (returning it unmapped) is
             # unreachable in practice — `messages.sender_type` has a CHECK
             # constraint limiting it to the three keys in _ROLE_MAP — but is
@@ -601,39 +607,85 @@ class ConversationsAiStore:
           (``subissue_barrier``), which read the last message and check for an
           already-written report.
         """
+        return await self._read_messages(
+            session_id=session_id, limit=limit, newest=newest, after_seq=None
+        )
+
+    async def get_messages_after(
+        self, *, session_id: int, after_seq: int, limit: int = 200
+    ) -> List[Dict[str, Any]]:
+        """Non-deleted messages with ``seq > after_seq``, newest ``limit`` of
+        them, returned seq ASC (fh5 A2).
+
+        The turn path's read when a stored summary covers everything up to
+        ``after_seq`` (``turn_history.load_turn_history``): the model gets the
+        summary plus these rows. Newest-window semantics so a gap larger than
+        ``limit`` still yields the most recent context.
+        """
+        return await self._read_messages(
+            session_id=session_id, limit=limit, newest=True, after_seq=after_seq
+        )
+
+    async def _read_messages(
+        self,
+        *,
+        session_id: int,
+        limit: int,
+        newest: bool,
+        after_seq: Optional[int],
+    ) -> List[Dict[str, Any]]:
         from sqlalchemy import select
 
         from app.db.session import read_scope
         from app.models import Messages
 
-        async with read_scope() as session:
-            rows = (
-                (
-                    await session.execute(
-                        select(
-                            Messages.id,
-                            Messages.conversation_id,
-                            Messages.seq,
-                            Messages.sender_type,
-                            Messages.sender_id,
-                            Messages.from_agent_id,
-                            Messages.type,
-                            Messages.body,
-                            Messages.created_at,
-                        )
-                        .where(
-                            Messages.conversation_id == _bigint(session_id),
-                            Messages.deleted_at.is_(None),
-                        )
-                        .order_by(Messages.seq.desc() if newest else Messages.seq.asc())
-                        .limit(limit)
-                    )
-                )
-                .mappings()
-                .all()
+        conditions = [
+            Messages.conversation_id == _bigint(session_id),
+            Messages.deleted_at.is_(None),
+        ]
+        if after_seq is not None:
+            conditions.append(Messages.seq > int(after_seq))
+        stmt = (
+            select(
+                Messages.id,
+                Messages.conversation_id,
+                Messages.seq,
+                Messages.sender_type,
+                Messages.sender_id,
+                Messages.from_agent_id,
+                Messages.type,
+                Messages.body,
+                Messages.created_at,
             )
+            .where(*conditions)
+            .order_by(Messages.seq.desc() if newest else Messages.seq.asc())
+            .limit(limit)
+        )
+        async with read_scope() as session:
+            rows = (await session.execute(stmt)).mappings().all()
         ordered = list(reversed(rows)) if newest else rows
         return [self._to_legacy_message_shape(dict(r)) for r in ordered]
+
+    async def get_conversation_type(self, *, session_id: int) -> Optional[str]:
+        """``conversations.type`` for the id, or None when there is no row.
+
+        fh5 A2: only ``direct_agent`` turns read / write the 1:1 summary in
+        ``conversation_memory``; group conversations keep their own rolling
+        summary in the same table.
+        """
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import Conversations
+
+        async with read_scope() as session:
+            return (
+                await session.execute(
+                    select(Conversations.type).where(
+                        Conversations.id == _bigint(session_id)
+                    )
+                )
+            ).scalar_one_or_none()
 
     @staticmethod
     def display_attachments(

@@ -150,6 +150,8 @@ MODEL_SURFACES: tuple[Surface, ...] = (
     # ── fh4 T4: new chat README ───────────────────────────────────────
     Surface("services/ai/chat/conversations_ai_store.py", _CHAT, _H_HISTORY),
     Surface("services/ai/chat/history_image_replay.py", _CHAT, _H_HISTORY),
+    # fh5 A2: decides whether a turn starts from the stored summary frame.
+    Surface("services/ai/chat/turn_history.py", _CHAT, _H_HISTORY),
     Surface(
         "services/ai/chat/ai_library_chat_service.py",
         _CHAT,

@@ -43,7 +43,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from loguru import logger
 
@@ -93,6 +93,72 @@ class CompactionStats:
     yellow_prune: Optional[PruneStats] = None
     emergency_dropped_chars: int = 0
     notes: tuple[str, ...] = ()
+    # fh5 A2: set only when an LLM summary was ACCEPTED this turn. The raw
+    # text (never the framed message — framing lives in ``summary_frame``),
+    # the path that produced it (``warm`` / ``legacy``), and the largest
+    # ``seq`` it covers when the caller passed ``message_seqs``. The chat
+    # service persists the pair to ``conversation_memory``; the emergency cap
+    # leaves all three ``None`` (I9 — it writes nothing).
+    summary_text: Optional[str] = None
+    summary_path: Optional[str] = None
+    covers_up_to_seq: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class CarriedSummary:
+    """A stored summary the turn starts from (fh5 A2).
+
+    ``text`` is the raw summary (``conversation_memory.summary_md``);
+    ``covers_up_to_seq`` is the watermark — every message with a seq at or
+    below it is represented by the summary, not sent verbatim. The history
+    loader puts ``render_summary_message(text)`` at index 0 and the runner's
+    preflight reports it as ``compaction_summary{path:"stored"}``.
+    """
+
+    text: str
+    covers_up_to_seq: int
+
+
+@dataclass(frozen=True)
+class _HeadSummary:
+    """What an accepted head summary produced: the new message list plus the
+    facts the caller persists."""
+
+    messages: list[dict]
+    text: str
+    path: str
+    covers_up_to_seq: Optional[int]
+
+
+def _aligned_seqs(
+    message_seqs: Optional[Sequence[Optional[int]]], messages: list[dict]
+) -> Optional[list[Optional[int]]]:
+    """``message_seqs`` when it is 1:1 with ``messages``, else ``None``.
+
+    A list of the wrong length cannot say which rows a head holds, so no
+    watermark is claimed from it (a wrong watermark would hide rows from every
+    later turn). Pruning keeps the list 1:1, so alignment checked here holds
+    through the yellow pass.
+    """
+    if message_seqs is None:
+        return None
+    if len(message_seqs) != len(messages):
+        logger.warning(
+            "[compactor] message_seqs has {} entries for {} messages; "
+            "no watermark will be reported",
+            len(message_seqs),
+            len(messages),
+        )
+        return None
+    return list(message_seqs)
+
+
+def _head_watermark(seqs: Optional[list[Optional[int]]], split: int) -> Optional[int]:
+    """Largest seq among the summarized head, or ``None`` when unknown."""
+    if seqs is None:
+        return None
+    covered = [s for s in seqs[:split] if s is not None]
+    return max(covered) if covered else None
 
 
 class NoSafeSplitError(RuntimeError):
@@ -211,8 +277,16 @@ class ContextCompactor:
         tools: Optional[list] = None,
         recorder: Any = None,
         user_id: str | None = None,
+        message_seqs: Optional[Sequence[Optional[int]]] = None,
     ) -> tuple[list[dict], CompactionStats]:
         """Return possibly-compacted messages + stats.
+
+        ``message_seqs`` (fh5 A2, optional) is aligned 1:1 with
+        ``user_messages``: the ``messages.seq`` of each history row, the
+        carried summary's watermark for its frame, ``None`` for anything
+        without one (the new user message). With it, an accepted summary
+        reports ``covers_up_to_seq`` (stats + ``compaction_summary`` payload);
+        without it, today's payload is unchanged.
 
         ``recorder`` (anything with ``async record_event(type, payload)``)
         receives the compaction bracket — ``compaction_start`` /
@@ -321,6 +395,8 @@ class ContextCompactor:
         notes: list[str] = list(window_notes)
         capped: list[dict]
         dropped_chars = 0
+        accepted: Optional[_HeadSummary] = None
+        seqs = _aligned_seqs(message_seqs, user_messages)
         inc_metric("compaction_triggered")
         # The bracket: start lands BEFORE the summarizer is awaited, end lands
         # in ``finally``. A crash in between leaves an orphan start — the
@@ -340,7 +416,7 @@ class ContextCompactor:
         end_payload: dict[str, Any] = {}
         try:
             try:
-                capped = await self._compact_with_summary(
+                accepted = await self._summarize_head(
                     messages=pruned,
                     keep_recent_turns=keep,
                     model=model,
@@ -349,7 +425,9 @@ class ContextCompactor:
                     adapter=adapter,
                     recorder=recorder,
                     user_id=user_id,
+                    message_seqs=seqs,
                 )
+                capped = accepted.messages
                 notes.append("compacted via LLM head summary")
             except Exception as exc:
                 logger.warning(
@@ -419,6 +497,11 @@ class ContextCompactor:
             yellow_prune=prune_stats,
             emergency_dropped_chars=dropped_chars,
             notes=tuple(notes),
+            summary_text=accepted.text if accepted and accepted.text else None,
+            summary_path=accepted.path if accepted and accepted.text else None,
+            covers_up_to_seq=(
+                accepted.covers_up_to_seq if accepted and accepted.text else None
+            ),
         )
 
     async def _compact_with_summary(
@@ -432,7 +515,35 @@ class ContextCompactor:
         adapter: Any = None,
         recorder: Any = None,
         user_id: str | None = None,
+        message_seqs: Optional[Sequence[Optional[int]]] = None,
     ) -> list[dict]:
+        """The compacted message list only — see ``_summarize_head``."""
+        result = await self._summarize_head(
+            messages=messages,
+            keep_recent_turns=keep_recent_turns,
+            model=model,
+            system_message=system_message,
+            tools=tools,
+            adapter=adapter,
+            recorder=recorder,
+            user_id=user_id,
+            message_seqs=_aligned_seqs(message_seqs, messages),
+        )
+        return result.messages
+
+    async def _summarize_head(
+        self,
+        *,
+        messages: list[dict],
+        keep_recent_turns: int,
+        model: str,
+        system_message: Optional[str] = None,
+        tools: Optional[list] = None,
+        adapter: Any = None,
+        recorder: Any = None,
+        user_id: str | None = None,
+        message_seqs: Optional[list[Optional[int]]] = None,
+    ) -> _HeadSummary:
         """Replace messages[:-keep_recent_turns] with a single
         [Earlier conversation summary] system message produced by the
         configured cheap model.
@@ -456,7 +567,10 @@ class ContextCompactor:
         when every boundary would orphan a tool reply.
         """
         if len(messages) <= keep_recent_turns:
-            return list(messages)  # nothing to summarize
+            # Nothing to summarize. Not an accepted summary either: callers
+            # read ``text == ""`` as "no summary" (maybe_compact only reaches
+            # here from orange/red, where a history this short cannot occur).
+            return _HeadSummary(list(messages), "", "", None)
 
         split = _safe_split_index(messages, len(messages) - keep_recent_turns)
         if split == 0:
@@ -467,6 +581,7 @@ class ContextCompactor:
         head = messages[:split]
         tail = messages[split:]
         head_tokens = count_messages_tokens(head, model)
+        covers = _head_watermark(message_seqs, split)
 
         last_summary_tokens: Optional[int] = None
         for attempt in range(1, self.SUMMARY_ATTEMPTS + 1):
@@ -496,20 +611,21 @@ class ContextCompactor:
             summary_message = render_summary_message(summary_text)
             summary_tokens = count_messages_tokens([summary_message], model)
             if summary_tokens < head_tokens:
-                await _emit(
-                    recorder,
-                    "compaction_summary",
-                    {
-                        "summary_tokens": summary_tokens,
-                        "head_tokens": head_tokens,
-                        "attempts": attempt,
-                        "path": summary_path,
-                        # phase 2b-1: replay.messages_from_events rebuilds
-                        # the post-compaction history from this text; the
-                        # emergency-cap row above stays metrics-only.
-                        "summary": summary_text,
-                    },
-                )
+                payload: dict[str, Any] = {
+                    "summary_tokens": summary_tokens,
+                    "head_tokens": head_tokens,
+                    "attempts": attempt,
+                    "path": summary_path,
+                    # phase 2b-1: replay.messages_from_events rebuilds
+                    # the post-compaction history from this text; the
+                    # emergency-cap row above stays metrics-only.
+                    "summary": summary_text,
+                }
+                if covers is not None:
+                    # fh5 A2: fork reads this to know which origin rows the
+                    # summary already holds (issue_fork.seed_messages).
+                    payload["covers_up_to_seq"] = covers
+                await _emit(recorder, "compaction_summary", payload)
                 if attempt > 1:
                     logger.info(
                         "[compactor] summary accepted on attempt {} "
@@ -518,7 +634,12 @@ class ContextCompactor:
                         head_tokens,
                         summary_tokens,
                     )
-                return [summary_message] + list(tail)
+                return _HeadSummary(
+                    messages=[summary_message] + list(tail),
+                    text=summary_text,
+                    path=summary_path,
+                    covers_up_to_seq=covers,
+                )
 
             last_summary_tokens = summary_tokens
             logger.warning(
@@ -647,6 +768,7 @@ class ContextCompactor:
 
 
 __all__ = [
+    "CarriedSummary",
     "ContextCompactor",
     "NoSafeSplitError",
     "CompactionTier",
