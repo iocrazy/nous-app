@@ -723,6 +723,7 @@ async def _run_reply_turns(
                 set_status=set_status,
                 content_len=content_len,
                 run_id=(result or {}).get("run_id"),
+                verification=(result or {}).get("verification"),
             )
             # I4 (final review): mirrors execute_issue's own fan-in call — a
             # child issue resumed and completed via a reply-answer (rather
@@ -1022,6 +1023,7 @@ async def route_finish_outcome(
     content_len: int = 0,
     run_id: Optional[str] = None,
     disarm_wakeups: Optional[Callable[[int, str], Awaitable[Any]]] = None,
+    verification: Optional[dict[str, Any]] = None,
 ) -> None:
     """Route an agent's FinishIssue declaration (or the lack of one) to an
     issue status transition. Shared by the dispatch loop's terminal step
@@ -1047,8 +1049,10 @@ async def route_finish_outcome(
                           ``_run_reply_turns``, so a plain reply on the issue
                           can nudge it forward instead of parking it out of
                           reach forever.
-      completed       → done if ``auto_close`` (slice 2a platform toggle) else
-                        in_review (human confirms)
+      completed       → done only if ``auto_close`` AND ``verification.verdict
+                        == "pass"`` (completion loop, 2026-09-26: a verdict of
+                        fail / unverified / absent parks at in_review — the
+                        toggle alone no longer closes); else in_review
       needs_input     → needs_followup (slice 2b: a deliberate hand-off, distinct
                         from blocked=errored; carries the agent's reason)
       continue (capped)→ in_review (handed to a human after the cap; never
@@ -1132,10 +1136,13 @@ async def route_finish_outcome(
             outcome_reason=reason,
         )
     elif outcome == "completed":
-        # slice 2a: self-close only when the platform toggle trusts agents to.
+        # Completion loop: the platform toggle trusts agents to self-close
+        # ONLY when an independent verifier passed the declaration. No verdict
+        # (loop disabled, legacy caller) is "not verified", never "trusted".
+        verified = (verification or {}).get("verdict") == "pass"
         await set_status(
             issue_id,
-            "done" if auto_close else "in_review",
+            "done" if auto_close and verified else "in_review",
             agent_outcome="completed",
             outcome_reason=reason,
         )
@@ -1442,6 +1449,7 @@ async def _run_dispatch_with_continuation(
                 set_status=set_status,
                 content_len=len((res or {}).get("content") or ""),
                 run_id=(res or {}).get("run_id"),
+                verification=(res or {}).get("verification"),
             )
             question = await _question_for_park(res or {}, reason)
             if question is not None:
@@ -1633,6 +1641,7 @@ async def _run_dispatch_with_continuation(
         set_status=set_status,
         content_len=content_len,
         run_id=(res or {}).get("run_id"),
+        verification=(res or {}).get("verification"),
     )
     return {
         "outcome": outcome,

@@ -17,15 +17,25 @@ from app.workflows.issue_lifecycle import _run_dispatch_with_continuation
 class _Recorder:
     """Captures set_status calls + scripts run_turn outcomes."""
 
-    def __init__(self, outcomes: list[tuple[str | None, str | None]]):
+    def __init__(
+        self,
+        outcomes: list[tuple[str | None, str | None]],
+        verification: dict | None = None,
+    ):
         self._outcomes = list(outcomes)
+        # Completion loop (2026-09-26): what the step result carries under
+        # "verification"; None = no verdict (loop off / not run).
+        self._verification = verification
         self.turns: list[bool] = []  # is_continuation per call
         self.status_calls: list[dict] = []
 
     async def run_turn(self, issue_row, agent_id, user_id, *, is_continuation):
         self.turns.append(is_continuation)
         outcome, reason = self._outcomes[len(self.turns) - 1]
-        return {"content": "x", "outcome": outcome, "reason": reason}
+        out = {"content": "x", "outcome": outcome, "reason": reason}
+        if self._verification is not None:
+            out["verification"] = self._verification
+        return out
 
     async def set_status(
         self,
@@ -115,11 +125,23 @@ async def test_completed_goes_in_review_with_outcome():
 
 @pytest.mark.asyncio
 async def test_completed_auto_closes_to_done_when_enabled():
-    # slice 2a: with the platform toggle on, completed → done (self-close).
-    rec = _Recorder([("completed", "all done")])
+    # slice 2a + completion loop (2026-09-26): with the platform toggle on,
+    # completed → done only when the verifier passed the declaration.
+    rec = _Recorder([("completed", "all done")], verification={"verdict": "pass"})
     await _run(rec, auto_close=True)
     call = rec.status_calls[-1]
     assert call["status"] == "done"
+    assert call["agent_outcome"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_completed_without_a_verdict_stays_in_review_even_when_enabled():
+    # Completion loop: the toggle alone no longer closes — no verdict is
+    # "not verified", never "trusted".
+    rec = _Recorder([("completed", "all done")])
+    await _run(rec, auto_close=True)
+    call = rec.status_calls[-1]
+    assert call["status"] == "in_review"
     assert call["agent_outcome"] == "completed"
 
 
