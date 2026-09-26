@@ -88,20 +88,25 @@ describe('ChatFab · resting position', () => {
     expect(fab().style.top).toBe('300px');
   });
 
-  it('re-clamps a remembered top that a smaller window would push off-screen', () => {
+  it('clamps a remembered top on render without overwriting what the user chose', () => {
     useGlobalChatStore.setState({ fabSide: 'right', fabTop: 2000 });
     render(<ChatFab />);
     expect(fab().style.top).toBe(`${VH - FAB_SIZE_PX - FAB_GUTTER_PX}px`);
-    expect(useGlobalChatStore.getState().fabTop).toBe(VH - FAB_SIZE_PX - FAB_GUTTER_PX);
+    // A short window (mobile keyboard, a temporary resize) must not erase the spot.
+    expect(useGlobalChatStore.getState().fabTop).toBe(2000);
   });
 
-  it('re-clamps when the window shrinks', () => {
+  it('re-clamps when the window shrinks and keeps the remembered top', () => {
     useGlobalChatStore.setState({ fabSide: 'right', fabTop: 700 });
     render(<ChatFab />);
     setViewport(800, 500);
     fireEvent(window, new Event('resize'));
     expect(fab().style.top).toBe(`${500 - FAB_SIZE_PX - FAB_GUTTER_PX}px`);
     expect(fab().style.left).toBe(`${800 - FAB_SIZE_PX - FAB_GUTTER_PX}px`);
+    expect(useGlobalChatStore.getState().fabTop).toBe(700);
+    setViewport(VW, VH);
+    fireEvent(window, new Event('resize'));
+    expect(fab().style.top).toBe('700px');
   });
 });
 
@@ -145,6 +150,53 @@ describe('ChatFab · drag', () => {
     expect(fab().dataset.phase).not.toBe('dragging');
     fireEvent.pointerUp(window, { clientX: 700, clientY: 400 });
     expect(useGlobalChatStore.getState().open).toBe(false);
+  });
+});
+
+describe('ChatFab · cancelled and orphaned gestures', () => {
+  it('does not open the chat when the system cancels a press (palm, second finger, OS gesture)', () => {
+    render(<ChatFab />);
+    fireEvent.pointerDown(fab(), { clientX: 900, clientY: 600, button: 0 });
+    fireEvent.pointerCancel(window, { clientX: 900, clientY: 600 });
+    expect(useGlobalChatStore.getState().open).toBe(false);
+    expect(fab().dataset.phase).toBe('docked');
+  });
+
+  it('snaps a cancelled drag where it was, without opening', () => {
+    render(<ChatFab />);
+    fireEvent.pointerDown(fab(), { clientX: 900, clientY: 600, button: 0 });
+    fireEvent.pointerMove(window, { clientX: 200, clientY: 300 });
+    fireEvent.pointerCancel(window, { clientX: 200, clientY: 300 });
+    const s = useGlobalChatStore.getState();
+    expect(s.open).toBe(false);
+    expect(s.fabSide).toBe('left');
+    expect(s.fabTop).toBe(VH - FAB_SIZE_PX - 80 - 300);
+  });
+
+  it('tears the drag down on unmount so a late pointerup changes nothing', () => {
+    const view = render(<ChatFab />);
+    fireEvent.pointerDown(fab(), { clientX: 900, clientY: 600, button: 0 });
+    fireEvent.pointerMove(window, { clientX: 200, clientY: 300 });
+    view.unmount();
+    expect(() => fireEvent.pointerUp(window, { clientX: 200, clientY: 300 })).not.toThrow();
+    const s = useGlobalChatStore.getState();
+    expect(s.open).toBe(false);
+    expect(s.fabSide).toBe('right');
+    expect(s.fabTop).toBeNull();
+  });
+
+  it('a click that unmounts the fab mid-gesture leaves no window listeners behind', () => {
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const view = render(<ChatFab />);
+    fireEvent.pointerDown(fab(), { clientX: 900, clientY: 600, button: 0 });
+    view.unmount();
+    for (const type of ['pointermove', 'pointerup', 'pointercancel']) {
+      const added = add.mock.calls.filter(([t]) => t === type).map(([, fn]) => fn);
+      const removed = remove.mock.calls.filter(([t]) => t === type).map(([, fn]) => fn);
+      expect(added.length).toBeGreaterThan(0);
+      for (const fn of added) expect(removed).toContain(fn);
+    }
   });
 });
 

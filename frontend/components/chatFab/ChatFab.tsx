@@ -83,14 +83,21 @@ export function ChatFab(): React.ReactElement {
   const [live, setLive] = useState<{ left: number; top: number } | null>(null);
   const [peeking, setPeeking] = useState(false);
   const drag = useRef<DragState | null>(null);
+  /** Removes the window listeners of the drag in flight; null when idle. */
+  const endSession = useRef<(() => void) | null>(null);
+  const mounted = useRef(true);
   const snapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── resting position, re-clamped against the live viewport ──
+  // ── resting position: the remembered top, clamped for display only ──
+  // Only a drop writes the store; a short window (mobile keyboard, a
+  // temporary resize) must not erase the spot the user picked.
   const restingTop = storedTop == null ? defaultFabTop(vp.vh) : clampFabTop(storedTop, vp.vh);
-  useEffect(() => {
-    if (storedTop != null && restingTop !== storedTop) setFabPosition({ side, top: restingTop });
-  }, [restingTop, setFabPosition, side, storedTop]);
+
+  // The pointer handlers read these through refs so a pointermove re-render
+  // does not rebuild them mid-gesture.
+  const latest = useRef({ brain, live, side, restingTop, motionOn });
+  latest.current = { brain, live, side, restingTop, motionOn };
 
   useEffect(() => {
     const onResize = () => setVp(viewport());
@@ -122,30 +129,58 @@ export function ChatFab(): React.ReactElement {
     return clearPeek;
   }, [phase, brain.holdsAttention, clearPeek, schedulePeek]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      endSession.current?.();
+      drag.current = null;
       if (snapTimer.current) clearTimeout(snapTimer.current);
       if (peekTimer.current) clearTimeout(peekTimer.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
   // ── open ──
   const openChat = useCallback(() => {
-    brain.pop(() => setOpen(true));
-  }, [brain, setOpen]);
+    latest.current.brain.pop(() => setOpen(true));
+  }, [setOpen]);
 
   // ── drag / snap / click ──
+  /** Drop a moved fab where it is: snap to the nearer edge and remember it. */
+  const settle = useCallback(
+    (d: DragState) => {
+      const { brain: b, motionOn: motion } = latest.current;
+      b.dragEnd();
+      const { vw, vh } = viewport();
+      const nextSide: FabSide = snapSide(d.left + FAB_SIZE_PX / 2, vw);
+      const nextTop = clampFabTop(d.top, vh);
+      setFabPosition({ side: nextSide, top: nextTop });
+      setLive(null);
+      setPhase('snapping');
+      b.snap(nextSide);
+      if (snapTimer.current) clearTimeout(snapTimer.current);
+      snapTimer.current = setTimeout(
+        () => {
+          if (!mounted.current) return;
+          setPhase('docked');
+          latest.current.brain.land();
+        },
+        motion ? SNAP_MS : 0,
+      );
+    },
+    [setFabPosition],
+  );
+
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLButtonElement>) => {
       if (e.button !== 0) return;
-      const el = rootRef.current;
-      if (!el) return;
+      if (!rootRef.current) return;
+      endSession.current?.();
       clearPeek();
-      brain.touch();
-      const { vw } = viewport();
-      const startLeft = live?.left ?? dockedLeft(side, vw);
-      const startTop = live?.top ?? restingTop;
+      const { brain: b, live: l, side: sd, restingTop: rt } = latest.current;
+      b.touch();
+      const startLeft = l?.left ?? dockedLeft(sd, viewport().vw);
+      const startTop = l?.top ?? rt;
       drag.current = {
         startX: e.clientX,
         startY: e.clientY,
@@ -162,58 +197,55 @@ export function ChatFab(): React.ReactElement {
 
       const onMove = (ev: PointerEvent) => {
         const d = drag.current;
-        if (!d) return;
+        if (!d || !mounted.current) return;
         const dx = ev.clientX - d.startX;
         const dy = ev.clientY - d.startY;
         if (!d.moved && !isClickGesture(dx, dy)) {
           d.moved = true;
           setPhase('dragging');
-          brain.dragStart();
+          latest.current.brain.dragStart();
         }
         if (!d.moved) return;
-        const { vw: w, vh: h } = viewport();
-        d.left = clampFabLeft(d.startLeft + dx, w);
-        d.top = clampFabTop(d.startTop + dy, h);
+        const { vw, vh } = viewport();
+        d.left = clampFabLeft(d.startLeft + dx, vw);
+        d.top = clampFabTop(d.startTop + dy, vh);
         d.vx = d.vx * 0.6 + (ev.clientX - d.lastX) * 0.4;
         d.vy = d.vy * 0.6 + (ev.clientY - d.lastY) * 0.4;
         d.lastX = ev.clientX;
         d.lastY = ev.clientY;
         setLive({ left: d.left, top: d.top });
-        brain.dragMove(d.vx, d.vy);
+        latest.current.brain.dragMove(d.vx, d.vy);
       };
-      const onUp = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onUp);
+      /** Detach and hand back the gesture, or null if it was already torn down. */
+      const take = (): DragState | null => {
+        teardown();
         const d = drag.current;
         drag.current = null;
-        if (!d) return;
-        if (!d.moved) {
-          openChat();
-          return;
-        }
-        brain.dragEnd();
-        const { vw: w, vh: h } = viewport();
-        const nextSide: FabSide = snapSide(d.left + FAB_SIZE_PX / 2, w);
-        const nextTop = clampFabTop(d.top, h);
-        setFabPosition({ side: nextSide, top: nextTop });
-        setLive(null);
-        setPhase('snapping');
-        brain.snap(nextSide);
-        if (snapTimer.current) clearTimeout(snapTimer.current);
-        snapTimer.current = setTimeout(
-          () => {
-            setPhase('docked');
-            brain.land();
-          },
-          motionOn ? SNAP_MS : 0,
-        );
+        return mounted.current ? d : null;
       };
+      const onUp = () => {
+        const d = take();
+        if (!d) return;
+        if (d.moved) settle(d);
+        else openChat();
+      };
+      // A cancelled press (palm, second finger, OS gesture) is never a click.
+      const onCancel = () => {
+        const d = take();
+        if (d?.moved) settle(d);
+      };
+      const teardown = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
+        if (endSession.current === teardown) endSession.current = null;
+      };
+      endSession.current = teardown;
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onUp);
+      window.addEventListener('pointercancel', onCancel);
     },
-    [brain, clearPeek, live, motionOn, openChat, restingTop, setFabPosition, side],
+    [clearPeek, openChat, settle],
   );
 
   const onKeyDown = useCallback(
