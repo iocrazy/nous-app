@@ -277,6 +277,9 @@ on:
       - 'backend/app/repositories/conversation_memory_repository.py'
       - 'backend/app/services/issues/issue_fork.py'
       - 'backend/app/services/ai/chat/turn_history.py'
+      # fh5 review L: the benchmark replicates this service's history assembly
+      # order; if the service changes the order, the benchmark must re-run.
+      - 'backend/app/services/ai/chat/ai_library_chat_service.py'
       - 'backend/app/services/ai/runner/stored_summary.py'
       - 'backend/app/services/ai/runner/replay.py'
       - 'backend/tests/db/test_turn_history_store_integration.py'
