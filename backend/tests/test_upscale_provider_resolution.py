@@ -186,3 +186,25 @@ async def test_picker_rows_exclude_the_upscaler_and_keep_the_projection(
 
     with_provider = await visible_generation_rows(USER, include_actual_provider=True)
     assert [r["actual_provider"] for r in with_provider] == ["ark", "jimeng-cli"]
+
+
+@pytest.mark.parametrize(
+    ("row_type", "provider", "expected"),
+    [
+        ("image", "nous", False),  # nous-engine image = super-resolution only
+        ("image", "jimeng-local", True),
+        ("image", "codex-local", True),
+        ("video", "jimeng-local", True),
+        ("image", "no-such-protocol", True),  # unknown protocol is not "cannot"
+        ("llm", "nous", False),
+        ("embedding", "ark", False),
+        (None, None, False),
+    ],
+)
+def test_generates_from_prompt_is_the_one_predicate(row_type, provider, expected):
+    """Shared by the generation pickers' server row set and
+    ``platform_models[name].generatable`` (spec 2026-09-25): one answer, always
+    a bool."""
+    from app.services.generation.model_capabilities import generates_from_prompt
+
+    assert generates_from_prompt(row_type, provider) is expected

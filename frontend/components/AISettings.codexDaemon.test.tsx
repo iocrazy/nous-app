@@ -30,7 +30,7 @@ vi.mock('react-i18next', () => {
 
 vi.mock('../services/aiService', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/aiService')>()),
-  getNousModels: vi.fn().mockResolvedValue([]),
+  getPlatformStatus: vi.fn(() => new Promise(() => {})),
   getModuleGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true, visual_analysis: true,
     caption: true, classification: true, summarization: true,

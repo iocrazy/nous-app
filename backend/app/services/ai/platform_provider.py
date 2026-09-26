@@ -57,6 +57,7 @@ class PlatformModel:
     pricing_type: str
     pricing_value: float
     context_window_tokens: Optional[int]
+    generatable: bool
     sort_order: int
     last_tested_at: Optional[str]
     last_test_code: Optional[str]
@@ -89,6 +90,7 @@ class PlatformModel:
             "pricing_type": self.pricing_type,
             "pricing_value": self.pricing_value,
             "context_window_tokens": self.context_window_tokens,
+            "generatable": self.generatable,
         }
 
 
@@ -151,6 +153,7 @@ def _to_model(
     row: Mapping[str, Any], status: str, snapshot: Optional[EngineSnapshot]
 ) -> PlatformModel:
     from app.repositories.nous_model_repository import LOCAL_ENGINE_PROVIDERS
+    from app.services.generation.model_capabilities import generates_from_prompt
 
     provider = str(row.get("actual_provider") or "")
     tested_at = row.get("last_tested_at")
@@ -171,6 +174,9 @@ def _to_model(
         pricing_type=str(row.get("pricing_type") or "per_token"),
         pricing_value=float(row.get("pricing_value") or 0),
         context_window_tokens=row.get("context_window_tokens"),
+        # Same predicate the generation pickers' server row set uses; derived
+        # from the private provider, published as a plain bool.
+        generatable=generates_from_prompt(row.get("type"), provider),
         sort_order=int(row.get("sort_order") or 0),
         last_tested_at=str(tested_at) if tested_at else None,
         last_test_code=code,

@@ -7,7 +7,7 @@ import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { PromptNodeView } from './PromptNodeView';
 
 vi.mock('./useGenerationModels', () => ({ useGenerationModels: () => [] }));
-vi.mock('./useTextModels', () => ({ useTextModels: () => [] }));
+vi.mock('../../../../hooks/usePlatformModels', () => ({ useTextPlatformModels: () => [] }));
 vi.mock('./useAgents', () => ({ useAgents: () => [] }));
 
 const P = (id: string) => ({

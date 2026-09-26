@@ -33,7 +33,7 @@ function renderFooter() {
   return render(
     <GenFooterControls
       gen={GEN}
-      models={[{ name: 'm1', display_name: 'Model One' }]}
+      models={[{ name: 'm1', actual_model: 'model-one' }]}
       onChange={() => {}}
     />,
   );

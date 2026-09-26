@@ -1,6 +1,7 @@
 // features/canvas-core/smart/nodes/PromptNodeView.textmodels.test.tsx
-// P0-1: the text prompt's model dropdown is sourced from the platform DB
-// catalog (useTextModels), NOT a hardcoded PROVIDER_OPTIONS list. This guards
+// P0-1: the text prompt's model dropdown is sourced from the user's enabled
+// platform llm rows (the AI settings, spec 2026-09-25), NOT a hardcoded
+// PROVIDER_OPTIONS list. This guards
 // the 2026-07-12 regression where the default named `qwen-plus` and a
 // fabricated `nous/storyboard` slug the platform doesn't carry.
 
@@ -21,15 +22,28 @@ vi.mock('react-i18next', () => ({
 }));
 vi.mock('./useGenerationModels', () => ({ useGenerationModels: () => [] }));
 vi.mock('./useAgents', () => ({ useAgents: () => [] }));
-vi.mock('./useTextModels', () => ({
-  useTextModels: () => [
-    // Real text-models row shape (2026-09-24): actual_model + last_test_status
-    // ride along; actual_provider never does (leak tripwire).
-    { name: 'mediahub-doubao-llm', display_name: 'Doubao LLM', actual_model: 'doubao-seed-1-6-250615', type: 'llm', last_test_status: 'ok' },
-    { name: 'mediahub-deepseek', display_name: 'DeepSeek', actual_model: 'deepseek-v4-pro', type: 'llm', last_test_status: 'not_probed' },
-    // Local nous-engine row, authorized but not loaded (mig 503).
-    { name: 'nous-qwen3-8-27b', display_name: 'Qwen3 27B', actual_model: 'qwen3-8-27b', type: 'llm', last_test_status: 'idle' },
-  ],
+// The real hooks run; only the two boundaries are stubbed: the settings
+// AuthContext loaded (platform card + mapping, tests/fixtures/platform), and
+// the status request (pending, so the settings' status shows).
+vi.mock('../../../../contexts/AuthContext', async (orig) => {
+  const { baseAISettings, withPlatform } = await import('../../../../tests/fixtures/platform');
+  const settings = withPlatform(baseAISettings(), [
+    { name: 'mediahub-doubao-llm', actual_model: 'doubao-seed-1-6-250615', type: 'llm', status: 'ok' },
+    { name: 'mediahub-deepseek', actual_model: 'deepseek-v4-pro', type: 'llm', status: 'not_probed' },
+    // Local nous-engine row, authorized but not loaded.
+    { name: 'nous-qwen3-8-27b', actual_model: 'qwen3-8-27b', type: 'llm', status: 'idle' },
+    // Not a text model, and one the user switched off: neither is offered.
+    { name: 'nous-seedream', actual_model: 'doubao-seedream-4-0', type: 'image' },
+    { name: 'nous-kimi', actual_model: 'kimi-k2', type: 'llm', disabled: true },
+  ]);
+  return {
+    ...(await orig<typeof import('../../../../contexts/AuthContext')>()),
+    useOptionalAISettings: () => settings,
+  };
+});
+vi.mock('../../../../services/aiService', async (orig) => ({
+  ...(await orig<typeof import('../../../../services/aiService')>()),
+  getPlatformStatus: () => new Promise(() => {}),
 }));
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';

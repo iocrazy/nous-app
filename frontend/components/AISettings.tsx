@@ -33,25 +33,24 @@ import {
   Terminal,
 } from 'lucide-react';
 import { AISettings as AISettingsType, AIProviderConfig, AILibraryAgent } from '../types';
-import type { AIGovernanceFlags, NousModelPublic } from '../types/api';
+import type { AIGovernanceFlags } from '../types/api';
 import {
   saveAISettings as saveAISettingsApi,
   testAIConnection as testAIConnectionApi,
   reportProviderHealth,
-  getNousModels,
   getAIGovernance,
   GOVERNANCE_ALL_ALLOWED,
 } from '../services/aiService';
 import { useTranslation } from 'react-i18next';
-import { visiblePlatformModels } from './AILibrary/agentEditorModel';
 import { relativeTime } from '../utils/taskDisplay';
-import { buildModelHealth, healthReasonKey } from '../utils/modelHealth';
 import {
-  isPlatformModelAvailable,
   platformModelAvailability,
   platformModelLabel,
+  platformModelRows,
   platformModelText,
+  type PlatformModelRow,
 } from '../utils/platformModel';
+import { usePlatformStatus } from '../hooks/usePlatformStatus';
 import {
   suspectedNonChatKind,
   nonChatKindKey,
@@ -596,7 +595,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [nousModels, setNousModels] = useState<NousModelPublic[]>([]);
   const [agents, setAgents] = useState<AILibraryAgent[]>([]);
   // The three async option sources (platform models, agents, governance) hydrate
   // after mount. Until ALL have settled, a task-assignment picker whose stored
@@ -605,10 +603,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
   // lands. These "settled" flags gate the pickers behind a stable placeholder so
   // they never flash a value the user didn't choose. Settled = resolved OR
   // rejected (fail-open governance still counts as ready).
-  const [nousModelsLoaded, setNousModelsLoaded] = useState(false);
   const [agentsLoaded, setAgentsLoaded] = useState(false);
   const [governanceLoaded, setGovernanceLoaded] = useState(false);
-  const optionsReady = nousModelsLoaded && agentsLoaded && governanceLoaded;
+  // The platform list rides on the settings themselves (spec 2026-09-25):
+  // `platform_models` is absent until AuthContext has loaded them, `null` when
+  // the server could not compute the view (settled, just unknown).
+  const platformListLoaded = settings.platform_models !== undefined;
+  const optionsReady = platformListLoaded && agentsLoaded && governanceLoaded;
   const isDirtyRef = useRef(false);
   // Render-visible mirror of isDirtyRef: drives the floating save button's
   // "unsaved changes" dot. The ref stays the source of truth for the prop
@@ -655,23 +656,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     setConnectionError((prev) => ({ ...errorSeed, ...prev }));
     setLastTested((prev) => ({ ...testedSeed, ...prev }));
   }, [settings.provider_health]);
-
-  useEffect(() => {
-    let cancelled = false;
-    getNousModels()
-      .then((list) => {
-        if (!cancelled) setNousModels(list);
-      })
-      .catch((err) => {
-        console.error('[AISettings] getNousModels failed:', err);
-      })
-      .finally(() => {
-        if (!cancelled) setNousModelsLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Fetch per-module governance flags once on mount.
   // Fail-open: any error leaves governance as GOVERNANCE_ALL_ALLOWED (all true).
@@ -808,46 +792,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
   const nousUserEnabled = localSettings.providers.nous?.enabled !== false;
 
   // The set of platform models the user has hidden from the pickers.
-  const nousDisabledModels = localSettings.providers.nous?.disabled_models ?? [];
+  const localDisabled = localSettings.providers.nous?.disabled_models;
+  const nousDisabledModels = useMemo(() => localDisabled ?? [], [localDisabled]);
 
-  // Single derived list every user-facing picker consumes so no consumption
-  // point can drift: admin master switch on AND user master toggle on AND the
-  // model is not in the user's blacklist. Per-module governance (nous_modules)
-  // is applied on top of this at each picker.
-  // Platform-model self-check (spec 2026-08-14 §F2). The backend probes every
-  // enabled platform model hourly; until now the verdict never left the admin
-  // surface, so picking a model whose probe was failing looked identical to
-  // picking a healthy one — right up until the job failed.
-  //
-  // A failing model is MARKED, never removed and never disabled: the probe has
-  // returned a false negative in production (2026-08-14), so it advises rather
-  // than vetoes. `relativeTime` (already imported for this file's English UI)
-  // carries the check age — hourly cadence means a 50-minute-old verdict is
-  // not a statement about right now.
-  //
-  // The verdict now carries WHY (spec 2026-08-14 reason-code, backend mig 427).
-  // "Timed out" and "rate limited" ask the user for opposite things — wait vs
-  // go deal with a quota — and under #1838 both read as the same bare red dot.
-  // The reason is a closed enum, never the probe's raw text: that text embeds
-  // the upstream host and private base_url and never leaves admin.
-  const nousHealth = useMemo(() => buildModelHealth(nousModels), [nousModels]);
-  const nousHealthWarning = (modelName: string): string | null => {
-    const health = nousHealth[modelName];
-    if (health?.status !== 'fail') return null;
-    const checked = relativeTime(health.testedAt ?? undefined);
-    const reasonKey = healthReasonKey(health.code);
-    // No key = a row probed before the column existed, or a code newer than
-    // this build. Both fall back to the original reason-less wording.
-    if (!reasonKey) {
-      return checked
-        ? t('aiSettings.modelHealthFailedAgo', { ago: checked })
-        : t('aiSettings.modelHealthFailed');
-    }
-    const reason = t(reasonKey);
-    return checked
-      ? t('aiSettings.modelHealthFailedReasonAgo', { reason, ago: checked })
-      : t('aiSettings.modelHealthFailedReason', { reason });
-  };
 
   // BYOK model guard (2026-08-16 incident). A user pruned doubao's enabled
   // models down to `doubao-embedding-vision-251215`; summarization takes that
@@ -889,49 +836,62 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     };
   };
 
-  const nousConfig = localSettings.providers.nous;
-  const visibleNousModels = useMemo(() => {
-    if (!governance.nous_enabled) return [];
-    // Same predicate the agent editor uses (one management entry, one rule).
-    return visiblePlatformModels(nousModels, nousConfig);
-  }, [governance.nous_enabled, nousConfig, nousModels]);
+  // Runtime state (engine ok/idle, reachability) from the one status request,
+  // falling back to the status these settings carried.
+  const platformStatus = usePlatformStatus(localSettings);
 
-  // Platform rows the card lists: every row the user could toggle, minus the
-  // ones whose last probe failed (utils/platformModel). NOT visibleNousModels —
-  // that one also drops the user's own disabled rows, and the card is where
-  // they switch those back on.
-  const listedNousModels = useMemo(
-    () => nousModels.filter(isPlatformModelAvailable),
-    [nousModels],
+  // Every row the card lists (the server already dropped failed and
+  // no-longer-served rows), live status overlaid, in card type order.
+  const listedNousModels = useMemo<PlatformModelRow[]>(
+    () =>
+      platformModelRows(localSettings, { scope: 'listed' })
+        .map((m) => ({ ...m, status: platformStatus.statusOf(m.name) ?? m.status }))
+        .sort((a, b) => (NOUS_TYPE_ORDER[a.type] ?? 99) - (NOUS_TYPE_ORDER[b.type] ?? 99)),
+    [localSettings, platformStatus],
+  );
+
+  // Which listed rows are on. The base is the server's `enabled_models`; the
+  // only local adjustment is this session's unsaved chip edits, read as the
+  // difference between the stored blacklist and the edited one.
+  const storedNousDisabled = settings.providers.nous?.disabled_models;
+  const nousEnabledNames = useMemo(() => {
+    const base = new Set(localSettings.providers.nous?.enabled_models ?? []);
+    const stored = new Set(storedNousDisabled ?? []);
+    const edited = new Set(nousDisabledModels);
+    for (const name of edited) if (!stored.has(name)) base.delete(name);
+    for (const name of stored) if (!edited.has(name)) base.add(name);
+    return base;
+  }, [localSettings.providers.nous?.enabled_models, storedNousDisabled, nousDisabledModels]);
+
+  // What the task pickers offer: the card on, the row enabled. Per-module
+  // governance (nous_modules) is applied on top at each picker; the admin
+  // master switch is already applied server-side (models = []).
+  const visibleNousModels = useMemo(
+    () => (nousUserEnabled ? listedNousModels.filter((m) => nousEnabledNames.has(m.name)) : []),
+    [listedNousModels, nousEnabledNames, nousUserEnabled],
   );
 
   // Idle on nous-engine (authorized, not loaded): the row is listed but the
   // pickers disable it with this reason (utils/platformModel). A saved value
   // that is idle stays selected — UiSelect dims it and titles the trigger.
-  const nousNotLoadedReason = (m: NousModelPublic): string | undefined =>
-    platformModelAvailability(m).reason === 'not_loaded'
+  const nousNotLoadedReason = (m: PlatformModelRow): string | undefined =>
+    platformModelAvailability(m.status).reason === 'not_loaded'
       ? t('platformModel.notLoaded')
       : undefined;
 
-  // A saved task assignment pointing at a platform row that is now hidden
-  // (failed probe). The picker keeps it as an explicit "unavailable" option so
-  // the value is never silently replaced by whatever the <select> shows first.
+  // A saved task assignment pointing at a platform row the server no longer
+  // lists (failed probe, or nous-engine stopped serving it). The picker keeps
+  // it as an explicit "unavailable" option so the value is never silently
+  // replaced by whatever the <select> shows first. Only when the list is
+  // KNOWN: `platform_models === null` is "could not compute", not "gone".
   const unavailableNousOption = (
     value: string,
-    type: NousModelPublic['type'],
   ): { value: string; label: string } | null => {
     if (!governance.nous_enabled || !value.startsWith('nous:')) return null;
-    const m = nousModels.find(
-      (x) => `nous:${x.name}` === value && x.type === type && !isPlatformModelAvailable(x),
-    );
-    if (!m) return null;
-    const warning = nousHealthWarning(m.name);
-    return {
-      value,
-      label:
-        t('aiSettings.platformUnavailableOption', { name: platformModelText(m) }) +
-        (warning ? ` — ${warning}` : ''),
-    };
+    if (!localSettings.platform_models) return null;
+    const name = value.slice('nous:'.length);
+    if (listedNousModels.some((m) => m.name === name)) return null;
+    return { value, label: t('aiSettings.platformUnavailableOption', { name }) };
   };
 
   // Flip the platform-card master switch. Absent config => currently ON, so the
@@ -945,14 +905,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     });
   };
 
-  // Platform rows in card order (llm → asr → embedding → image → tts → video).
-  const sortedNousModels = useMemo(
-    () =>
-      [...listedNousModels].sort(
-        (a, b) => (NOUS_TYPE_ORDER[a.type] ?? 99) - (NOUS_TYPE_ORDER[b.type] ?? 99),
-      ),
-    [listedNousModels],
-  );
   const nousRowByName = useMemo(
     () => new Map(listedNousModels.map((m) => [m.name, m])),
     [listedNousModels],
@@ -974,7 +926,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
       const m = nousRowByName.get(name);
       if (!m) return null;
       const type = m.type.toUpperCase();
-      if (platformModelAvailability(m).reason === 'not_loaded') {
+      if (platformModelAvailability(m.status).reason === 'not_loaded') {
         return {
           label: `${type} ${t('platformModel.notLoadedSuffix', '(not loaded)')}`,
           hint: t('platformModel.notLoaded', 'Not loaded on nous-engine'),
@@ -1146,10 +1098,12 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     setSaveSuccess(false);
     setSaveError(null);
     try {
-      await saveAISettingsApi(localSettings);
+      // The PUT echo is the recomputed settings (platform card included), so
+      // the parent adopts exactly what a fresh load would return.
+      const saved = await saveAISettingsApi(localSettings);
       isDirtyRef.current = false;
       setIsDirty(false);
-      onSave(localSettings);
+      onSave(saved);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), SAVE_SUCCESS_MS);
     } catch (err) {
@@ -1222,22 +1176,17 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           : model.pricing_type === 'per_request'
             ? t('aiSettings.pricingPerRequest', { value: model.pricing_value })
             : t('aiSettings.pricingPerTokens', { value: model.pricing_value });
-      const warning = nousHealthWarning(model.name);
       options.push({
         value: `nous:${model.name}`,
-        label:
-          t('aiSettings.platformAsrOption', {
-            name: platformModelText(model),
-            pricing: pricingLabel,
-          }) + (warning ? ` — ${warning}` : ''),
+        label: t('aiSettings.platformAsrOption', {
+          name: platformModelText(model),
+          pricing: pricingLabel,
+        }),
         notLoaded: nousNotLoadedReason(model),
       });
     }
 
-    const unavailable = unavailableNousOption(
-      localSettings.task_assignment.transcription,
-      'asr',
-    );
+    const unavailable = unavailableNousOption(localSettings.task_assignment.transcription);
     if (unavailable) options.unshift(unavailable);
 
     if (options.length === 0) {
@@ -1332,22 +1281,17 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     const nousLlmOptions = nousAllowed
       ? visibleNousModels
           .filter((m) => m.type === 'llm')
-          .map((m) => {
-            const warning = nousHealthWarning(m.name);
-            return {
-              value: `nous:${m.name}`,
-              label:
-                t('aiSettings.platformLlmOption', { name: platformModelText(m) }) +
-                (warning ? ` — ${warning}` : ''),
-              notLoaded: nousNotLoadedReason(m),
-            };
-          })
+          .map((m) => ({
+            value: `nous:${m.name}`,
+            label: t('aiSettings.platformLlmOption', { name: platformModelText(m) }),
+            notLoaded: nousNotLoadedReason(m),
+          }))
       : [];
     const knownSlugs = new Set([
       ...options.map((o) => o.value),
       ...nousLlmOptions.map((o) => o.value),
     ]);
-    const unavailable = unavailableNousOption(currentValue, 'llm');
+    const unavailable = unavailableNousOption(currentValue);
     const isLegacy = !unavailable && currentValue !== '' && !knownSlugs.has(currentValue);
 
     return (
@@ -1997,15 +1941,25 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                   adding it back removes it — so nothing changes on the wire. */}
               {nousUserEnabled && (
                 <div className="px-6 pb-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                  {sortedNousModels.length === 0 ? (
+                  {platformStatus.engine?.reachable === false && (
+                    <p
+                      data-testid="platform-engine-unreachable"
+                      role="status"
+                      className="flex items-center gap-1.5 text-[11px] text-warn"
+                    >
+                      <AlertTriangle size={12} className="shrink-0" aria-hidden />
+                      <span>{t('aiSettings.platformEngineUnreachable')}</span>
+                    </p>
+                  )}
+                  {listedNousModels.length === 0 ? (
                     <p className="text-xs text-ink-500">{t('aiSettings.noPlatformModels')}</p>
                   ) : (
                     <EnabledModelsField
                       providerKey="nous"
-                      enabledModels={sortedNousModels
-                        .filter((m) => !nousDisabledModels.includes(m.name))
+                      enabledModels={listedNousModels
+                        .filter((m) => nousEnabledNames.has(m.name))
                         .map((m) => m.name)}
-                      catalog={sortedNousModels.map((m) => m.name)}
+                      catalog={listedNousModels.map((m) => m.name)}
                       onAdd={(name) => setNousModelEnabled(name, true)}
                       onRemove={(name) => setNousModelEnabled(name, false)}
                       labelOf={nousLabelOf}

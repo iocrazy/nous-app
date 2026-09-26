@@ -1,5 +1,5 @@
 // features/canvas-core/services/canvasGenerationService.test.ts
-// REST client for the G4-B1 generation endpoints: model catalog, count-fan-out
+// REST client for the G4-B1 generation endpoints: count-fan-out
 // dispatch, and task polling until a terminal phase.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -16,12 +16,11 @@ vi.mock('../../../services/apiClient', () => ({
   },
 }));
 
+import * as service from './canvasGenerationService';
 import {
   cancelGeneration,
   dispatchGenerations,
   getGeneration,
-  listGenerationModels,
-  listTextModels,
   pollGeneration,
 } from './canvasGenerationService';
 
@@ -48,65 +47,11 @@ afterEach(() => {
 });
 
 describe('canvasGenerationService', () => {
-  it('lists generation models', async () => {
-    apiFetch.mockResolvedValue(
-      jsonResponse({ success: true, data: [{ name: 'jimeng-cli-image', type: 'image' }] }),
-    );
-    const models = await listGenerationModels();
-    expect(apiFetch).toHaveBeenCalledWith('/api/v1/canvases/generation-models');
-    expect(models[0].name).toBe('jimeng-cli-image');
-  });
-
-  it('lists text (llm) models from the DB catalog endpoint', async () => {
-    apiFetch.mockResolvedValue(
-      jsonResponse({ success: true, data: [{ name: 'mediahub-doubao-llm', type: 'llm' }] }),
-    );
-    const models = await listTextModels();
-    expect(apiFetch).toHaveBeenCalledWith('/api/v1/canvases/text-models');
-    expect(models[0].name).toBe('mediahub-doubao-llm');
-  });
-
-  // Real wire rows (2026-09-24): exactly the canvases_router public fields,
-  // with jimeng-local's empty actual_model as production has it.
-  const wireRow = (name: string, type: string, actual_model: string, last_test_status: string) => ({
-    name,
-    display_name: name.toUpperCase(),
-    actual_model,
-    type,
-    is_local: name.includes('-local-'),
-    sort_order: 10,
-    last_test_status,
-  });
-
-  it('drops failed rows from both canvas catalogs, keeps not_probed', async () => {
-    apiFetch.mockResolvedValueOnce(
-      jsonResponse({
-        success: true,
-        data: [
-          wireRow('jimeng-local-image', 'image', '', 'not_probed'),
-          wireRow('openai-image-flare', 'image', 'gpt-image-2.5-flare', 'fail'),
-          wireRow('nous-studio-upscale', 'image', 'studio-upscale', 'ok'),
-        ],
-      }),
-    );
-    expect((await listGenerationModels()).map((m) => m.name)).toEqual([
-      'jimeng-local-image',
-      'nous-studio-upscale',
-    ]);
-
-    apiFetch.mockResolvedValueOnce(
-      jsonResponse({
-        success: true,
-        data: [
-          wireRow('nous-deepseek-v4-pro', 'llm', 'deepseek-v4-pro', 'ok'),
-          wireRow('nous-broken-llm', 'llm', 'broken-llm-0101', 'fail'),
-          wireRow('Codex (Local)', 'llm', '', 'not_probed'),
-        ],
-      }),
-    );
-    const text = await listTextModels();
-    expect(text.map((m) => m.name)).toEqual(['nous-deepseek-v4-pro', 'Codex (Local)']);
-    expect(text[0].actual_model).toBe('deepseek-v4-pro');
+  // The model lists moved onto the AI settings (spec 2026-09-25 §3.7); the
+  // canvas no longer fetches a catalog of its own.
+  it('no longer exposes the canvas catalog requests', () => {
+    expect('listGenerationModels' in service).toBe(false);
+    expect('listTextModels' in service).toBe(false);
   });
 
   it('cancels a generation task via DELETE', async () => {

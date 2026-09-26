@@ -14,6 +14,7 @@ import {
   renderModelSelect,
   type ProviderModelGroup,
 } from './agentEditorModel';
+import { baseAISettings, withPlatform, type PlatformRowSpec } from '../../tests/fixtures/platform';
 
 const GROUPS: ProviderModelGroup[] = [
   {
@@ -128,20 +129,36 @@ describe('renderModelSelect — labels', () => {
 });
 
 // ── platform rows obey the Providers page's Nous card (user 2026-09-06:
-// "agent 也属于应用，可用模型取值也来源于唯一管理入口") ────────────────────────
-describe('visiblePlatformModels', () => {
-  const rows = [{ name: 'a' }, { name: 'b' }] as never[];
-  it('drops rows the user switched off on the Nous card', async () => {
-    const { visiblePlatformModels } = await import('./agentEditorModel');
-    expect(visiblePlatformModels(rows, { enabled: true, disabled_models: ['b'] } as never).map((m: { name: string }) => m.name)).toEqual(['a']);
+// "agent 也属于应用，可用模型取值也来源于唯一管理入口"). Since spec 2026-09-25 the
+// card is computed server-side and has the BYOK shape, so getAvailableModels
+// produces the platform group from the settings alone — no second request.
+describe('getAvailableModels — the platform card', () => {
+  const ROWS: PlatformRowSpec[] = [
+    { name: 'nous-qwen3-8b', actual_model: 'qwen3-8b', type: 'llm' },
+    { name: 'nous-wemm-2b', actual_model: 'wemm-2b', type: 'embedding' },
+    { name: 'nous-deepseek', actual_model: 'deepseek-v4-pro', type: 'llm', disabled: true },
+    { name: 'jimeng-local-image', actual_model: '', type: 'image', is_local: true },
+  ];
+
+  it('lists only enabled llm rows, labelled the way admin does, valued by row name', async () => {
+    const { getAvailableModels } = await import('./agentEditorModel');
+    const nous = getAvailableModels(withPlatform(baseAISettings(), ROWS)).find(
+      (g) => g.providerKey === 'nous',
+    );
+    expect(nous?.models).toEqual(['nous-qwen3-8b']);
+    expect(nous?.labels).toEqual({ 'nous-qwen3-8b': 'qwen3-8b' });
   });
+
   it('offers nothing when the Nous card itself is off', async () => {
-    const { visiblePlatformModels } = await import('./agentEditorModel');
-    expect(visiblePlatformModels(rows, { enabled: false } as never)).toEqual([]);
+    const { getAvailableModels } = await import('./agentEditorModel');
+    const groups = getAvailableModels(withPlatform(baseAISettings(), ROWS, { enabled: false }));
+    expect(groups.find((g) => g.providerKey === 'nous')).toBeUndefined();
   });
-  it('an absent card config means no restriction', async () => {
-    const { visiblePlatformModels } = await import('./agentEditorModel');
-    expect(visiblePlatformModels(rows, undefined)).toHaveLength(2);
+
+  it('offers nothing when the platform view is unknown (platform_models: null)', async () => {
+    const { getAvailableModels } = await import('./agentEditorModel');
+    const settings = { ...withPlatform(baseAISettings(), ROWS), platform_models: null };
+    expect(getAvailableModels(settings).find((g) => g.providerKey === 'nous')).toBeUndefined();
   });
 });
 
@@ -203,36 +220,6 @@ describe('renderModelSelect — non-chat note', () => {
   });
 });
 
-describe('visiblePlatformModels — failed probe (2026-09-24)', () => {
-  const rows = [
-    { name: 'ok', last_test_status: 'ok' as const },
-    { name: 'failed', last_test_status: 'fail' as const },
-    { name: 'unprobed', last_test_status: 'not_probed' as const },
-    { name: 'never', last_test_status: null },
-    { name: 'absent' },
-  ];
-
-  it('drops failed rows and keeps ok / not_probed / never-probed', async () => {
-    const { visiblePlatformModels } = await import('./agentEditorModel');
-    expect(visiblePlatformModels(rows, undefined).map((m) => m.name)).toEqual([
-      'ok',
-      'unprobed',
-      'never',
-      'absent',
-    ]);
-  });
-
-  it('applies the failed filter on top of the user blacklist', async () => {
-    const { visiblePlatformModels } = await import('./agentEditorModel');
-    const cfg = { enabled: true, disabled_models: ['ok'] } as never;
-    expect(visiblePlatformModels(rows, cfg).map((m) => m.name)).toEqual([
-      'unprobed',
-      'never',
-      'absent',
-    ]);
-  });
-});
-
 describe('renderModelSelect — orphan labels', () => {
   it('says "unavailable" for a saved model the caller knows was hidden', () => {
     renderSelect({
@@ -280,10 +267,10 @@ describe('renderModelSelect — not loaded on nous-engine', () => {
 describe('platformNotLoadedLabels', () => {
   it('maps only idle rows to the reason', () => {
     const rows = [
-      { name: 'a', last_test_status: 'idle' as const },
-      { name: 'b', last_test_status: 'ok' as const },
-      { name: 'c', last_test_status: null },
-      { name: 'd', last_test_status: 'not_probed' as const },
+      { name: 'a', status: 'idle' as const },
+      { name: 'b', status: 'ok' as const },
+      { name: 'c' },
+      { name: 'd', status: 'not_probed' as const },
     ];
     expect(platformNotLoadedLabels(rows, 'Not loaded on nous-engine')).toEqual({
       a: 'Not loaded on nous-engine',

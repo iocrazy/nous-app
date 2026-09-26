@@ -9,8 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within, fireEvent, act } from '@testing-library/react';
 import { AISettings } from './AISettings';
 import type { AISettings as AISettingsType } from '../types';
-import type { NousModelPublic } from '../types/api';
-import { makeNousModel } from '../tests/fixtures/ai';
+import { withPlatform, type PlatformRowSpec } from '../tests/fixtures/platform';
 
 import en from '../public/locales/en.json';
 
@@ -33,21 +32,11 @@ vi.mock('react-i18next', () => {
   return { useTranslation: () => ({ t }) };
 });
 
-const ASR_MODEL = makeNousModel({
-  name: 'moss-asr',
-  display_name: 'MOSS ASR',
-  type: 'asr',
-  pricing_type: 'per_hour',
-  pricing_value: 3,
-});
-const LLM_MODEL = makeNousModel({
-  name: 'nous-llm',
-  display_name: 'Nous LLM',
-  type: 'llm',
-  pricing_type: 'per_token',
-  pricing_value: 2,
-});
-const MODELS: NousModelPublic[] = [ASR_MODEL, LLM_MODEL];
+// No actual_model here, so each row is labelled by its name.
+const MODELS: PlatformRowSpec[] = [
+  { name: 'moss-asr', actual_model: '', type: 'asr', pricing_type: 'per_hour', pricing_value: 3 },
+  { name: 'nous-llm', actual_model: '', type: 'llm', pricing_type: 'per_token', pricing_value: 2 },
+];
 
 // ASR picker label (transcription <select>) and LLM picker label (agent <select>),
 // named by the admin identifier (no actual_model here, so the row name).
@@ -55,9 +44,9 @@ const ASR_OPTION = /moss-asr \(Platform/;
 const LLM_OPTION = /nous-llm \(Platform\)/;
 
 vi.mock('../services/aiService', () => ({
-  saveAISettings: vi.fn().mockResolvedValue(undefined),
+  saveAISettings: vi.fn(async (s: unknown) => s), // PUT echoes the saved settings
   testAIConnection: vi.fn(),
-  getNousModels: vi.fn().mockResolvedValue([]),
+  getPlatformStatus: vi.fn(() => new Promise(() => {})),
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
@@ -118,9 +107,7 @@ const saveButton = () => screen.getByRole('button', { name: 'Save Settings' });
 const unsavedDot = () => screen.queryByTestId('ai-settings-unsaved-dot');
 
 async function renderWithModels(onSave = vi.fn()) {
-  const { getNousModels } = await import('../services/aiService');
-  vi.mocked(getNousModels).mockResolvedValue(MODELS);
-  render(<AISettings settings={baseSettings} onSave={onSave} />);
+  render(<AISettings settings={withPlatform(baseSettings, MODELS)} onSave={onSave} />);
   await waitFor(() => {
     expect(
       document.querySelector('[data-testid="platform-model-row"][data-model-name="moss-asr"]'),

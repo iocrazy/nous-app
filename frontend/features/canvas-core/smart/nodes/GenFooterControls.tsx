@@ -18,36 +18,35 @@ Timer,
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { NousModelPublic } from '../../../../types/api';
+import type { PlatformModelStatus } from '../../../../types/api';
 import type { PromptGenSettings } from '../types';
 import { useModelCapabilities } from './useModelCapabilities';
 import { platformModelAvailability, platformModelText } from '../../../../utils/platformModel';
 
 export interface FooterModel {
   name: string;
-  display_name?: string;
   /** Upstream model id; the primary label, as on the admin AI Models card. */
   actual_model?: string | null;
   /** True when the row runs on the user's own machine via the paired codex
    *  daemon (C 方案). Derived server-side — the raw provider name is behind
    *  the 2026-08-14 leak tripwire and never reaches the client. */
   is_local?: boolean;
-  /** Last probe verdict; `idle` rows are listed but not pickable. */
-  last_test_status?: NousModelPublic['last_test_status'];
+  /** Live status (hooks/usePlatformStatus); `idle` rows are listed but not
+   *  pickable. */
+  status?: PlatformModelStatus;
 }
 
 /** What the picker calls a catalog row: the admin identifier and nothing
  *  else (utils/platformModel). The "(Local)" tag and the old "· local" suffix
  *  are gone on purpose: the server twin is hidden whenever the local one can
- *  run (see visible_generation_rows), so "local" is not a distinction the
+ *  run (see useGenerationModels), so "local" is not a distinction the
  *  user needs — one engine, one entry, one name. */
 export function modelLabel(m: {
   name: string;
-  display_name?: string;
   actual_model?: string | null;
   is_local?: boolean;
 }): string {
-  return platformModelText({ name: m.name, display_name: m.display_name, actual_model: m.actual_model });
+  return platformModelText({ name: m.name, actual_model: m.actual_model });
 }
 
 export interface GenFooterControlsProps {
@@ -250,7 +249,7 @@ export function GenFooterControls({
   // Idle nous-engine rows (authorized, not loaded) are listed but not pickable
   // (utils/platformModel). A saved one stays on the pill, titled with why.
   const notLoadedText = t('platformModel.notLoaded', 'Not loaded on nous-engine');
-  const isNotLoaded = (m: FooterModel) => platformModelAvailability(m).reason === 'not_loaded';
+  const isNotLoaded = (m: FooterModel) => platformModelAvailability(m.status).reason === 'not_loaded';
   const selectedNotLoaded = found ? isNotLoaded(found) : false;
   // Resolved against the OFFERED rungs, not the full ramp: a stored quality
   // this model no longer honours is dropped server-side before dispatch, so

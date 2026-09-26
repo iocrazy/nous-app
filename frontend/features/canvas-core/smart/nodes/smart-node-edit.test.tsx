@@ -36,13 +36,23 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
 
-// The text prompt's provider dropdown is now sourced from the platform DB
-// catalog (P0-1). Stub the hook with fixed llm rows so the dropdown has
-// selectable options without a network fetch.
+// The text prompt's provider dropdown is sourced from the user's enabled
+// platform llm rows (P0-1, spec 2026-09-25). Stub the hook with a fixed row so
+// the dropdown has a selectable option without a network fetch.
 vi.mock('./useAgents', () => ({ useAgents: () => [] }));
-vi.mock('./useTextModels', () => ({
-  useTextModels: () => [
-    { name: 'mediahub-doubao-llm', display_name: 'Doubao LLM', actual_model: 'doubao-seed-1-6-250615', type: 'llm', last_test_status: 'ok' },
+vi.mock('./useGenerationModels', () => ({ useGenerationModels: () => [] }));
+vi.mock('../../../../hooks/usePlatformModels', () => ({
+  useTextPlatformModels: () => [
+    {
+      name: 'mediahub-doubao-llm',
+      actual_model: 'doubao-seed-1-6-250615',
+      type: 'llm',
+      status: 'ok',
+      is_local: false,
+      pricing_type: 'per_token',
+      pricing_value: 1,
+      context_window_tokens: 32768,
+    },
   ],
 }));
 

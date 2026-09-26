@@ -16,9 +16,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { AISettings } from './AISettings';
-import type { AISettings as AISettingsType } from '../types';
-import type { NousModelPublic } from '../types/api';
-import { makeNousModel } from '../tests/fixtures/ai';
+import {
+  ENGINE_DOWN,
+  baseAISettings,
+  withPlatform,
+  type PlatformRowSpec,
+} from '../tests/fixtures/platform';
 
 import en from '../public/locales/en.json';
 
@@ -42,48 +45,35 @@ vi.mock('react-i18next', () => {
 });
 
 // Chip text is `actual_model`, else the row `name` (moss-asr has no
-// actual_model, like the jimeng-local rows in production).
-const FOUR_TYPES: NousModelPublic[] = [
-  makeNousModel({
+// actual_model, like the jimeng-local rows in production). The platform list
+// rides on the settings (spec 2026-09-25) — the wire shape is
+// tests/fixtures/platform. `display_name` is not even on the wire any more;
+// the old names are kept here only to prove none of them reach the page.
+const FOUR_TYPES: PlatformRowSpec[] = [
+  {
     name: 'nous-doubao-embedding-vision',
-    display_name: 'Doubao Embedding Vision',
     actual_model: 'doubao-embedding-vision-251215',
     type: 'embedding',
     pricing_type: 'per_request',
     pricing_value: 1,
-  }),
-  makeNousModel({
-    name: 'moss-asr',
-    display_name: 'MOSS ASR',
-    actual_model: '',
-    type: 'asr',
-    pricing_type: 'per_hour',
-    pricing_value: 3,
-  }),
-  makeNousModel({
-    name: 'nous-llm',
-    display_name: 'Nous LLM',
-    actual_model: 'qwen3-8b-instruct',
-    type: 'llm',
-    pricing_type: 'per_token',
-    pricing_value: 2,
-  }),
-  makeNousModel({
+  },
+  { name: 'moss-asr', actual_model: '', type: 'asr', pricing_type: 'per_hour', pricing_value: 3 },
+  { name: 'nous-llm', actual_model: 'qwen3-8b-instruct', type: 'llm', pricing_type: 'per_token', pricing_value: 2 },
+  {
     name: 'nous-seedream-3',
-    display_name: 'Doubao Seedream 3.0',
     actual_model: 'doubao-seedream-3-0-t2i-250415',
     type: 'image',
     pricing_type: 'per_request',
     pricing_value: 5,
-  }),
+  },
 ];
-const DISPLAY_NAMES = FOUR_TYPES.map((m) => m.display_name);
+const DISPLAY_NAMES = ['Doubao Embedding Vision', 'MOSS ASR', 'Nous LLM', 'Doubao Seedream 3.0'];
 
 vi.mock('../services/aiService', () => ({
-  saveAISettings: vi.fn().mockResolvedValue(undefined),
+  saveAISettings: vi.fn(async (s: unknown) => s), // PUT echoes the saved settings
   testAIConnection: vi.fn(),
-  // Overridden per-test.
-  getNousModels: vi.fn().mockResolvedValue([]),
+  // Never answers: the card falls back to the status the settings carried.
+  getPlatformStatus: vi.fn(() => new Promise(() => {})),
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
@@ -104,26 +94,9 @@ vi.mock('./ApprovalsPanel', () => ({ ApprovalsPanel: () => null }));
 vi.mock('./MemoryPanel', () => ({ MemoryPanel: () => null }));
 vi.mock('./AIHealthBoard', () => ({ AIHealthBoard: () => null }));
 
-const baseSettings: AISettingsType = {
-  ai_enabled: true,
-  auto_transcribe: false,
-  auto_summarize: false,
-  preferred_language: 'auto',
-  providers: {},
-  task_assignment: {
-    transcription: '',
-    summarization: '',
-    visual_analysis: '',
-    translation: '',
-    caption: '',
-    classification: '',
-    image_generation: '',
-    script_generation: '',
-  },
-};
-
-function renderSettings() {
-  return render(<AISettings settings={baseSettings} onSave={vi.fn()} />);
+function renderSettings(rows: PlatformRowSpec[] = FOUR_TYPES, engine = undefined as undefined | typeof ENGINE_DOWN) {
+  const settings = withPlatform(baseAISettings(), rows, engine ? { engine } : {});
+  return render(<AISettings settings={settings} onSave={vi.fn()} />);
 }
 
 /** The platform card (header + body). */
@@ -146,9 +119,6 @@ describe('AISettings — Nous (Platform) models card', () => {
   });
 
   it('renders ALL enabled model types (not just llm) as chips, each with a type tag', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue(FOUR_TYPES);
-
     renderSettings();
 
     await waitFor(() => expect(chip('nous-llm')).not.toBeNull());
@@ -172,9 +142,6 @@ describe('AISettings — Nous (Platform) models card', () => {
   });
 
   it('sorts chips llm → asr → embedding → image', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue(FOUR_TYPES);
-
     renderSettings();
 
     await waitFor(() => expect(chip('nous-llm')).not.toBeNull());
@@ -185,9 +152,6 @@ describe('AISettings — Nous (Platform) models card', () => {
   });
 
   it('never shows a display_name anywhere on the card — only the admin identifiers', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue(FOUR_TYPES);
-
     renderSettings();
 
     await waitFor(() => expect(chip('nous-llm')).not.toBeNull());
@@ -203,19 +167,10 @@ describe('AISettings — Nous (Platform) models card', () => {
   });
 
   it('keeps a not-loaded nous-engine row as a chip tagged "(not loaded)" and titled with why', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue([
+    renderSettings([
       FOUR_TYPES[2],
-      makeNousModel({
-        name: 'nous-qwen3-27b',
-        display_name: 'Qwen3 27B',
-        actual_model: 'qwen3-27b',
-        type: 'llm',
-        last_test_status: 'idle',
-      }),
+      { name: 'nous-qwen3-27b', actual_model: 'qwen3-27b', type: 'llm', status: 'idle' },
     ]);
-
-    renderSettings();
 
     await waitFor(() => expect(chip('nous-qwen3-27b')).not.toBeNull());
     const idle = chip('nous-qwen3-27b')!;
@@ -230,10 +185,7 @@ describe('AISettings — Nous (Platform) models card', () => {
   });
 
   it('shows the empty-state copy when no platform models are configured', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue([]);
-
-    renderSettings();
+    renderSettings([]);
 
     await waitFor(() => {
       expect(screen.getByText('No platform models available.')).toBeInTheDocument();
@@ -241,24 +193,28 @@ describe('AISettings — Nous (Platform) models card', () => {
     expect(screen.queryAllByTestId('platform-model-row')).toHaveLength(0);
   });
 
-  it('never renders an admin description note (even if one sneaks into the payload)', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    // Simulate a stale/dirty payload carrying an internal ops note.
-    // `description` is not part of the public type; the spread keeps it on
-    // the object the way a stale payload would.
-    const dirty = {
-      ...FOUR_TYPES[2],
-      description: 'via ZeroTier (10.0.0.10:8000) from 8512939 BYOK',
-    };
-    const leaky: NousModelPublic[] = [dirty];
-    vi.mocked(getNousModels).mockResolvedValue(leaky);
+  it('says so on the card when nous-engine cannot be reached — and keeps the list', async () => {
+    renderSettings(FOUR_TYPES, ENGINE_DOWN);
 
+    await waitFor(() => expect(chip('nous-llm')).not.toBeNull());
+    const notice = within(platformCard()).getByTestId('platform-engine-unreachable');
+    expect(notice).toHaveTextContent('nous-engine is unreachable right now');
+    expect(screen.getAllByTestId('platform-model-row')).toHaveLength(4);
+  });
+
+  it('shows no unreachable notice while the engine answers', async () => {
     renderSettings();
 
     await waitFor(() => expect(chip('nous-llm')).not.toBeNull());
-    expect(screen.queryByText(/ZeroTier/)).toBeNull();
-    expect(screen.queryByText(/BYOK/)).toBeNull();
-    // The chip shows the type tag instead.
-    expect(within(chip('nous-llm')!).getByTestId('non-chat-kind-tag').textContent).toBe('LLM');
+    expect(screen.queryByTestId('platform-engine-unreachable')).toBeNull();
+  });
+
+  it('renders no API key box and no Test Connection on the managed card', async () => {
+    renderSettings();
+
+    await waitFor(() => expect(chip('nous-llm')).not.toBeNull());
+    const card = platformCard();
+    expect(within(card).queryByPlaceholderText(/key/i)).toBeNull();
+    expect(within(card).queryByRole('button', { name: /test connection/i })).toBeNull();
   });
 });

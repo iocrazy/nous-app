@@ -360,8 +360,12 @@ async def test_settings_carry_the_platform_view(
         "pricing_type": "per_token",
         "pricing_value": models["nous-qwen3-8b"]["pricing_value"],
         "context_window_tokens": 32768,
+        # A chat row: never a generation choice — an explicit false, not null.
+        "generatable": False,
     }
     assert models["nous-wemm-2b"]["status"] == "idle"
+    assert models["nous-wemm-2b"]["generatable"] is False
+    assert models["nous-codex-image"]["generatable"] is True
     assert models["nous-codex-image"]["is_local"] is True
     assert models["nous-codex-image"]["status"] == "not_probed"
     engine = body["platform_engine"]
@@ -397,6 +401,63 @@ async def test_unreachable_engine_keeps_the_list(
     assert models["nous-revoked"]["status"] == "not_probed"
     assert models["nous-qwen3-8b"]["status"] == "not_probed"
     assert "nous-qwen3-8b" in body["ai_providers"]["nous"]["enabled_models"]
+
+
+@pytest.mark.asyncio
+async def test_generatable_is_the_generation_picker_predicate(
+    client, platform, settings_repo
+) -> None:
+    """``platform_models[name].generatable`` is the same predicate the server's
+    generation row set applies (``generates_from_prompt``): an upscale-only
+    nous-engine image service is listed but not generatable; a local daemon
+    image row is. The canvas / cover / asset pickers filter on it."""
+    import httpx
+
+    body = {
+        **ENGINE_BODY,
+        "data": [
+            *ENGINE_BODY["data"],
+            {
+                "id": "studio-upscale",
+                "object": "model",
+                "type": "image",
+                "ready": True,
+                "context_window": None,
+                "capabilities": None,
+            },
+        ],
+    }
+    platform.engine = lambda request: httpx.Response(200, json=body)
+    platform.rows.extend(
+        [
+            _orm_row(
+                "nous-studio-upscale",
+                type="image",
+                actual_provider="nous",
+                actual_model="studio-upscale",
+                base_url=ENGINE,
+                api_key="sk-engine",
+                sort_order=7,
+            ),
+            _orm_row(
+                "jimeng-local-image",
+                type="image",
+                actual_provider="jimeng-local",
+                actual_model="",
+                last_test_status=None,
+                sort_order=8,
+            ),
+        ]
+    )
+    raw = await ai_settings_router.get_ai_settings(_ctx())
+    response = await client.get("/api/v1/ai/settings")
+    assert_wire_unchanged(response, raw)
+    models = response.json()["platform_models"]
+    assert models["nous-studio-upscale"]["status"] == "ok"
+    assert models["nous-studio-upscale"]["generatable"] is False
+    assert models["jimeng-local-image"]["generatable"] is True
+    assert models["nous-qwen3-8b"]["generatable"] is False
+    assert all(isinstance(m["generatable"], bool) for m in models.values())
 
 
 @pytest.mark.asyncio

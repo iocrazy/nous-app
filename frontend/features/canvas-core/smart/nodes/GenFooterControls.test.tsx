@@ -133,22 +133,23 @@ import { modelLabel } from './GenFooterControls';
 
 describe('modelLabel', () => {
   it('is actual_model, like the admin card, and never includes display_name', () => {
-    const label = modelLabel({
+    // `display_name` is not on the wire any more (platform_models carries no
+    // such key); a stray one on the object is still never printed.
+    const row = {
       name: 'openai-image-flare',
       display_name: 'GPT Image 2.5 Flare (OpenAI API)',
       actual_model: 'gpt-image-2.5-flare',
-    });
+    };
+    const label = modelLabel(row);
     expect(label).toBe('gpt-image-2.5-flare');
     expect(label).not.toContain('GPT Image 2.5 Flare');
   });
   it('falls back to the row name for a local row and never appends "· local"', () => {
     expect(
-      modelLabel({ name: 'jimeng-local-image', display_name: 'Dreamina (Local)', actual_model: '', is_local: true }),
+      modelLabel({ name: 'jimeng-local-image', actual_model: '', is_local: true }),
     ).toBe('jimeng-local-image');
-    expect(modelLabel({ name: 'a-row', display_name: 'Something (本地)', is_local: true })).toBe('a-row');
-    expect(
-      modelLabel({ name: 'codex-local-image', display_name: 'GPT Image (Codex, local)', is_local: true }),
-    ).toBe('codex-local-image');
+    expect(modelLabel({ name: 'a-row', is_local: true })).toBe('a-row');
+    expect(modelLabel({ name: 'codex-local-image', is_local: true })).toBe('codex-local-image');
     expect(modelLabel({ name: 'x-row' })).toBe('x-row');
   });
 });
@@ -172,8 +173,8 @@ describe('GenFooterControls — model popover rows', () => {
 
 describe('GenFooterControls — model not loaded on nous-engine', () => {
   const WITH_IDLE = [
-    { name: 'codex-image', display_name: 'GPT Image (Codex)', last_test_status: 'ok' },
-    { name: 'nous-studio-image', display_name: 'Studio Image', last_test_status: 'idle' },
+    { name: 'codex-image', status: 'ok' },
+    { name: 'nous-studio-image', status: 'idle' },
   ];
 
   function renderIdle(gen: Record<string, unknown>, onChange = vi.fn()) {

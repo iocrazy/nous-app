@@ -2,7 +2,7 @@
  * Canvas generation REST client (Infinite-Canvas parity Phase 2 G4-B1/F1).
  *
  * Matches `backend/app/api/canvases_router.py`'s generation endpoints:
- * model catalog for the composer picker, count-fan-out dispatch (each item
+ * per-model capabilities for the composer knobs, count-fan-out dispatch (each item
  * is an independent DBOS task — the queue governs concurrency, the browser
  * never opens its own parallelism), and task polling until a terminal
  * phase. The durable result lands in `metadata.result_url` (a same-origin
@@ -14,17 +14,9 @@ import type {
   CanvasGenerationCapability,
   CanvasGenerationDispatch,
   CanvasGenerationTask,
-  CanvasModelOption,
   CanvasTimelineDispatch,
   Envelope,
 } from '../../../types/api';
-import { isPlatformModelAvailable } from '../../../utils/platformModel';
-
-/** An image/video catalog row for the composer picker — the backend's public
- *  projection (`CanvasModelOption`): no credential, host or provider name
- *  (2026-08-14 leak tripwire); `is_local` is the one bit derived from the
- *  provider. `type` is `'image' | 'video'` on this endpoint. */
-export type GenerationModel = CanvasModelOption;
 
 export interface GenerationDispatchRequest {
   node_id: string;
@@ -78,18 +70,6 @@ const TERMINAL_PHASES = new Set(['completed', 'failed', 'cancelled', 'lost']);
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_POLL_TIMEOUT_MS = 30 * 60 * 1000;
 
-export async function listGenerationModels(): Promise<GenerationModel[]> {
-  const response = await apiFetch('/api/v1/canvases/generation-models');
-  const body = (await response.json()) as Partial<Envelope<GenerationModel[]>>;
-  if (!body.success || !Array.isArray(body.data)) {
-    throw new ApiError('generation-models response missing data', 500);
-  }
-  // Same availability rule as Settings (utils/platformModel). The backend
-  // already drops failed rows here; filtering again keeps the two pickers on
-  // one predicate should that server filter ever change.
-  return body.data.filter(isPlatformModelAvailable);
-}
-
 /** What one catalog model can actually honour, as projected by the backend
  *  (`GET /api/v1/canvases/generation-capabilities`). The UI hides a knob only
  *  when a model is present here and says no — absence means "unknown", never
@@ -98,9 +78,9 @@ export async function listGenerationModels(): Promise<GenerationModel[]> {
  *  (the router's `QUALITY_TIER_ORDER`), `[]` whenever no tier is honoured. */
 export type ModelCapabilities = CanvasGenerationCapability;
 
-/** Per-model capabilities keyed by catalog model name. Visibility matches
- *  `listGenerationModels` row for row (both endpoints read one server-side
- *  predicate), so every model the picker offers has an entry here. */
+/** Per-model capabilities keyed by catalog model name. Visibility follows the
+ *  server's generation-row predicate, so every model the pickers offer
+ *  (useGenerationModels) has an entry here. */
 export async function listGenerationCapabilities(): Promise<Record<string, ModelCapabilities>> {
   const response = await apiFetch('/api/v1/canvases/generation-capabilities');
   const body = (await response.json()) as Partial<
@@ -110,26 +90,6 @@ export async function listGenerationCapabilities(): Promise<Record<string, Model
     throw new ApiError('generation-capabilities response missing data', 500);
   }
   return body.data;
-}
-
-/** An enabled `llm` catalog row for the text prompt's model picker. Same
- *  public projection as GenerationModel — the two come from the same
- *  `nous_models` table, differing only in `type`. It never carries
- *  `actual_provider` (the old hand-written type claimed it always did). */
-export type TextModel = CanvasModelOption;
-
-/** Enabled llm models from the platform catalog (public columns only) — the
- *  single source of truth for the text prompt node's model dropdown, replacing
- *  the old hardcoded PROVIDER_OPTIONS that named models the platform doesn't
- *  carry (the 2026-07-12 "default prompt won't run" root cause). */
-export async function listTextModels(): Promise<TextModel[]> {
-  const response = await apiFetch('/api/v1/canvases/text-models');
-  const body = (await response.json()) as Partial<Envelope<TextModel[]>>;
-  if (!body.success || !Array.isArray(body.data)) {
-    throw new ApiError('text-models response missing data', 500);
-  }
-  // text-models does not filter failed rows server-side; this is the filter.
-  return body.data.filter(isPlatformModelAvailable);
 }
 
 export async function dispatchGenerations(

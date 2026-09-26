@@ -1,4 +1,4 @@
-import type { CollectionRules, FormFieldDef, MusicRef, Tag, TopicRef, TranscriptSegment, UsageAggregate, UsagePerAgent, WorkflowNodeEvents } from './types/api';
+import type { CollectionRules, FormFieldDef, MusicRef, PlatformEngineState, PlatformModelEntry, Tag, TopicRef, TranscriptSegment, UsageAggregate, UsagePerAgent, WorkflowNodeEvents } from './types/api';
 
 // The only import in this file, and deliberately `import type`: it is erased
 // at compile time (`isolatedModules`), so the app's leaf declaration file
@@ -491,6 +491,12 @@ export interface AIProviderConfig {
   // (not whitelist) semantics so any model the admin adds later is visible by
   // default — the user only ever opts models OUT.
   disabled_models?: string[];
+  // Platform ("nous") only, READ-only: the server computes this card
+  // (spec 2026-09-25 §3.1) — `models` is every row the user may toggle,
+  // `enabled_models` is `models − disabled_models`. `managed` = no key box,
+  // no Test Connection. saveAISettings sends back only `enabled` and
+  // `disabled_models` for this provider.
+  managed?: boolean;
   selected_model?: string;
   summary_model?: string;
   analysis_model?: string;
@@ -522,6 +528,13 @@ export interface AISettings {
   // so the Settings UI restores it across reloads. Read-only from the client's
   // perspective (written via /ai/test-connection + /ai/provider-health).
   provider_health?: Record<string, ProviderHealthEntry>;
+  /** Platform row name → mapping, for every name in `providers.nous.models`.
+   *  `null` = the server could not compute the view (unknown, not empty);
+   *  absent = settings not loaded yet. */
+  platform_models?: Record<string, PlatformModelEntry> | null;
+  /** nous-engine reachability behind the platform list; `null` when no
+   *  listed row is served by nous-engine or the view is unknown. */
+  platform_engine?: PlatformEngineState | null;
 }
 
 export interface ProviderHealthEntry {

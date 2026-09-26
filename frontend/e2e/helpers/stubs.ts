@@ -304,3 +304,63 @@ function frame(index: number, row: number, col: number) {
     col,
   };
 }
+
+/** One platform row for {@link stubPlatformModels}. */
+export interface E2EPlatformRow {
+  name: string;
+  type: 'llm' | 'embedding' | 'tts' | 'asr' | 'image' | 'video';
+  actual_model?: string;
+  is_local?: boolean;
+  status?: 'ok' | 'idle' | 'not_probed';
+  /** Server default: image/video rows can generate; upscale-only rows cannot. */
+  generatable?: boolean;
+}
+
+/**
+ * Serve the platform model list the way production does since spec
+ * 2026-09-25: on `GET /ai/settings` (`ai_providers.nous` + `platform_models`
+ * + `platform_engine`) with runtime state on `GET /ai/platform-status`.
+ * Shapes follow `backend/tests/api/test_ai_settings_wire.py`. Every picker
+ * (canvas, cover studio, asset sheet, agent editor, Settings) reads these two
+ * responses — there is no per-surface catalog endpoint to stub any more.
+ * Call after {@link setupStubbedSession} (later routes win).
+ */
+export async function stubPlatformModels(page: Page, rows: E2EPlatformRow[]): Promise<void> {
+  const names = rows.map((r) => r.name);
+  const engine = { reachable: true, stale: false, checked_at: '2020-01-02T00:00:00Z' };
+  const settings = {
+    ai_enabled: true,
+    ai_providers: {
+      nous: { enabled: true, managed: true, models: names, enabled_models: names, disabled_models: [] },
+    },
+    platform_models: Object.fromEntries(
+      rows.map((r) => [
+        r.name,
+        {
+          actual_model: r.actual_model ?? '',
+          type: r.type,
+          status: r.status ?? 'ok',
+          is_local: r.is_local ?? false,
+          pricing_type: 'per_request',
+          pricing_value: 1,
+          context_window_tokens: null,
+          generatable: r.generatable ?? (r.type === 'image' || r.type === 'video'),
+        },
+      ]),
+    ),
+    platform_engine: engine,
+    task_assignment: {},
+    provider_health: {},
+  };
+  const status = {
+    models: Object.fromEntries(
+      rows.map((r) => [
+        r.name,
+        { status: r.status ?? 'ok', local_ready: r.is_local ? true : null, superseded: false },
+      ]),
+    ),
+    engine,
+  };
+  await page.route('**/api/v1/ai/settings', (route) => fulfillJson(route, settings));
+  await page.route('**/api/v1/ai/platform-status', (route) => fulfillJson(route, status));
+}

@@ -7,7 +7,7 @@
  *      removing a chip opts the row out; a disabled row is not a chip but is
  *      offered by Add Model, and picking it there opts it back in. Only the
  *      opted-out model disappears from the pickers; the rest stay.
- *   3. Default (no stored nous config) → all platform models visible.
+ *   3. Default (nothing blacklisted) → all platform models visible.
  *   4. Save payload carries providers.nous and does NOT clobber other
  *      providers (merge-safe shape).
  */
@@ -15,8 +15,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { AISettings } from './AISettings';
 import type { AISettings as AISettingsType } from '../types';
-import type { NousModelPublic } from '../types/api';
-import { makeNousModel } from '../tests/fixtures/ai';
+import { baseAISettings, withPlatform, type PlatformRowSpec } from '../tests/fixtures/platform';
 
 import en from '../public/locales/en.json';
 
@@ -41,23 +40,10 @@ vi.mock('react-i18next', () => {
 
 // moss-asr has no actual_model, so it reads as its row name; nous-llm reads
 // as its actual_model. Either way display_name is never shown.
-const ASR_MODEL = makeNousModel({
-  name: 'moss-asr',
-  display_name: 'MOSS ASR',
-  actual_model: '',
-  type: 'asr',
-  pricing_type: 'per_hour',
-  pricing_value: 3,
-});
-const LLM_MODEL = makeNousModel({
-  name: 'nous-llm',
-  display_name: 'Nous LLM',
-  actual_model: 'qwen3-8b-instruct',
-  type: 'llm',
-  pricing_type: 'per_token',
-  pricing_value: 2,
-});
-const MODELS: NousModelPublic[] = [ASR_MODEL, LLM_MODEL];
+const MODELS: PlatformRowSpec[] = [
+  { name: 'moss-asr', actual_model: '', type: 'asr', pricing_type: 'per_hour', pricing_value: 3 },
+  { name: 'nous-llm', actual_model: 'qwen3-8b-instruct', type: 'llm', pricing_type: 'per_token', pricing_value: 2 },
+];
 
 // ASR picker label (transcription <select>) and LLM picker label (agent <select>),
 // both named by the admin identifier.
@@ -65,9 +51,9 @@ const ASR_OPTION = /moss-asr \(Platform/;
 const LLM_OPTION = /qwen3-8b-instruct \(Platform\)/;
 
 vi.mock('../services/aiService', () => ({
-  saveAISettings: vi.fn().mockResolvedValue(undefined),
+  saveAISettings: vi.fn(async (s: unknown) => s), // PUT echoes the saved settings
   testAIConnection: vi.fn(),
-  getNousModels: vi.fn().mockResolvedValue([]),
+  getPlatformStatus: vi.fn(() => new Promise(() => {})),
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
@@ -88,28 +74,20 @@ vi.mock('./ApprovalsPanel', () => ({ ApprovalsPanel: () => null }));
 vi.mock('./MemoryPanel', () => ({ MemoryPanel: () => null }));
 vi.mock('./AIHealthBoard', () => ({ AIHealthBoard: () => null }));
 
-const baseSettings: AISettingsType = {
-  ai_enabled: true,
-  auto_transcribe: false,
-  auto_summarize: false,
-  preferred_language: 'auto',
-  providers: {},
-  task_assignment: {
-    transcription: '',
-    summarization: '',
-    visual_analysis: '',
-    translation: '',
-    caption: '',
-    classification: '',
-    image_generation: '',
-    script_generation: '',
-  },
-};
+interface RenderOptions {
+  /** The stored master switch. */
+  enabled?: boolean;
+  /** Row names in the stored blacklist. */
+  disabled?: string[];
+  providers?: AISettingsType['providers'];
+}
 
-function renderSettings(overrides?: Partial<AISettingsType>) {
-  return render(
-    <AISettings settings={{ ...baseSettings, ...overrides }} onSave={vi.fn()} />,
-  );
+/** Settings as GET /ai/settings returns them: the server-computed platform
+ *  card (models / enabled_models / disabled_models) plus the mapping. */
+function renderSettings({ enabled = true, disabled = [], providers = {} }: RenderOptions = {}) {
+  const rows = MODELS.map((m) => ({ ...m, disabled: disabled.includes(m.name) }));
+  const settings = withPlatform(baseAISettings({ providers }), rows, { enabled });
+  return render(<AISettings settings={settings} onSave={vi.fn()} />);
 }
 
 /** The platform card (header + body). */
@@ -146,10 +124,7 @@ describe('AISettings — platform card master toggle + per-model chips', () => {
     vi.clearAllMocks();
   });
 
-  it('default (no stored nous config): all platform models visible in pickers', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue(MODELS);
-
+  it('default (nothing blacklisted): all platform models visible in pickers', async () => {
     renderSettings();
 
     // UiSelect mirrors each option into a native + a custom-rendered list, so
@@ -165,10 +140,7 @@ describe('AISettings — platform card master toggle + per-model chips', () => {
   });
 
   it('master toggle OFF (stored): pickers drop platform models AND card body collapses', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue(MODELS);
-
-    renderSettings({ providers: { nous: { enabled: false } } });
+    renderSettings({ enabled: false });
 
     // Card header still present…
     await waitFor(() => {
@@ -183,12 +155,7 @@ describe('AISettings — platform card master toggle + per-model chips', () => {
   });
 
   it('per-model blacklist: only the opted-out model leaves the picker', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue(MODELS);
-
-    renderSettings({
-      providers: { nous: { enabled: true, disabled_models: ['moss-asr'] } },
-    });
+    renderSettings({ disabled: ['moss-asr'] });
 
     await waitFor(() => {
       // LLM still selectable…
@@ -206,9 +173,6 @@ describe('AISettings — platform card master toggle + per-model chips', () => {
   });
 
   it('removing a chip then Save persists nous.disabled_models without clobbering other providers', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue(MODELS);
-
     renderSettings({
       providers: {
         openai: { enabled: true, api_key_set: true, selected_model: 'gpt-4o' },
@@ -232,9 +196,6 @@ describe('AISettings — platform card master toggle + per-model chips', () => {
   });
 
   it('removing a chip labelled by actual_model blacklists the row name, not the label', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue(MODELS);
-
     renderSettings();
 
     await waitFor(() => expect(chip('nous-llm')).not.toBeNull());
@@ -247,12 +208,7 @@ describe('AISettings — platform card master toggle + per-model chips', () => {
   });
 
   it('picking a disabled row from Add Model re-enables it and Save drops it from disabled_models', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue(MODELS);
-
-    renderSettings({
-      providers: { nous: { enabled: true, disabled_models: ['moss-asr', 'nous-llm'] } },
-    });
+    renderSettings({ disabled: ['moss-asr', 'nous-llm'] });
 
     await waitFor(() => {
       expect(within(platformCard()).getByRole('button', { name: 'Add Model' })).toBeInTheDocument();
@@ -277,8 +233,7 @@ describe('AISettings — platform card master toggle + per-model chips', () => {
   });
 
   it('clicking the master toggle OFF then Save persists nous.enabled=false', async () => {
-    const { getNousModels, saveAISettings } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue(MODELS);
+    const { saveAISettings } = await import('../services/aiService');
 
     renderSettings();
 
@@ -305,10 +260,7 @@ describe('AISettings — platform card master toggle + per-model chips', () => {
   // "add" can do is drop a row name from the blacklist — so the button must
   // not be offered at all rather than sit there as a silent no-op.
   it('does not offer "Add <typed>" for a name outside the platform catalog', async () => {
-    const { getNousModels } = await import('../services/aiService');
-    vi.mocked(getNousModels).mockResolvedValue(MODELS);
-
-    renderSettings({ providers: { nous: { enabled: true, disabled_models: ['moss-asr'] } } });
+    renderSettings({ disabled: ['moss-asr'] });
 
     await waitFor(() => {
       expect(within(platformCard()).getByRole('button', { name: 'Add Model' })).toBeInTheDocument();
@@ -319,5 +271,27 @@ describe('AISettings — platform card master toggle + per-model chips', () => {
 
     expect(within(platformCard()).queryByTestId('add-custom-model')).toBeNull();
     expect(within(platformCard()).getByText(en.aiSettings.noMatches)).toBeInTheDocument();
+  });
+
+  // The PUT echo is the recomputed settings (spec 2026-09-25 §3.1): the page
+  // hands THAT to the parent, not its own local copy, so `enabled_models`
+  // reflects the saved blacklist without a second request.
+  it('hands the PUT echo — not the local draft — to onSave', async () => {
+    const { saveAISettings } = await import('../services/aiService');
+    const echo = withPlatform(baseAISettings(), [
+      { ...MODELS[0], disabled: true },
+      MODELS[1],
+    ]);
+    vi.mocked(saveAISettings).mockResolvedValueOnce(echo);
+    const onSave = vi.fn();
+    render(<AISettings settings={withPlatform(baseAISettings(), MODELS)} onSave={onSave} />);
+
+    await waitFor(() => expect(chip('moss-asr')).not.toBeNull());
+    fireEvent.click(within(chip('moss-asr')!).getByRole('button', { name: 'Remove moss-asr' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0][0]).toBe(echo);
+    expect(onSave.mock.calls[0][0].providers.nous.enabled_models).toEqual(['nous-llm']);
   });
 });

@@ -5,9 +5,11 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as aiService from './aiService';
+import { platformSettingsWire, platformStatusWire, ENGINE_DOWN } from '../tests/fixtures/platform';
 import {
   getAISettings,
-  getNousModels,
+  getPlatformStatus,
   getSummary,
   getSummaryByResource,
   getTranscript,
@@ -345,24 +347,85 @@ describe('saveAISettings', () => {
   });
 });
 
-describe('getNousModels', () => {
-  it('threads type query', async () => {
-    const spy = stubJson({ models: [{ name: 'nous-x' }] });
-    await getNousModels('asr');
-    const url = spy.mock.calls[0][0] as string;
-    expect(url).toContain('type=asr');
+describe('platform models ride on the settings (spec 2026-09-25)', () => {
+  const ROWS = [
+    { name: 'nous-doubao', actual_model: 'doubao-seed-2-0-pro', disabled: true },
+    { name: 'nous-qwen3-8b', actual_model: 'qwen3-8b' },
+    { name: 'nous-wemm-2b', actual_model: 'wemm-2b', type: 'embedding' as const, status: 'idle' as const },
+  ];
+
+  it('getAISettings passes the nous card, platform_models and platform_engine through as sent', async () => {
+    const wire = platformSettingsWire(ROWS, { engine: ENGINE_DOWN });
+    stubJson({ ai_enabled: true, ...wire });
+    const settings = await getAISettings();
+    expect(settings.providers.nous).toEqual(wire.ai_providers.nous);
+    expect(settings.platform_models).toEqual(wire.platform_models);
+    expect(settings.platform_engine).toEqual(ENGINE_DOWN);
   });
 
-  it('returns [] on error', async () => {
-    stubJson({ detail: 'oops' }, 500);
-    const result = await getNousModels();
-    expect(result).toEqual([]);
+  it('keeps platform_models: null (unknown) distinct from an empty map', async () => {
+    stubJson({ ai_providers: { nous: { enabled: true, disabled_models: [] } }, platform_models: null, platform_engine: null });
+    const settings = await getAISettings();
+    expect(settings.platform_models).toBeNull();
+    expect(settings.platform_engine).toBeNull();
   });
 
-  it('returns [] when models field missing', async () => {
-    stubJson({});
-    const result = await getNousModels();
-    expect(result).toEqual([]);
+  it('saveAISettings sends back only enabled + disabled_models for nous — never the computed list', async () => {
+    const wire = platformSettingsWire(ROWS);
+    const spy = stubJson({ ai_enabled: true, ...wire });
+    await saveAISettings({
+      ai_enabled: true,
+      preferred_language: 'auto',
+      providers: {
+        nous: wire.ai_providers.nous as never,
+        deepseek: { enabled: true, models: ['deepseek-chat'], enabled_models: ['deepseek-chat'] },
+      },
+      platform_models: wire.platform_models,
+      platform_engine: wire.platform_engine,
+      task_assignment: { transcription: '', summarization: '', visual_analysis: '' },
+    });
+    const body = JSON.parse((spy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.ai_providers.nous).toEqual({ enabled: true, disabled_models: ['nous-doubao'] });
+    // BYOK cards keep their own lists (they ARE stored).
+    expect(body.ai_providers.deepseek.enabled_models).toEqual(['deepseek-chat']);
+    expect(body).not.toHaveProperty('platform_models');
+    expect(body).not.toHaveProperty('platform_engine');
+  });
+
+  it('saveAISettings returns the parsed PUT echo, platform view included', async () => {
+    const wire = platformSettingsWire(ROWS);
+    stubJson({ ai_enabled: true, ...wire });
+    const saved = await saveAISettings({
+      ai_enabled: true,
+      preferred_language: 'auto',
+      providers: {},
+      task_assignment: { transcription: '', summarization: '', visual_analysis: '' },
+    });
+    expect(saved.providers.nous?.enabled_models).toEqual(['nous-qwen3-8b', 'nous-wemm-2b']);
+    expect(saved.platform_models).toEqual(wire.platform_models);
+  });
+
+  it('getPlatformStatus GETs /ai/platform-status and returns the body', async () => {
+    const body = platformStatusWire({ 'nous-qwen3-8b': {}, 'codex-local-image': { local_ready: true } });
+    const spy = stubJson(body);
+    expect(await getPlatformStatus()).toEqual(body);
+    expect(spy.mock.calls[0][0]).toBe('https://api.test/api/v1/ai/platform-status');
+  });
+
+  it('getPlatformStatus rejects a body that is not a status answer', async () => {
+    stubJson({ success: true, data: [] });
+    await expect(getPlatformStatus()).rejects.toThrow('missing models');
+  });
+
+  it('getPlatformStatus throws on an error status (the hook keeps the last value)', async () => {
+    stubJson({ detail: 'boom' }, 500);
+    await expect(getPlatformStatus()).rejects.toThrow('boom');
+  });
+
+  // Regression guard: the per-surface catalog request is gone for good. Five
+  // surfaces each fetching their own list is what spec 2026-09-25 removed.
+  it('no longer exports getNousModels', () => {
+    expect('getNousModels' in aiService).toBe(false);
   });
 });
 

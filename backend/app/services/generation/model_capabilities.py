@@ -35,6 +35,30 @@ from app.services.ai.provider_protocols.base import ProviderCapabilities
 _GENERATION_TYPES = ("image", "video")
 
 
+def generates_from_prompt(
+    row_type: Optional[str], actual_provider: Optional[str]
+) -> bool:
+    """Whether a catalog row can generate a picture or a clip from a prompt.
+
+    The ONE predicate behind both the generation pickers' row set
+    (:func:`visible_generation_rows`) and ``platform_models[name].generatable``
+    on the AI settings (``services/ai/platform_provider``), so the two cannot
+    drift. False for every non-image/video row, and for upscale-only image
+    services (nous-engine super-resolution: the protocol's ``text_to_image`` is
+    False) — they need an input image and would fail on every prompt. A row
+    whose protocol does not resolve stays True: "unknown protocol" is not
+    "cannot generate", and dispatch answers that case with a typed refusal.
+    """
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+
+    if row_type not in _GENERATION_TYPES:
+        return False
+    proto = resolve_generation_protocol((actual_provider or "").lower())
+    if row_type == "image" and proto is not None:
+        return bool(getattr(proto, "text_to_image", True))
+    return True
+
+
 async def visible_generation_rows(
     user_id: str, *, include_actual_provider: bool = False
 ) -> List[Dict[str, Any]]:
@@ -49,7 +73,6 @@ async def visible_generation_rows(
     from app.services.ai.platform_model_visibility import (
         filter_platform_models_for_user,
     )
-    from app.services.ai.provider_protocols import resolve_generation_protocol
 
     # actual_provider is always fetched — the upscale-only filter below needs
     # it — and stripped again unless the caller asked for it, so the default
@@ -62,17 +85,7 @@ async def visible_generation_rows(
     rows = await filter_platform_models_for_user(user_id, rows)
     out: List[Dict[str, Any]] = []
     for r in rows:
-        if r.get("type") not in _GENERATION_TYPES:
-            continue
-        provider = r.get("actual_provider")
-        proto = resolve_generation_protocol((provider or "").lower())
-        # Upscale-only services (nous-engine super-resolution) need an input
-        # image; a picker entry for them would fail on every prompt.
-        if (
-            r.get("type") == "image"
-            and proto is not None
-            and not getattr(proto, "text_to_image", True)
-        ):
+        if not generates_from_prompt(r.get("type"), r.get("actual_provider")):
             continue
         if not include_actual_provider:
             r = {k: v for k, v in r.items() if k != "actual_provider"}

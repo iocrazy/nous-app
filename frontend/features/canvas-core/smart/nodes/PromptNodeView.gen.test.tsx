@@ -26,7 +26,7 @@ vi.mock('./useGenerationModels', () => ({
     ].filter((m) => !kind || m.type === kind),
 }));
 vi.mock('./useAgents', () => ({ useAgents: () => [] }));
-vi.mock('./useTextModels', () => ({ useTextModels: () => [] }));
+vi.mock('../../../../hooks/usePlatformModels', () => ({ useTextPlatformModels: () => [] }));
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { PromptNodeView } from './PromptNodeView';

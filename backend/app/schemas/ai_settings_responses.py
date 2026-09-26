@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.nous_model import NousModelType
 from app.schemas.wire import WireDatetime
@@ -141,6 +141,14 @@ class AiPlatformModelEntry(BaseModel):
     pricing_type: Literal["per_hour", "per_request", "per_token"]
     pricing_value: float
     context_window_tokens: Optional[int]
+    generatable: bool = Field(
+        description=(
+            "Whether the row can generate an image/clip from a prompt — the same "
+            "predicate the generation pickers use (services/generation/"
+            "model_capabilities.generates_from_prompt). False for every "
+            "non-image/video row and for upscale-only services."
+        )
+    )
 
 
 class AiPlatformEngineState(BaseModel):

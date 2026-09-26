@@ -1,22 +1,30 @@
 /**
- * Platform-model health in AI Settings.
+ * Platform-model status in AI Settings (spec 2026-09-25).
  *
- * 2026-08-14 (#1838) surfaced the probe result as a warning and deliberately
- * kept failing models listed. 2026-09-24 reversed that at the user's request:
- * the admin AI Models page shows a failed row as broken, so the user side no
- * longer offers it — on the platform card or in the task pickers. `ok`,
- * `not_probed` and never-probed rows stay listed.
- *
- * The one place a failed model still appears is a task assignment that
- * already points at it: the picker keeps it as an explicit "unavailable"
- * option carrying the reason, instead of silently showing another model.
+ * The platform list rides on the settings: the server has already dropped
+ * rows whose probe failed and rows nous-engine no longer serves, so the page
+ * never sees a `fail` row. What it still decides:
+ *   - an `idle` row (authorized on nous-engine, not loaded) stays listed but
+ *     cannot be picked;
+ *   - `not_probed` is not a verdict — listed and pickable;
+ *   - the live status from GET /ai/platform-status (hooks/usePlatformStatus)
+ *     wins over the one the settings carried;
+ *   - a task assignment pointing at a row the server no longer lists is kept
+ *     as an explicit "unavailable" option instead of being swapped — but only
+ *     when the list is KNOWN (`platform_models: null` is "could not compute").
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { AISettings } from './AISettings';
 import type { AISettings as AISettingsType } from '../types';
-import type { NousModelPublic } from '../types/api';
-import { makeNousModel } from '../tests/fixtures/ai';
+import type { PlatformStatusResponse } from '../types/api';
+import { _resetPlatformStatusCache } from '../hooks/usePlatformStatus';
+import {
+  baseAISettings,
+  platformStatusWire,
+  withPlatform,
+  type PlatformRowSpec,
+} from '../tests/fixtures/platform';
 import en from '../public/locales/en.json';
 
 // Resolve against the REAL shipped English copy rather than a hand-written
@@ -36,55 +44,41 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-const twentyMinutesAgo = new Date(Date.now() - 20 * 60_000).toISOString();
-
-const SICK_LLM = makeNousModel({
-  name: 'mediahub-deepseek-v4-flash',
-  display_name: 'DeepSeek V4 Flash',
-  type: 'llm',
-  pricing_type: 'per_token',
-  pricing_value: 2,
-  last_test_status: 'fail',
-  last_tested_at: twentyMinutesAgo,
-});
-const WELL_LLM = makeNousModel({
+const WELL_LLM: PlatformRowSpec = {
   name: 'mediahub-deepseek-v4-pro',
-  display_name: 'DeepSeek V4 Pro',
+  actual_model: '',
   type: 'llm',
-  pricing_type: 'per_token',
   pricing_value: 4,
-  last_test_status: 'ok',
-  last_tested_at: twentyMinutesAgo,
-});
-/** Same red light as SICK_LLM, but the backend classified WHY (mig 427). */
-const RATE_LIMITED_LLM = makeNousModel({
-  ...SICK_LLM,
-  name: 'mediahub-doubao-seed-2-0-pro',
-  display_name: 'Doubao Seed 2.0 Pro',
-  last_test_code: 'rate_limit',
-});
-/** Recorded as failing by construction — see the no-badge test below. */
-const SICK_IMAGE = makeNousModel({
-  name: 'mediahub-doubao-seedream-t2i',
-  display_name: 'Seedream T2I',
-  type: 'image',
-  pricing_type: 'per_request',
-  pricing_value: 5,
-  last_test_status: 'fail',
-  last_tested_at: twentyMinutesAgo,
-});
-const UNPROBED_ASR = makeNousModel({
+};
+const UNPROBED_ASR: PlatformRowSpec = {
   name: 'moss-asr',
-  display_name: 'MOSS ASR',
+  actual_model: '',
   type: 'asr',
   pricing_type: 'per_hour',
   pricing_value: 3,
-});
+  status: 'not_probed',
+};
+const IDLE_LLM: PlatformRowSpec = {
+  name: 'nous-qwen3-8-27b',
+  actual_model: 'qwen3-8-27b',
+  type: 'llm',
+  status: 'idle',
+};
+const IDLE_ASR: PlatformRowSpec = { ...UNPROBED_ASR, name: 'nous-local-asr', status: 'idle' };
+
+// Pending by default (the settings' status is what shows); a test that wants
+// the live answer resolves it.
+let resolveStatus: (s: PlatformStatusResponse) => void = () => {};
+const getPlatformStatus = vi.fn(
+  () => new Promise<PlatformStatusResponse>((res) => {
+    resolveStatus = res;
+  }),
+);
 
 vi.mock('../services/aiService', () => ({
-  saveAISettings: vi.fn().mockResolvedValue(undefined),
+  saveAISettings: vi.fn(async (s: unknown) => s), // PUT echoes the saved settings
   testAIConnection: vi.fn(),
-  getNousModels: vi.fn().mockResolvedValue([]),
+  getPlatformStatus: () => getPlatformStatus(),
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
@@ -105,41 +99,22 @@ vi.mock('./ApprovalsPanel', () => ({ ApprovalsPanel: () => null }));
 vi.mock('./MemoryPanel', () => ({ MemoryPanel: () => null }));
 vi.mock('./AIHealthBoard', () => ({ AIHealthBoard: () => null }));
 
-const baseSettings: AISettingsType = {
-  ai_enabled: true,
-  auto_transcribe: false,
-  auto_summarize: false,
-  preferred_language: 'auto',
-  providers: {},
-  task_assignment: {
-    transcription: '',
-    summarization: '',
-    visual_analysis: '',
-    translation: '',
-    caption: '',
-    classification: '',
-    image_generation: '',
-    script_generation: '',
-  },
-};
-
 async function renderWith(
-  models: NousModelPublic[],
+  rows: PlatformRowSpec[],
   taskAssignment: Partial<AISettingsType['task_assignment']> = {},
+  override?: Partial<AISettingsType>,
 ) {
-  const { getNousModels } = await import('../services/aiService');
-  vi.mocked(getNousModels).mockResolvedValue(models);
+  const base = baseAISettings();
   const settings: AISettingsType = {
-    ...baseSettings,
-    task_assignment: { ...baseSettings.task_assignment, ...taskAssignment },
+    ...withPlatform(
+      { ...base, task_assignment: { ...base.task_assignment, ...taskAssignment } },
+      rows,
+    ),
+    ...override,
   };
   const result = render(<AISettings settings={settings} onSave={vi.fn()} />);
-  // Wait on a row that stays listed: the first healthy one.
-  const anchor = models.find((m) => m.last_test_status !== 'fail');
-  if (anchor) {
-    await waitFor(() => {
-      expect(cardRow(anchor.name)).toBeInTheDocument();
-    });
+  if (rows.length > 0 && override?.platform_models !== null) {
+    await waitFor(() => expect(cardRow(rows[0].name)).toBeInTheDocument());
   }
   return result;
 }
@@ -153,114 +128,55 @@ function cardRow(name: string): HTMLElement {
   return row as HTMLElement;
 }
 
-function queryCardRow(name: string): Element | null {
-  return document.querySelector(
-    `[data-testid="platform-model-row"][data-model-name="${name}"]`,
-  );
-}
-
-describe('AISettings — platform model health', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('hides a failing model from the platform card', async () => {
-    await renderWith([SICK_LLM, WELL_LLM]);
-    expect(cardRow(WELL_LLM.name)).toBeInTheDocument();
-    expect(queryCardRow(SICK_LLM.name)).toBeNull();
-  });
-
-  it('hides a failing image model too — the rule is by status, not by type', async () => {
-    // Image rows are only probed by the admin Test button now (the hourly poll
-    // writes `not_probed`), so a `fail` on one is a real verdict.
-    await renderWith([SICK_IMAGE, WELL_LLM]);
-    expect(queryCardRow(SICK_IMAGE.name)).toBeNull();
-  });
-
-  it('keeps a never-probed model listed — no signal is not a failure', async () => {
-    await renderWith([UNPROBED_ASR, WELL_LLM]);
-    expect(cardRow(UNPROBED_ASR.name)).toBeInTheDocument();
-  });
-
-  it('does not offer a failing model in the task picker', async () => {
-    await renderWith([SICK_LLM, WELL_LLM]);
-    // Options are named by the admin identifier (row name: no actual_model).
-    expect(screen.getAllByText(/mediahub-deepseek-v4-pro \(Platform\)/).length).toBeGreaterThan(0);
-    expect(screen.queryAllByText(/mediahub-deepseek-v4-flash/)).toHaveLength(0);
-  });
-
-  it('keeps the healthy model label clean in the task picker', async () => {
-    await renderWith([SICK_LLM, WELL_LLM]);
-    const healthy = screen.getAllByText(/mediahub-deepseek-v4-pro \(Platform\)/);
-    expect(healthy[0].textContent).not.toContain('health check failed');
-  });
-
-  it('says a saved-but-failing model is unavailable, with the reason, instead of swapping it', async () => {
-    await renderWith([RATE_LIMITED_LLM, WELL_LLM], {
-      summarization: `nous:${RATE_LIMITED_LLM.name}`,
-    });
-    const option = document.querySelector(
-      `option[data-unavailable="true"][value="nous:${RATE_LIMITED_LLM.name}"]`,
-    );
-    expect(option).not.toBeNull();
-    expect(option!.textContent).toContain('unavailable');
-    expect(option!.textContent).toContain('Rate limited');
-    expect(option!.textContent).toContain('20m ago');
-    // The select still holds the saved value.
-    const select = option!.closest('select') as HTMLSelectElement;
-    expect(select.value).toBe(`nous:${RATE_LIMITED_LLM.name}`);
-  });
-
-  it('does the same for a saved transcription model', async () => {
-    const sickAsr = makeNousModel({
-      ...UNPROBED_ASR,
-      name: 'nous-moss-asr',
-      last_test_status: 'fail',
-      last_tested_at: twentyMinutesAgo,
-    });
-    await renderWith([sickAsr, WELL_LLM], { transcription: `nous:${sickAsr.name}` });
-    const option = document.querySelector(
-      `option[value="nous:${sickAsr.name}"]`,
-    ) as HTMLOptionElement | null;
-    expect(option).not.toBeNull();
-    expect(option!.textContent).toContain('unavailable');
-    // Listed first, so the <select> shows the saved value rather than
-    // whichever option happened to come first.
-    const select = option!.closest('select') as HTMLSelectElement;
-    expect(select.options[0]).toBe(option);
-    expect(select.value).toBe(`nous:${sickAsr.name}`);
-  });
-});
-
-// ── idle: authorized on nous-engine, not loaded (mig 503) ───────────────────
-// Unlike `fail` (hidden), an idle row stays visible but cannot be picked: a
-// real chat to one got 503 "not loaded" on 2026-09-24.
-const IDLE_LLM = makeNousModel({
-  name: 'nous-qwen3-8-27b',
-  display_name: 'Qwen3 27B',
-  actual_model: 'qwen3-8-27b',
-  type: 'llm',
-  pricing_type: 'per_token',
-  pricing_value: 1,
-  last_test_status: 'idle',
-  last_tested_at: twentyMinutesAgo,
-});
-const IDLE_ASR = makeNousModel({
-  ...UNPROBED_ASR,
-  name: 'nous-local-asr',
-  last_test_status: 'idle',
-  last_tested_at: twentyMinutesAgo,
-});
-
 function optionFor(value: string): HTMLOptionElement[] {
   return Array.from(document.querySelectorAll(`option[value="${value}"]`)) as HTMLOptionElement[];
 }
 
-describe('AISettings — platform model not loaded on nous-engine', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+beforeEach(() => {
+  vi.clearAllMocks();
+  _resetPlatformStatusCache();
+});
+
+describe('AISettings — platform rows the server no longer lists', () => {
+  it('keeps a never-probed model listed and pickable — no signal is not a failure', async () => {
+    await renderWith([UNPROBED_ASR, WELL_LLM]);
+    expect(cardRow(UNPROBED_ASR.name)).toBeInTheDocument();
+    const [asr] = optionFor(`nous:${UNPROBED_ASR.name}`);
+    expect(asr.disabled).toBe(false);
   });
 
+  it('says a saved model the server dropped is unavailable, instead of swapping it', async () => {
+    await renderWith([WELL_LLM], { summarization: 'nous:mediahub-doubao-seed-2-0-pro' });
+    const option = document.querySelector(
+      'option[data-unavailable="true"][value="nous:mediahub-doubao-seed-2-0-pro"]',
+    );
+    expect(option).not.toBeNull();
+    expect(option!.textContent).toContain('unavailable');
+    // The select still holds the saved value.
+    const select = option!.closest('select') as HTMLSelectElement;
+    expect(select.value).toBe('nous:mediahub-doubao-seed-2-0-pro');
+  });
+
+  it('does the same for a saved transcription model, listed first', async () => {
+    await renderWith([WELL_LLM], { transcription: 'nous:nous-moss-asr' });
+    const option = document.querySelector(
+      'option[value="nous:nous-moss-asr"]',
+    ) as HTMLOptionElement | null;
+    expect(option).not.toBeNull();
+    expect(option!.textContent).toContain('unavailable');
+    const select = option!.closest('select') as HTMLSelectElement;
+    expect(select.options[0]).toBe(option);
+    expect(select.value).toBe('nous:nous-moss-asr');
+  });
+
+  it('does not call a saved model unavailable when the list itself is unknown', async () => {
+    await renderWith([], { summarization: 'nous:mediahub-deepseek-v4-pro' }, { platform_models: null });
+    await waitFor(() => expect(screen.getByText('No platform models available.')).toBeInTheDocument());
+    expect(document.querySelector('option[data-unavailable="true"]')).toBeNull();
+  });
+});
+
+describe('AISettings — platform model not loaded on nous-engine', () => {
   it('shows an idle LLM in the task pickers, disabled, with the reason', async () => {
     await renderWith([IDLE_LLM, WELL_LLM]);
     const idle = optionFor(`nous:${IDLE_LLM.name}`);
@@ -292,14 +208,25 @@ describe('AISettings — platform model not loaded on nous-engine', () => {
   it('lists an idle row on the platform card as a chip tagged "(not loaded)"', async () => {
     await renderWith([IDLE_LLM, WELL_LLM]);
     const idleChip = cardRow(IDLE_LLM.name);
-    // Chip text is the admin identifier (actual_model), not display_name.
     expect(idleChip.textContent).toContain('qwen3-8-27b');
-    expect(idleChip.textContent).not.toContain('Qwen3 27B');
     const tag = idleChip.querySelector('[data-testid="non-chat-kind-tag"]');
     expect(tag?.textContent).toBe('LLM (not loaded)');
     expect(tag?.getAttribute('title')).toBe('Not loaded on nous-engine');
     const wellTag = cardRow(WELL_LLM.name).querySelector('[data-testid="non-chat-kind-tag"]');
     expect(wellTag?.textContent).toBe('LLM');
-    expect(wellTag?.getAttribute('title')).not.toBe('Not loaded on nous-engine');
+  });
+
+  it('the live status wins: an idle row that nous-engine has since loaded becomes pickable', async () => {
+    await renderWith([IDLE_LLM, WELL_LLM]);
+    expect(optionFor(`nous:${IDLE_LLM.name}`)[0].disabled).toBe(true);
+
+    resolveStatus(platformStatusWire({ [IDLE_LLM.name]: { status: 'ok' }, [WELL_LLM.name]: {} }));
+
+    await waitFor(() => {
+      for (const o of optionFor(`nous:${IDLE_LLM.name}`)) expect(o.disabled).toBe(false);
+    });
+    const tag = cardRow(IDLE_LLM.name).querySelector('[data-testid="non-chat-kind-tag"]');
+    expect(tag?.textContent).toBe('LLM');
+    expect(getPlatformStatus).toHaveBeenCalledTimes(1);
   });
 });
