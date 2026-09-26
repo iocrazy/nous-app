@@ -56,6 +56,10 @@ OWNED_FRAMES: Final[frozenset[str]] = frozenset(
         # 三期 3a-④: 本轮被人引用的产出版本（只有坐标，没有内容）
         "referenced_outputs",
         "scene_elements",
+        # 内建 todo 的清单（agent_framework/agent_todo.py），经 Skill 工具结果
+        # 进模型；条目文字由模型写，可被它本轮读到的任何内容带偏。逐行框，
+        # 每条走 escape_frame_prose。
+        "todo_list",
         "user_context",
         "user_instruction",
         "user_selection",

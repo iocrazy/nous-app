@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+from app.boundary.frame_markers import escape_frame_prose
+
 
 class TodoStatus(str, Enum):
     PENDING = "pending"
@@ -136,7 +138,14 @@ class AgentTodoList:
         )
 
     def render_for_prompt(self) -> str:
-        """Markdown rendering for system-message injection."""
+        """Markdown rendering for system-message injection.
+
+        ``<todo_list>`` is a frame we own (registered in ``OWNED_FRAMES``) and
+        it is line-oriented: one item per line. The item text is model-written
+        and can be steered by anything the model read this turn, so each label
+        goes through ``escape_frame_prose`` — a literal ``</todo_list>`` cannot
+        close the frame and a newline cannot forge a second (e.g. ✅) row.
+        """
         if not self.items:
             return ""
         lines = ["<todo_list>"]
@@ -151,7 +160,7 @@ class AgentTodoList:
                 if (it.status == TodoStatus.IN_PROGRESS and it.active_form)
                 else it.content
             )
-            lines.append(f"  {mark} {it.id}. {label}")
+            lines.append(f"  {mark} {it.id}. {escape_frame_prose(label)}")
         lines.append("</todo_list>")
         return "\n".join(lines)
 

@@ -115,16 +115,43 @@ def test_hostile_user_context_cannot_close_its_frame(fake_agent_dict):
 
 # ── The registry guard: a new frame must be registered to be defended ────
 
-#: 提示词渲染模块 —— 扫这几个文件找框。
-_PROMPT_SOURCES = (
-    ("services", "ai", "prompts", "prompt_composer.py"),
-    ("services", "storyboard", "script", "script_ai_service.py"),
-    ("services", "ai", "chat", "ai_library_chat_service.py"),
-    ("services", "ai", "runner", "inbox.py"),
-    # 压缩摘要框：渲染在 summary_frame.py，压缩器与 replay 都经它出消息。
-    ("boundary", "summary_frame.py"),
-    ("agent_framework", "context_compactor.py"),
-)
+#: 框的发现规则（T7 / 审计 P3）：不再写死扫描清单。上一版只扫 6 个文件，
+#: 于是 ``agent_framework/agent_todo.py`` 的 ``<todo_list>``（经 Skill 工具结果
+#: 进模型、正文由模型写）从未进过这条守卫的视野 —— 清单之外新增的渲染文件
+#: 永远不会被发现。现在扫 ``app/`` 下每个 Python 文件：一个文件的字符串模板里
+#: 既出现 ``<name``（开）又出现 ``</name>``（闭）就算它渲染了框 ``name``。
+_APP_ROOT = Path(__file__).resolve().parents[4] / "app"
+
+#: 由发现规则必须扫到的文件 —— 正向对照（旧的写死清单 + agent_todo）。发现
+#: 规则一旦变瞎，下面的登记守卫会因为「什么都没扫到」而全绿；这张表让它说出来。
+_KNOWN_FRAME_RENDERERS = {
+    "services/ai/prompts/prompt_composer.py",
+    "services/storyboard/script/script_ai_service.py",
+    "services/ai/chat/ai_library_chat_service.py",
+    "services/ai/runner/inbox.py",
+    "boundary/summary_frame.py",
+    "agent_framework/agent_todo.py",
+}
+
+_OPENING_RE = re.compile(r"<\s*([a-z][a-z0-9_-]*)[\s>/]")
+
+#: 按 (文件, 名字) 排除的**非框**：这些文件里的尖括号对不是渲染给模型读的框。
+#: 按文件而不是按名字排除，是为了让同名的真框出现在别处时照样被抓到。
+_NOT_FRAME_SITES = {
+    # 返回给浏览器的占位 SVG 图片字节，模型永远看不到。
+    ("api/resources_crud_router.py", "svg"),
+    # 识别并剥掉外部文本里伪造的 chat-template token（``<s>`` / ``</s>``）的
+    # 正则 —— 是检测模式，不是渲染。
+    ("boundary/external_text.py", "s"),
+    # loguru 的颜色标记（``<green>…</green>``），日志格式，不进提示词。
+    ("core/utils.py", "cyan"),
+    ("core/utils.py", "green"),
+    ("core/utils.py", "level"),
+    # 解析抓来网页的 HTML ``<title>`` 的正则，是读，不是写。
+    ("services/ai/prompts/link_understanding.py", "title"),
+    # 解析模型输出里 reasoning 的闭合标记 ``</think>``，是读模型输出。
+    ("services/ai/runner/reasoning.py", "think"),
+}
 
 # Excluded on purpose, with the reason each is not a frame:
 #  - inner elements of a frame we already own (closing one of these does
@@ -234,20 +261,52 @@ def _templates_in(src: Path) -> list[str]:
     return out
 
 
+def _rendered_frames(templates: list[str]) -> set[str]:
+    """名字同时以开、闭两种标记出现在模板里的框。"""
+    opened = {m.group(1) for t in templates for m in _OPENING_RE.finditer(t)}
+    closed = {m.group(1) for t in templates for m in _CLOSING_RE.finditer(t)}
+    return opened & closed
+
+
+def _frame_renderers() -> dict[str, set[str]]:
+    """``app/`` 下每个渲染框的文件 → 它渲染的框名（已扣掉按文件排除的非框）。"""
+    out: dict[str, set[str]] = {}
+    for src in sorted(_APP_ROOT.rglob("*.py")):
+        rel = src.relative_to(_APP_ROOT).as_posix()
+        frames = {
+            f
+            for f in _rendered_frames(_templates_in(src))
+            if (rel, f) not in _NOT_FRAME_SITES
+        }
+        if frames:
+            out[rel] = frames
+    return out
+
+
 def _prompt_sources() -> list[Path]:
-    root = Path(__file__).resolve().parents[4] / "app"
-    sources = [root.joinpath(*parts) for parts in _PROMPT_SOURCES]
-    for src in sources:
-        assert src.exists(), f"guard is scanning a path that moved: {src}"
-    return sources
+    return [_APP_ROOT / rel for rel in _frame_renderers()]
+
+
+@pytest.mark.unit
+def test_discovery_finds_every_known_frame_renderer():
+    """正向对照：发现规则必须扫到已知渲染框的文件，排除名单也不许陈旧。"""
+    renderers = _frame_renderers()
+    missing = _KNOWN_FRAME_RENDERERS - renderers.keys()
+    assert not missing, f"发现规则没扫到这些渲染框的文件（守卫瞎了）：{sorted(missing)}"
+    stale = {
+        (rel, name)
+        for rel, name in _NOT_FRAME_SITES
+        if name not in _rendered_frames(_templates_in(_APP_ROOT / rel))
+    }
+    assert not stale, f"排除名单里这些条目已不再出现，删掉它们：{sorted(stale)}"
 
 
 @pytest.mark.unit
 def test_every_frame_rendered_in_prompt_code_is_registered():
     """A frame added to a prompt but not to OWNED_FRAMES is undefended.
 
-    Scans the prompt-rendering modules for closing-frame markers and requires
-    each to be declared. Not cosmetic: an unregistered frame is exactly the
+    Scans every ``app/`` module that renders a frame (discovery above, T7)
+    and requires each frame to be declared. Not cosmetic: an unregistered frame is exactly the
     hole this whole layer exists to close, and nothing else would notice.
 
     ⚠️ 扫的是 ``ast`` 还原出的**模板**，不是源码文本（C3）。上一版拿正则找
@@ -256,13 +315,14 @@ def test_every_frame_rendered_in_prompt_code_is_registered():
     （它碰巧已登记，所以至今无害，但守卫并没有在保护它）。本票落地前验过：
     把一个已登记的框改写成 f-string 再从 OWNED_FRAMES 拿掉，旧守卫全绿。
     """
-    found: set[str] = set()
-    for src in _prompt_sources():
-        for template in _templates_in(src):
-            found.update(m.group(1) for m in _CLOSING_RE.finditer(template))
-    undeclared = {f for f in found - _NOT_FRAMES if f not in OWNED_FRAMES}
+    undeclared = sorted(
+        f"{rel}: {name}"
+        for rel, frames in _frame_renderers().items()
+        for name in frames - _NOT_FRAMES
+        if name not in OWNED_FRAMES
+    )
     assert not undeclared, (
-        f"frames rendered but not in OWNED_FRAMES: {sorted(undeclared)} — "
+        f"frames rendered but not in OWNED_FRAMES: {undeclared} — "
         "register them so escape_frame_body defuses them"
     )
 

@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from dbos import DBOS
 from loguru import logger
 
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.services.generation.local_dispatch import raise_if_failed
 from app.services.library.generated_media_service import (
     GenerationOrigin,
@@ -55,11 +56,16 @@ _MAX_SEGMENT_SECONDS = 10
 
 
 async def _run_ffmpeg(args: List[str]) -> None:
-    """Run ffmpeg, raising with its stderr tail on failure."""
+    """Run ffmpeg, raising with its stderr tail on failure.
+
+    Spawned through ``safe_popen_kwargs()`` like every other child: ffmpeg
+    needs nothing from our environment, so it gets the scrubbed copy.
+    """
     proc = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **safe_popen_kwargs(),
     )
     _, stderr = await proc.communicate()
     if proc.returncode != 0:

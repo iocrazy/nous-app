@@ -112,3 +112,42 @@ def test_unlink_failure_does_not_raise(monkeypatch, tmp_path):
         assert f.exists()  # 确实没删掉(证明触发的是失败路径)
     finally:
         os.chmod(d, 0o755)
+
+
+# ── 形似链接的路径只摘链接（CLAUDE.md「形似链接的路径要用 unlink 删」）──
+#
+# 旧代码先 realpath 再 rmtree：local_path 若是一个指向目录的 symlink，
+# realpath 把它解析成目标，于是删的是**目标目录的内容**，链接本身留着。
+
+
+def test_symlink_to_dir_removes_only_the_link(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(tmp_path))
+    target = tmp_path / "global" / "shared"
+    target.mkdir(parents=True)
+    (target / "keep.mp4").write_bytes(b"precious")
+    link = tmp_path / "global" / "123"
+    link.symlink_to(target, target_is_directory=True)
+
+    discard_local_source(link, SB)
+
+    assert not os.path.lexists(link)  # 链接被摘掉
+    assert (target / "keep.mp4").read_bytes() == b"precious"  # 目标完好
+
+
+def test_symlink_pointing_outside_download_path_is_unlinked_not_followed(
+    monkeypatch, tmp_path
+):
+    """链接本身在 DOWNLOAD_PATH 内、目标在外：摘链接，目标绝不碰。"""
+    base = tmp_path / "dl"
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("x")
+    (base / "global").mkdir(parents=True)
+    link = base / "global" / "123"
+    link.symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(base))
+
+    discard_local_source(link, SB)
+
+    assert not os.path.lexists(link)
+    assert (outside / "keep.txt").exists()

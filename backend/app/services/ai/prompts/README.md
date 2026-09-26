@@ -109,6 +109,30 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 
 `tools` 在多数 provider 侧位于系统消息之前的前缀里，所以**改这份 schema 的任何一个字都会让全部 agent 的前缀一次性失效**——这是一次性的，之后逐轮不变。本模块不为它计指纹（`_prefix_fingerprint()` 不吃 tools），因为它对所有 agent 恒等，没有跨 agent 串味的问题。
 
+### 工具结果：内建 todo 的 `<todo_list>`（`Skill(skill="todo")` 的返回值）
+
+#### What the model sees
+
+`skill_tool_service` 把 `AgentTodoList.render_for_prompt()`（`agent_framework/agent_todo.py`）放进 todo 工具结果的 `prompt` 字段。框的形状（状态符号 ⏸ / 🔄 / ✅，进行中的条目显示 `active_form`）：
+
+```
+<todo_list>
+  ✅ 1. <条目文字>
+  🔄 2. <进行中条目的 active_form>
+  ⏸ 3. <条目文字>
+</todo_list>
+```
+
+框名 `todo_list` 登记在 `../../../boundary/frame_markers.py` 的 `OWNED_FRAMES` 里（2026-09-25，T7）。条目文字是模型自己写的，但可以被它本轮读到的任何外部内容带偏，所以每条都过 `escape_frame_prose`：字面 `</todo_list>` 关不掉框，换行被压平成空格、伪造不出第二条（比如一条假的 ✅），`&<>` 实体转义。代价是条目里的 `&` 会显示成 `&amp;`。
+
+#### Token effect
+
+每条一行，上限 `MAX_TODO_ITEMS`（30）条；只在模型调用 todo 工具的那一次结果里出现，逐次调用各自一份。
+
+#### KV Cache effect
+
+工具结果是 append-only 的对话消息，不改更早的 token；本模块的改动不影响系统消息前缀。
+
 ### 收件箱消息框 `<inbox_message>`（步骤边界注入的 user 消息）
 
 #### What the model sees
