@@ -357,6 +357,9 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
             preferred_language=ai_settings.get("preferred_language", "auto"),
             transcription_hotwords=ai_settings.get("transcription_hotwords", ""),
             task_assignment=ai_settings.get("task_assignment", {}),
+            # Same shape as GET: a PUT never writes provider health, so the
+            # stored value is echoed back unchanged instead of dropping to {}.
+            provider_health=settings_json.get("ai_provider_health", {}) or {},
             platform_models=platform_models,
             platform_engine=platform_engine,
         )
@@ -519,4 +522,10 @@ async def get_platform_status(auth: AuthDep):
     """
     from app.services.ai.platform_provider import platform_status
 
-    return await platform_status(auth.user_id)
+    try:
+        return await platform_status(auth.user_id)
+    except Exception as exc:  # noqa: BLE001 — degraded, logged, not swallowed
+        # Same fallback as ``GET /ai/settings``: the list still renders from
+        # the statuses it carried; "unknown" is not "no models".
+        logger.warning(f"platform status failed for {auth.user_id}: {exc!r}")
+        return {"models": {}, "engine": None}

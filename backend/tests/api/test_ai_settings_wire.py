@@ -562,6 +562,39 @@ async def test_platform_status(client, platform, settings_repo, monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_platform_status_degrades_instead_of_500(
+    client, platform, settings_repo, monkeypatch
+) -> None:
+    """Same fallback as ``GET /ai/settings``: a view that cannot be computed
+    is "unknown" (empty models, no engine), never a 500."""
+    import app.services.ai.platform_provider as pp
+
+    monkeypatch.setattr(pp, "_compute", AsyncMock(side_effect=RuntimeError("db down")))
+    response = await client.get("/api/v1/ai/platform-status")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"models": {}, "engine": None}
+
+
+@pytest.mark.asyncio
+async def test_put_echoes_the_stored_provider_health(
+    client, platform, settings_repo
+) -> None:
+    """PUT answers in GET's shape: the stored provider health comes back
+    unchanged (a PUT never writes it), so the client never blanks it."""
+    health = {
+        "deepseek": {"status": "ok", "detail": "", "tested_at": "2026-09-25T00:00:00Z"}
+    }
+    stored = _stored_settings({"enabled": True, "disabled_models": []})
+    stored["settings_json"]["ai_provider_health"] = health
+    settings_repo.get_by_user_id = AsyncMock(return_value=stored)
+    payload = {"ai_providers": {"nous": {"disabled_models": []}}}
+    put = await client.put("/api/v1/ai/settings", json=payload)
+    assert put.status_code == 200, put.text
+    get = await client.get("/api/v1/ai/settings")
+    assert put.json()["provider_health"] == health == get.json()["provider_health"]
+
+
+@pytest.mark.asyncio
 async def test_providers_route_is_gone(client) -> None:
     """Unauthenticated and without a caller anywhere in the repo."""
     response = await client.get("/api/v1/ai/providers")

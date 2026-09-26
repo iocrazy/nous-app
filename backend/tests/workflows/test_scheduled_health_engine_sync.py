@@ -75,4 +75,11 @@ async def test_probe_step_reads_the_catalog_once_and_never_syncs():
 
     sync.assert_not_awaited()
     repo.list_all.assert_awaited_once()
-    assert summary == {"total": 1, "ok": 1, "failed": 0, "idle": 0, "not_probed": 0}
+    assert summary == {
+        "total": 1,
+        "ok": 1,
+        "failed": 0,
+        "idle": 0,
+        "not_probed": 0,
+        "engine_live": 0,
+    }
