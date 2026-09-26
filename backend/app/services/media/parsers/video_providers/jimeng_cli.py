@@ -5,12 +5,10 @@ Drives the official ``dreamina`` CLI (baked into the backend image, see
 one-time OAuth login persisted on a shared volume, so there is no api_key — the
 subscription session is the credential.
 
-Subprocess discipline (backend event-loop freeze blood-lesson):
-  - never a synchronous wait on the loop: ``create_subprocess_exec`` +
-    ``asyncio.wait_for(proc.communicate(), timeout=...)`` (off-loop);
-  - every call carries a hard timeout; on timeout the process is ``kill()``ed
-    and reaped so no orphan lingers;
-  - ``safe_popen_kwargs()`` sets PR_SET_PDEATHSIG so a child dies with us.
+Subprocess discipline (backend event-loop freeze blood-lesson): every call
+goes through ``app.agent_framework.process_runner.run_process`` — off-loop,
+hard timeout, the whole process group killed and reaped on timeout or
+workflow cancel, scrubbed env + PR_SET_PDEATHSIG via ``safe_popen_kwargs``.
 
 The CLI's stdout mixes human log lines with JSON; ``_extract_json`` scans for
 the best JSON object. Every failure is classified into a stable code
@@ -26,7 +24,6 @@ local file directly, no URL download).
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import tempfile
@@ -34,7 +31,7 @@ from typing import List, Optional, Tuple
 
 from loguru import logger
 
-from app.agent_framework.process_lifecycle import safe_popen_kwargs
+from app.agent_framework.process_runner import current_workflow_id, run_process
 from app.services.media.parsers.video_providers.base import GenResult
 
 
@@ -249,47 +246,45 @@ class JimengCliProvider:
     # ------------------------------------------------------------------ CLI ---
 
     async def _run_cli(self, args: List[str], timeout: float) -> Tuple[int, str, str]:
-        """Run ``dreamina <args>`` off-loop with a hard timeout + kill-on-timeout.
+        """Run ``dreamina <args>`` off-loop through ``run_process``.
 
-        Returns ``(returncode, stdout, stderr)``. Raises ``JimengCliError`` with
-        code ``timeout`` (killed) or ``cli_missing`` (binary absent).
+        Returns ``(returncode, stdout, stderr)`` — ``returncode`` negative for
+        a signal death (the asyncio convention ``_classify_failure`` already
+        sees). Raises ``JimengCliError`` with code ``timeout`` (the whole
+        process group killed and reaped), ``cancelled`` (the owning workflow
+        was cancelled mid-run) or ``cli_missing`` (binary absent).
         """
         cmd = [self._bin, *args]
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **safe_popen_kwargs(),
+            res = await run_process(
+                cmd, timeout_s=timeout, workflow_id=current_workflow_id()
             )
         except FileNotFoundError as exc:
             raise JimengCliError(
                 "cli_missing", f"dreamina binary not found ({self._bin!r})"
             ) from exc
 
-        try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
+        stderr = res.stderr_text()
+        if res.cancelled:
+            raise JimengCliError(
+                "cancelled", f"dreamina {args[0]} killed: workflow cancelled"
             )
-        except asyncio.TimeoutError:
-            # Hard-kill the runaway process and reap it so no orphan lingers.
-            try:
-                proc.kill()
-                await asyncio.wait_for(proc.communicate(), timeout=2)
-            except Exception:  # noqa: BLE001 — best-effort reap, never re-raise
-                pass
+        if res.timed_out:
             logger.error(
-                "[jimeng-cli] '{}' timed out after {}s (killed)", args[0], timeout
+                "[jimeng-cli] '{}' timed out after {}s (group killed; {})",
+                args[0],
+                timeout,
+                res.describe(),
             )
             raise JimengCliError(
-                "timeout", f"dreamina {args[0]} timed out after {timeout:.0f}s"
+                "timeout",
+                f"dreamina {args[0]} timed out after {timeout:.0f}s",
+                stderr=stderr[:500],
             )
-
-        stdout = stdout_b.decode("utf-8", errors="replace") if stdout_b else ""
-        stderr = stderr_b.decode("utf-8", errors="replace") if stderr_b else ""
         if stderr.strip():
             logger.info("[jimeng-cli] {} stderr: {}", args[0], stderr[:2000])
-        return proc.returncode, stdout, stderr
+        rc = res.exit_code if res.exit_code is not None else -(res.signal or 0)
+        return rc, res.stdout_text(), stderr
 
     @staticmethod
     def _classify_failure(

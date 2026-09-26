@@ -1,25 +1,36 @@
-"""kill_tree — graceful SIGTERM → grace → SIGKILL with Unix process
-group handling.
+"""kill_tree — SIGTERM → grace → SIGKILL on a whole process group, returning
+only once the group is STILL (CLAUDE.md 防御模式「Dispose 必须到达静止」).
 
 When DBOS workflow cancel fires, nous spawns subprocesses (yt-dlp,
 whisper, ffmpeg) that need to be killed too. Otherwise the workflow
 "completes cancel" but the subprocess keeps running, holding the GPU
 or filesystem locks.
 
-The full kill sequence:
-  1. SIGTERM the entire process group (parent + descendants)
-  2. Wait up to ``grace_seconds`` for the process to exit voluntarily
-  3. If still alive, SIGKILL the process group (force kill, no cleanup)
-  4. Swallow OSError on already-dead PID (race condition is normal)
+The kill sequence:
+  1. Capture the child's process group ONCE, before any signal. Every later
+     signal goes to that pgid — it keeps reaching the grandchildren after the
+     leader has died (``getpgid(pid)`` raises ESRCH once the leader is gone,
+     which is how yt-dlp's ffmpeg used to survive).
+  2. SIGTERM the group; poll for quiescence until ``grace_seconds``.
+  3. SIGKILL the group; poll again, bounded by ``reap_timeout_s``.
+  4. Report a frozen ``KillOutcome``. ``quiesced=False`` is logged at ERROR:
+     that is the case an operator must see.
 
-Mirrors OpenClaw ``process/kill-tree.ts`` (Unix branch). Windows path
-not implemented — nous deploys on Linux only.
+"Quiescent" = the leader is not running AND no member of the group is
+running. A zombie counts as not running: it holds no resources beyond its
+process-table slot and is waiting for its owner's ``wait``. We only PEEK at
+our own children (``waitid(..., WNOWAIT)``) and never reap them — reaping
+would steal the exit status from ``asyncio``'s child watcher or from
+``Popen.wait`` (which then reports rc 255 / 0 instead of the real signal).
 
-Subprocesses MUST be spawned with ``preexec_fn=os.setsid`` (or its
-equivalent ``start_new_session=True``) so they get their own process
-group. Otherwise SIGTERM to the group hits us too. Existing subprocess
-spawn sites in nous need a small audit; the helper itself handles
-either case (will just SIGTERM the single PID if no group exists).
+If the child shares OUR process group (spawned without a new session),
+only its pid is signalled — ``killpg`` on it would kill us.
+
+Subprocesses SHOULD be spawned with ``**safe_popen_kwargs()`` (setsid +
+PDEATHSIG), or ``start_new_session=True`` for the one env-exempt site.
+
+Mirrors OpenClaw ``process/kill-tree.ts`` (Unix branch). Windows is not
+implemented — nous deploys on Linux; macOS is supported for development.
 """
 
 from __future__ import annotations
@@ -28,101 +39,256 @@ import asyncio
 import errno
 import os
 import signal
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from typing import Generator
 
 from loguru import logger
+
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
+
+_POLL_S = 0.05
+DEFAULT_REAP_TIMEOUT_S = 2.0
+
+
+@dataclass(frozen=True)
+class KillOutcome:
+    """How one kill went. Independent flags (orthogonal reporting)."""
+
+    already_dead: bool  # nothing was running when we arrived; no signal sent
+    exited_on_term: bool  # the group went still within the SIGTERM grace
+    escalated: bool  # SIGKILL was needed
+    quiesced: bool  # the group is still now (False = logged at ERROR)
 
 
 async def kill_process_tree(
     pid: int,
     *,
     grace_seconds: float = 3.0,
-) -> None:
-    """Kill the process tree rooted at ``pid``.
+    reap_timeout_s: float = DEFAULT_REAP_TIMEOUT_S,
+) -> KillOutcome:
+    """Kill the process tree rooted at ``pid`` and wait until it is still.
 
-    Args:
-        pid: The root process id. Treated as the process group leader.
-        grace_seconds: How long to wait after SIGTERM before escalating
-            to SIGKILL. Default 3s — enough for ffmpeg/yt-dlp to finish
-            writing partial output, short enough that the cancel feels
-            responsive in the UI.
-
-    Behaviour:
-        - PID <= 0: silent no-op (defensive; some callers store -1 as
-          "no subprocess").
-        - PID already dead (ProcessLookupError / OSError ESRCH):
-          silent — race condition is normal and acceptable.
-        - SIGTERM to the process group (negative PID per killpg
-          convention). Falls back to per-PID kill if process is not a
-          group leader.
-        - Polls process status every 100ms during grace window.
-        - SIGKILL on grace expiry; swallow ESRCH again.
+    ``pid <= 0`` is a silent no-op (some callers store -1 as "no child").
     """
+    steps = _kill_steps(pid, grace_seconds, reap_timeout_s)
+    try:
+        while True:
+            await asyncio.sleep(next(steps))
+    except StopIteration as done:
+        return done.value
+
+
+def kill_process_tree_sync(
+    pid: int,
+    *,
+    grace_seconds: float = 0.5,
+    reap_timeout_s: float = DEFAULT_REAP_TIMEOUT_S,
+) -> KillOutcome:
+    """Blocking twin for contexts that cannot await: atexit, signal
+    handlers, and the sync ``isolated_runner`` step."""
+    steps = _kill_steps(pid, grace_seconds, reap_timeout_s)
+    try:
+        while True:
+            time.sleep(next(steps))
+    except StopIteration as done:
+        return done.value
+
+
+def _kill_steps(
+    pid: int, grace_seconds: float, reap_timeout_s: float
+) -> Generator[float, None, KillOutcome]:
+    """The kill sequence, written once. Yields sleep durations; the async and
+    sync drivers differ only in how they sleep."""
     if pid <= 0:
-        return
+        return KillOutcome(True, False, False, True)
+    pgid = _capture_pgid(pid)
+    if _quiescent(pid, pgid):
+        return KillOutcome(True, False, False, True)
 
-    # Phase 1: SIGTERM the process group
-    if not _signal_group(pid, signal.SIGTERM):
-        # Couldn't even SIGTERM (likely already dead) — done.
-        return
+    _send(pid, pgid, signal.SIGTERM)
+    deadline = time.monotonic() + max(grace_seconds, 0.0)
+    while time.monotonic() < deadline:
+        if _quiescent(pid, pgid):
+            return KillOutcome(False, True, False, True)
+        yield _POLL_S
+    if _quiescent(pid, pgid):
+        return KillOutcome(False, True, False, True)
 
-    # Phase 2: poll for voluntary exit during grace window
-    deadline = asyncio.get_event_loop().time() + grace_seconds
-    while asyncio.get_event_loop().time() < deadline:
-        if not _is_alive(pid):
-            return
-        await asyncio.sleep(0.1)
-
-    # Phase 3: still alive after grace — SIGKILL
-    if _is_alive(pid):
-        logger.warning(
-            f"kill_tree: pid {pid} ignored SIGTERM after {grace_seconds}s, "
-            f"escalating to SIGKILL"
+    logger.warning(
+        f"kill_tree: pid {pid} (pgid {pgid}) still running {grace_seconds}s "
+        "after SIGTERM, escalating to SIGKILL"
+    )
+    _send(pid, pgid, signal.SIGKILL)
+    deadline = time.monotonic() + max(reap_timeout_s, 0.0)
+    while time.monotonic() < deadline:
+        if _quiescent(pid, pgid):
+            return KillOutcome(False, False, True, True)
+        yield _POLL_S
+    quiesced = _quiescent(pid, pgid)
+    if not quiesced:
+        logger.error(
+            f"kill_tree: pid {pid} (pgid {pgid}) NOT quiescent {reap_timeout_s}s "
+            "after SIGKILL — process or group member left running"
         )
-        _signal_group(pid, signal.SIGKILL)
+    return KillOutcome(False, False, True, quiesced)
 
 
-def _signal_group(pid: int, sig: int) -> bool:
-    """Send ``sig`` to the process group of ``pid`` (negative PID per
-    killpg convention). Falls back to per-PID kill if not a group
-    leader. Returns True if signal was sent (or process is already
-    dead — same outcome semantics)."""
-    # Try the group first (catches subprocess descendants)
+def _capture_pgid(pid: int) -> int | None:
+    """The group to signal, or ``None`` when only the pid may be signalled
+    (no group found, or it is OUR group)."""
     try:
-        os.killpg(os.getpgid(pid), sig)
-        return True
-    except ProcessLookupError:
-        return True  # already dead
-    except OSError as e:
-        if e.errno == errno.ESRCH:
-            return True  # already dead
-        # Not a group leader — fall through to per-PID kill
-    except Exception as e:
-        logger.debug(f"kill_tree: killpg({pid}, {sig}) error: {e}")
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, PermissionError, OSError):
+        return None
+    if pgid == os.getpgrp():
+        return None
+    return pgid
 
-    # Per-PID fallback
+
+def _send(pid: int, pgid: int | None, sig: int) -> None:
+    """Signal the captured group (or the lone pid). ESRCH = already gone,
+    which is the outcome we wanted."""
     try:
-        os.kill(pid, sig)
-        return True
+        if pgid is not None:
+            os.killpg(pgid, sig)
+        else:
+            os.kill(pid, sig)
     except ProcessLookupError:
-        return True
-    except OSError as e:
-        if e.errno == errno.ESRCH:
-            return True
-        logger.debug(f"kill_tree: kill({pid}, {sig}) error: {e}")
-        return False
+        return
+    except OSError as exc:
+        if exc.errno != errno.ESRCH:
+            logger.warning(f"kill_tree: signal {sig} to pid={pid} pgid={pgid}: {exc}")
 
 
-def _is_alive(pid: int) -> bool:
-    """Return True if ``pid`` is still alive. Signal 0 is the standard
-    Unix idiom for "check existence without sending a real signal"."""
+def _quiescent(pid: int, pgid: int | None) -> bool:
+    return _is_dead(pid) and (pgid is None or _group_quiescent(pgid))
+
+
+def _is_dead(pid: int) -> bool:
+    """``pid`` is not running: gone, or a zombie awaiting its reaper.
+
+    Our own child is PEEKED at with ``waitid(WNOWAIT)`` — never reaped, so
+    the owner's ``wait`` still gets the real status. Anyone else's pid falls
+    back to ``kill(pid, 0)`` plus a zombie check.
+    """
+    try:
+        res = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError:
+        res = None  # not our child (or already reaped) — probe below
+    except (AttributeError, OSError):
+        res = None
+    else:
+        # Our child: a result means it has exited and waits to be reaped.
+        # None means it is still running.
+        return res is not None
     try:
         os.kill(pid, 0)
-        return True
     except ProcessLookupError:
-        return False
-    except OSError as e:
-        if e.errno == errno.ESRCH:
-            return False
-        # EPERM means the process exists but we're not allowed to
-        # signal it — for our purposes that's "alive".
-        return e.errno == errno.EPERM
+        return True
+    except PermissionError:
+        return False  # exists, not ours to signal
+    except OSError as exc:
+        return exc.errno == errno.ESRCH
+    return _is_zombie(pid)
+
+
+def _is_zombie(pid: int) -> bool:
+    """Linux reads ``/proc/<pid>/stat`` field 3; macOS asks ``ps``."""
+    if sys.platform.startswith("linux"):
+        try:
+            with open(f"/proc/{pid}/stat", encoding="ascii", errors="replace") as fh:
+                data = fh.read()
+        except OSError:
+            return True  # vanished between the probes
+        tail = data.rsplit(")", 1)[-1].split()
+        return bool(tail) and tail[0] == "Z"
+    states = _ps_states(["-p", str(pid)])
+    return not states or all(s.startswith("Z") for s in states)
+
+
+def _group_quiescent(pgid: int) -> bool:
+    """No member of ``pgid`` is running (members that are zombies are fine)."""
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        pass
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return True
+    states = _group_states(pgid)
+    if states is None:
+        return False  # could not enumerate; the group still answers signal 0
+    return all(s.startswith("Z") for s in states)
+
+
+def _group_states(pgid: int) -> list[str] | None:
+    """Process states of every member of ``pgid``."""
+    if sys.platform.startswith("linux"):
+        states: list[str] = []
+        try:
+            entries = os.listdir("/proc")
+        except OSError:
+            return None
+        for entry in entries:
+            if not entry.isdigit():
+                continue
+            try:
+                with open(
+                    f"/proc/{entry}/stat", encoding="ascii", errors="replace"
+                ) as fh:
+                    tail = fh.read().rsplit(")", 1)[-1].split()
+            except OSError:
+                continue
+            # tail: state ppid pgrp ...
+            if len(tail) > 2 and tail[2] == str(pgid):
+                states.append(tail[0])
+        return states
+    rows = _ps_rows(["-A", "-o", "pgid=,stat="])
+    if rows is None:
+        return None
+    return [stat for g, stat in rows if g == str(pgid)]
+
+
+def _ps_rows(args: list[str]) -> list[tuple[str, str]] | None:
+    try:
+        out = subprocess.run(
+            ["ps", *args],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            **safe_popen_kwargs(),
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug(f"kill_tree: ps {args} failed: {exc}")
+        return None
+    rows = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            rows.append((parts[0], parts[1]))
+    return rows
+
+
+def _ps_states(args: list[str]) -> list[str]:
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "stat=", *args],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            **safe_popen_kwargs(),
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug(f"kill_tree: ps {args} failed: {exc}")
+        return []
+    return [s.strip() for s in out.splitlines() if s.strip()]
+
+
+__all__ = ["KillOutcome", "kill_process_tree", "kill_process_tree_sync"]
