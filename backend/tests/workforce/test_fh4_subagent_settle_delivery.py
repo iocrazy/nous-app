@@ -360,3 +360,60 @@ async def test_render_escapes_status_and_reason():
     )
     head = render_inbox_message(item).split("\n")[0]
     assert "<evil" not in head and 'status="x&quot;&gt;&lt;evil"' in head
+
+
+# ── review M1: an already-claimed result orders no wake-up ─────────────────
+
+
+_CLAIMED_AT = "2026-09-26T01:02:03+00:00"
+
+
+async def test_reaper_orders_no_wake_when_the_result_was_already_claimed(reaper):
+    """The worker filed the result and died; the drain's turn already read it.
+    Waking the issue again would buy a billed "Continue" on an empty inbox."""
+    stored = {
+        "id": 55,
+        "claimed_at": _CLAIMED_AT,
+        "content": {
+            "child_run_id": "9001",
+            "status": "success",
+            "settle_reason": "producer",
+            "summary": "done it",
+        },
+    }
+    reaper({"id": "9001", "status": "completed", "error_code": None}, stored=stored)
+
+    out = await st.reap_stale_workforce_tasks()
+
+    assert out["done"] == 1
+    assert out["wake_orders"] == []
+
+
+async def test_a_replay_whose_result_was_already_claimed_orders_no_wake():
+    w = _wire()
+    w.workforce.latest_run_for_task = AsyncMock(
+        return_value={"id": "52", "status": "completed", "output_summary": "ok"}
+    )
+    w.inbox_repo.enqueue = AsyncMock(
+        return_value={"id": 1, "claimed_at": _CLAIMED_AT, "content": {}}
+    )
+
+    out = await _run(w, _task())
+
+    w.run_bg.assert_not_awaited()
+    assert out["idle_dispatch"] is None
+
+
+async def test_an_unclaimed_replayed_result_still_wakes_the_issue():
+    """Positive control: the wake is withheld only for a consumed result."""
+    w = _wire()
+    w.workforce.latest_run_for_task = AsyncMock(
+        return_value={"id": "52", "status": "completed", "output_summary": "ok"}
+    )
+    w.inbox_repo.enqueue = AsyncMock(
+        return_value={"id": 1, "claimed_at": None, "content": {}}
+    )
+
+    out = await _run(w, _task())
+
+    assert out["idle_dispatch"]["issue_id"] == 7

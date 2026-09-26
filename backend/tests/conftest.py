@@ -77,6 +77,25 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
+def _engine_less_tree_capacity(request, monkeypatch):
+    """fh4 E3: every sub-agent spawn path (sync, background, fan-out,
+    Delegate) resolves its tree root and takes the per-tree advisory lock when
+    ``tree_capacity._engine_ready()`` is true — which it is on any machine that
+    exports ``SUPAVISOR_DATABASE_URL`` (the drift DB). A unit test must not
+    depend on whether a database is reachable: with it, two concurrent
+    fan-out children serialised on a real lock and their order flipped (fh4
+    review M2). Only ``integration``-marked tests see the real engine; unit
+    tests that exercise the capacity logic patch the module directly."""
+    if request.node.get_closest_marker("integration"):
+        return
+    try:
+        import app.services.workforce.tree_capacity as _tc
+    except Exception:  # pragma: no cover — module import is a hard dep in practice
+        return
+    monkeypatch.setattr(_tc, "_engine_ready", lambda: False)
+
+
+@pytest.fixture(autouse=True)
 def _inert_caller_scope(request, monkeypatch):
     """RLS 第三层 PR-2b: the screenwriting handlers wrap their tenant scene/shot
     reads+writes in ``caller_scope(user_id)``, which opens a REAL authenticated

@@ -101,10 +101,16 @@ async def deliver_subagent_result(
         return DeliveryOutcome(
             stored=None, failure="result_delivery_failed", idle_dispatch=None
         )
-    # The wake ORDER, not the wake. Only an issue has turns to start.
+    # The wake ORDER, not the wake. Only an issue has turns to start — and
+    # only while the result is still unread. When dedupe hands back a row that
+    # is already CLAIMED (the worker filed it, the drain's turn read it, and
+    # now the reaper or a replayed step arrives), a turn has consumed it:
+    # ordering another wake-up would start a billed "Continue" on an empty
+    # inbox under a workflow id the drain's turn does not share (fh4 review M1).
+    unread = not (stored or {}).get("claimed_at")
     idle = (
         {"issue_id": int(target_id), "user_id": str(payload["user_id"])}
-        if target_kind == "issue"
+        if target_kind == "issue" and unread
         else None
     )
     return DeliveryOutcome(stored=stored, failure=None, idle_dispatch=idle)
