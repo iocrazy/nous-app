@@ -28,8 +28,11 @@ MIGRATION = (
 )
 # The allowlist is re-declared whole by each migration that touches it; the
 # ORM literal must equal the LATEST one (461 admitted the phase-2b-2
-# orchestration events, 492 ``media_job_done`` for async GenerateVideo).
-LATEST_MIGRATION = MIGRATION.parent / "492_agent_video_async_inbox.sql"
+# orchestration events, 492 ``media_job_done`` for async GenerateVideo,
+# 509 ``verification`` for the issue completion verifier).
+LATEST_MIGRATION = (
+    MIGRATION.parent / "509_issue_acceptance_criteria_and_verification_event.sql"
+)
 _ARRAY = re.compile(r"ARRAY\[(.*?)\]", re.DOTALL)
 _LITERAL = re.compile(r"'([a-z_]+)'::text")
 

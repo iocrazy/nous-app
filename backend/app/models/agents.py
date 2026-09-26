@@ -497,7 +497,8 @@ class AgentRunTranscriptEvents(Base):
             " 'question_asked'::text, 'question_answered'::text,"
             " 'capability_denied'::text, 'fork'::text,"
             " 'subagent_spawned'::text, 'subagent_done'::text,"
-            " 'schedule_set'::text, 'media_job_done'::text])",
+            " 'schedule_set'::text, 'media_job_done'::text,"
+            " 'verification'::text])",
             name="agent_run_transcript_events_event_type_check",
         ),
         ForeignKeyConstraint(
