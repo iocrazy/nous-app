@@ -152,6 +152,7 @@
     "unlimited": "无限制"
   },
   "common": {
+    "hide": "隐藏",
     "error": "出错了",
     "details": "详情",
     "dismiss": "关闭",
@@ -5779,6 +5780,19 @@
     }
   },
   "issueDetail": {
+    "criteria": "完成标准",
+    "editCriteria": "修改",
+    "clearCriteria": "清除",
+    "criteriaProposedByAgent": "由 agent 提出",
+    "criteriaNone": "还没有——agent 开工前会先提出标准，你也可以自己写。",
+    "criteriaPlaceholder": "例如：场景 1–2 各建两个镜头并出图",
+    "criteriaRequired": "至少写一条标准",
+    "verdict": "完成核验",
+    "verdictPass": "已核验",
+    "verdictFail": "被驳回（第 {{n}}/{{m}} 次）",
+    "verdictUnverified": "未核验：{{reason}}",
+    "verdictAgentClaim": "agent 的声明",
+    "verdictDetails": "详情",
     "outputs": "产出",
     "outputsRevised": "{{n}} 个修订",
     "costPerOutput": "单件成本",

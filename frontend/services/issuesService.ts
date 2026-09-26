@@ -40,6 +40,17 @@ export type IssueOriginKind =
   | 'publish'
   | 'pipeline';
 
+export interface IssueVerification {
+  verdict: 'pass' | 'fail' | 'unverified';
+  reason?: string;
+  unmet?: { criterion: string; why?: string }[];
+  attempt?: number;
+  max_attempts?: number;
+  retry?: boolean;
+  checked_at?: string;
+  verifier_run_id?: string | null;
+}
+
 export interface Issue {
   id: number;
   issue_number: number;
@@ -69,6 +80,11 @@ export interface Issue {
   /** harness P4 (mig 453): target-level pause + budget. Absent on older payloads. */
   paused_at?: string | null;
   budget_cents?: number | null;
+  /** 509: completion criteria the verifier checks against. */
+  acceptance_criteria?: string | null;
+  acceptance_criteria_source?: 'user' | 'agent' | null;
+  /** 509: the verifier's last verdict, lifted from execution_state.verification. */
+  verification?: IssueVerification | null;
   request_depth: number;
   started_at: string | null;
   completed_at: string | null;
@@ -104,12 +120,16 @@ export interface IssueCreatePayload {
   origin_id?: string;
   origin_fingerprint?: string;
   billing_code?: string;
+  acceptance_criteria?: string;
 }
 
 export interface IssueUpdatePayload {
   /** harness P4 §1-⑤: integer cents, >= 0; NULL = unlimited (use clear_budget). */
   budget_cents?: number;
   clear_budget?: boolean;
+  /** 509: a person's edit stamps source='user'; clearing goes through the flag. */
+  acceptance_criteria?: string;
+  clear_acceptance_criteria?: boolean;
   title?: string;
   description?: string;
   priority?: IssuePriority;
