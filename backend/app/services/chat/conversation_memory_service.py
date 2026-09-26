@@ -1,8 +1,9 @@
 """Group-agent conversation memory (Phase 1.5).
 
 Read side — build_memory_block(): rolling summary (conversation_memory) +
-agent_memory recall, rendered as a markdown block the agent turn appends to
-its request instructions. Write side — maybe_compact(): after agent turns,
+agent_memory recall, rendered as a markdown block inside a
+``<conversation_memory>`` frame that the agent turn appends to its request
+instructions. Write side — maybe_compact(): after agent turns,
 summarize the un-summarized head (keeping the newest COMPACT_KEEP_TAIL
 messages verbatim, since recent_messages already feeds those to the turn)
 via a cheap LLM, and advance last_seq_summarized.
@@ -22,6 +23,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from app.boundary.frame_markers import escape_frame_body
 from app.core.config import settings
 from app.repositories.conversation_memory_repository import (
     get_conversation_memory_repository,
@@ -130,7 +132,8 @@ async def build_memory_block(
         mem = await get_conversation_memory_repository().load(cid)
         if mem and (mem.get("summary_md") or "").strip():
             parts.append(
-                "## Conversation summary (older messages)\n" + mem["summary_md"]
+                "## Conversation summary (older messages)\n"
+                + escape_frame_body(mem["summary_md"])
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[conv_memory] summary load failed conv={cid}: {exc!r}")
@@ -144,12 +147,33 @@ async def build_memory_block(
             hits = await recall(ctx, user_query, limit=5)
             if hits:
                 parts.append(
-                    "## Relevant memories\n"
-                    + "\n".join(f"- {h.kind}: {h.title} — {h.body_md}" for h in hits)
+                    "## Relevant memories\n" + "\n".join(_render_hit(h) for h in hits)
                 )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[conv_memory] recall failed conv={cid}: {exc!r}")
-    return "\n\n".join(parts)
+    return _frame(parts)
+
+
+def _render_hit(hit: MemoryHit) -> str:
+    return (
+        f"- {escape_frame_body(hit.kind)}: {escape_frame_body(hit.title)}"
+        f" — {escape_frame_body(hit.body_md)}"
+    )
+
+
+def _frame(parts: list[str]) -> str:
+    """Wrap the block in ``<conversation_memory>`` (registered in OWNED_FRAMES).
+
+    Everything inside — the rolling summary and every recalled memory — is
+    derived from what channel users said, so it is untrusted. The prose note
+    in ``conversation_agent_turn._UNTRUSTED_CHANNEL_INSTRUCTION`` is a second
+    layer only; the structural guard is this frame plus ``escape_frame_body``
+    on each value, which keeps a forged ``</conversation_memory>`` (or any
+    other owned close marker) from ending the data early.
+    """
+    if not parts:
+        return ""
+    return "<conversation_memory>\n" + "\n\n".join(parts) + "\n</conversation_memory>"
 
 
 async def maybe_compact(*, conversation: dict[str, Any]) -> None:

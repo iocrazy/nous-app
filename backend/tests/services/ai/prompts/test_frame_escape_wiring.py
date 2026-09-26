@@ -131,6 +131,9 @@ _KNOWN_FRAME_RENDERERS = {
     "services/ai/runner/inbox.py",
     "boundary/summary_frame.py",
     "agent_framework/agent_todo.py",
+    # fh4 T6：团队频道记忆块、剧本输入 / 上次错误两个新框
+    "services/chat/conversation_memory_service.py",
+    "services/storyboard/script/script_prompt_frames.py",
 }
 
 _OPENING_RE = re.compile(r"<\s*([a-z][a-z0-9_-]*)[\s>/]")
