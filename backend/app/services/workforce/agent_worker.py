@@ -84,6 +84,7 @@ from app.services.workforce.subagent_delivery import (
     envelope_from_prior_run,
     terminal_run_for_task,
 )
+from app.services.workforce.tree_capacity import resolve_tree_root
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +306,7 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
         # 派发没有父 run，继承不到就保持 None —— 回落到 get_team_id_for_user
         # 语义上不等价（一个用户可能属于多个团队），记到别人头上比不记更糟。
         child_team_id = await team_of_run(parent_run_id)
+        tree_root = await resolve_tree_root(parent_run_id)
 
         async with RunRecorder(
             agent_id=composed.agent_id,
@@ -333,22 +335,16 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             # root 一次扣的判据是「这个字段是不是 None」。metadata 里那份是给人
             # 看的 jsonb；扣费不该靠一个随时会改结构的 dict 取键。
             parent_run_id=str(parent_run_id) if parent_run_id else None,
+            # fh4 E3: the tree links go in with the INSERT — the follow-up
+            # attach UPDATE left the child uncountable (root NULL) meanwhile.
+            root_run_id=str(tree_root) if tree_root is not None else None,
+            agent_depth=inherited_depth if parent_run_id else None,
             metadata={
                 "task_id": str(task_id),
                 "parent_run_id": str(parent_run_id) if parent_run_id else None,
                 "agent_depth": inherited_depth,
             },
         ) as recorder:
-            # Tag the run with the parent chain so cost rollup queries
-            # (root_run_id) work for delegated trees. The runs repo
-            # exposes this; AgentRunsRepository wraps the UPDATE.
-            if parent_run_id is not None:
-                await _attach_to_parent_run(
-                    run_id=recorder.run_id,
-                    parent_run_id=parent_run_id,
-                    agent_depth=inherited_depth,
-                )
-
             result = await stack.runner.run_turn(
                 composed,
                 user_messages=[{"role": "user", "content": user_query}],
@@ -970,55 +966,3 @@ async def _lookup_inbox_message(
     except Exception as err:
         logger.warning(f"[agent-worker] inbox lookup failed: {err}")
         return None
-
-
-async def _attach_to_parent_run(
-    *,
-    # agent_runs.id is BIGINT Snowflake (mig 232) → numeric string.
-    run_id: str,
-    parent_run_id: str,
-    agent_depth: int,
-) -> None:
-    """Set ``agent_runs.parent_run_id`` and propagate ``root_run_id``.
-
-    RunRecorder doesn't take these on construction (M2 added them as a
-    schema-only change), so we patch them in via a follow-up UPDATE.
-    The parent's ``root_run_id`` is read first; if NULL (parent is root),
-    we use the parent's id as the root.
-    """
-
-    try:
-        from sqlalchemy import select
-        from sqlalchemy import update as sa_update
-
-        from app.db.session import read_scope, write_scope
-        from app.models import AgentRuns
-
-        # Read parent's root_run_id (or use parent_run_id as fallback if
-        # parent is itself a root). agent_runs.id/parent_run_id/root_run_id are
-        # BIGINT (mig 232) → bind int.
-        async with read_scope() as session:
-            parent = (
-                await session.execute(
-                    select(AgentRuns.root_run_id)
-                    .where(AgentRuns.id == int(parent_run_id))
-                    .limit(1)
-                )
-            ).first()
-        root_run_id = (parent[0] if parent is not None else None) or int(parent_run_id)
-
-        async with write_scope() as session:
-            await session.execute(
-                sa_update(AgentRuns)
-                .where(AgentRuns.id == int(run_id))
-                .values(
-                    parent_run_id=int(parent_run_id),
-                    root_run_id=int(root_run_id),
-                    agent_depth=agent_depth,
-                )
-            )
-    except Exception as err:
-        logger.warning(
-            f"[agent-worker] failed to attach run {run_id} to parent "
-            f"{parent_run_id}: {err}"
-        )

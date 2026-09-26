@@ -135,11 +135,8 @@ async def test_sync_spawn_attaches_the_child_to_the_running_run(monkeypatch):
     stack must all name the run that is executing right now."""
     import app.services.ai.chat.ai_library_chat_wiring as wiring_mod
     import app.services.ai.scope.scope_binding as scope_mod
-    import app.services.workforce.agent_worker as worker_mod
 
     wired = _wire_sync_spawn(monkeypatch)
-    attach = AsyncMock()
-    monkeypatch.setattr(worker_mod, "_attach_to_parent_run", attach)
 
     rec = _Rec(run_id=900)
     svc = _svc(parent_recorder=rec)
@@ -147,8 +144,11 @@ async def test_sync_spawn_attaches_the_child_to_the_running_run(monkeypatch):
     out = await svc.spawn({"subagent_type": "librarian", "prompt": "dig"})
 
     assert out["status"] == "success"
-    assert attach.await_args is not None, "a root run's child was never attached"
-    assert attach.await_args.kwargs["parent_run_id"] == "900"
+    # fh4 E3: the tree links ride on the child's own INSERT (the recorder
+    # kwargs), not on a follow-up attach UPDATE.
+    kwargs = wired.recorders[0].kwargs
+    assert kwargs["parent_run_id"] == "900", "a root run's child was never attached"
+    assert kwargs["root_run_id"] == "900"
     # the child's own stack, its recorder metadata, and the scope it inherits
     assert (
         wiring_mod.build_agent_runner_stack.await_args.kwargs["parent_run_id"] == "900"
@@ -158,18 +158,15 @@ async def test_sync_spawn_attaches_the_child_to_the_running_run(monkeypatch):
 
 
 async def test_sync_spawn_of_a_depth_one_child_attaches_to_its_own_run(monkeypatch):
-    import app.services.workforce.agent_worker as worker_mod
-
-    _wire_sync_spawn(monkeypatch)
-    attach = AsyncMock()
-    monkeypatch.setattr(worker_mod, "_attach_to_parent_run", attach)
+    wired = _wire_sync_spawn(monkeypatch)
 
     svc = _svc(parent_run_id="900", agent_depth=1, parent_recorder=_Rec(run_id=51))
 
     out = await svc.spawn({"subagent_type": "librarian", "prompt": "dig"})
 
     assert out["status"] == "success"
-    assert attach.await_args.kwargs["parent_run_id"] == "51"
+    assert wired.recorders[0].kwargs["parent_run_id"] == "51"
+    assert wired.recorders[0].kwargs["agent_depth"] == 2
 
 
 # ── continue (child_run_id) ─────────────────────────────────────────────

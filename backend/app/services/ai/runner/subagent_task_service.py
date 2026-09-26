@@ -230,6 +230,12 @@ class SubAgentTaskService:
     the SkillToolService so the ``task`` built-in can dispatch.
     """
 
+    # Class-level defaults so a stub built with ``__new__`` (a common test
+    # shape here) can still answer ``active_parent_run_id`` — the fan-out's
+    # tree pre-check (fh4 E3) reads it before any child is spawned.
+    parent_recorder: Any = None
+    parent_run_id: Optional[str] = None
+
     def __init__(
         self,
         *,
@@ -375,6 +381,18 @@ class SubAgentTaskService:
                 "(max_parallel_delegates=0)"
             )
 
+        # fh4 E3: the whole fan-out fits in the tree or none of it starts —
+        # half a fan-out is a result the model did not ask for. A pre-check
+        # only (soft cap): each child's own INSERT still re-checks under the
+        # tree lock, see ``workforce/tree_capacity.py``.
+        from app.services.workforce import tree_capacity
+
+        root = await tree_capacity.resolve_tree_root(self.active_parent_run_id)
+        try:
+            await tree_capacity.check_tree_capacity(root, len(tasks))
+        except tree_capacity.TreeCapacityExceeded as refused:
+            return {**self._failed("tree_capacity_exceeded"), **refused.as_fields()}
+
         semaphore = asyncio.Semaphore(self.max_parallel)
 
         want_await = args.get("await")
@@ -516,11 +534,9 @@ class SubAgentTaskService:
                 team_of_run,
             )
 
-            # _attach_to_parent_run is private to agent_worker; keep an
-            # eye on it during workforce refactors. The function writes
-            # agent_runs.parent_run_id + root_run_id; if it ever moves
-            # the import will fail loudly at the first task spawn.
-            from app.services.workforce.agent_worker import _attach_to_parent_run
+            # fh4 E3: the tree's cap and root. The child's tree links are
+            # written by its INSERT (no follow-up attach UPDATE any more).
+            from app.services.workforce import tree_capacity
         except Exception as exc:
             logger.exception("[subagent_task] import wiring failed")
             return self._failed(f"import failed: {exc!s:.120}")
@@ -612,6 +628,13 @@ class SubAgentTaskService:
             else await team_of_run(parent_run_id)
         )
 
+        # fh4 E3: which tree this child joins, and the per-tree cap check that
+        # runs inside the child's INSERT transaction (lock → count → insert).
+        tree_root = await tree_capacity.resolve_tree_root(parent_run_id)
+
+        async def _capacity_guard(session: Any) -> None:
+            await tree_capacity.reserve_in_session(session, root=tree_root, requested=1)
+
         started = time.monotonic()
         # Set once ``subagent_spawned`` has gone out. The crash path below
         # reads it to decide whether it OWES a matching ``subagent_done``:
@@ -646,6 +669,9 @@ class SubAgentTaskService:
                 credential_origin=stack.credential_origin,
                 # 同 agent_worker：扣费判据要一个不被 metadata 结构带偏的字段。
                 parent_run_id=str(parent_run_id) if parent_run_id else None,
+                root_run_id=str(tree_root) if tree_root is not None else None,
+                agent_depth=self.agent_depth + 1,
+                capacity_guard=_capacity_guard if tree_root is not None else None,
                 metadata={
                     "subagent_type": slug,
                     "description": description or None,
@@ -657,25 +683,6 @@ class SubAgentTaskService:
                     ),
                 },
             ) as recorder:
-                if parent_run_id is not None:
-                    try:
-                        await _attach_to_parent_run(
-                            run_id=recorder.run_id,
-                            parent_run_id=parent_run_id,
-                            agent_depth=self.agent_depth + 1,
-                        )
-                    except Exception:
-                        # Non-fatal: parent_run_id is for the Runs tab
-                        # tree; losing it doesn't break the sub-run
-                        # itself. Log full stack so post-mortem can see
-                        # which write failed.
-                        logger.exception(
-                            "[subagent_task] _attach_to_parent_run failed "
-                            "run_id={} parent_run_id={}",
-                            getattr(recorder, "run_id", "?"),
-                            parent_run_id,
-                        )
-
                 await self._emit_parent(
                     "subagent_spawned",
                     {
@@ -705,28 +712,37 @@ class SubAgentTaskService:
                     sub_run_id=recorder.run_id,
                     recorder=recorder,
                 )
-                await self._emit_parent(
-                    "subagent_done",
-                    {
-                        "child_run_id": str(recorder.run_id),
-                        "task_id": None,
-                        "mode": "sync",
-                        "subagent_type": slug,
-                        "status": envelope["status"],
-                        # fh4 E2: who ended it — the child, or a cancel.
-                        "settle_reason": str(
-                            settle_reason_for_envelope(envelope["status"])
-                        ),
-                        # Same key, same bound as the background path's, so
-                        # the card renders a summary line whichever mode ran.
-                        "summary": clip_claimed_text(envelope["summary"]),
-                        "cost_cents": _cost_cents_of(recorder),
-                        "byok_cents": _byok_cents_of(recorder),
-                        "tokens_used": envelope["tokens_used"],
-                        "duration_ms": int((time.monotonic() - started) * 1000),
-                    },
-                )
-                return envelope
+            # fh4 E3 release order: dispose → release → notify. Leaving the
+            # ``async with`` finished the child row (``__aexit__`` → terminal),
+            # which is what frees its tree slot; only then is the parent told.
+            # Before fh4 this ``done`` was written inside the block, while the
+            # row still read ``running``.
+            await self._emit_parent(
+                "subagent_done",
+                {
+                    "child_run_id": str(recorder.run_id),
+                    "task_id": None,
+                    "mode": "sync",
+                    "subagent_type": slug,
+                    "status": envelope["status"],
+                    # fh4 E2: who ended it — the child, or a cancel.
+                    "settle_reason": str(
+                        settle_reason_for_envelope(envelope["status"])
+                    ),
+                    # Same key, same bound as the background path's, so the
+                    # card renders a summary line whichever mode ran.
+                    "summary": clip_claimed_text(envelope["summary"]),
+                    "cost_cents": _cost_cents_of(recorder),
+                    "byok_cents": _byok_cents_of(recorder),
+                    "tokens_used": envelope["tokens_used"],
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
+            )
+            return envelope
+        except tree_capacity.TreeCapacityExceeded as refused:
+            # Refused before the row existed: nothing ran, nothing was
+            # announced (no ``subagent_spawned``), nothing to settle.
+            return {**self._failed("tree_capacity_exceeded"), **refused.as_fields()}
         except Exception as exc:
             logger.exception("[subagent_task] run_turn failed slug={}", slug)
             error_msg = f"sub-agent crashed: {exc!s:.120}"
@@ -865,9 +881,15 @@ class SubAgentTaskService:
         if agent_id is None:
             return self._failed(f"unknown agent slug: {slug!r}")
 
+        from app.services.workforce import tree_capacity
+
+        tree_root = await tree_capacity.resolve_tree_root(self.active_parent_run_id)
         payload = {
             "kind": "subagent",
             "parent_run_id": self.active_parent_run_id,
+            # fh4 E3: the queued row IS the child's reservation until its run
+            # row exists; the tree count finds it by this key.
+            "root_run_id": str(tree_root) if tree_root is not None else None,
             # The worker rebuilds this service from the payload; without the
             # caller's agent id it could not resolve depth or scope.
             "caller_agent_id": str(self.caller_agent_id),
@@ -890,13 +912,19 @@ class SubAgentTaskService:
             get_agent_workforce_repository,
         )
 
-        try:
-            row = await get_agent_workforce_repository().create_task(
+        async def _create() -> Optional[dict[str, Any]]:
+            return await get_agent_workforce_repository().create_task(
                 agent_id=agent_id,
                 user_id=self.caller_user_id,
                 payload=payload,
                 title=(description or prompt)[:120],
             )
+
+        try:
+            # Lock → count → INSERT in one transaction (fh4 E3).
+            row = await tree_capacity.run_within_tree_capacity(tree_root, 1, _create)
+        except tree_capacity.TreeCapacityExceeded as refused:
+            return {**self._failed("tree_capacity_exceeded"), **refused.as_fields()}
         except Exception as exc:  # noqa: BLE001 — typed failure to the model
             logger.exception("[subagent_task] background task insert failed")
             return self._failed(f"task_create_failed: {exc!s:.120}")

@@ -46,7 +46,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 from uuid import UUID
 
 from loguru import logger
@@ -54,6 +54,16 @@ from sqlalchemy.exc import IntegrityError
 
 from app.services.ai.runner.run_projection import apply as apply_projection
 from app.services.ai.runner.run_projection import empty_views, recompute_spent
+
+
+class RunAdmissionRefused(Exception):
+    """Raised through ``RunRecorder.__aenter__`` when ``capacity_guard``
+    refuses the run before its row is written (fh4 E3: a full sub-agent tree,
+    ``workforce.tree_capacity.TreeCapacityExceeded``).
+
+    Same contract as ``AgentPausedError``: no row, no retry — a refusal is an
+    answer, not a transient blip — and the caller turns it into a typed
+    result for whoever asked."""
 
 
 class AgentPausedError(Exception):
@@ -136,8 +146,9 @@ class RunRecorder:
     # 派发这条 run 的父 run（``agent_runs.id`` 的字符串形），root 为 None。
     # ``metadata["parent_run_id"]`` 里也有一份，但那是给人看的 jsonb。
     # ⚠️ **扣费不再读这个字段**：树收口（``tree_charge.settle_tree_if_closed``）
-    # 沿 ``agent_runs.root_run_id`` 在库里解析整棵树 —— 那一列由
-    # ``_attach_to_parent_run`` 服务端写，是唯一真相。这里留着是派发关系的
+    # 沿 ``agent_runs.root_run_id`` 在库里解析整棵树 —— 那一列自 fh4 起由本
+    # recorder 的 INSERT 连同 ``parent_run_id`` 一起写（``root_run_id`` 字段，
+    # 调用方用 ``tree_capacity.resolve_tree_root`` 解析），是唯一真相。这里留着是派发关系的
     # provenance，别再把任何计费判据挂回它。
     # ⚠️ 两个字段都必须是**简单默认值** —— 简单默认值会成为类属性，全仓用
     # ``RunRecorder.__new__(...)`` 造桩的测试才读得到 None；换成
@@ -149,6 +160,19 @@ class RunRecorder:
     # (``recovered_from`` / ``superseded_by``, see ``step_recovery``). Simple
     # default for the same ``RunRecorder.__new__`` reason as the field above.
     dbos_step_key: Optional[str] = None
+    # fh4 E3: the child's tree links, written by the INSERT itself. Before fh4
+    # a follow-up UPDATE (``agent_worker._attach_to_parent_run``) set them, so
+    # a running child sat with ``root_run_id`` NULL for a moment — or forever
+    # when that UPDATE failed — and the tree could not count it. Written only
+    # when ``parent_run_id`` is set; ``root_run_id`` defaults to the parent.
+    # Simple defaults, same ``RunRecorder.__new__`` reason as above.
+    root_run_id: Optional[str] = None
+    agent_depth: Optional[int] = None
+    # fh4 E3: awaited with the INSERT's own session, before the INSERT, in the
+    # same transaction — the per-tree lock + count lives here, so the row that
+    # takes the slot commits with the check. Raise ``RunAdmissionRefused`` to
+    # refuse; nothing is written.
+    capacity_guard: Optional[Callable[[Any], Awaitable[Any]]] = None
 
     # Internal state (populated by start / methods; not caller-facing)
     # str form of agent_runs.id (BIGINT Snowflake since mig 232). Not a UUID.
@@ -225,9 +249,9 @@ class RunRecorder:
     async def __aenter__(self) -> "RunRecorder":
         try:
             await self._start_once()
-        except AgentPausedError:
-            # Re-raise — caller needs to surface the pause to the user,
-            # and we intentionally do NOT persist a run row for pre-flight rejections.
+        except (AgentPausedError, RunAdmissionRefused):
+            # Re-raise — caller needs to surface the pause / refusal, and we
+            # intentionally do NOT persist a run row for pre-flight rejections.
             raise
         except Exception as err:
             # Retry ONCE on a transient failure (pgbouncer recycle, brief
@@ -239,7 +263,7 @@ class RunRecorder:
             try:
                 await asyncio.sleep(0.1)
                 await self._start_once()
-            except AgentPausedError:
+            except (AgentPausedError, RunAdmissionRefused):
                 raise
             except Exception as err2:
                 # Both attempts failed — degrade gracefully (no row, no
@@ -796,6 +820,12 @@ class RunRecorder:
         payload = {k: v for k, v in payload.items() if v is not None}
         if self.issue_id is not None:
             payload["issue_id"] = int(self.issue_id)
+        if self.parent_run_id:
+            # fh4 E3: tree links at INSERT, never a follow-up UPDATE.
+            payload["parent_run_id"] = int(self.parent_run_id)
+            payload["root_run_id"] = int(self.root_run_id or self.parent_run_id)
+            if self.agent_depth is not None:
+                payload["agent_depth"] = int(self.agent_depth)
 
         cols = list(payload.keys())
         placeholders = [
@@ -810,6 +840,8 @@ class RunRecorder:
             f"VALUES ({', '.join(placeholders)}) RETURNING id"
         )
         async with write_scope() as session:
+            if self.capacity_guard is not None:
+                await self.capacity_guard(session)
             row = (await session.execute(stmt, params)).first()
         if row is not None:
             # agent_runs.id became a BIGINT Snowflake in migration 232 (was

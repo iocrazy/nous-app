@@ -99,6 +99,14 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 
 `await` / `child_run_id`（2026-09-10，harness 二期 2b-2）也只对 `skill="task"` 有意义。省略 `await` 等于 `true` —— 没听说过这个参数的模型拿到的仍是原来的同步行为。`await=false` 的返回值是 `{"status": "queued", "task_id": …}`，**`sub_run_id` 是 `null`**：那一刻还没有子 run。三条拒绝也从这里回给模型：`no_reply_target`（结果没有可投递的目标）、`async_not_allowed_for_subagent`（子 agent 不能再派后台子 agent）、`continue_not_allowed_in_fanout`（`tasks` 与 `child_run_id` 同时出现）。
 
+2026-09-26 fh4 E3 加第四条：整棵根树的活跃子 agent 已到上限（`MAX_ACTIVE_SUBAGENTS_PER_TREE`，默认 8，env 可覆盖）时，`Skill(task)`（同步、后台、`tasks` 扇出一样）回的是标准失败信封再多三个键，扇出装不下就**整体拒绝**、一个都不启动：
+
+```
+{"status": "failed", "error": "tree_capacity_exceeded", "limit": 8, "active": 8, "requested": 1, "summary": "", "sub_run_id": null, …}
+```
+
+`Delegate` 在同样情形回 `{"error": "tree_capacity_exceeded", "limit": …, "active": …, "requested": 1, "agent_slug": …}`。拒绝不写 `subagent_spawned`、不建子 run 行，模型据 `active` / `limit` 决定是等已派出的孩子回来还是自己做。Token effect 与 KV Cache effect 同其余工具结果（一次几十 token，append-only）。
+
 `op` / `items` / `id` 只对 `skill="todo"` 有意义，2026-09-06 起才声明——此前模型只看得到 `skill` 与 `file`，内建 todo 的参数全靠猜：doubao lite 把 `"?op=replace&items=…"` 塞进 `file` 连错四次，整轮没有一个 todo 快照，任务卡的 n/m 也就从未出现。模型用不了它没被展示的参数，这不是提示词问题。
 
 #### Token effect
