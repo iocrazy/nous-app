@@ -14,6 +14,7 @@ from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel
 
 from app.schemas.nous_model import NousModelType
+from app.schemas.wire import WireDatetime
 
 
 class AiProviderHealthReportResponse(BaseModel):
@@ -118,3 +119,71 @@ class AiNousModelsResponse(BaseModel):
     """``GET /ai/nous-models``."""
 
     models: List[AiNousModelPublic]
+
+
+# ─── platform provider view (spec 2026-09-25 §3.1 / §3.3) ─────────────────────
+
+AiPlatformModelStatus = Literal["ok", "idle", "not_probed"]
+
+
+class AiPlatformModelEntry(BaseModel):
+    """``platform_models[<name>]`` in ``GET/PUT /ai/settings``.
+
+    The mapping from a platform row name to what a picker shows. No
+    ``base_url`` / key / upstream provider (the 2026-08-14 leak tripwire);
+    ``status`` never carries ``fail`` — failed rows are not in the list.
+    """
+
+    actual_model: str
+    type: NousModelType
+    status: AiPlatformModelStatus
+    is_local: bool
+    pricing_type: Literal["per_hour", "per_request", "per_token"]
+    pricing_value: float
+    context_window_tokens: Optional[int]
+
+
+class AiPlatformEngineState(BaseModel):
+    """nous-engine reachability behind the platform list.
+
+    ``reachable=False`` means the list could not be read (it is NOT "no
+    models" — rows stay listed as ``not_probed``); ``stale=True`` means the
+    list is a carried-over snapshot at most 10 minutes old.
+    """
+
+    reachable: bool
+    stale: bool
+    checked_at: Optional[WireDatetime]
+
+
+class AiPlatformProviderEntry(BaseModel):
+    """``ai_providers.nous`` in ``GET/PUT /ai/settings`` — the same shape as a
+    BYOK card (``models`` / ``enabled_models`` are catalog names), computed by
+    the server on every read. Only ``enabled`` and ``disabled_models`` are
+    stored; a PUT drops the rest."""
+
+    enabled: bool
+    managed: Literal[True] = True
+    models: List[str]
+    enabled_models: List[str]
+    disabled_models: List[str]
+
+
+class AiPlatformModelRuntime(BaseModel):
+    """One row of ``GET /ai/platform-status``.
+
+    ``local_ready`` is ``None`` for rows that do not run on the user's own
+    machine; ``superseded`` marks a server twin hidden because its local twin
+    can run (the picker rule ``apply_readiness`` applies today).
+    """
+
+    status: AiPlatformModelStatus
+    local_ready: Optional[bool]
+    superseded: bool
+
+
+class AiPlatformStatusResponse(BaseModel):
+    """``GET /ai/platform-status``."""
+
+    models: Dict[str, AiPlatformModelRuntime]
+    engine: Optional[AiPlatformEngineState]

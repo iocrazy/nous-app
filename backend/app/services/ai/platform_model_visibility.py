@@ -30,22 +30,50 @@ logger = logging.getLogger(__name__)
 _AI_SETTINGS_KEY = "ai_settings"
 
 
+async def stored_nous_settings(user_id: str) -> dict[str, Any]:
+    """The user's stored ``ai_providers.nous`` entry (``{}`` when absent)."""
+    from app.repositories.user_settings_repository import UserSettingsRepository
+
+    row = await UserSettingsRepository().get_by_user_id(user_id)
+    settings_json = (row or {}).get("settings_json") or {}
+    ai_settings = settings_json.get(_AI_SETTINGS_KEY) or {}
+    nous = (ai_settings.get("ai_providers") or {}).get("nous")
+    return dict(nous) if isinstance(nous, dict) else {}
+
+
+def disabled_names(nous: dict[str, Any]) -> tuple[str, ...]:
+    """The stored per-model blacklist, cleaned (order kept)."""
+    raw = nous.get("disabled_models") or []
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    return tuple(dict.fromkeys(str(n) for n in raw if n))
+
+
 async def platform_model_gate(user_id: str) -> tuple[bool, frozenset[str]]:
     """``(any_allowed, disabled_names)`` for this user.
 
     ``any_allowed=False`` means the user turned the platform card's master
     switch off; ``disabled_names`` is the per-model blacklist otherwise.
     """
-    from app.repositories.user_settings_repository import UserSettingsRepository
-
-    row = await UserSettingsRepository().get_by_user_id(user_id)
-    settings_json = (row or {}).get("settings_json") or {}
-    ai_settings = settings_json.get(_AI_SETTINGS_KEY) or {}
-    nous = (ai_settings.get("ai_providers") or {}).get("nous") or {}
+    nous = await stored_nous_settings(user_id)
     if nous.get("enabled") is False:
         return False, frozenset()
-    disabled = nous.get("disabled_models") or []
-    return True, frozenset(str(n) for n in disabled if n)
+    return True, frozenset(disabled_names(nous))
+
+
+def blacklisted(rows: list[dict[str, Any]], disabled: Iterable[str]) -> set[int]:
+    """``id()`` of each row the blacklist hides. Pure.
+
+    Each persisted name is resolved to the row it means — exact name first,
+    then the mediahub-/nous- rename alias — so a blacklist written before the
+    rename keeps hiding the renamed row, and a name that exactly matches one
+    row never also hides its alias twin.
+    """
+    return {
+        id(hit)
+        for name in disabled
+        if (hit := find_row_by_catalog_name(rows, name)) is not None
+    }
 
 
 async def filter_platform_models_for_user(
@@ -69,13 +97,5 @@ async def filter_platform_models_for_user(
         return []
     if not disabled:
         return rows
-    # Each persisted blacklist name is resolved to the row it means — exact
-    # name first, then the mediahub-/nous- rename alias — so a blacklist
-    # written before the rename keeps hiding the renamed row, and a name that
-    # exactly matches one row never also hides its alias twin.
-    hidden = {
-        id(hit)
-        for name in disabled
-        if (hit := find_row_by_catalog_name(rows, name)) is not None
-    }
+    hidden = blacklisted(rows, disabled)
     return [r for r in rows if id(r) not in hidden]

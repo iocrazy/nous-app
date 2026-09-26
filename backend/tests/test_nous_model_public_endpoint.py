@@ -8,23 +8,70 @@ import pytest
 from app.services.ai.governance.ai_governance import AIModuleGovernance
 
 
+def _patched_view(repo):
+    """Governance on, no stored card, the given catalog repo."""
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    stack.enter_context(
+        patch(
+            "app.repositories.nous_model_repository.get_nous_model_repository",
+            return_value=repo,
+        )
+    )
+    stack.enter_context(
+        patch(
+            "app.services.ai.governance.ai_governance.is_nous_globally_enabled",
+            new=AsyncMock(return_value=True),
+        )
+    )
+    stack.enter_context(
+        patch(
+            "app.services.ai.platform_model_visibility.stored_nous_settings",
+            new=AsyncMock(return_value={}),
+        )
+    )
+    return stack
+
+
+def _full_row(name: str, type_: str) -> dict:
+    return {
+        "id": 7300000000000000123,
+        "name": name,
+        "display_name": name,
+        "actual_model": name,
+        "actual_provider": "ark",
+        "type": type_,
+        "pricing_type": "per_token",
+        "pricing_value": 0,
+        "sort_order": 0,
+        "last_test_status": "ok",
+        "last_tested_at": None,
+        "last_test_code": None,
+        "context_window_tokens": None,
+        "api_key": "sk-secret",
+        "base_url": "https://ark.example",
+    }
+
+
 @pytest.mark.asyncio
 async def test_list_nous_models_passes_type_filter():
+    from types import SimpleNamespace
+
     from app.api.ai_settings_router import list_nous_models
 
     repo = MagicMock()
-    repo.list_enabled = AsyncMock(return_value=[{"name": "nous-llm", "type": "llm"}])
-    with patch(
-        "app.repositories.nous_model_repository.get_nous_model_repository",
-        return_value=repo,
-    ):
-        from types import SimpleNamespace
-
+    repo.list_enabled_private = AsyncMock(
+        return_value=[_full_row("nous-llm", "llm"), _full_row("nous-pic", "image")]
+    )
+    with _patched_view(repo):
         result = await list_nous_models(
             auth=SimpleNamespace(user_id="viewer-1"), type="llm"
         )
-    repo.list_enabled.assert_awaited_once_with("llm", viewer_user_id="viewer-1")
-    assert result == {"models": [{"name": "nous-llm", "type": "llm"}]}
+    repo.list_enabled_private.assert_awaited_once_with("viewer-1")
+    assert [m["name"] for m in result["models"]] == ["nous-llm"]
+    assert "api_key" not in result["models"][0]
+    assert "base_url" not in result["models"][0]
 
 
 def test_public_projection_excludes_admin_description():
@@ -137,10 +184,43 @@ async def test_list_nous_models_passes_viewer_from_auth():
     from app.api.ai_settings_router import list_nous_models
 
     repo = MagicMock()
-    repo.list_enabled = AsyncMock(return_value=[])
-    with patch(
-        "app.repositories.nous_model_repository.get_nous_model_repository",
-        return_value=repo,
-    ):
+    repo.list_enabled_private = AsyncMock(return_value=[])
+    with _patched_view(repo):
         await list_nous_models(auth=SimpleNamespace(user_id="viewer-1"), type="image")
-    repo.list_enabled.assert_awaited_once_with("image", viewer_user_id="viewer-1")
+    repo.list_enabled_private.assert_awaited_once_with("viewer-1")
+
+
+@pytest.mark.parametrize("viewer", [None, "00000000-0000-0000-0000-000000000042"])
+@pytest.mark.asyncio
+async def test_list_enabled_private_keeps_owner_scoping(monkeypatch, viewer):
+    """The credential-bearing read behind the platform view scopes rows the
+    same way ``list_enabled`` does: another user's private row never enters
+    anyone else's view (no viewer → platform rows only)."""
+    from contextlib import asynccontextmanager
+
+    import app.repositories.nous_model_repository as repo_mod
+
+    seen: list = []
+
+    class _Session:
+        async def execute(self, stmt):
+            seen.append(stmt)
+            result = MagicMock()
+            result.scalars.return_value.all.return_value = []
+            return result
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    monkeypatch.setattr(repo_mod, "read_scope", _scope)
+    await repo_mod.NousModelRepository().list_enabled_private(viewer)
+    compiled = seen[0].compile()
+    sql = str(compiled)
+    assert "nous_models.is_enabled IS true" in sql
+    assert "nous_models.owner_user_id IS NULL" in sql
+    if viewer:
+        assert "nous_models.owner_user_id = :owner_user_id_1" in sql
+        assert compiled.params["owner_user_id_1"] == viewer
+    else:
+        assert "owner_user_id =" not in sql

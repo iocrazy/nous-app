@@ -106,6 +106,11 @@ _PUBLIC_COLS = (
 )
 
 
+# Providers whose work runs on the viewer's own machine (codex daemon). The one
+# bit of ``actual_provider`` a public projection may carry is "is it one of these".
+LOCAL_ENGINE_PROVIDERS = ("codex-local", "jimeng-local")
+
+
 def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
     """Strategy-C value-type parity IN PLACE on a SELECT *-shaped dict:
     datetime → ISO str (REST shape); bigint id + Numeric pricing_value LEFT
@@ -232,7 +237,7 @@ class NousModelRepository:
                 for m in result.mappings().all():
                     row = dict(m)
                     provider = row.pop("actual_provider", None)
-                    row["is_local"] = provider in ("codex-local", "jimeng-local")
+                    row["is_local"] = provider in LOCAL_ENGINE_PROVIDERS
                     if include_actual_provider:
                         row["actual_provider"] = provider
                     out.append(_parity(row))
@@ -240,6 +245,37 @@ class NousModelRepository:
         except Exception as e:
             logger.error(f"Failed to list enabled nous models: {e}")
             return []
+
+    async def list_enabled_private(
+        self, viewer_user_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Every enabled row ``viewer_user_id`` may see, FULL rows (api_key
+        revealed, base_url, actual_provider, context window …).
+
+        SERVER-SIDE ONLY: the platform provider view
+        (``services/ai/platform_provider``) reads the engine with each row's
+        own credential and projects a public shape itself. Same owner scoping
+        as :meth:`list_enabled` (no viewer → platform rows only). Raises on a
+        read failure — the caller decides what "could not read the catalog"
+        means (it is not "no models").
+        """
+        stmt = (
+            select(NousModels)
+            .where(NousModels.is_enabled.is_(True))
+            .order_by(NousModels.sort_order)
+        )
+        if viewer_user_id:
+            stmt = stmt.where(
+                or_(
+                    NousModels.owner_user_id.is_(None),
+                    NousModels.owner_user_id == viewer_user_id,
+                )
+            )
+        else:
+            stmt = stmt.where(NousModels.owner_user_id.is_(None))
+        async with read_scope() as session:
+            result = await session.execute(stmt)
+            return [_row(r) for r in result.scalars().all()]
 
     async def get_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """Get a catalog model by name (includes all fields for backend use).
