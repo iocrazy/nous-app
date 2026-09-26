@@ -33,6 +33,7 @@ from tests.services.ai.prompts.test_model_experience_readmes import (
     _H_MCP,
     _H_MEDIA,
     _H_SCREENWRITING,
+    _H_SET_CRITERIA,
     _H_SKILL_SCHEMA,
     _H_WAKEUP,
     _PROMPTS,
@@ -94,6 +95,10 @@ TOOL_SURFACES: dict[tuple[str, str], tuple[str, str]] = {
     ("services/ai/tools/schedule_wakeup_tool.py", "ScheduleWakeup"): (
         _PROMPTS,
         _H_WAKEUP,
+    ),
+    ("services/ai/tools/set_acceptance_criteria_tool.py", "SetAcceptanceCriteria"): (
+        _PROMPTS,
+        _H_SET_CRITERIA,
     ),
     **{
         ("services/ai/tools/screenwriting_specs.py", tool): (_PROMPTS, _H_SCREENWRITING)

@@ -372,6 +372,44 @@ Attached to this message (listed for reference; the files are not loaded into th
 
 `tools` 数组是稳定前缀的一部分，issue run 与 chat run 因而是两个前缀族——**本模块任何改动（描述、参数名、参数顺序）都会让 issue 路的前缀复用一次性失效，chat 路不受影响**。本模块不为它计指纹（对所有 agent 恒等）。⚠️ provider 端是否真的命中缓存不在本模块契约内。
 
+### 工具 schema：`SetAcceptanceCriteria`（仅 issue 根 run）
+
+#### What the model sees
+
+与 `ScheduleWakeup` 同一注入点（issue 触发且已知 `issue_id`），tools 里追加在 `ScheduleWakeup` 之后、`AskUser` 之前。稳定字面量（`json.dumps(set_acceptance_criteria_spec(), indent=2)` 原样）：
+
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "SetAcceptanceCriteria",
+    "description": "Record the acceptance criteria for this issue before you start working, when the issue has none yet. Write concrete, checkable outcomes: how many scenes or shots, whether images are generated, a word-count range. A person's own criteria are locked and cannot be changed by you. Call this at most once per turn.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "type": "string",
+          "description": "The completion criteria, as a short checklist a reviewer can verify. At most 4000 characters."
+        }
+      },
+      "required": [
+        "criteria"
+      ]
+    }
+  }
+}
+```
+
+工具结果是 `{"ok": true, "criteria": "...", "source": "agent"}`，或类型化拒绝 `{"error": "criteria_required" | "criteria_too_long" | "criteria_locked" | "criteria_already_set" | "criteria_write_failed"}`（`criteria_locked` / `criteria_already_set` 附带当前 `criteria`，`criteria_too_long` 附带 `max_chars`）。人写的标准（`source='user'`）锁定；agent 自己先前的提议可以被它替换；每回合最多一次成功调用。指令句在 `FinishIssue` 块里（同一段 `FINISH_ISSUE_INSTRUCTION`）。
+
+#### Token effect
+
+schema 约 130 token，固定。结果体 ≤ 4000 字符（`ACCEPTANCE_CRITERIA_MAX_CHARS`）+ 十几个 token 的外壳。每回合最多一次成功调用。
+
+#### KV Cache effect
+
+只在 tools 列表里，与 `FinishIssue` / `ScheduleWakeup` 同族：issue 轮次与聊天轮次本来就是两个缓存族，本工具不再分裂族。改这份 schema 的任何一个字会让 issue 族的 tools 前缀失效一次，之后逐轮不变。
+
 ### 工具 schema：`LibrarySearch`（请求的 `tools` 参数，两条路都有）
 
 #### What the model sees
@@ -645,7 +683,10 @@ You are working an assigned issue. Before you end this turn you MUST call the Fi
 - 'needs_input' — you are blocked and need a human decision or information; state precisely what you need in 'reason'.
 - 'continue' — you made real progress but need another turn to finish.
 Always include a one-sentence 'reason'. Do not end the turn without calling FinishIssue.
+If the issue has no acceptance criteria yet, call SetAcceptanceCriteria once before you start working, stating checkable outcomes (scenes, shots, images, word count). A person's criteria are locked; work to them.
 ```
+
+最后一行（2026-09-26，issue「做完」闭环）指向同一 issue 轮次注入的 `SetAcceptanceCriteria`（见上文该工具的块）。强制声明请求复用整段指令，所以那次请求的系统消息里也有这一行，而它的 tools 只有 `FinishIssue`：句子限定在「开始工作之前」，强制请求里模型若误调它，那次调用按非 `FinishIssue` 忽略，落到既有的「没声明 → in_review」兜底。
 
 轮次结束时模型若没有声明结果，`forced_finish_declaration` 另发**一次独立请求**：系统消息是 `You just worked on an assigned issue but your turn ended without declaring an outcome.` 加两个换行加上面那段指令，tools 只有 `FinishIssue`，消息只有一条 user：
 
@@ -661,7 +702,7 @@ adapter 接受 `tool_choice` 时强制 `{"type": "function", "function": {"name"
 
 #### Token effect
 
-schema 约 200 token（不含 `options` 子 schema），指令约 110 token，都固定。强制声明请求 `max_tokens = 300`、温度 0.2；`{assistant_text}` 是上一轮完整的最终文本，**没有上限**。
+schema 约 200 token（不含 `options` 子 schema），指令约 150 token（2026-09-26 加 `SetAcceptanceCriteria` 一句后），都固定。强制声明请求 `max_tokens = 300`、温度 0.2；`{assistant_text}` 是上一轮完整的最终文本，**没有上限**。
 
 #### KV Cache effect
 

@@ -61,6 +61,9 @@ from app.services.ai.tools.ask_user_tool import (
     ask_user_handler,
 )
 from app.services.ai.tools.schedule_wakeup_tool import SCHEDULE_WAKEUP_TOOL_NAME
+from app.services.ai.tools.set_acceptance_criteria_tool import (
+    SET_ACCEPTANCE_CRITERIA_TOOL_NAME,
+)
 from app.services.infra.hooks import (
     HookContext,
     HookRegistry,
@@ -152,6 +155,9 @@ SUPPORTED_TOOLS: frozenset[str] = frozenset(
         # phase 2b-2: arm a one-time wake-up on this issue (issue root runs
         # only; the handler is injected per turn, like FinishIssue).
         SCHEDULE_WAKEUP_TOOL_NAME,
+        # issue completion loop: record acceptance criteria (issue turns
+        # only; handler injected per turn next to ScheduleWakeup).
+        SET_ACCEPTANCE_CRITERIA_TOOL_NAME,
     }
 )
 
@@ -360,6 +366,9 @@ class AgentRunner:
         # stray call gets a clear "not available" result rather than arming a
         # wake-up on a conversation the caller does not own.
         self.schedule_wakeup_handler: Optional[Any] = None
+        # issue completion loop: per-turn SetAcceptanceCriteria handler, same
+        # injection point and None-contract as schedule_wakeup_handler.
+        self.set_acceptance_criteria_handler: Optional[Any] = None
         # Task 5 (Agent 权限页梳理立项, 2026-08-10): tool names already
         # reported via a "capability_denied" transcript event THIS turn.
         # One AgentRunner instance == one turn (see build_agent_runner_stack
@@ -1021,6 +1030,11 @@ class AgentRunner:
                         tool_name,
                         self._dispatch_schedule_wakeup(args, recorder),
                     )
+                elif tool_name == SET_ACCEPTANCE_CRITERIA_TOOL_NAME:
+                    result = await self._timed(
+                        tool_name,
+                        self._dispatch_set_acceptance_criteria(args, recorder),
+                    )
                 elif tool_name == "GenerateImage":
                     if self.generate_image_handler is None:
                         result = {
@@ -1506,6 +1520,28 @@ class AgentRunner:
         except Exception as sw_exc:  # noqa: BLE001
             logger.warning(f"[AgentRunner] ScheduleWakeup handler raised: {sw_exc!r}")
             return {"error": f"ScheduleWakeup failed: {sw_exc.__class__.__name__}"}
+
+    async def _dispatch_set_acceptance_criteria(
+        self, args: dict, recorder: Any
+    ) -> dict:
+        """Route a SetAcceptanceCriteria call to the per-turn handler injected
+        by the chat service. Mirrors the ScheduleWakeup contract: never raises."""
+        if self.set_acceptance_criteria_handler is None:
+            return {
+                "error": (
+                    "SetAcceptanceCriteria is not available on this turn — it only "
+                    "applies while working an assigned issue."
+                )
+            }
+        try:
+            return await self.set_acceptance_criteria_handler(args, recorder)
+        except Exception as sac_exc:  # noqa: BLE001
+            logger.warning(
+                f"[AgentRunner] SetAcceptanceCriteria handler raised: {sac_exc!r}"
+            )
+            return {
+                "error": f"SetAcceptanceCriteria failed: {sac_exc.__class__.__name__}"
+            }
 
     def _high_risk_gate_registered(self) -> bool:
         """True when ``HighRiskCapabilityGateHook`` is actually installed in
@@ -2343,6 +2379,11 @@ class AgentRunner:
                     result = await self._timed(
                         tool_name,
                         self._dispatch_schedule_wakeup(args, recorder),
+                    )
+                elif tool_name == SET_ACCEPTANCE_CRITERIA_TOOL_NAME:
+                    result = await self._timed(
+                        tool_name,
+                        self._dispatch_set_acceptance_criteria(args, recorder),
                     )
                 elif tool_name == "GenerateImage":
                     if self.generate_image_handler is None:

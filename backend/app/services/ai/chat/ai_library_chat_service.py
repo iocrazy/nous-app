@@ -1368,6 +1368,30 @@ class AILibraryChatService:
                     f"[chat] ScheduleWakeup tool registered for issue {issue_id}"
                 )
 
+                # issue completion loop §5.1: SetAcceptanceCriteria rides the
+                # same root-run-with-issue_id gate — the criteria are a column
+                # on THIS issue, so there must be one to write to.
+                from app.services.ai.tools.set_acceptance_criteria_tool import (
+                    make_set_acceptance_criteria_handler,
+                    set_acceptance_criteria_spec,
+                )
+
+                composed = composed.model_copy(
+                    update={
+                        "tools": list(composed.tools or [])
+                        + [set_acceptance_criteria_spec()]
+                    }
+                )
+                runner.set_acceptance_criteria_handler = (
+                    make_set_acceptance_criteria_handler(
+                        issue_id=int(issue_id),
+                        agent_id=str(composed.agent_id) if composed.agent_id else None,
+                    )
+                )
+                logger.info(
+                    f"[chat] SetAcceptanceCriteria tool registered for issue {issue_id}"
+                )
+
         # Phase 2a: AskUser on BOTH roads (issue and chat) — the agent's one
         # verb for "ask the human to pick"; the runner parks the turn after it.
         from app.services.ai.tools.ask_user_tool import ask_user_spec

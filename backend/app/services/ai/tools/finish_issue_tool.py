@@ -42,6 +42,9 @@ FINISH_ISSUE_INSTRUCTION = (
     "- 'continue' — you made real progress but need another turn to finish.\n"
     "Always include a one-sentence 'reason'. Do not end the turn without calling "
     "FinishIssue."
+    "\nIf the issue has no acceptance criteria yet, call SetAcceptanceCriteria once "
+    "before you start working, stating checkable outcomes (scenes, shots, images, "
+    "word count). A person's criteria are locked; work to them."
 )
 
 

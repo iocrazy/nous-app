@@ -67,6 +67,7 @@ _H_TODO = '### 工具结果：内建 todo 的 `<todo_list>`（`Skill(skill="todo
 _H_INBOX = "### 收件箱消息框 `<inbox_message>`（步骤边界注入的 user 消息）"
 _H_ASK_USER = "### 工具 schema：`AskUser`（请求的 `tools` 参数，两条路都有）"
 _H_WAKEUP = "### 工具 schema：`ScheduleWakeup`（仅 issue 根 run）"
+_H_SET_CRITERIA = "### 工具 schema：`SetAcceptanceCriteria`（仅 issue 根 run）"
 _H_LIBRARY = "### 工具 schema：`LibrarySearch`（请求的 `tools` 参数，两条路都有）"
 _H_TIMEOUT = "### 工具结果：超时（任何工具，两条路都有）"
 _H_RESOURCES = "### `<available_resources>`（仅当本轮有 @-mention）"
@@ -89,6 +90,9 @@ MODEL_SURFACES: tuple[Surface, ...] = (
     Surface("services/ai/runner/inbox_hook.py", _PROMPTS, _H_INBOX),
     Surface("services/ai/tools/ask_user_tool.py", _PROMPTS, _H_ASK_USER),
     Surface("services/ai/tools/schedule_wakeup_tool.py", _PROMPTS, _H_WAKEUP),
+    Surface(
+        "services/ai/tools/set_acceptance_criteria_tool.py", _PROMPTS, _H_SET_CRITERIA
+    ),
     Surface("services/ai/tools/library_search_tool.py", _PROMPTS, _H_LIBRARY),
     Surface("services/ai/runner/tool_exec.py", _PROMPTS, _H_TIMEOUT),
     Surface("services/ai/runner/tool_timeouts.py", _PROMPTS, _H_TIMEOUT),
