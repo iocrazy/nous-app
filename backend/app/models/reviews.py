@@ -337,6 +337,15 @@ class Issues(Base):
             name="issues_budget_cents_check",
         ),
         CheckConstraint(
+            "acceptance_criteria IS NULL OR char_length(acceptance_criteria) <= 4000",
+            name="issues_acceptance_criteria_len_check",
+        ),
+        CheckConstraint(
+            "acceptance_criteria_source IS NULL OR "
+            "acceptance_criteria_source IN ('user', 'agent')",
+            name="issues_acceptance_criteria_source_check",
+        ),
+        CheckConstraint(
             "priority = ANY (ARRAY['critical'::text, 'high'::text, 'medium'::text, 'low'::text])",
             name="issues_priority_check",
         ),
@@ -517,6 +526,12 @@ class Issues(Base):
     )
     budget_cents: Mapped[Optional[int]] = mapped_column(
         Integer, comment="453: spend cap for this issue's runs; NULL = unlimited"
+    )
+    acceptance_criteria: Mapped[Optional[str]] = mapped_column(
+        Text, comment="509: completion criteria the verifier checks against"
+    )
+    acceptance_criteria_source: Mapped[Optional[str]] = mapped_column(
+        Text, comment="509: 'user' (locked for the agent) | 'agent' (proposal)"
     )
     origin_id: Mapped[Optional[str]] = mapped_column(Text)
     billing_code: Mapped[Optional[str]] = mapped_column(Text)

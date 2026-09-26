@@ -16438,6 +16438,11 @@ export interface components {
             /** Team Name */
             team_name: string;
         };
+        /**
+         * AcceptanceCriteriaSource
+         * @enum {string}
+         */
+        AcceptanceCriteriaSource: "user" | "agent";
         /** AccountConfigOverride */
         AccountConfigOverride: {
             /** Description */
@@ -27582,6 +27587,9 @@ export interface components {
          * @description Read response — all server-set fields included.
          */
         Issue: {
+            /** Acceptance Criteria */
+            acceptance_criteria?: string | null;
+            acceptance_criteria_source?: components["schemas"]["AcceptanceCriteriaSource"] | null;
             /** Ai Session Id */
             ai_session_id?: string | null;
             /** Assignee Agent Id */
@@ -27663,12 +27671,18 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Verification */
+            verification?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * IssueCreate
          * @description Caller payload for POST /issues. created_by_* is set by the router from auth context.
          */
         IssueCreate: {
+            /** Acceptance Criteria */
+            acceptance_criteria?: string | null;
             /** Assignee Agent Id */
             assignee_agent_id?: string | null;
             /** Assignee User Id */
@@ -28109,6 +28123,8 @@ export interface components {
          * @description PATCH payload — every field optional. Status changes go through dedicated endpoint.
          */
         IssueUpdate: {
+            /** Acceptance Criteria */
+            acceptance_criteria?: string | null;
             /** Assignee Agent Id */
             assignee_agent_id?: string | null;
             /** Assignee User Id */
@@ -28117,6 +28133,8 @@ export interface components {
             billing_code?: string | null;
             /** Budget Cents */
             budget_cents?: number | null;
+            /** Clear Acceptance Criteria */
+            clear_acceptance_criteria?: boolean | null;
             /** Clear Budget */
             clear_budget?: boolean | null;
             /** Description */

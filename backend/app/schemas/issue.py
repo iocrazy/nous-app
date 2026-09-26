@@ -13,6 +13,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+ACCEPTANCE_CRITERIA_MAX_CHARS = 4000
+
 
 class IssueStatus(str, Enum):
     BACKLOG = "backlog"
@@ -51,6 +53,11 @@ class IssueOriginKind(str, Enum):
     PIPELINE = "pipeline"
 
 
+class AcceptanceCriteriaSource(str, Enum):
+    USER = "user"
+    AGENT = "agent"
+
+
 class IssueBase(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     description: Optional[str] = Field(default=None, max_length=50000)
@@ -68,6 +75,12 @@ class IssueBase(BaseModel):
     origin_id: Optional[str] = None
     origin_fingerprint: str = "default"
     billing_code: Optional[str] = None
+    # 509: completion criteria the verifier checks against. Written through
+    # POST / PATCH → source='user' (the router stamps it); the agent's own
+    # proposal comes through the SetAcceptanceCriteria tool → source='agent'.
+    acceptance_criteria: Optional[str] = Field(
+        default=None, max_length=ACCEPTANCE_CRITERIA_MAX_CHARS
+    )
 
     @model_validator(mode="after")
     def assignee_xor(self) -> "IssueBase":
@@ -99,6 +112,12 @@ class IssueUpdate(BaseModel):
     # exclude_none — clearing goes through ``clear_budget``.
     budget_cents: Optional[int] = Field(default=None, ge=0)
     clear_budget: Optional[bool] = None
+    acceptance_criteria: Optional[str] = Field(
+        default=None, max_length=ACCEPTANCE_CRITERIA_MAX_CHARS
+    )
+    # exclude_none — clearing goes through ``clear_acceptance_criteria``
+    # (same idiom as ``clear_budget``).
+    clear_acceptance_criteria: Optional[bool] = None
 
     @model_validator(mode="after")
     def assignee_xor(self) -> "IssueUpdate":
@@ -134,6 +153,10 @@ class Issue(IssueBase):
     execution_state: Optional[dict[str, Any]] = None
     paused_at: Optional[datetime] = None
     budget_cents: Optional[int] = None
+    acceptance_criteria_source: Optional[AcceptanceCriteriaSource] = None
+    # 509: the verifier's last verdict, lifted out of execution_state so the
+    # detail page does not parse jsonb. Read-only; never accepted on write.
+    verification: Optional[dict[str, Any]] = None
     request_depth: int = 0
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -153,6 +176,16 @@ class Issue(IssueBase):
         parity rule keeps BIGINTs unconverted). Pydantic v2 will not coerce
         int → str on its own, so do it here rather than at every call site."""
         return str(v) if isinstance(v, int) else v
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_verification(cls, data: Any) -> Any:
+        if not isinstance(data, dict) or data.get("verification") is not None:
+            return data
+        state = data.get("execution_state")
+        if isinstance(state, dict) and isinstance(state.get("verification"), dict):
+            return {**data, "verification": state["verification"]}
+        return data
 
 
 class IssueListResponse(BaseModel):

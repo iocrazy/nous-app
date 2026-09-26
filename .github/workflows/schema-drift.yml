@@ -237,6 +237,7 @@ on:
       # 与两个 repository。DISTINCT ON 的「每支视频最佳镜头」RPC、replace 的整表替换
       # + FK 级联、coverage / stale / pending 同一口径 —— 只有真库答得出。
       - 'backend/tests/db/test_migration_507_video_shots_integration.py'
+      - 'backend/tests/db/test_migration_509_acceptance_criteria.py'
       - 'backend/app/repositories/video_shots_repository.py'
       # mig 504：分享密码改 bcrypt。回填与 trigger 用 pgcrypto 的 crypt()，后端用
       # Python 的 bcrypt 校验，两边要对同一段字节（72 字节截断）给出同一结论 ——
@@ -284,15 +285,15 @@ on:
       - 'backend/app/services/ai/runner/replay.py'
       - 'backend/tests/db/test_turn_history_store_integration.py'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all forty-five, so it has to
+      # to it changes what "green" means for all forty-six, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the forty-five above was counted with this command, not derived
-      # from the forty-four it replaced):
+      # (the forty-six above was counted with this command, not derived
+      # from the forty-five it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -1099,6 +1100,17 @@ jobs:
           # 再经真 ORM 引擎跑两个 repository（replace 整表替换 + 级联删旧向量、upsert_many、
           # coverage / stale_count / pending_for_user 同一口径、search 拒绝空 user_id）。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_507_video_shots_integration.py -v
+
+      - name: Assert mig 509's acceptance-criteria columns, CHECKs, atomic-create proc and 'verification' event type
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 两列 + 两个 CHECK 真的拦（>4000、未知 source）；issue_create_atomic 重定义后
+          # 真的写两列且 ACL 仍是 backend-only；mig 170 trigger 仍活着（正向对照）；
+          # transcript event_type 白名单收 'verification'。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_509_acceptance_criteria.py -v
 
       - name: Assert mig 504 hashed share passwords and pgcrypto agrees with the backend
         working-directory: backend

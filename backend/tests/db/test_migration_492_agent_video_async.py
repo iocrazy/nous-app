@@ -59,10 +59,15 @@ def test_492_keeps_every_461_literal_and_adds_the_two_new_ones():
 
 
 def test_orm_mirrors_equal_the_migration():
+    """Direction only for the event types (509 re-declared the allowlist, so
+    equality-to-the-head lives in test_transcript_event_types_phase2a via
+    ``LATEST_MIGRATION``): nothing 492 admitted may fall out of the ORM. The
+    inbox kinds are still 492's own list, so that one stays equality."""
     events, kinds = _arrays(BODY)
-    assert _orm(
+    orm_events = _orm(
         AgentRunTranscriptEvents, "agent_run_transcript_events_event_type_check"
-    ) == (events)
+    )
+    assert events <= orm_events, events - orm_events
     assert _orm(AgentRunInbox, "agent_run_inbox_kind_check") == kinds
 
 
