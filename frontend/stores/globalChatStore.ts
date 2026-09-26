@@ -15,6 +15,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { STORAGE_KEYS } from '../utils/storageKeys';
+import type { FabActivity } from '../components/chatFab/fabActivity';
+import type { FabSide } from '../components/chatFab/fabGeometry';
 
 export interface PageChatContext {
   projectId?: string;
@@ -137,6 +139,18 @@ interface GlobalChatState {
   /** Pending "insert this asset chip" request (not persisted). */
   pendingAsset: PendingAsset | null;
 
+  /** Collapsed entry (the mascot FAB): which edge it is docked on and its
+   *  top offset in px, both persisted. `fabTop` null = never moved, use the
+   *  default height. Re-clamped against the live viewport by ChatFab. */
+  fabSide: FabSide;
+  fabTop: number | null;
+  /** What the mascot is doing; published by AIChatPanel while mounted,
+   *  `waiting` is sticky across a minimize (the question is still parked
+   *  server-side), `running` is not. Not persisted. */
+  fabActivity: FabActivity;
+  /** Assistant replies that arrived while collapsed; cleared on open. */
+  fabUnread: number;
+
   setOpen: (open: boolean) => void;
   toggle: () => void;
   setRect: (
@@ -156,6 +170,9 @@ interface GlobalChatState {
   /** Open the floating chat and stage an asset chip for the composer. */
   sendAssetToChat: (asset: Omit<PendingAsset, 'nonce'>) => void;
   consumePendingAsset: () => void;
+  setFabPosition: (pos: { side: FabSide; top: number }) => void;
+  setFabActivity: (activity: FabActivity) => void;
+  setFabUnread: (count: number) => void;
 }
 
 export const CHAT_MIN_W = 340;
@@ -175,9 +192,15 @@ export const useGlobalChatStore = create<GlobalChatState>()(
       pendingQuote: null,
       pendingResource: null,
       pendingAsset: null,
+      fabSide: 'right',
+      fabTop: null,
+      fabActivity: 'idle',
+      fabUnread: 0,
 
-      setOpen: (open) => set({ open }),
-      toggle: () => set((s) => ({ open: !s.open })),
+      // Opening the window is the act of reading, so it clears the unread
+      // count in the same set — no second render where the badge lingers.
+      setOpen: (open) => set(open ? { open, fabUnread: 0 } : { open }),
+      toggle: () => set((s) => (s.open ? { open: false } : { open: true, fabUnread: 0 })),
       setRect: (rect) => set(rect),
       setPageContext: (ctx) => set({ pageContext: ctx }),
       requestChat: (agentSlug, sessionId) =>
@@ -210,6 +233,9 @@ export const useGlobalChatStore = create<GlobalChatState>()(
           },
         })),
       consumePendingAsset: () => set({ pendingAsset: null }),
+      setFabPosition: ({ side, top }) => set({ fabSide: side, fabTop: top }),
+      setFabActivity: (activity) => set({ fabActivity: activity }),
+      setFabUnread: (count) => set({ fabUnread: Math.max(0, Math.floor(count)) }),
     }),
     {
       name: STORAGE_KEYS.globalChat,
@@ -222,6 +248,8 @@ export const useGlobalChatStore = create<GlobalChatState>()(
         bottom: s.bottom,
         width: s.width,
         height: s.height,
+        fabSide: s.fabSide,
+        fabTop: s.fabTop,
       }),
     },
   ),
