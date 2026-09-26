@@ -1,0 +1,114 @@
+name: Bench shot cut (production sample)
+
+# T7 of the shot index (spec §8.1): score our cutter against PySceneDetect on
+# N of one user's real video downloads. Runs INSIDE the deployed nous-backend
+# container on gpupc (the videos live there; Mac mini has no SSH from CI), so
+# it is dispatch-only — the only trigger a self-hosted job may have besides
+# push-to-master / schedule (CLAUDE.md, self-hosted 安全性).
+#
+# Read-only: the script only reads resources / parsed_media and streams each
+# video to a temp file it deletes. scenedetect goes into /tmp inside the
+# container (--target), never into the image's venv.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Videos to score'
+        default: '30'
+        required: true
+      seed:
+        description: 'Sample seed (deterministic per seed)'
+        default: '7'
+        required: true
+      user_id:
+        description: 'Creator uuid (empty = the creator with the most videos)'
+        default: ''
+        required: false
+      min_seconds:
+        description: 'Skip videos shorter than this'
+        default: '20'
+        required: true
+      max_seconds:
+        description: 'Skip videos longer than this'
+        default: '900'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-shot-cut
+  cancel-in-progress: false
+
+jobs:
+  bench:
+    name: hist_v2 vs PySceneDetect on a production sample
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 45
+    steps:
+      - name: Backend container is up
+        run: docker exec nous-backend /app/.venv/bin/python -c "import app; print('ok')"
+
+      # opencv-headless is ~50 MB; gpupc pulls foreign indexes slowly, so use
+      # the Aliyun PyPI mirror (same reason the Dockerfile has APT_MIRROR).
+      - name: Install scenedetect into /tmp inside the container
+        run: |
+          docker exec -i nous-backend sh -c '
+            UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple \
+            uv pip install -q --python /app/.venv/bin/python --target /tmp/sd "scenedetect[opencv-headless]"'
+
+      - name: Run the benchmark
+        id: bench
+        env:
+          LIMIT: ${{ inputs.limit }}
+          SEED: ${{ inputs.seed }}
+          USER_ID: ${{ inputs.user_id }}
+          MIN_S: ${{ inputs.min_seconds }}
+          MAX_S: ${{ inputs.max_seconds }}
+        run: |
+          set -o pipefail
+          user_flag=""
+          if [ -n "$USER_ID" ]; then user_flag="--user-id $USER_ID"; fi
+          # The script's own exit code is the verdict (0: mean F1 >= 0.8,
+          # 1: below, 2: nothing scored); keep it, but always show the table.
+          set +e
+          docker exec -i -w /app nous-backend sh -c "
+            PYTHONPATH=/tmp/sd /app/.venv/bin/python scripts/bench_shot_cut_prod.py \
+              --limit $LIMIT --seed $SEED --min-seconds $MIN_S --max-seconds $MAX_S $user_flag \
+              --json /tmp/bench_shot_cut.json" 2>&1 | tee bench.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "verdict=$rc" >> "$GITHUB_OUTPUT"
+          {
+            echo '## Shot cut benchmark (production sample)'
+            echo
+            echo "limit=$LIMIT seed=$SEED range=${MIN_S}–${MAX_S}s · script exit $rc (0 = mean F1 ≥ 0.8)"
+            echo
+            echo '```'
+            grep -vE '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' bench.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          docker cp nous-backend:/tmp/bench_shot_cut.json bench_shot_cut.json || true
+
+      - name: Upload per-video rows
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-shot-cut
+          path: |
+            bench.txt
+            bench_shot_cut.json
+          if-no-files-found: warn
+
+      # The number is the deliverable, not a gate: a below-target mean is a
+      # finding to act on, not a broken workflow — fail only when nothing ran.
+      - name: Fail when nothing could be scored
+        if: steps.bench.outputs.verdict == '2'
+        run: |
+          echo "::error::no video could be scored (see bench.txt)"
+          exit 1
+
+      - name: Clean the container's temp files
+        if: always()
+        run: docker exec nous-backend sh -c 'rm -rf /tmp/sd /tmp/bench_shot_cut.json' || true
