@@ -19,6 +19,10 @@ from app.services.ai.tools.finish_issue_tool import extract_issue_options
 from app.services.ai.tools.forced_finish_declaration import (
     attempt_forced_finish_declaration,
 )
+from app.services.issues.acceptance_criteria import (
+    criteria_section,
+    load_acceptance_criteria,
+)
 from app.services.issues.execution_state import merge_execution_state
 from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_chunk,
@@ -35,24 +39,58 @@ from app.services.issues.turn_recovery import (
     current_dbos_step_key,
     enforce_recovery_limit,
 )
+from app.services.issues.verification import (
+    apply_completion_verification,
+    pending_verifier_feedback,
+    reset_verify_attempts,
+)
 
 
-def _build_user_message(issue: dict[str, Any], brief: str | None = None) -> str:
+def _build_user_message(
+    issue: dict[str, Any],
+    brief: str | None = None,
+    *,
+    criteria: str | None = None,
+    criteria_source: str | None = None,
+) -> str:
     """Compose a user message from an issue's title, optional description,
     and (M4 Autopilot, task O2) an optional workflow-node ``brief`` — the
     "heads up" runtime text a manager can write onto a ``project_stage_nodes``
     row any time before/while it's open (design spec §1/§3). Appended
     regardless of how the run was dispatched (auto-start, confirm-gate
     manual, or start-early) — the brief is context for the WORK, not a
-    dispatch-mechanism detail."""
+    dispatch-mechanism detail.
+
+    ``criteria`` / ``criteria_source`` (509) append an ``Acceptance criteria
+    (source=…)`` section after Details — same trust level as title /
+    description, body frame-escaped."""
     title = (issue.get("title") or "").strip()
     description = (issue.get("description") or "").strip()
     parts = [f"Task: {title}"] if title else []
     if description:
         parts.append(f"\nDetails:\n{description}")
+    section = criteria_section(criteria, criteria_source)
+    if section:
+        parts.append(section)
     if brief:
         parts.append(f"\nContext:\n{brief}")
     return "\n".join(parts) or "Complete the assigned task."
+
+
+async def _resolve_criteria(
+    issue_id: int, issue: dict[str, Any]
+) -> tuple[str | None, str | None]:
+    """Fresh read of the criteria pair (the row the loop loaded before turn 1
+    predates a SetAcceptanceCriteria call); falls back to the dict, then to
+    none. Never raises."""
+    try:
+        criteria, source = await load_acceptance_criteria(issue_id)
+        if criteria:
+            return criteria, source
+    except Exception as exc:  # noqa: BLE001 — enrichment, not a precondition
+        logger.warning(f"[issue_agent] issue={issue_id} criteria read failed: {exc!r}")
+    criteria = (issue.get("acceptance_criteria") or "").strip() or None
+    return criteria, (issue.get("acceptance_criteria_source") if criteria else None)
 
 
 async def _resolve_stage_brief(issue: dict[str, Any]) -> str | None:
@@ -241,6 +279,11 @@ async def run_issue_agent(
                 f"[issue_agent] issue={iid} could not clear forked_from: {exc!r}; "
                 f"the next run on this issue would be recorded as a fork"
             )
+    elif not is_continuation:
+        # Completion loop: verify_attempts is per dispatch — the first turn
+        # (not a continuation, not a fork) starts the retry budget at zero.
+        # Best-effort inside the helper; never breaks the turn.
+        await reset_verify_attempts(iid)
 
     if fork_of is not None:
         # A forked run starts from the seeded history (task text included);
@@ -249,9 +292,17 @@ async def run_issue_agent(
         content_in = steer_text or CONTINUATION_NUDGE
     elif is_continuation:
         content_in = CONTINUATION_NUDGE
+        # Issue completion loop: an unconsumed verifier rejection rides the
+        # nudge once (pending_verifier_feedback stamps consumed_at).
+        feedback = await pending_verifier_feedback(iid)
+        if feedback:
+            content_in = f"{CONTINUATION_NUDGE}\n\n{feedback}"
     else:
         brief = await _resolve_stage_brief(issue)
-        content_in = _build_user_message(issue, brief=brief)
+        criteria, criteria_source = await _resolve_criteria(iid, issue)
+        content_in = _build_user_message(
+            issue, brief=brief, criteria=criteria, criteria_source=criteria_source
+        )
 
     # W3c: classify spend by who ultimately caused it. A routine/pipeline issue
     # runs on the schedule/pipeline owner's behalf (rule_owner); anything else
@@ -341,6 +392,26 @@ async def run_issue_agent(
                 )
                 outcome, reason = None, None
 
+        # Completion loop: a declared (or forced) ``completed`` is reviewed
+        # before it is routed. Fail-open to "not reviewed" — never to pass.
+        verification: Optional[dict[str, Any]] = None
+        try:
+            outcome, reason, verification = await apply_completion_verification(
+                issue_id=iid,
+                outcome=outcome,
+                reason=reason,
+                result=result,
+                content=content,
+                session_id=session_id,
+                user_id=user_id,
+                trigger=trigger,
+                attribution=attribution,
+            )
+        except Exception as exc:  # noqa: BLE001 — decoration, never break the turn
+            logger.warning(
+                f"[issue_agent] issue={iid} verification hook raised: {exc!r}"
+            )
+
         logger.info(
             f"[issue_agent] issue={iid} session={session_id} "
             f"produced {len(content)} chars; outcome={outcome}"
@@ -362,6 +433,8 @@ async def run_issue_agent(
             # Phase 2a Task 5: a hook stop ("paused" / "cancelled") — the
             # workflow reads it BEFORE FinishIssue routing.
             "stop_reason": result.get("stop_reason"),
+            # Completion loop: the verdict route_finish_outcome reads (Task 7).
+            "verification": verification,
         }
     finally:
         # 这一行在 ``finally`` 里：这里抛出的任何东西都会盖掉正在传播的真异常。

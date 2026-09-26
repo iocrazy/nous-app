@@ -171,10 +171,11 @@ async def test_resuming_reply_that_hits_the_cap_parks_blocked_with_typed_prefix(
 # Workflow bodies (and the helpers they inline) are hashed into the DBOS app
 # version; this fix must live only inside the step. If one of these changes on
 # purpose, update the hash in the same PR and say why in its description.
+# 2026-09-26 completion loop: _run_reply_turns passes verification= to route_finish_outcome (one kwarg, no step change).
 _PINNED_SOURCES = {
     "respond_to_issue_reply": "331838c6e2f8eea5ffef1a5de45b2bd23c7e17e5932870eb88175b67775883d9",
     "execute_issue": "a5f3f2460c673b834e83449f5b812fb7de9112b954cc4365af0aff79d3744ad6",
-    "_run_reply_turns": "6d1bd3ecbc13cde09741c8d0ce65526ff553e902368f88926fe315861a6b83c9",
+    "_run_reply_turns": "1b7f77c546663d8c1b05a3cd608e51decac715cb031ba2df8be5875df8d05d00",
     "run_issue_reply_for_wait": "750f359404f04bd6646376f055b9c7b6c29be6f994af9ed6948995e618609647",
 }
 

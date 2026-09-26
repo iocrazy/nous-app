@@ -8,7 +8,7 @@
 
 **Tech Stack:** FastAPI + SQLAlchemy async ORM（`write_scope` / `read_scope`）、DBOS、Pydantic v2、pytest（`unit` / `integration` marker）、React + vitest、OpenAPI 派生类型（`backend/openapi.json` → `frontend/types/api.generated.d.ts`）。
 
-**Spec:** `docs/superpowers/specs/2026-09-26-issue-completion-loop-design.md`（本计划落地时同 PR 修订了 §5.1 / §5.3 / §5.4 / §5.5 / §11-C，见下方「与 spec 的四处偏离」）。
+**Spec:** `docs/superpowers/specs/2026-09-26-issue-completion-loop-design.md`（本计划落地时同 PR 修订了 §5.1 / §5.3 / §5.4 / §5.5 / §8 / §11-C，见下方「与 spec 的五处偏离」）。
 
 ## Global Constraints
 
@@ -24,12 +24,13 @@
 - UI 文案英文、i18n key camelCase、语义色 token（ok / warn / danger）。
 - 每个 Task 一个 commit；类型 `feat(issues):` / `test(issues):` / `docs(prompts):`。
 
-## 与 spec 的四处偏离（已写回 spec，实施以本节为准）
+## 与 spec 的五处偏离（已写回 spec，实施以本节为准）
 
 1. **mig 170 不是白名单而是「不可变列」黑名单**（`issues_enforce_update_allowlist` 逐列比对 `id / issue_number / … / execution_state / origin_*`）。新列不在黑名单里，creator / assignee 默认就能改，**不用改 trigger**；用真库集成测试钉住「非 service_role 更新新列不被拦」即可。
 2. **`issue_messages.kind='system_status'` 的 CHECK 要求 `from_status` 或 `to_status` 非空**（它是状态变更行）。标准提出与 verdict 两种消息改用 `kind='comment'` + `author_agent_id=<assignee agent>`，`meta.kind ∈ {'criteria_proposed','verdict'}` 区分。
 3. **verifier 不引入 `system_settings.verifier_model`**，复用当前 issue session 绑定的模型与凭证（`forced_finish_declaration._resolve_agent_and_adapter`），这样 BYOK / 平台凭证与计费归因天然一致。真栈验收 C 改为「把 agent 的 model 指向一个不存在的目录行 → unverified(verifier_unavailable)」。
 4. **`load_auto_close_flag` 在派发时、回合之前就被调用并 checkpoint**，不能承载「pass 才 done」。改为：step 结果字典多一个 `verification` 键，`route_finish_outcome(...)` 新增可选关键字 `verification`，completed 分支 `"done" if auto_close and verdict == "pass" else "in_review"`。三个调用点透传：`_run_reply_turns`（哈希守卫，更新）、`_run_dispatch_with_continuation` 两处（非守卫）。另外 `scene_rewritten` 谓词简化为「本 issue 有 `script_scene` 产出登记」——写入咽喉点登记即是改写事实，不再比 `content_version`。
+5. **verifier 自开 root run，不挂 issue run 树**（PR-1 评审，2026-09-26）：issue 根 run 在 verifier 起跑前已结账，子 run 挂树永远拿到 already 而不扣费。`judge.py` 的 `RunRecorder(...)` 去掉 `parent_run_id`，保留 `issue_id` / `trigger=f"{trigger}_verify"` / `attribution` / `credential_origin`，血缘写进 `metadata={"verifier": True, "issue_run_id": <issue run>}`；与 forced declare 同形。spec §5.3 末条与 §8 首条已标 **[修订]**。
 
 ## File Structure
 

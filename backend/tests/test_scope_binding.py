@@ -374,6 +374,12 @@ SCOPE_EXEMPT_RUN_RECORDER_SITES: dict[str, str] = {
         "mirrors the originating session's team/project columns for the Runs "
         "panel's grouping and runs no tools of its own"
     ),
+    "services/issues/verification/judge.py": (
+        "not a dispatch: the completion verifier's child row, appended after "
+        "an issue turn that already ran. It reads a pre-built evidence bundle, "
+        "is offered no tools, and mirrors the issue session's team/project "
+        "columns like forced_finish_declaration above"
+    ),
 }
 
 

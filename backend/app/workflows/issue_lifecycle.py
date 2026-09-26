@@ -42,6 +42,7 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_message,
     publish_status,
 )
+from app.services.issues.issue_status_read import read_issue_status
 from app.services.issues.turn_outcome import (
     AWAITING_APPROVAL_OUTCOME,
     resolve_turn_outcome,
@@ -50,6 +51,7 @@ from app.services.issues.turn_recovery import (
     current_dbos_step_key,
     enforce_recovery_limit,
 )
+from app.services.issues.verification import apply_completion_verification
 
 # Task 7a defect 2: extra turns a dispatch may run purely to drain items that
 # landed on the inbox after its last step boundary. Bounded on purpose — a
@@ -517,6 +519,38 @@ async def run_issue_reply_step(
     content = assistant.get("content") or ""
     # fh2 T4: same precedence as the dispatch turn (see turn_outcome).
     outcome, reason, question, awaiting_input = resolve_turn_outcome(result)
+    # Completion loop: same hook as the dispatch turn, narrowed twice.
+    # (1) Only a RESUMING reply is verified — the one _run_reply_turns will
+    # route. It flips the issue to in_progress before the turn; a plain
+    # comment leaves the status where it was. That status is this step's only
+    # view of "resuming" (the caller is hash-pinned), read only when there is
+    # a completed declaration to review. (2) No retry: the reply road has no
+    # continuation turn, so a rejection stays completed → in_review.
+    # The reply road has no attribution; the verifier child run takes
+    # RunRecorder's default.
+    verification: Optional[dict[str, Any]] = None
+    try:
+        if (
+            outcome == "completed"
+            and await read_issue_status(issue_id, purpose="reply_verification")
+            == "in_progress"
+        ):
+            outcome, reason, verification = await apply_completion_verification(
+                issue_id=issue_id,
+                outcome=outcome,
+                reason=reason,
+                result=result,
+                content=content,
+                session_id=session_id,
+                user_id=user_id,
+                trigger="issue_reply",
+                attribution=None,
+                allow_retry=False,
+            )
+    except Exception as exc:  # noqa: BLE001 — decoration, never break the turn
+        logger.warning(
+            f"[issue_reply] issue {issue_id}: verification hook raised: {exc!r}"
+        )
     return {
         "content": content,
         "outcome": outcome,
@@ -527,6 +561,8 @@ async def run_issue_reply_step(
         "options": extract_issue_options(result.get("tool_calls")),
         "stop_reason": result.get("stop_reason"),
         "pending_dispatches": pending_dispatches,
+        # Completion loop: the verdict route_finish_outcome reads (Task 7).
+        "verification": verification,
     }
 
 
@@ -723,6 +759,7 @@ async def _run_reply_turns(
                 set_status=set_status,
                 content_len=content_len,
                 run_id=(result or {}).get("run_id"),
+                verification=(result or {}).get("verification"),
             )
             # I4 (final review): mirrors execute_issue's own fan-in call — a
             # child issue resumed and completed via a reply-answer (rather
@@ -1022,6 +1059,7 @@ async def route_finish_outcome(
     content_len: int = 0,
     run_id: Optional[str] = None,
     disarm_wakeups: Optional[Callable[[int, str], Awaitable[Any]]] = None,
+    verification: Optional[dict[str, Any]] = None,
 ) -> None:
     """Route an agent's FinishIssue declaration (or the lack of one) to an
     issue status transition. Shared by the dispatch loop's terminal step
@@ -1047,8 +1085,10 @@ async def route_finish_outcome(
                           ``_run_reply_turns``, so a plain reply on the issue
                           can nudge it forward instead of parking it out of
                           reach forever.
-      completed       → done if ``auto_close`` (slice 2a platform toggle) else
-                        in_review (human confirms)
+      completed       → done only if ``auto_close`` AND ``verification.verdict
+                        == "pass"`` (completion loop, 2026-09-26: a verdict of
+                        fail / unverified / absent parks at in_review — the
+                        toggle alone no longer closes); else in_review
       needs_input     → needs_followup (slice 2b: a deliberate hand-off, distinct
                         from blocked=errored; carries the agent's reason)
       continue (capped)→ in_review (handed to a human after the cap; never
@@ -1132,10 +1172,13 @@ async def route_finish_outcome(
             outcome_reason=reason,
         )
     elif outcome == "completed":
-        # slice 2a: self-close only when the platform toggle trusts agents to.
+        # Completion loop: the platform toggle trusts agents to self-close
+        # ONLY when an independent verifier passed the declaration. No verdict
+        # (loop disabled, legacy caller) is "not verified", never "trusted".
+        verified = (verification or {}).get("verdict") == "pass"
         await set_status(
             issue_id,
-            "done" if auto_close else "in_review",
+            "done" if auto_close and verified else "in_review",
             agent_outcome="completed",
             outcome_reason=reason,
         )
@@ -1442,6 +1485,7 @@ async def _run_dispatch_with_continuation(
                 set_status=set_status,
                 content_len=len((res or {}).get("content") or ""),
                 run_id=(res or {}).get("run_id"),
+                verification=(res or {}).get("verification"),
             )
             question = await _question_for_park(res or {}, reason)
             if question is not None:
@@ -1633,6 +1677,7 @@ async def _run_dispatch_with_continuation(
         set_status=set_status,
         content_len=content_len,
         run_id=(res or {}).get("run_id"),
+        verification=(res or {}).get("verification"),
     )
     return {
         "outcome": outcome,

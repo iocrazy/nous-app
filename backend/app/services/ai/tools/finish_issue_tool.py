@@ -44,6 +44,16 @@ FINISH_ISSUE_INSTRUCTION = (
     "FinishIssue."
 )
 
+# Issue completion loop §5.1: appended after FINISH_ISSUE_INSTRUCTION (joined
+# by one newline) only on issue turns that also carry the SetAcceptanceCriteria
+# tool. Kept OUT of the core above because forced_finish_declaration reuses the
+# core in a request whose tools hold only FinishIssue.
+ACCEPTANCE_CRITERIA_INSTRUCTION = (
+    "If the issue has no acceptance criteria yet, call SetAcceptanceCriteria once "
+    "before you start working, stating checkable outcomes (scenes, shots, images, "
+    "word count). A person's criteria are locked; work to them."
+)
+
 
 def finish_issue_spec() -> dict[str, Any]:
     """OpenAI function-calling spec for FinishIssue (model-facing)."""
@@ -163,6 +173,7 @@ def extract_issue_options(
 __all__ = [
     "FINISH_ISSUE_OUTCOMES",
     "FINISH_ISSUE_TOOL_NAME",
+    "ACCEPTANCE_CRITERIA_INSTRUCTION",
     "FINISH_ISSUE_INSTRUCTION",
     "finish_issue_spec",
     "finish_issue_handler",

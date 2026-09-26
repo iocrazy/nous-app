@@ -139,6 +139,8 @@ _KNOWN_FRAME_RENDERERS = {
     "boundary/system_note.py",
     # fh5 C1：方括号框 ``[link-summary]…[/link-summary]`` —— 方括号扫描的正向对照
     "services/ai/prompts/link_injection.py",
+    # issue completion loop: 核验驳回的 <verifier_feedback> 框
+    "services/issues/verification/feedback.py",
 }
 
 _OPENING_RE = re.compile(r"<\s*([a-z][a-z0-9_-]*)[\s>/]")

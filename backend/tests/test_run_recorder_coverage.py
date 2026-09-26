@@ -127,6 +127,13 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     "services/ai/tools/forced_finish_declaration.py": (
         "FinishIssue tool_choice forcing, wrapped in its own RunRecorder"
     ),
+    # issue completion loop (2026-09-26): the verifier is one tool-less,
+    # bounded request on the issue session's model, same shape as the forced
+    # declaration above — wrapped in its own child RunRecorder (billing and
+    # usage recorded there), with a hard asyncio timeout.
+    "services/issues/verification/judge.py": (
+        "completion verifier: one tool-less request wrapped in its own child RunRecorder"
+    ),
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a
