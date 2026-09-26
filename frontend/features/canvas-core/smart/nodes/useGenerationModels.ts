@@ -13,19 +13,14 @@
 // Unknown (`local_ready === null`, status not fetched yet) is not a verdict —
 // the row stays, and dispatch answers with a typed refusal if it must.
 //
-// TRANSITIONAL (P2 → P3): upscale-only image services (studio-upscale) need an
-// input image and fail on every prompt, but the settings mapping cannot say
-// so yet. Until P3 adds `AiPlatformModelEntry.generatable`, the list is
-// intersected with the generation capability table's rows (same server
-// predicate; the composer loads that table anyway). While the table is
-// unknown the intersection is skipped rather than emptying the picker. The
-// test "upscale-only rows never reach a generation picker" stays the gate
-// when P3 swaps this for the field.
+// Only rows the server marks `generatable` are offered: upscale-only services
+// (nous-engine super-resolution) need an input image and would fail on every
+// prompt. `generatable` is the same predicate the server's generation row set
+// uses (backend services/generation/model_capabilities.generates_from_prompt).
 
 import { useMemo } from 'react';
 
 import { usePlatformModels } from '../../../../hooks/usePlatformModels';
-import { useGeneratableModelNames } from './useModelCapabilities';
 import type { PlatformModelType } from '../../../../types/api';
 import type { PlatformModelRow } from '../../../../utils/platformModel';
 
@@ -38,15 +33,14 @@ const VIDEO: readonly PlatformModelType[] = ['video'];
 export function useGenerationModels(kind?: 'image' | 'video'): GenerationModel[] {
   const types = kind === 'image' ? IMAGE : kind === 'video' ? VIDEO : GENERATION_TYPES;
   const { rows, status } = usePlatformModels(types);
-  const generatable = useGeneratableModelNames();
   return useMemo(
     () =>
       rows.filter(
         (m) =>
+          m.generatable &&
           status.localReady(m.name) !== false &&
-          !status.superseded(m.name) &&
-          (generatable === null || generatable.has(m.name)),
+          !status.superseded(m.name),
       ),
-    [rows, status, generatable],
+    [rows, status],
   );
 }

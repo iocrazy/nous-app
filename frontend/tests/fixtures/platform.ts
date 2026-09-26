@@ -6,7 +6,7 @@
  * `test_unreachable_engine_keeps_the_list`, `test_platform_status`), not
  * invented: `ai_providers.nous` carries `enabled / managed / models /
  * enabled_models / disabled_models`; `platform_models[name]` carries exactly
- * the seven mapping keys (no key, host, display name or sort order); the
+ * the eight mapping keys (no key, host, display name or sort order); the
  * status endpoint answers `{models: {name: {status, local_ready, superseded}},
  * engine}`. `aiService.getAISettings` passes all of these through unchanged,
  * so the same objects serve as the normalized settings a component receives.
@@ -26,14 +26,18 @@ export interface PlatformRowSpec extends Partial<PlatformModelEntry> {
 }
 
 export function platformEntry(overrides: Partial<PlatformModelEntry> = {}): PlatformModelEntry {
+  const type = overrides.type ?? 'llm';
   return {
     actual_model: 'qwen3-8b',
-    type: 'llm',
+    type,
     status: 'ok',
     is_local: false,
     pricing_type: 'per_token',
     pricing_value: 1,
     context_window_tokens: 32768,
+    // The server's default answer for an ordinary row: image/video rows can
+    // generate, everything else cannot. Upscale-only rows override to false.
+    generatable: type === 'image' || type === 'video',
     ...overrides,
   };
 }

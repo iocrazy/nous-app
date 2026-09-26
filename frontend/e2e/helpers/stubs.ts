@@ -312,6 +312,8 @@ export interface E2EPlatformRow {
   actual_model?: string;
   is_local?: boolean;
   status?: 'ok' | 'idle' | 'not_probed';
+  /** Server default: image/video rows can generate; upscale-only rows cannot. */
+  generatable?: boolean;
 }
 
 /**
@@ -342,6 +344,7 @@ export async function stubPlatformModels(page: Page, rows: E2EPlatformRow[]): Pr
           pricing_type: 'per_request',
           pricing_value: 1,
           context_window_tokens: null,
+          generatable: r.generatable ?? (r.type === 'image' || r.type === 'video'),
         },
       ]),
     ),

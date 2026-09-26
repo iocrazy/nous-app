@@ -12,9 +12,8 @@
 //   3. the generation list applies the daemon rule the server used to apply
 //      (`apply_readiness`): local rows the daemon cannot run are hidden, a
 //      superseded server twin is hidden, unknown is not a verdict;
-//   4. upscale-only rows never reach a generation picker (P2: via the
-//      capability table's rows; P3 swaps that for `generatable` — this test
-//      stays the gate).
+//   4. upscale-only rows never reach a generation picker: the server marks
+//      them `generatable: false` (same predicate as its generation row set).
 
 import { render, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,12 +50,6 @@ vi.mock('../services/aiLibraryService', () => ({
 }));
 vi.mock('../components/ApprovalsPanel', () => ({ ApprovalsPanel: () => null }));
 vi.mock('../components/AIHealthBoard', () => ({ AIHealthBoard: () => null }));
-// generation-capabilities is keyed by the server's generation-row predicate,
-// which drops upscale-only services — `nous-studio-upscale` is absent here.
-const listGenerationCapabilities = vi.fn();
-vi.mock('../features/canvas-core/services/canvasGenerationService', () => ({
-  listGenerationCapabilities: () => listGenerationCapabilities(),
-}));
 const auth = vi.hoisted(() => ({ settings: null as unknown }));
 vi.mock('../contexts/AuthContext', () => ({
   useOptionalAISettings: () => auth.settings,
@@ -65,7 +58,6 @@ vi.mock('../contexts/AuthContext', () => ({
 import { AISettings } from '../components/AISettings';
 import { getAvailableModels } from '../components/AILibrary/agentEditorModel';
 import { useGenerationModels } from '../features/canvas-core/smart/nodes/useGenerationModels';
-import { _resetModelCapabilitiesCache } from '../features/canvas-core/smart/nodes/useModelCapabilities';
 import { _resetPlatformStatusCache } from './usePlatformStatus';
 import { useTextPlatformModels } from './usePlatformModels';
 
@@ -80,7 +72,13 @@ const ROWS: PlatformRowSpec[] = [
   { name: 'nous-moss-asr', actual_model: 'moss-asr', type: 'asr', pricing_type: 'per_hour' },
   { name: 'nous-seedream', actual_model: 'doubao-seedream-4-0', type: 'image' },
   // Upscale-only (needs an input image): never a text-to-image choice.
-  { name: 'nous-studio-upscale', actual_model: 'studio-upscale', type: 'image', status: 'not_probed' },
+  {
+    name: 'nous-studio-upscale',
+    actual_model: 'studio-upscale',
+    type: 'image',
+    status: 'ok',
+    generatable: false,
+  },
   { name: 'jimeng-image', actual_model: 'jimeng-4.0', type: 'image' },
   { name: 'jimeng-local-image', actual_model: '', type: 'image', is_local: true, status: 'not_probed' },
   { name: 'codex-local-image', actual_model: 'gpt-image-2', type: 'image', is_local: true, status: 'not_probed' },
@@ -94,18 +92,8 @@ const GENERATABLE = [
   'codex-local-image',
   'jimeng-local-seedance',
 ];
-const CAPS = Object.fromEntries(
-  GENERATABLE.map((n) => [
-    n,
-    { ratios: [], quality: false, quality_tiers: [], resolution: false, max_refs: 0, negative: false, video_modes: [] },
-  ]),
-);
-
 beforeEach(() => {
   _resetPlatformStatusCache();
-  _resetModelCapabilitiesCache();
-  listGenerationCapabilities.mockReset();
-  listGenerationCapabilities.mockResolvedValue(CAPS);
   getPlatformStatus.mockReset();
   auth.settings = SETTINGS;
   fetchSpy.mockReset();
@@ -114,34 +102,24 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   _resetPlatformStatusCache();
-  _resetModelCapabilitiesCache();
 });
 
 describe('useGenerationModels — the daemon rule on the settings list', () => {
-  it('before the status lands: every enabled generatable row, unknown is not a verdict', async () => {
+  it('before the status lands: every enabled generatable row, unknown is not a verdict', () => {
     getPlatformStatus.mockReturnValue(new Promise(() => {}));
     const { result } = renderHook(() => useGenerationModels());
-    await waitFor(() => expect(result.current.map((m) => m.name)).toEqual(GENERATABLE));
+    expect(result.current.map((m) => m.name)).toEqual(GENERATABLE);
   });
 
   it('upscale-only rows never reach a generation picker', async () => {
-    getPlatformStatus.mockReturnValue(new Promise(() => {}));
-    const { result } = renderHook(() => useGenerationModels('image'));
-    await waitFor(() => expect(listGenerationCapabilities).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(result.current.map((m) => m.name)).not.toContain('nous-studio-upscale'),
+    // Even once the engine reports it loaded and ok.
+    getPlatformStatus.mockResolvedValue(
+      platformStatusWire({ 'nous-studio-upscale': { status: 'ok' }, 'nous-seedream': {} }),
     );
-    expect(result.current.map((m) => m.name)).toContain('nous-seedream');
-  });
-
-  it('an unknown capability table (failed) does not empty the picker', async () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    listGenerationCapabilities.mockRejectedValue(new Error('boom'));
-    getPlatformStatus.mockReturnValue(new Promise(() => {}));
     const { result } = renderHook(() => useGenerationModels('image'));
-    await waitFor(() => expect(spy).toHaveBeenCalled());
+    await waitFor(() => expect(getPlatformStatus).toHaveBeenCalled());
+    expect(result.current.map((m) => m.name)).not.toContain('nous-studio-upscale');
     expect(result.current.map((m) => m.name)).toContain('nous-seedream');
-    spy.mockRestore();
   });
 
   it('hides local rows the daemon cannot run and the server twin a ready local twin supersedes', async () => {
@@ -163,10 +141,9 @@ describe('useGenerationModels — the daemon rule on the settings list', () => {
     );
   });
 
-  it('filters by kind', async () => {
+  it('filters by kind', () => {
     getPlatformStatus.mockReturnValue(new Promise(() => {}));
     const { result } = renderHook(() => useGenerationModels('video'));
-    await waitFor(() => expect(listGenerationCapabilities).toHaveBeenCalled());
     expect(result.current.map((m) => m.name)).toEqual(['jimeng-local-seedance']);
   });
 
@@ -239,7 +216,7 @@ describe('every surface shows the same list from the same settings', () => {
     }
   });
 
-  it('all surfaces together: ONE status request, ONE capability request, zero catalog requests', async () => {
+  it('all surfaces together: ONE status request, zero catalog requests', async () => {
     getPlatformStatus.mockResolvedValue(platformStatusWire({ 'nous-qwen3-8b': {} }));
     renderHook(() => useTextPlatformModels());
     renderHook(() => useTextPlatformModels());
@@ -248,7 +225,6 @@ describe('every surface shows the same list from the same settings', () => {
     getAvailableModels(SETTINGS);
     render(<AISettings settings={SETTINGS} onSave={vi.fn()} />);
     await waitFor(() => expect(getPlatformStatus).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(listGenerationCapabilities).toHaveBeenCalledTimes(1));
     // Nothing else went to the network: no /ai/nous-models, no
     // /canvases/text-models, no /canvases/generation-models.
     expect(fetchSpy).not.toHaveBeenCalled();
