@@ -35,7 +35,10 @@ def _reference_cuts_ms(path: Path) -> list[int]:
 
     scenes = detect(str(path), ContentDetector())
     # Boundaries = the start of every scene but the first.
-    return [int(round(start.get_seconds() * 1000)) for start, _ in scenes[1:]]
+    return [
+        int(round((getattr(start, "seconds", None) or start.get_seconds()) * 1000))
+        for start, _ in scenes[1:]
+    ]
 
 
 async def _our_cuts_ms(path: Path) -> tuple[list[int], int, float]:

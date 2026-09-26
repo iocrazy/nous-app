@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import pytest
 
+from app.services.library.shot_cut import DEFAULT_PARAMS
 from scripts.bench_shot_cut_prod import (
     _top_creator,
     choose_sample,
     parse_duration_seconds,
+    parse_variants,
 )
 
 pytestmark = pytest.mark.unit
@@ -72,3 +74,24 @@ def test_top_creator_is_the_one_with_most_videos():
     rows = [{"creator_id": "a"}, {"creator_id": "b"}, {"creator_id": "b"}]
     assert _top_creator(rows) == "b"
     assert _top_creator([]) is None
+
+
+def test_parse_variants_always_starts_with_the_defaults_and_types_fields():
+    out = parse_variants("min_shot_ms=800; min_shot_ms=800,ratio=2.0 ;;")
+    assert [label for label, _ in out] == [
+        "default",
+        "min_shot_ms=800",
+        "min_shot_ms=800,ratio=2.0",
+    ]
+    assert out[0][1] is DEFAULT_PARAMS
+    assert out[1][1].min_shot_ms == 800 and isinstance(out[1][1].min_shot_ms, int)
+    assert out[1][1].ratio == DEFAULT_PARAMS.ratio
+    assert out[2][1].ratio == 2.0 and out[2][1].min_shot_ms == 800
+    assert parse_variants("") == [("default", DEFAULT_PARAMS)]
+    assert parse_variants(None) == [("default", DEFAULT_PARAMS)]
+
+
+@pytest.mark.parametrize("bad", ["min_shot=800", "ratio", "min_shot_ms=abc"])
+def test_parse_variants_rejects_typos_instead_of_scoring_defaults(bad):
+    with pytest.raises(ValueError):
+        parse_variants(bad)
