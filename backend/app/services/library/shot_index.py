@@ -32,8 +32,13 @@ from app.services.ai.providers.embedding_service import (
     EmbeddingService,
     classify_embed_reason,
 )
-from app.services.library.shot_cut import ALGO_VERSION, DEFAULT_PARAMS, CutParams
+from app.services.library.shot_cut import DEFAULT_PARAMS, CutParams
+from app.services.library.shot_cut import algo_version as cut_algo_version
 from app.services.library.shot_frames import ShotFramesError, cut_video_file
+from app.services.library.shot_merge import (
+    VECTOR_MERGE_COSINE,
+    merge_similar_neighbours,
+)
 
 #: Representative frames in flight at once against the provider. Network
 #: providers (doubao) rate-limit; a local engine would take more, but the
@@ -80,6 +85,9 @@ class ShotIndexResult:
     #: row exists, its vector does not, so the video counts as covered only
     #: if at least one landed.
     skipped: int
+    #: Adjacent shots folded because their frame vectors matched
+    #: (``shot_merge``); ``shots`` counts what is left.
+    merged: int = 0
 
     def as_metadata(self) -> dict[str, Any]:
         d = asdict(self)
@@ -110,8 +118,8 @@ def _data_uri(jpeg: bytes) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
 
 
-def _frame_hash(jpeg: bytes) -> str:
-    return f"{ALGO_VERSION}:{hashlib.sha1(jpeg).hexdigest()}"
+def _frame_hash(jpeg: bytes, version: str) -> str:
+    return f"{version}:{hashlib.sha1(jpeg).hexdigest()}"
 
 
 async def _embed_frame(
@@ -136,12 +144,14 @@ async def index_resource_shots(
     embedder: EmbeddingService,
     progress: Optional[ProgressFn] = None,
     params: CutParams = DEFAULT_PARAMS,
+    merge_cosine: float = VECTOR_MERGE_COSINE,
 ) -> ShotIndexResult:
     """Cut ``file_path`` (any storage shape; materialized here), embed one
     frame per shot into ``space`` and replace the resource's shot rows.
 
     ``progress(pct, subtitle)`` is called at the phase changes the Task Center
-    shows (extract → cuts → embedding i/n → writing)."""
+    shows (extract → cuts → embedding i/n → writing). Before writing,
+    adjacent shots whose frame vectors reach ``merge_cosine`` are folded."""
     from app.repositories.video_shots_repository import (
         FRAME_KIND,
         ShotRow,
@@ -158,6 +168,7 @@ async def index_resource_shots(
                 logger.warning(f"[shot_index] progress callback failed: {e}")
 
     space_id = int(space["id"])
+    version = cut_algo_version(params)
     await _say(5, "Extracting frames")
     try:
         async with materialize(file_path) as local_path:
@@ -196,7 +207,7 @@ async def index_resource_shots(
         for i, vec, code in results:
             done += 1
             if vec is not None:
-                vectors[i] = (vec, _frame_hash(frames[i]))
+                vectors[i] = (vec, _frame_hash(frames[i], version))
                 consecutive_errors = 0
                 continue
             if code in ABORT_REASONS:
@@ -208,6 +219,8 @@ async def index_resource_shots(
                 )
         await _say(30 + int(60 * done / max(total, 1)), f"Embedding {done} / {total}")
 
+    folded = merge_similar_neighbours(shots, vectors, threshold=merge_cosine)
+    shots, vectors = list(folded.shots), list(folded.vectors)
     await _say(92, "Writing")
     shot_rows = [
         ShotRow(
@@ -222,7 +235,7 @@ async def index_resource_shots(
     ids = await get_video_shots_repository().replace(
         resource_id=resource_id,
         shots=shot_rows,
-        algo_version=ALGO_VERSION,
+        algo_version=version,
         duration_ms=duration_ms,
     )
     landed = [
@@ -236,11 +249,12 @@ async def index_resource_shots(
     result = ShotIndexResult(
         resource_id=resource_id,
         space_id=space_id,
-        algo_version=ALGO_VERSION,
+        algo_version=version,
         duration_ms=duration_ms,
         shots=len(shots),
         embedded=len(landed),
         skipped=len(shots) - len(landed),
+        merged=folded.merged,
     )
     logger.info(f"[shot_index] resource={resource_id} {result}")
     return result

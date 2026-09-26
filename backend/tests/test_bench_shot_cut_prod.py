@@ -91,7 +91,16 @@ def test_parse_variants_always_starts_with_the_defaults_and_types_fields():
     assert parse_variants(None) == [("default", DEFAULT_PARAMS)]
 
 
-@pytest.mark.parametrize("bad", ["min_shot=800", "ratio", "min_shot_ms=abc"])
+def test_parse_variants_takes_the_detector_as_a_string():
+    out = parse_variants("detector=hist;scene_threshold=0.2,min_shot_ms=500")
+    assert out[1][1].detector == "hist" and out[1][1].ratio == DEFAULT_PARAMS.ratio
+    assert out[2][1].scene_threshold == 0.2 and out[2][1].min_shot_ms == 500
+    assert out[2][1].detector == DEFAULT_PARAMS.detector == "scene"
+
+
+@pytest.mark.parametrize(
+    "bad", ["min_shot=800", "ratio", "min_shot_ms=abc", "detector=magic"]
+)
 def test_parse_variants_rejects_typos_instead_of_scoring_defaults(bad):
     with pytest.raises(ValueError):
         parse_variants(bad)
