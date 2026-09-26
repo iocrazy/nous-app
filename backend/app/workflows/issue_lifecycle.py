@@ -42,6 +42,7 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_message,
     publish_status,
 )
+from app.services.issues.issue_status_read import read_issue_status
 from app.services.issues.turn_outcome import (
     AWAITING_APPROVAL_OUTCOME,
     resolve_turn_outcome,
@@ -518,21 +519,34 @@ async def run_issue_reply_step(
     content = assistant.get("content") or ""
     # fh2 T4: same precedence as the dispatch turn (see turn_outcome).
     outcome, reason, question, awaiting_input = resolve_turn_outcome(result)
-    # Completion loop: same hook as the dispatch turn. The reply road has no
-    # attribution, so the verifier child run takes RunRecorder's default.
+    # Completion loop: same hook as the dispatch turn, narrowed twice.
+    # (1) Only a RESUMING reply is verified — the one _run_reply_turns will
+    # route. It flips the issue to in_progress before the turn; a plain
+    # comment leaves the status where it was. That status is this step's only
+    # view of "resuming" (the caller is hash-pinned), read only when there is
+    # a completed declaration to review. (2) No retry: the reply road has no
+    # continuation turn, so a rejection stays completed → in_review.
+    # The reply road has no attribution; the verifier child run takes
+    # RunRecorder's default.
     verification: Optional[dict[str, Any]] = None
     try:
-        outcome, reason, verification = await apply_completion_verification(
-            issue_id=issue_id,
-            outcome=outcome,
-            reason=reason,
-            result=result,
-            content=content,
-            session_id=session_id,
-            user_id=user_id,
-            trigger="issue_reply",
-            attribution=None,
-        )
+        if (
+            outcome == "completed"
+            and await read_issue_status(issue_id, purpose="reply_verification")
+            == "in_progress"
+        ):
+            outcome, reason, verification = await apply_completion_verification(
+                issue_id=issue_id,
+                outcome=outcome,
+                reason=reason,
+                result=result,
+                content=content,
+                session_id=session_id,
+                user_id=user_id,
+                trigger="issue_reply",
+                attribution=None,
+                allow_retry=False,
+            )
     except Exception as exc:  # noqa: BLE001 — decoration, never break the turn
         logger.warning(
             f"[issue_reply] issue {issue_id}: verification hook raised: {exc!r}"

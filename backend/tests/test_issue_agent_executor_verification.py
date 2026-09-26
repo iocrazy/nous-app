@@ -111,3 +111,61 @@ async def test_hook_exception_never_breaks_the_turn(m, monkeypatch):
         issue={"id": 42, "title": "t"}, agent_id="a", user_id=USER
     )
     assert out["outcome"] == "completed" and out["verification"] is None
+
+
+# ── follow-up: verify_attempts is per dispatch ──
+
+
+async def test_first_turn_of_a_dispatch_resets_the_attempt_counter(m, monkeypatch):
+    mod, chat = m
+    monkeypatch.setattr(
+        mod,
+        "apply_completion_verification",
+        AsyncMock(return_value=("completed", "x", None)),
+    )
+    reset = AsyncMock()
+    monkeypatch.setattr(mod, "reset_verify_attempts", reset)
+    await mod.run_issue_agent(
+        issue={"id": 42, "title": "t"}, agent_id="a", user_id=USER
+    )
+    reset.assert_awaited_once_with(42)
+    assert reset.await_count == 1 and chat.run_session_turn.await_count == 1
+
+
+async def test_a_continuation_does_not_reset(m, monkeypatch):
+    mod, chat = m
+    monkeypatch.setattr(
+        mod,
+        "apply_completion_verification",
+        AsyncMock(return_value=("completed", "x", None)),
+    )
+    monkeypatch.setattr(mod, "pending_verifier_feedback", AsyncMock(return_value=None))
+    reset = AsyncMock()
+    monkeypatch.setattr(mod, "reset_verify_attempts", reset)
+    await mod.run_issue_agent(
+        issue={"id": 42, "title": "t"}, agent_id="a", user_id=USER, is_continuation=True
+    )
+    reset.assert_not_awaited()
+
+
+async def test_a_fork_does_not_reset(m, monkeypatch):
+    mod, chat = m
+    monkeypatch.setattr(
+        mod,
+        "apply_completion_verification",
+        AsyncMock(return_value=("completed", "x", None)),
+    )
+    monkeypatch.setattr(mod, "merge_execution_state", AsyncMock())
+    reset = AsyncMock()
+    monkeypatch.setattr(mod, "reset_verify_attempts", reset)
+    await mod.run_issue_agent(
+        issue={
+            "id": 42,
+            "title": "t",
+            "execution_state": {"forked_from": {"run_id": 1, "at_seq": 2}},
+        },
+        agent_id="a",
+        user_id=USER,
+    )
+    assert chat.run_session_turn.await_args.kwargs["fork_of"] == (1, 2)
+    reset.assert_not_awaited()

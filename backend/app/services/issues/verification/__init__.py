@@ -64,10 +64,12 @@ async def pending_verifier_feedback(issue_id: int) -> Optional[str]:
 from app.services.issues.verification.service import (  # noqa: E402
     VERIFY_MAX_ATTEMPTS,
     apply_completion_verification,
+    reset_verify_attempts,
 )
 
 __all__ = [
     "VERIFY_MAX_ATTEMPTS",
     "apply_completion_verification",
     "pending_verifier_feedback",
+    "reset_verify_attempts",
 ]

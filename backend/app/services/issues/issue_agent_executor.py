@@ -42,6 +42,7 @@ from app.services.issues.turn_recovery import (
 from app.services.issues.verification import (
     apply_completion_verification,
     pending_verifier_feedback,
+    reset_verify_attempts,
 )
 
 
@@ -278,6 +279,11 @@ async def run_issue_agent(
                 f"[issue_agent] issue={iid} could not clear forked_from: {exc!r}; "
                 f"the next run on this issue would be recorded as a fork"
             )
+    elif not is_continuation:
+        # Completion loop: verify_attempts is per dispatch — the first turn
+        # (not a continuation, not a fork) starts the retry budget at zero.
+        # Best-effort inside the helper; never breaks the turn.
+        await reset_verify_attempts(iid)
 
     if fork_of is not None:
         # A forked run starts from the seeded history (task text included);

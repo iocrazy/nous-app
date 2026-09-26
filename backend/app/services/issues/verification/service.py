@@ -5,6 +5,16 @@ Runs INSIDE the existing step bodies (``run_issue_agent`` /
 ``run_issue_reply_step``); plain async, never a DBOS step. Every failure
 degrades to ``unverified`` — never to ``pass`` (spec §7).
 
+Three scope rules (follow-up to Task 6):
+
+* The reply road verifies only a RESUMING turn — the one ``_run_reply_turns``
+  will route; the reply step sees that as ``status == "in_progress"``.
+* The reply road never retries (``allow_retry=False``): it has no
+  continuation turn, so a rejection stays ``completed`` → in_review with the
+  fail verdict visible, and no pending feedback is left behind.
+* ``verify_attempts`` counts per dispatch: the first turn of a dispatch
+  (not a continuation, not a fork) resets it (``reset_verify_attempts``).
+
 Import rule: the package ``__init__`` imports THIS module at its end, so
 nothing here may import from ``app.services.issues.verification`` itself —
 only from its submodules.
@@ -273,11 +283,17 @@ async def apply_completion_verification(
     user_id: str,
     trigger: str,
     attribution: Optional[str],
+    allow_retry: bool = True,
 ) -> tuple[Optional[str], Optional[str], Optional[dict[str, Any]]]:
     """The step-body hook. Only a ``completed`` declaration is reviewed; a
     cancel / pause / budget wrap-up is not (spec §7, §8). Returns the possibly
     converted ``(outcome, reason)`` and the verdict dict that goes into the
-    step result as ``"verification"``."""
+    step result as ``"verification"``.
+
+    ``allow_retry=False`` (the reply road, which has no continuation turn):
+    a rejection is stored with ``retry=False`` and the outcome stays
+    ``completed``, so routing parks it at in_review instead of
+    ``continue_capped`` and no later continuation injects stale feedback."""
     if outcome != "completed":
         return outcome, reason, None
     skip = _skip_reason(result or {})
@@ -308,7 +324,9 @@ async def apply_completion_verification(
             "unverified", "verifier_error", (), (), (), None, "none", None, None
         )
     attempts = _attempts_of(row) + 1
-    retry = verdict.verdict == "fail" and attempts <= VERIFY_MAX_ATTEMPTS
+    retry = (
+        allow_retry and verdict.verdict == "fail" and attempts <= VERIFY_MAX_ATTEMPTS
+    )
     stamped = Verdict(
         **{**asdict(verdict), "attempt": attempts, "retry": retry, "checked_at": _now()}
     )
@@ -338,9 +356,22 @@ async def apply_completion_verification(
     return outcome, reason, vd
 
 
+async def reset_verify_attempts(issue_id: int) -> None:
+    """Start a dispatch's attempt budget at zero. Best-effort: a failed write
+    only means this dispatch inherits the old count (fewer retries), never a
+    broken turn."""
+    try:
+        await merge_execution_state(int(issue_id), {"verify_attempts": 0})
+    except Exception as exc:  # noqa: BLE001 — logged, never breaks the turn
+        logger.warning(
+            f"[verification] issue {issue_id}: verify_attempts reset failed: {exc!r}"
+        )
+
+
 __all__ = [
     "VERIFY_MAX_ATTEMPTS",
     "Verdict",
     "apply_completion_verification",
+    "reset_verify_attempts",
     "verify_completion",
 ]

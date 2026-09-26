@@ -182,3 +182,31 @@ def test_public_helpers_are_not_dbos_steps():
         assert not hasattr(
             fn, "__wrapped__"
         ), fn  # DBOS.step wraps; plain coroutines do not
+
+
+# ── follow-up: reply road has no retry turn; counter resets per dispatch ──
+
+
+async def test_allow_retry_false_keeps_completed_and_stores_no_retry(wired):
+    j, merge, *_ = wired
+    j.return_value = JudgeResult("fail", ({"criterion": "c", "why": "w"},), 0.8, "v1")
+    outcome, reason, v = await _apply(allow_retry=False)
+    assert (outcome, reason) == ("completed", "done")
+    assert v["verdict"] == "fail" and v["retry"] is False and v["attempt"] == 1
+    assert (
+        merge.await_args.args[1]["verification"]["retry"] is False
+    )  # no pending feedback later
+
+
+async def test_reset_verify_attempts_zeroes_the_counter(monkeypatch):
+    merge = AsyncMock()
+    monkeypatch.setattr(svc, "merge_execution_state", merge)
+    await svc.reset_verify_attempts(5)
+    merge.assert_awaited_once_with(5, {"verify_attempts": 0})
+
+
+async def test_reset_verify_attempts_never_raises(monkeypatch):
+    monkeypatch.setattr(
+        svc, "merge_execution_state", AsyncMock(side_effect=RuntimeError("db"))
+    )
+    await svc.reset_verify_attempts(5)  # logged, not raised
