@@ -22,12 +22,18 @@ const createSpaceMock = vi.fn();
 const activateSpaceMock = vi.fn();
 const deleteSpaceMock = vi.fn();
 const getCatalogMock = vi.fn();
+const setVisualSpaceMock = vi.fn();
+const clearVisualSpaceMock = vi.fn();
+const updateShotsPolicyMock = vi.fn();
 vi.mock('../../services/searchService', () => ({
   getVectorsStatus: (...args: unknown[]) => getVectorsStatusMock(...args),
   createVectorSpace: (...args: unknown[]) => createSpaceMock(...args),
   activateVectorSpace: (...args: unknown[]) => activateSpaceMock(...args),
   deleteVectorSpace: (...args: unknown[]) => deleteSpaceMock(...args),
   getVectorSpaceCatalog: (...args: unknown[]) => getCatalogMock(...args),
+  setVisualSpace: (...args: unknown[]) => setVisualSpaceMock(...args),
+  clearVisualSpace: (...args: unknown[]) => clearVisualSpaceMock(...args),
+  updateShotsPolicy: (...args: unknown[]) => updateShotsPolicyMock(...args),
 }));
 vi.mock('../../services/aiService', () => ({
   backfillEmbeddings: (...args: unknown[]) => backfillMock(...args),
@@ -114,6 +120,50 @@ const withSpaces = (cand: ReturnType<typeof candidate> | null, canManage = true)
   spaces: cand ? [ACTIVE_SPACE, cand] : [ACTIVE_SPACE],
   can_manage: canManage,
 });
+
+// Real wire of the per-layer fields (PR #2482 / #2485, cn.nous.ink 2026-09-26):
+// `visual_space` names the space the visual layer lives in, `spaces[].visual`
+// marks it, `shots_policy` carries the automation policy + sweeper progress.
+const FOLLOWING_VISUAL = {
+  id: OK_STATUS.space.id,
+  actual_model: 'doubao-embedding-vision-251215',
+  catalog_name: 'nous-doubao-embedding-vision',
+  follows_active: true,
+};
+const POLICY = {
+  auto_index: 'local_only',
+  backfill: 'off',
+  batch: 5,
+  daily_cap: 200,
+  provider_local: false,
+  dispatched_today: 0,
+  active: 0,
+  pending_total: 1162,
+  last_tick: null,
+  last_error: null,
+  last_skip: null,
+};
+const imageCandidate = (visual = false) => ({
+  ...candidate(150),
+  modalities: ['image', 'text'],
+  visual,
+  layers: [
+    ...candidate(150).layers,
+    { layer: 'visual', status: visual ? 'ok' : 'not_built', covered: visual ? 38 : 0, total: 1118, stale: 0 },
+  ],
+});
+const withVisual = (cand: ReturnType<typeof imageCandidate>, opts: { canManage?: boolean; policy?: typeof POLICY | null } = {}) => {
+  const onCandidate = cand.visual;
+  return {
+    ...withSpaces(cand, opts.canManage ?? true),
+    spaces: [{ ...ACTIVE_SPACE, visual: !onCandidate }, cand],
+    visual_space: onCandidate
+      ? { id: cand.id, actual_model: cand.actual_model, catalog_name: cand.catalog_name, follows_active: false }
+      : FOLLOWING_VISUAL,
+    visual_status: 'ok',
+    shots_policy: opts.policy === undefined ? POLICY : opts.policy,
+  };
+};
 // Real wire of GET /search/vectors/catalog: `last_test_status` carries the
 // live status (backend test_platform_embedding_models_*), plus `engine`.
 const ROWS = [
@@ -133,6 +183,9 @@ describe('VectorsPanel', () => {
     deleteSpaceMock.mockReset();
     getCatalogMock.mockReset();
     backfillShotsMock.mockReset();
+    setVisualSpaceMock.mockReset();
+    clearVisualSpaceMock.mockReset();
+    updateShotsPolicyMock.mockReset();
   });
 
   it('renders the current space card from /vectors/status', async () => {
@@ -673,6 +726,205 @@ describe('VectorsPanel', () => {
       const line = await screen.findByTestId('vector-space-error');
       expect(line).toHaveTextContent(text);
       spy.mockRestore();
+    });
+  });
+
+  describe('visual layer space', () => {
+    it('older backends without visual_space show no visual buttons or lines', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(150)));
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      expect(within(card).queryByRole('button', { name: 'Use For Visual' })).toBeNull();
+      expect(screen.queryByTestId('vector-visual-layer-line')).toBeNull();
+      expect(screen.getByTestId('vector-visual-source')).toHaveTextContent('one keyframe per shot');
+      expect(screen.queryByTestId('indexing-policy')).toBeNull();
+    });
+
+    it('says the visual layer follows the current space, on the card and in the Visual row', async () => {
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(false)));
+      render(<VectorsPanel />);
+      expect(await screen.findByTestId('vector-visual-layer-line')).toHaveTextContent('follows current space');
+      expect(screen.getByTestId('vector-visual-source')).toHaveTextContent(
+        'one keyframe per shot · follows current space',
+      );
+    });
+
+    it('Use For Visual points the visual layer at the candidate and renders the returned status', async () => {
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(false)));
+      setVisualSpaceMock.mockResolvedValue(withVisual(imageCandidate(true)));
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      const btn = within(card).getByRole('button', { name: 'Use For Visual' });
+      expect(btn).toBeEnabled();
+      fireEvent.click(btn);
+      await waitFor(() => expect(setVisualSpaceMock).toHaveBeenCalledWith(CANDIDATE_ID));
+      expect(await screen.findByTestId('vector-visual-badge')).toHaveTextContent('Visual layer');
+      expect(screen.getByTestId('vector-visual-layer-line')).toHaveTextContent('nous-wemm-embedding-2b · separate space');
+      expect(screen.getByTestId('vector-visual-source')).toHaveTextContent('space nous-wemm-embedding-2b');
+      expect(screen.getByTestId('vector-space-notice')).toHaveTextContent('nous-wemm-embedding-2b');
+      // The candidate's own visual coverage is on its card now.
+      expect(screen.getByTestId('vector-candidate-visual-coverage')).toHaveTextContent('38 / 1,118');
+    });
+
+    it('a text-only candidate cannot be used for the visual layer, and says why', async () => {
+      const textOnly = { ...imageCandidate(false), modalities: ['text'] };
+      getVectorsStatusMock.mockResolvedValue(withVisual(textOnly));
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      const btn = within(card).getByRole('button', { name: 'Use For Visual' });
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveAttribute('title', "This space's model takes no image input");
+    });
+
+    it('the visual space shows Follow Current instead, and its Delete is disabled with the reason', async () => {
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(true)));
+      clearVisualSpaceMock.mockResolvedValue(withVisual(imageCandidate(false)));
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      expect(within(card).queryByRole('button', { name: 'Use For Visual' })).toBeNull();
+      const del = within(card).getByRole('button', { name: 'Delete' });
+      expect(del).toBeDisabled();
+      expect(del).toHaveAttribute('title', 'This space serves the Visual layer — point it elsewhere first');
+      fireEvent.click(within(card).getByRole('button', { name: 'Follow Current' }));
+      await waitFor(() => expect(clearVisualSpaceMock).toHaveBeenCalled());
+      expect(await screen.findByText('Visual layer follows the current space again.')).toBeInTheDocument();
+      expect(screen.queryByTestId('vector-visual-badge')).toBeNull();
+    });
+
+    it('a 422 provider_no_image from Use For Visual reads its own line', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(false)));
+      setVisualSpaceMock.mockRejectedValue(
+        new ApiError('Refused', 422, {
+          code: 'http_422',
+          details: { code: 'provider_no_image', message: 'wemm-embedding-2b takes no image input' },
+        }),
+      );
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      fireEvent.click(within(card).getByRole('button', { name: 'Use For Visual' }));
+      expect(await screen.findByTestId('vector-space-error')).toHaveTextContent("This space's model takes no image input");
+      spy.mockRestore();
+    });
+
+    it('an unavailable visual space is said on the current-space card', async () => {
+      getVectorsStatusMock.mockResolvedValue({
+        ...withVisual(imageCandidate(false)),
+        visual_space: null,
+        visual_status: 'visual_space_unavailable',
+      });
+      render(<VectorsPanel />);
+      expect(await screen.findByTestId('vector-visual-status')).toHaveTextContent('its model is no longer available');
+    });
+
+    it('non-admins see Use For Visual disabled with the admin reason', async () => {
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(false), { canManage: false }));
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      const btn = within(card).getByRole('button', { name: 'Use For Visual' });
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveAttribute('title', 'Only an admin can change embedding spaces');
+    });
+  });
+
+  describe('indexing policy', () => {
+    it('renders the policy, the progress line and the network-provider warning', async () => {
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(false)));
+      render(<VectorsPanel />);
+      const section = await screen.findByTestId('indexing-policy');
+      expect(
+        within(within(section).getByTestId('policy-auto-index')).getByRole('radio', { name: 'Local provider only', checked: true }),
+      ).toBeInTheDocument();
+      expect(within(section).getByTestId('policy-provider-line')).toHaveTextContent(
+        'current visual provider is a network one — Local provider only equals Off',
+      );
+      // remaining = the Visual row's total − covered (1,200 − 38).
+      expect(within(section).getByTestId('policy-today')).toHaveTextContent('0 dispatched · 0 running · 1,162 remaining');
+      expect(within(section).getByTestId('policy-today')).toHaveTextContent('no tick yet');
+      expect(within(section).getByRole('button', { name: 'Save Policy' })).toBeDisabled();
+    });
+
+    it('a local provider reads the free-indexing line and progress with a last tick', async () => {
+      const policy = {
+        ...POLICY,
+        backfill: 'local_only',
+        provider_local: true,
+        dispatched_today: 37,
+        active: 3,
+        last_tick: '2026-09-26T10:20:00+00:00',
+        last_skip: 'backpressure',
+      };
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(true), { policy }));
+      render(<VectorsPanel />);
+      const section = await screen.findByTestId('indexing-policy');
+      expect(within(section).getByTestId('policy-provider-line')).toHaveTextContent('visual provider is nous-engine (local)');
+      expect(within(section).getByTestId('policy-provider-line')).not.toHaveClass('text-warn');
+      const today = within(section).getByTestId('policy-today');
+      expect(today).toHaveTextContent('37 dispatched · 3 running');
+      expect(today).toHaveTextContent('last tick 2026-09-26 10:20');
+      expect(today).toHaveTextContent('last tick skipped: backpressure');
+    });
+
+    it('Save sends only the changed fields and renders the returned status', async () => {
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(true)));
+      const saved = { ...POLICY, backfill: 'local_only', batch: 8, provider_local: true };
+      updateShotsPolicyMock.mockResolvedValue(withVisual(imageCandidate(true), { policy: saved }));
+      render(<VectorsPanel />);
+      const section = await screen.findByTestId('indexing-policy');
+      fireEvent.click(within(within(section).getByTestId('policy-backfill')).getByRole('radio', { name: 'Local provider only' }));
+      fireEvent.change(within(section).getByRole('spinbutton', { name: 'Batch per tick' }), { target: { value: '8' } });
+      const save = within(section).getByRole('button', { name: 'Save Policy' });
+      expect(save).toBeEnabled();
+      fireEvent.click(save);
+      await waitFor(() => expect(updateShotsPolicyMock).toHaveBeenCalledWith({ backfill: 'local_only', batch: 8 }));
+      expect(await screen.findByTestId('policy-notice')).toHaveTextContent('Policy saved');
+      expect(
+        within(within(section).getByTestId('policy-backfill')).getByRole('radio', { name: 'Local provider only', checked: true }),
+      ).toBeInTheDocument();
+      expect(within(section).getByRole('button', { name: 'Save Policy' })).toBeDisabled();
+    });
+
+    it('batch is clamped to 1–50 in the field', async () => {
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(true)));
+      render(<VectorsPanel />);
+      const section = await screen.findByTestId('indexing-policy');
+      const batch = within(section).getByRole('spinbutton', { name: 'Batch per tick' });
+      fireEvent.change(batch, { target: { value: '500' } });
+      expect(batch).toHaveValue(50);
+    });
+
+    it('a 422 policy_invalid names the field', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(true)));
+      updateShotsPolicyMock.mockRejectedValue(
+        new ApiError('Refused', 422, {
+          code: 'http_422',
+          details: { code: 'policy_invalid', field: 'batch', message: 'an integer in [1, 50]' },
+        }),
+      );
+      render(<VectorsPanel />);
+      const section = await screen.findByTestId('indexing-policy');
+      fireEvent.click(within(within(section).getByTestId('policy-auto-index')).getByRole('radio', { name: 'Always' }));
+      fireEvent.click(within(section).getByRole('button', { name: 'Save Policy' }));
+      expect(await screen.findByTestId('policy-error')).toHaveTextContent('Policy rejected: batch — an integer in [1, 50]');
+      spy.mockRestore();
+    });
+
+    it('non-admins see the policy read-only', async () => {
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(true), { canManage: false }));
+      render(<VectorsPanel />);
+      const section = await screen.findByTestId('indexing-policy');
+      expect(within(within(section).getByTestId('policy-auto-index')).getByRole('radio', { name: 'Off' })).toBeDisabled();
+      expect(within(section).getByRole('spinbutton', { name: 'Batch per tick' })).toBeDisabled();
+      expect(within(section).getByRole('button', { name: 'Save Policy' })).toBeDisabled();
+      expect(section).toHaveTextContent('Only an admin can change the indexing policy');
+    });
+
+    it('a null shots_policy (unreadable on the server) hides the section', async () => {
+      getVectorsStatusMock.mockResolvedValue(withVisual(imageCandidate(true), { policy: null }));
+      render(<VectorsPanel />);
+      await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      expect(screen.queryByTestId('indexing-policy')).toBeNull();
     });
   });
 });

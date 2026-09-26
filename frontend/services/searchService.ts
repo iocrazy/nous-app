@@ -3,7 +3,7 @@
  */
 
 import { apiClient } from './apiClient';
-import type { NousModelPublic, PlatformEngineState } from '../types/api';
+import type { NousModelPublic, PlatformEngineState, ShotsPolicyStatus, ShotsPolicyUpdate, VisualSpaceInfo, VisualStatus } from '../types/api';
 import type { SearchChipFilters } from './searchChipFilters';
 
 // Types
@@ -345,6 +345,9 @@ export interface VectorLayerStatus {
  *  candidates. `catalog_name` is null when the model left the catalog. */
 export interface VectorSpaceStatus extends VectorSpaceInfo {
   active: boolean;
+  /** The VISUAL layer (shot frames) embeds into and searches this space;
+   *  absent on backends before per-layer spaces. */
+  visual?: boolean;
   catalog_name: string | null;
   layers: VectorLayerStatus[];
 }
@@ -359,6 +362,14 @@ export interface VectorsStatus {
   layers: VectorLayerStatus[];
   spaces?: VectorSpaceStatus[];
   can_manage?: boolean;
+  /** The space the visual layer lives in (`follows_active` when it is the
+   *  current one); null with `visual_status` saying why. Absent on older
+   *  backends. */
+  visual_space?: VisualSpaceInfo | null;
+  visual_status?: VisualStatus;
+  /** Shot-index automation policy + sweeper progress; null only when the
+   *  policy could not be read, absent on older backends. */
+  shots_policy?: ShotsPolicyStatus | null;
 }
 
 /** Body of `DELETE /api/v1/search/vectors/spaces/{id}`. `deleted_vectors`
@@ -385,6 +396,20 @@ export const activateVectorSpace = (spaceId: string): Promise<VectorsStatus> =>
 /** Delete a non-active space and every vector in it (admin). */
 export const deleteVectorSpace = (spaceId: string): Promise<DeleteVectorSpaceResult> =>
   apiClient.delete<DeleteVectorSpaceResult>(`/api/v1/search/vectors/spaces/${encodeURIComponent(spaceId)}`);
+
+/** Point the VISUAL layer at `spaceId` (admin). 422 `provider_no_image` when
+ *  that space's embedder takes no images. Answers with the new status. */
+export const setVisualSpace = (spaceId: string): Promise<VectorsStatus> =>
+  apiClient.put<VectorsStatus>('/api/v1/search/vectors/visual-space', { space_id: spaceId });
+
+/** Make the visual layer follow the current space again (admin). */
+export const clearVisualSpace = (): Promise<VectorsStatus> =>
+  apiClient.delete<VectorsStatus>('/api/v1/search/vectors/visual-space');
+
+/** Write the shot-index automation policy (admin): only the fields sent.
+ *  422 `policy_invalid` names the field. Answers with the new status. */
+export const updateShotsPolicy = (patch: ShotsPolicyUpdate): Promise<VectorsStatus> =>
+  apiClient.put<VectorsStatus>('/api/v1/search/vectors/shots-policy', patch);
 
 /** What Add Space may pick. `models` are the platform provider view's system
  *  rows of type embedding (platform-wide only, governance and nous-engine
