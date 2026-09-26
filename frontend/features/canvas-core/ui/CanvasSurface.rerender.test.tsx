@@ -65,7 +65,7 @@ vi.mock('../smart/nodes/GroupNodeView', async (importOriginal) => {
 vi.mock('../smart/nodes/useGenerationModels', () => ({
   useGenerationModels: () => [],
 }));
-vi.mock('../smart/nodes/useTextModels', () => ({ useTextModels: () => [] }));
+vi.mock('../../../hooks/usePlatformModels', () => ({ useTextPlatformModels: () => [] }));
 vi.mock('../smart/nodes/useAgents', () => ({ useAgents: () => [] }));
 
 vi.mock('@xyflow/react', async (importOriginal) => {

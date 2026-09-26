@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
+import { ENGINE_DOWN, baseAISettings, withPlatform } from '../tests/fixtures/platform';
+
 import {
-  isPlatformModelAvailable,
   platformModelAvailability,
+  platformModelRows,
   platformOptionAttrs,
   platformModelLabel,
   platformModelText,
@@ -61,45 +63,24 @@ describe('platformModelLabel — same string as the admin AI Models card', () =>
   });
 });
 
-describe('isPlatformModelAvailable', () => {
-  it('is false only for a failed probe', () => {
-    expect(isPlatformModelAvailable({ last_test_status: 'fail' })).toBe(false);
-    expect(isPlatformModelAvailable({ last_test_status: 'ok' })).toBe(true);
-    // Not probed is not a verdict in either direction.
-    expect(isPlatformModelAvailable({ last_test_status: 'not_probed' })).toBe(true);
-    expect(isPlatformModelAvailable({ last_test_status: null })).toBe(true);
-    expect(isPlatformModelAvailable({})).toBe(true);
-  });
-});
-
 describe('platformModelAvailability — idle rows stay visible but cannot be picked', () => {
-  it('ok, not_probed and never-probed rows are selectable', () => {
+  it('ok, not_probed and unknown are selectable — no signal is not a verdict', () => {
     for (const status of ['ok', 'not_probed', null, undefined] as const) {
-      expect(platformModelAvailability({ last_test_status: status })).toEqual({
-        selectable: true,
-      });
+      expect(platformModelAvailability(status)).toEqual({ selectable: true });
     }
-    expect(platformModelAvailability({})).toEqual({ selectable: true });
   });
 
   it('idle (authorized on nous-engine, not loaded) is not selectable', () => {
-    expect(platformModelAvailability({ last_test_status: 'idle' })).toEqual({
+    expect(platformModelAvailability('idle')).toEqual({
       selectable: false,
       reason: 'not_loaded',
     });
-  });
-
-  it('fail is left to isPlatformModelAvailable (hidden upstream), not greyed here', () => {
-    expect(platformModelAvailability({ last_test_status: 'fail' })).toEqual({
-      selectable: true,
-    });
-    expect(isPlatformModelAvailable({ last_test_status: 'fail' })).toBe(false);
   });
 });
 
 describe('platformOptionAttrs — the <option> props a UiSelect needs', () => {
   it('disables an idle row and carries the caller-localized reason', () => {
-    expect(platformOptionAttrs({ last_test_status: 'idle' }, 'Not loaded on nous-engine')).toEqual({
+    expect(platformOptionAttrs('idle', 'Not loaded on nous-engine')).toEqual({
       disabled: true,
       'data-availability': 'not_loaded',
       'data-description': 'Not loaded on nous-engine',
@@ -107,6 +88,61 @@ describe('platformOptionAttrs — the <option> props a UiSelect needs', () => {
   });
 
   it('leaves a selectable row untouched', () => {
-    expect(platformOptionAttrs({ last_test_status: 'ok' }, 'x')).toEqual({ disabled: false });
+    expect(platformOptionAttrs('ok', 'x')).toEqual({ disabled: false });
+  });
+});
+
+describe('platformModelRows — the one mapping every picker uses', () => {
+  const ROWS = [
+    { name: 'nous-doubao', actual_model: 'doubao-seed-2-0-pro', disabled: true },
+    { name: 'nous-qwen3-8b', actual_model: 'qwen3-8b' },
+    { name: 'nous-wemm-2b', actual_model: 'wemm-2b', type: 'embedding' as const, status: 'idle' as const },
+    { name: 'codex-local-image', actual_model: 'gpt-image-2', type: 'image' as const, is_local: true },
+  ];
+
+  it('enabled scope = enabled_models in server order, each with its mapping', () => {
+    const rows = platformModelRows(withPlatform(baseAISettings(), ROWS));
+    expect(rows.map((r) => r.name)).toEqual(['nous-qwen3-8b', 'nous-wemm-2b', 'codex-local-image']);
+    expect(rows[1]).toMatchObject({ name: 'nous-wemm-2b', type: 'embedding', status: 'idle' });
+  });
+
+  it('listed scope keeps the rows the user switched off (the card re-enables them)', () => {
+    const rows = platformModelRows(withPlatform(baseAISettings(), ROWS), { scope: 'listed' });
+    expect(rows.map((r) => r.name)).toEqual([
+      'nous-doubao',
+      'nous-qwen3-8b',
+      'nous-wemm-2b',
+      'codex-local-image',
+    ]);
+  });
+
+  it('filters by type', () => {
+    const rows = platformModelRows(withPlatform(baseAISettings(), ROWS), { types: ['image'] });
+    expect(rows.map((r) => r.name)).toEqual(['codex-local-image']);
+  });
+
+  it('offers nothing when the card is switched off, but still lists for the card', () => {
+    const settings = withPlatform(baseAISettings(), ROWS, { enabled: false });
+    expect(platformModelRows(settings)).toEqual([]);
+    expect(platformModelRows(settings, { scope: 'listed' })).toHaveLength(4);
+  });
+
+  it('an unreachable engine changes nothing about the list (could not reach ≠ revoked)', () => {
+    const settings = withPlatform(baseAISettings(), ROWS, { engine: ENGINE_DOWN });
+    expect(platformModelRows(settings)).toHaveLength(3);
+  });
+
+  it('platform_models null (unknown) or absent (not loaded) → no rows, nothing guessed', () => {
+    const settings = withPlatform(baseAISettings(), ROWS);
+    expect(platformModelRows({ ...settings, platform_models: null })).toEqual([]);
+    expect(platformModelRows({ ...settings, platform_models: undefined })).toEqual([]);
+    expect(platformModelRows(null)).toEqual([]);
+  });
+
+  it('skips a name the mapping does not carry rather than showing a bare id', () => {
+    const settings = withPlatform(baseAISettings(), ROWS);
+    const nous = { ...settings.providers.nous!, enabled_models: ['ghost', 'nous-qwen3-8b'] };
+    const rows = platformModelRows({ ...settings, providers: { nous } });
+    expect(rows.map((r) => r.name)).toEqual(['nous-qwen3-8b']);
   });
 });

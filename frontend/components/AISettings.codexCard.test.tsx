@@ -27,7 +27,7 @@ vi.mock('../services/aiService', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/aiService')>()),
   testAIConnection: (...a: unknown[]) => testAIConnection(...a),
   reportProviderHealth: vi.fn().mockResolvedValue(undefined),
-  getNousModels: vi.fn().mockResolvedValue([]),
+  getPlatformStatus: vi.fn(() => new Promise(() => {})),
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true, visual_analysis: true,
     caption: true, classification: true, summarization: true,

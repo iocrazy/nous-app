@@ -4,7 +4,7 @@
 // the durable result URLs land in per-prompt output slots on the canvas.
 
 import { expect, test, type Page } from '@playwright/test';
-import { FIXTURE_IMAGE_URL, setupStubbedSession, TEAM_ID } from './helpers/stubs';
+import { FIXTURE_IMAGE_URL, setupStubbedSession, stubPlatformModels, TEAM_ID } from './helpers/stubs';
 
 const CANVAS = {
   id: 'c-gen',
@@ -55,18 +55,7 @@ async function setupStubs(page: Page): Promise<void> {
       }),
     }),
   );
-  await page.route('**/api/v1/canvases/generation-models', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        success: true,
-        data: [
-          { name: 'jimeng-cli-image', display_name: 'Jimeng Image', type: 'image', actual_provider: 'jimeng-cli' },
-        ],
-      }),
-    }),
-  );
+  await stubPlatformModels(page, [{ name: 'jimeng-cli-image', type: 'image' }]);
   await page.route('**/api/v1/canvases/c-gen/generations', (route) =>
     route.fulfill({
       status: 200,

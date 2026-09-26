@@ -34,10 +34,10 @@ vi.mock('react-i18next', () => {
 });
 
 vi.mock('../services/aiService', () => ({
-  saveAISettings: vi.fn().mockResolvedValue(undefined),
+  saveAISettings: vi.fn(async (s: unknown) => s), // PUT echoes the saved settings
   testAIConnection: vi.fn(),
   reportProviderHealth: vi.fn().mockResolvedValue(undefined),
-  getNousModels: vi.fn().mockResolvedValue([]),
+  getPlatformStatus: vi.fn(() => new Promise(() => {})),
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,

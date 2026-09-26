@@ -36,9 +36,11 @@ vi.mock('../../../../services/generatedService', () => ({
   saveGenerationAsAsset: (...a: unknown[]) => saveGenerationAsAsset(...a),
 }));
 
-// The catalog, from the same hook the canvas prompt node uses.
+// The image rows, from the same hook the canvas prompt node uses (the
+// platform list on the AI settings, spec 2026-09-25). No `display_name` —
+// the settings mapping does not carry one.
 const models = vi.fn(() => [
-  { name: 'seedream-4', display_name: 'Seedream 4', type: 'image' as const },
+  { name: 'seedream-4', actual_model: '', type: 'image' as const, status: 'ok' as const },
 ]);
 vi.mock('../../../../features/canvas-core/smart/nodes/useGenerationModels', () => ({
   useGenerationModels: (...a: unknown[]) => models(...(a as [])),
@@ -97,7 +99,7 @@ class ApiError extends Error {
 beforeEach(() => {
   vi.clearAllMocks();
   models.mockReturnValue([
-    { name: 'seedream-4', display_name: 'Seedream 4', type: 'image' as const },
+    { name: 'seedream-4', actual_model: '', type: 'image' as const, status: 'ok' as const },
   ]);
   previewGenerateSlot.mockResolvedValue(PREVIEW);
   generateSlot.mockResolvedValue({
@@ -441,30 +443,26 @@ describe('Attach Now', () => {
 describe('the model picker — not loaded on nous-engine', () => {
   const IDLE = {
     name: 'nous-studio-image',
-    display_name: 'Studio Image',
     actual_model: 'studio-image-v2',
     type: 'image' as const,
-    last_test_status: 'idle' as const,
+    status: 'idle' as const,
   };
 
   it('lists an idle model disabled, suffixed and titled with the reason', async () => {
     models.mockReturnValue([
-      { name: 'seedream-4', display_name: 'Seedream 4', type: 'image' as const },
+      { name: 'seedream-4', actual_model: '', type: 'image' as const, status: 'ok' as const },
       IDLE,
     ] as never);
     renderDialog();
     const select = await screen.findByTestId('generate-model');
     const idle = select.querySelector('option[value="nous-studio-image"]') as HTMLOptionElement;
     expect(idle.disabled).toBe(true);
-    // Option text is the admin identifier (actual_model, else the row name),
-    // never display_name.
+    // Option text is the admin identifier (actual_model, else the row name).
     expect(idle.textContent).toBe('studio-image-v2 (not loaded)');
     expect(idle.getAttribute('title')).toBe('Not loaded on nous-engine');
     const ready = select.querySelector('option[value="seedream-4"]') as HTMLOptionElement;
     expect(ready.disabled).toBe(false);
     expect(ready.textContent).toBe('seedream-4');
-    expect(select.textContent).not.toContain('Studio Image');
-    expect(select.textContent).not.toContain('Seedream 4');
   });
 
   it('keeps an idle preview model as the shown value instead of snapping away', async () => {

@@ -6,22 +6,22 @@
  *      `actual_model` is empty. The user side used to print `display_name`
  *      (`Doubao Embedding (Vision)`), so the two pages could not be matched;
  *      since 2026-09-25 `display_name` is not shown on the user side at all.
- *   2. Same AVAILABILITY. A row whose last probe failed is not offered;
- *      `not_probed` rows (image / local-daemon rows the hourly poll cannot
- *      judge) stay listed.
+ *   2. Same AVAILABILITY. `not_probed` rows (image / local-daemon rows the
+ *      hourly poll cannot judge) stay listed. Failed rows never reach the
+ *      page: the server drops them from the settings view (spec 2026-09-25,
+ *      pinned by backend/tests/api/test_ai_settings_wire.py).
  *
- * Fixture = production-shaped `GET /api/v1/ai/nous-models` rows: the 14 rows
- * the 2026-09-24 recon found (8 `ok`, 6 `not_probed`; jimeng-local rows carry
- * an EMPTY `actual_model`), wire types kept as sent (bigint `id` and Numeric
- * `pricing_value` are JSON numbers). Production had no `fail` row that day, so
- * two synthetic failing rows are appended — they are marked as such below.
+ * Fixture = the 14 rows the 2026-09-24 recon found (8 `ok`, 6 `not_probed`;
+ * jimeng-local rows carry an EMPTY `actual_model`), in the `GET /ai/settings`
+ * platform shape (tests/fixtures/platform). The old `display_name`s are kept
+ * beside each row only to prove none of them reaches the page.
  * Reconstructed from the recon and migration seeds, not a verbatim dump.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { AISettings } from './AISettings';
-import type { AISettings as AISettingsType } from '../types';
-import type { NousModelPublic } from '../types/api';
+import type { PlatformModelType } from '../types/api';
+import { baseAISettings, withPlatform, type PlatformRowSpec } from '../tests/fixtures/platform';
 
 import en from '../public/locales/en.json';
 
@@ -36,38 +36,31 @@ vi.mock('react-i18next', () => {
   return { useTranslation: () => ({ t }) };
 });
 
-const TESTED = '2026-09-24T01:00:00+00:00';
+type Row = PlatformRowSpec & { display_name: string };
 
-// The generated row already carries `id` (a JSON number) and `sort_order`.
-type WireRow = NousModelPublic;
-
-let nextId = 7_300_000_000_001;
 function row(
   name: string,
   display_name: string,
-  type: NousModelPublic['type'],
+  type: PlatformModelType,
   actual_model: string,
-  status: 'ok' | 'not_probed' | 'fail',
-  extra: Partial<WireRow> = {},
-): WireRow {
+  status: 'ok' | 'not_probed',
+  extra: Partial<PlatformRowSpec> = {},
+): Row {
   return {
-    id: nextId++,
     name,
     display_name,
     actual_model,
     type,
     pricing_type: type === 'asr' ? 'per_hour' : type === 'llm' ? 'per_token' : 'per_request',
     pricing_value: 0,
-    sort_order: 10,
-    last_test_status: status,
-    last_tested_at: TESTED,
-    last_test_code: status === 'fail' ? 'timeout' : null,
+    status,
     is_local: false,
+    context_window_tokens: null,
     ...extra,
   };
 }
 
-const PRODUCTION_ROWS: WireRow[] = [
+const PRODUCTION_ROWS: Row[] = [
   // 8 × ok
   row('nous-qwen3-llm', 'Qwen3 LLM', 'llm', 'qwen3-32b', 'ok'),
   row('nous-deepseek-v4-pro', 'DeepSeek V4 Pro', 'llm', 'deepseek-v4-pro', 'ok'),
@@ -98,16 +91,10 @@ const PRODUCTION_ROWS: WireRow[] = [
   }),
 ];
 
-// SYNTHETIC — no production row was failing on 2026-09-24.
-const FAILING_ROWS: WireRow[] = [
-  row('nous-broken-llm', 'Broken LLM', 'llm', 'broken-llm-0101', 'fail'),
-  row('nous-broken-embedding', 'Broken Embedding', 'embedding', 'broken-embedding-0101', 'fail'),
-];
-
 vi.mock('../services/aiService', () => ({
-  saveAISettings: vi.fn().mockResolvedValue(undefined),
+  saveAISettings: vi.fn(async (s: unknown) => s), // PUT echoes the saved settings
   testAIConnection: vi.fn(),
-  getNousModels: vi.fn().mockResolvedValue([]),
+  getPlatformStatus: vi.fn(() => new Promise(() => {})),
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
@@ -128,31 +115,13 @@ vi.mock('./ApprovalsPanel', () => ({ ApprovalsPanel: () => null }));
 vi.mock('./MemoryPanel', () => ({ MemoryPanel: () => null }));
 vi.mock('./AIHealthBoard', () => ({ AIHealthBoard: () => null }));
 
-const baseSettings: AISettingsType = {
-  ai_enabled: true,
-  auto_transcribe: false,
-  auto_summarize: false,
-  preferred_language: 'auto',
-  providers: {},
-  task_assignment: {
-    transcription: '',
-    summarization: '',
-    visual_analysis: '',
-    translation: '',
-    caption: '',
-    classification: '',
-    image_generation: '',
-    script_generation: '',
-  },
-};
-
 const rowEl = (name: string) =>
   document.querySelector(`[data-testid="platform-model-row"][data-model-name="${name}"]`);
 
-async function renderRows(rows: WireRow[]) {
-  const { getNousModels } = await import('../services/aiService');
-  vi.mocked(getNousModels).mockResolvedValue(rows);
-  render(<AISettings settings={baseSettings} onSave={vi.fn()} />);
+async function renderRows(rows: Row[]) {
+  // `display_name` is not a wire key any more; strip it before building the body.
+  const wire = rows.map(({ display_name: _dn, ...r }) => r);
+  render(<AISettings settings={withPlatform(baseAISettings(), wire)} onSave={vi.fn()} />);
   await waitFor(() => expect(rowEl('nous-qwen3-llm')).not.toBeNull());
 }
 
@@ -162,7 +131,7 @@ describe('AISettings — platform list matches Admin → AI Models', () => {
   });
 
   it('names each row exactly the way admin does: actual_model, and no display_name', async () => {
-    await renderRows([...PRODUCTION_ROWS, ...FAILING_ROWS]);
+    await renderRows(PRODUCTION_ROWS);
     const el = rowEl('nous-doubao-embedding-vision')!;
     const spans = el.querySelectorAll('span');
     expect(spans[0].textContent).toBe('doubao-embedding-vision-251215');
@@ -182,20 +151,10 @@ describe('AISettings — platform list matches Admin → AI Models', () => {
   });
 
   it('lists all 14 production rows, including the not_probed ones', async () => {
-    await renderRows([...PRODUCTION_ROWS, ...FAILING_ROWS]);
+    await renderRows(PRODUCTION_ROWS);
     for (const r of PRODUCTION_ROWS) {
       expect(rowEl(r.name), r.name).not.toBeNull();
     }
-  });
-
-  it('hides failing rows from the card and from every picker', async () => {
-    await renderRows([...PRODUCTION_ROWS, ...FAILING_ROWS]);
-    for (const r of FAILING_ROWS) {
-      expect(rowEl(r.name), r.name).toBeNull();
-      expect(document.querySelector(`option[value="nous:${r.name}"]`), r.name).toBeNull();
-    }
-    expect(document.body.textContent).not.toContain('broken-llm-0101');
-    expect(document.body.textContent).not.toContain('broken-embedding-0101');
   });
 
   it('uses the admin label in the task pickers but keeps nous:<name> as the value', async () => {

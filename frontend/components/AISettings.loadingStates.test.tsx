@@ -4,7 +4,9 @@
  * loading.
  *
  * The bug: a user's stored value (e.g. transcription = "nous:mediahub-moss-asr")
- * isn't in the option list until getNousModels resolves. A native <select> —
+ * isn't in the option list until the platform list arrives — since spec
+ * 2026-09-25 that list rides on the AI settings, which AuthContext loads after
+ * login, so the page can mount before `platform_models` is there. A native <select> —
  * and the custom UiSelect that mirrors it — falls back to the FIRST option when
  * the value doesn't match, so the picker briefly showed "Volcengine bigasr"
  * then snapped to the real value once data landed. The agent pickers similarly
@@ -17,8 +19,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { AISettings } from './AISettings';
 import type { AISettings as AISettingsType } from '../types';
-import type { NousModelPublic } from '../types/api';
-import { makeNousModel } from '../tests/fixtures/ai';
+import { withPlatform } from '../tests/fixtures/platform';
 
 import en from '../public/locales/en.json';
 
@@ -41,18 +42,11 @@ vi.mock('react-i18next', () => {
   return { useTranslation: () => ({ t }) };
 });
 
-// Deferred promises we resolve mid-test to simulate the slow async sources.
-let resolveNousModels: (m: NousModelPublic[]) => void = () => {};
-const nousModelsPromise = new Promise<NousModelPublic[]>((res) => {
-  resolveNousModels = res;
-});
-
 vi.mock('../services/aiService', () => ({
-  saveAISettings: vi.fn().mockResolvedValue(undefined),
+  saveAISettings: vi.fn(async (s: unknown) => s), // PUT echoes the saved settings
   testAIConnection: vi.fn(),
   reportProviderHealth: vi.fn().mockResolvedValue(undefined),
-  // Pending until the test resolves it — simulates a slow platform-models fetch.
-  getNousModels: vi.fn(() => nousModelsPromise),
+  getPlatformStatus: vi.fn(() => new Promise(() => {})),
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true,
     visual_analysis: true, caption: true, classification: true,
@@ -72,14 +66,6 @@ vi.mock('./ApprovalsPanel', () => ({ ApprovalsPanel: () => null }));
 vi.mock('./MemoryPanel', () => ({ MemoryPanel: () => null }));
 vi.mock('./AgentMemoriesPanel', () => ({ AgentMemoriesPanel: () => null }));
 vi.mock('./AIHealthBoard', () => ({ AIHealthBoard: () => null }));
-
-const MOSS_MODEL = makeNousModel({
-  name: 'mediahub-moss-asr',
-  display_name: 'MOSS ASR',
-  type: 'asr',
-  pricing_type: 'per_hour',
-  pricing_value: 10,
-});
 
 // Volcengine enabled → its whisperModels seed the first static option
 // ("Volcengine bigasr") the buggy picker used to flash.
@@ -102,9 +88,10 @@ const settingsWithNousAsr: AISettingsType = {
 
 describe('AISettings task-assignment loading states', () => {
   it('does not flash "Volcengine bigasr" while platform models load; shows the stored value, then the resolved model', async () => {
-    render(<AISettings settings={settingsWithNousAsr} onSave={vi.fn()} />);
+    // AuthContext has not loaded the settings yet: no `platform_models`.
+    const { rerender } = render(<AISettings settings={settingsWithNousAsr} onSave={vi.fn()} />);
 
-    // While getNousModels is pending, optionsReady is false: the picker must
+    // While the platform list is absent, optionsReady is false: the picker must
     // echo the stored raw value, NOT the first static option. (Text appears in
     // both the visible trigger and the aria-hidden native <select>.)
     expect((await screen.findAllByText('nous:mediahub-moss-asr')).length).toBeGreaterThan(0);
@@ -114,7 +101,14 @@ describe('AISettings task-assignment loading states', () => {
     // the admin identifier (row name here: no actual_model). (Post-
     // resolve, "Volcengine bigasr" is a legitimate *available* option in the
     // list — the point is it was never shown as the selected value.)
-    resolveNousModels([MOSS_MODEL]);
+    rerender(
+      <AISettings
+        settings={withPlatform(settingsWithNousAsr, [
+          { name: 'mediahub-moss-asr', actual_model: '', type: 'asr', pricing_type: 'per_hour', pricing_value: 10 },
+        ])}
+        onSave={vi.fn()}
+      />,
+    );
 
     expect((await screen.findAllByText(/mediahub-moss-asr \(Platform/)).length).toBeGreaterThan(0);
   });

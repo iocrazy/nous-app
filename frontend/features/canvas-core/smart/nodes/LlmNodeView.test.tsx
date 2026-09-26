@@ -8,13 +8,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LlmNodeView, upstreamTextFor } from './LlmNodeView';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
+import type { AISettings } from '../../../../types';
+import { baseAISettings, withPlatform } from '../../../../tests/fixtures/platform';
 
 vi.mock('@xyflow/react', () => ({
   Handle: () => null,
   Position: { Left: 'left', Right: 'right' },
 }));
-const textModels = vi.hoisted(() => ({ rows: [] as Record<string, unknown>[] }));
-vi.mock('./useTextModels', () => ({ useTextModels: () => textModels.rows }));
+// The dropdown reads the platform list off the AI settings (spec 2026-09-25)
+// through the real hooks; only the two boundaries are stubbed: the settings
+// AuthContext loaded, and the status request (pending → settings' status).
+const platform = vi.hoisted(() => ({ settings: null as AISettings | null }));
+vi.mock('../../../../contexts/AuthContext', async (orig) => ({
+  ...(await orig<typeof import('../../../../contexts/AuthContext')>()),
+  useOptionalAISettings: () => platform.settings,
+}));
+vi.mock('../../../../services/aiService', async (orig) => ({
+  ...(await orig<typeof import('../../../../services/aiService')>()),
+  getPlatformStatus: () => new Promise(() => {}),
+}));
 vi.mock('./useAgents', () => ({ useAgents: () => [] }));
 
 const mockCaller = vi.hoisted(() => vi.fn());
@@ -56,7 +68,7 @@ const BASE = {
 };
 
 afterEach(() => {
-  textModels.rows = [];
+  platform.settings = null;
   cleanup();
   vi.clearAllMocks();
   useCanvasCoreStore.getState().reset();
@@ -139,10 +151,13 @@ describe('LlmNodeView', () => {
 
 describe('LlmNodeView text-model dropdown — idle rows', () => {
   it('shows a nous-engine row that is not loaded as disabled, with the reason', () => {
-    textModels.rows = [
-      { name: 'nous-qwen3-8-27b', display_name: 'Qwen3 27B', actual_model: 'qwen3-8-27b', type: 'llm', last_test_status: 'idle' },
-      { name: 'mediahub-deepseek', display_name: 'DeepSeek', actual_model: 'deepseek-v4-pro', type: 'llm', last_test_status: 'ok' },
-    ];
+    platform.settings = withPlatform(baseAISettings(), [
+      { name: 'nous-qwen3-8-27b', actual_model: 'qwen3-8-27b', type: 'llm', status: 'idle' },
+      { name: 'mediahub-deepseek', actual_model: 'deepseek-v4-pro', type: 'llm', status: 'ok' },
+      // Not llm, and switched off: neither belongs in a text picker.
+      { name: 'nous-wemm-2b', actual_model: 'wemm-2b', type: 'embedding' },
+      { name: 'nous-doubao', actual_model: 'doubao-seed-2-0-pro', type: 'llm', disabled: true },
+    ]);
     seed({ ...BASE, provider_slug: 'nous-qwen3-8-27b' });
     renderView();
     const trigger = screen.getByLabelText('LLM provider');
@@ -151,6 +166,11 @@ describe('LlmNodeView text-model dropdown — idle rows', () => {
     expect(idle.disabled).toBe(true);
     expect(idle.dataset.description).toBe('Not loaded on nous-engine');
     expect(Array.from(mirror.options).find((o) => o.value === 'mediahub-deepseek')!.disabled).toBe(false);
+    expect(Array.from(mirror.options).map((o) => o.value)).toEqual([
+      '',
+      'nous-qwen3-8-27b',
+      'mediahub-deepseek',
+    ]);
     // Saved value kept, dimmed and titled — never swapped.
     expect(mirror.value).toBe('nous-qwen3-8-27b');
     expect(trigger.getAttribute('title')).toBe('Not loaded on nous-engine');

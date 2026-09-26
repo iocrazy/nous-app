@@ -55,9 +55,9 @@ const ALL_LOCKED = makeGovernance({
 
 // vi.mock is hoisted — use inline literals, not external variables.
 vi.mock('../services/aiService', () => ({
-  saveAISettings: vi.fn().mockResolvedValue(undefined),
+  saveAISettings: vi.fn(async (s: unknown) => s), // PUT echoes the saved settings
   testAIConnection: vi.fn(),
-  getNousModels: vi.fn().mockResolvedValue([]),
+  getPlatformStatus: vi.fn(() => new Promise(() => {})),
   // Default: all allowed. Individual tests override via mockResolvedValueOnce.
   getAIGovernance: vi.fn().mockResolvedValue({
     chat: true, transcription: true, translation: true,

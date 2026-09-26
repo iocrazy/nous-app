@@ -18,7 +18,7 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
 vi.mock('./useGenerationModels', () => ({ useGenerationModels: () => [] }));
-vi.mock('./useTextModels', () => ({ useTextModels: () => [] }));
+vi.mock('../../../../hooks/usePlatformModels', () => ({ useTextPlatformModels: () => [] }));
 vi.mock('./useAgents', () => ({
   useAgents: () => [
     { id: 'a1', slug: 'character-persona', name: 'Character Persona' },

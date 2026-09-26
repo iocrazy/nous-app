@@ -41,7 +41,7 @@
 
 import { expect, test, type Page, type Route } from '@playwright/test';
 
-import { setupStubbedSession } from './helpers/stubs';
+import { setupStubbedSession, stubPlatformModels } from './helpers/stubs';
 import { realCanvasRow } from './helpers/realShapes';
 
 const SCOPE_ID = '727145299382534200';
@@ -298,21 +298,7 @@ async function routeCanvasApi(
       },
     }),
   );
-  await page.route('**/api/v1/canvases/generation-models', (route) =>
-    route.fulfill({
-      json: {
-        success: true,
-        data: [
-          {
-            name: MODEL,
-            display_name: 'Jimeng Image',
-            type: 'image',
-            actual_provider: 'jimeng-cli',
-          },
-        ],
-      },
-    }),
-  );
+  await stubPlatformModels(page, [{ name: MODEL, type: 'image' }]);
   await page.route('**/api/v1/canvases/generation-capabilities', (route) =>
     route.fulfill({ json: { success: true, data: CAPABILITIES } }),
   );

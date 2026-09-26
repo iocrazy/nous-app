@@ -61,7 +61,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('./useAgents', () => ({ useAgents: () => [] }));
-vi.mock('./useTextModels', () => ({ useTextModels: () => [] }));
+vi.mock('../../../../hooks/usePlatformModels', () => ({ useTextPlatformModels: () => [] }));
 vi.mock('./useGenerationModels', () => ({ useGenerationModels: () => [] }));
 
 // OutputNodeView hides Rerun unless the output traces back to a prompt.

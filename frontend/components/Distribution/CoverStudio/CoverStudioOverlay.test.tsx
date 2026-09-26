@@ -35,7 +35,7 @@ const svc = vi.hoisted(() => ({
   markCoverTemplatesUsed: vi.fn(),
   resolveCoverTemplateReference: vi.fn(),
   saveGeneratedCoverAsTemplate: vi.fn(),
-  listGenerationModels: vi.fn(),
+  useGenerationModels: vi.fn(),
   listCoverStyles: vi.fn(),
   listCoverRounds: vi.fn(),
   selectCoverFrame: vi.fn(),
@@ -86,8 +86,10 @@ vi.mock('../../../services/coverTemplateService', () => ({
   resolveCoverTemplateReference: svc.resolveCoverTemplateReference,
   saveGeneratedCoverAsTemplate: svc.saveGeneratedCoverAsTemplate,
 }));
-vi.mock('../../../features/canvas-core/services/canvasGenerationService', () => ({
-  listGenerationModels: svc.listGenerationModels,
+// The model menu is the shared generation-model hook (spec 2026-09-25): the
+// enabled platform image rows from the AI settings, live status on top.
+vi.mock('../../../features/canvas-core/smart/nodes/useGenerationModels', () => ({
+  useGenerationModels: (kind?: string) => svc.useGenerationModels(kind),
 }));
 vi.mock('../../../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
 
@@ -224,7 +226,7 @@ function setPerson() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  svc.listGenerationModels.mockResolvedValue([]);
+  svc.useGenerationModels.mockReturnValue([]);
   svc.listCoverStyles.mockResolvedValue([BUILTIN_STYLE, NEON_STYLE]);
   svc.listCoverRounds.mockResolvedValue([]);
   svc.generateCoverDrafts.mockResolvedValue({
@@ -798,9 +800,9 @@ describe('CoverStudioOverlay — rounds survive closing the dialog', () => {
 
 describe('CoverStudioOverlay — model not loaded on nous-engine', () => {
   it('lists an idle image model disabled, with the reason', async () => {
-    svc.listGenerationModels.mockResolvedValue([
-      { name: 'codex-image', display_name: 'GPT Image', actual_model: 'gpt-image-2', type: 'image', last_test_status: 'ok' },
-      { name: 'nous-studio-image', display_name: 'Studio Image', actual_model: 'studio-image', type: 'image', last_test_status: 'idle' },
+    svc.useGenerationModels.mockReturnValue([
+      { name: 'codex-image', actual_model: 'gpt-image-2', type: 'image', status: 'ok' },
+      { name: 'nous-studio-image', actual_model: 'studio-image', type: 'image', status: 'idle' },
     ]);
     renderOverlay();
     const mirror = screen.getByTestId('cover-model') as HTMLSelectElement;
@@ -813,5 +815,7 @@ describe('CoverStudioOverlay — model not loaded on nous-engine', () => {
     expect((mirror.querySelector('option[value="codex-image"]') as HTMLOptionElement).disabled).toBe(
       false,
     );
+    // Image rows only — the same hook the canvas composer uses.
+    expect(svc.useGenerationModels).toHaveBeenCalledWith('image');
   });
 });
