@@ -20,6 +20,8 @@ import type { FabSide } from './fabGeometry';
 export const ATTENTION_MS = 2500;
 export const SLEEP_MS = 14_000;
 export const WAKE_PX = 110;
+/** While attentive, further attention within this window does not restart the timer. */
+const ATTEND_RESET_MS = 500;
 const LAND_HAPPY_MS = 1200;
 const POP_MS = 260;
 const ANTIC_MIN_MS = 3000;
@@ -109,11 +111,22 @@ export function useMascotBrain(opts: {
     });
   }, [q]);
 
+  const attentiveRef = useRef(false);
+  attentiveRef.current = attentive;
+  const attendResetAt = useRef(0);
+
   const attend = useCallback(() => {
-    lastAttention.current = Date.now();
+    const now = Date.now();
+    lastAttention.current = now;
+    // A stream of pointer moves near the pup would otherwise clear and re-arm
+    // the timer on every event.
+    if (attentiveRef.current && now - attendResetAt.current < ATTEND_RESET_MS) return;
+    attendResetAt.current = now;
+    attentiveRef.current = true;
     setAttentive(true);
     if (attentionTimer.current) clearTimeout(attentionTimer.current);
     attentionTimer.current = setTimeout(() => {
+      attentiveRef.current = false;
       setAttentive(false);
       clearEyes();
     }, ATTENTION_MS);
@@ -176,8 +189,9 @@ export function useMascotBrain(opts: {
   );
 
   // ── attention: the cursor coming near opens the eyes and wakes the pup ──
+  // rAF-throttled: at most one layout read per frame, for the newest event.
   useEffect(() => {
-    const onMove = (e: PointerEvent) => {
+    const track = (e: PointerEvent) => {
       const root = rootRef.current;
       if (!root || dragging.current) return;
       const r = root.getBoundingClientRect();
@@ -196,8 +210,28 @@ export function useMascotBrain(opts: {
         g.style.translate = `${tx.toFixed(1)}px ${ty.toFixed(1)}px`;
       });
     };
+    const hasRaf = typeof window.requestAnimationFrame === 'function';
+    let frame: number | null = null;
+    let pending: PointerEvent | null = null;
+    const onMove = (e: PointerEvent) => {
+      if (!hasRaf) {
+        track(e);
+        return;
+      }
+      pending = e;
+      if (frame != null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        const ev = pending;
+        pending = null;
+        if (ev) track(ev);
+      });
+    };
     document.addEventListener('pointermove', onMove);
-    return () => document.removeEventListener('pointermove', onMove);
+    return () => {
+      document.removeEventListener('pointermove', onMove);
+      if (frame != null && typeof window.cancelAnimationFrame === 'function') window.cancelAnimationFrame(frame);
+    };
   }, [attend, motionOn, q, rootRef, wake]);
 
   // ── idle loop: doze after SLEEP_MS, otherwise a small antic now and then ──

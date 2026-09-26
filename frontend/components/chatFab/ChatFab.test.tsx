@@ -8,7 +8,7 @@
  */
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { ChatFab } from './ChatFab';
 import { FAB_GUTTER_PX, FAB_SIZE_PX, TOP_CHROME_PX } from './fabGeometry';
@@ -36,6 +36,14 @@ function gesture(steps: Array<[number, number]>, start = { x: 900, y: 600 }) {
   fireEvent.pointerUp(window, { clientX: start.x + last[0], clientY: start.y + last[1] });
 }
 
+/** Manual animation frames: pointer tracking is rAF-throttled. */
+let frames: FrameRequestCallback[] = [];
+function flushFrames() {
+  const run = frames;
+  frames = [];
+  run.forEach((cb) => cb(performance.now()));
+}
+
 let matchMediaSpy: ReturnType<typeof vi.fn> | null = null;
 function prefersReducedMotion(on: boolean) {
   matchMediaSpy = vi.fn((query: string) => ({
@@ -52,6 +60,12 @@ function prefersReducedMotion(on: boolean) {
 }
 
 beforeEach(() => {
+  frames = [];
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+    frames.push(cb);
+    return frames.length;
+  });
+  vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
   setViewport(VW, VH);
   prefersReducedMotion(false);
   useGlobalChatStore.setState({
@@ -279,10 +293,12 @@ describe('ChatFab · chat state on the mascot', () => {
     expect(fab().dataset.face).toBe('serene');
     // Far away: nothing. Within 110px of the centre: attentive.
     fireEvent.pointerMove(document, { clientX: 100, clientY: 100 });
+    act(flushFrames);
     expect(fab().dataset.face).toBe('serene');
     const el = fab();
     el.getBoundingClientRect = () => ({ left: 960, top: 632, width: 56, height: 56, right: 1016, bottom: 688, x: 960, y: 632, toJSON: () => ({}) });
     fireEvent.pointerMove(document, { clientX: 1000, clientY: 600 });
+    act(flushFrames);
     expect(fab().dataset.face).toBe('open');
     expect(fab().dataset.mood).toContain('attentive');
   });
@@ -317,6 +333,45 @@ describe('ChatFab · chat state on the mascot', () => {
     expect(fab().dataset.mood).toContain('thinking');
     expect(fab().dataset.face).toBe('thinking');
     expect(fab().getAttribute('aria-label')).toBe('Open AI Chat, waiting for your answer');
+  });
+});
+
+describe('ChatFab · cursor tracking cost', () => {
+  const NEAR_RECT = { left: 960, top: 632, width: 56, height: 56, right: 1016, bottom: 688, x: 960, y: 632, toJSON: () => ({}) };
+
+  it('measures layout at most once per frame, for the newest pointer position', () => {
+    render(<ChatFab />);
+    const rect = vi.fn(() => NEAR_RECT);
+    fab().getBoundingClientRect = rect;
+    fireEvent.pointerMove(document, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(document, { clientX: 500, clientY: 500 });
+    fireEvent.pointerMove(document, { clientX: 1000, clientY: 600 });
+    expect(rect).not.toHaveBeenCalled();
+    act(flushFrames);
+    expect(rect).toHaveBeenCalledTimes(1);
+    expect(fab().dataset.face).toBe('open'); // judged on the last event (near), not the first (far)
+  });
+
+  it('does not restart the attention timer on every move while already attentive', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    // The idle loop's first antic also lands at 2.5s; pin it to the ear/hop
+    // one, which does not touch attention, so only the move timer is measured.
+    vi.spyOn(Math, 'random').mockReturnValue(0.3);
+    try {
+      render(<ChatFab />);
+      fab().getBoundingClientRect = () => NEAR_RECT;
+      fireEvent.pointerMove(document, { clientX: 1000, clientY: 600 });
+      act(flushFrames);
+      expect(fab().dataset.face).toBe('open');
+      act(() => vi.advanceTimersByTime(400));
+      fireEvent.pointerMove(document, { clientX: 1001, clientY: 600 });
+      act(flushFrames);
+      // Timer still runs from the first move: attention wears off 2.5s after it.
+      act(() => vi.advanceTimersByTime(2100 + 10));
+      expect(fab().dataset.face).toBe('serene');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
