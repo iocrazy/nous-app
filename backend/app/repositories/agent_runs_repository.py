@@ -78,11 +78,12 @@ def worker_shutdown_stmt(run_ids: List[int]):
     )
 
 
-async def _after_crash_flip(rows) -> list[int]:
+async def _after_crash_flip(rows, *, reason: str) -> list[int]:
     """被崩溃类写方翻掉的 run 永远不会再经过 ``RunRecorder._finish``，所以检索投影
     与 ``ai_usage_hourly`` 的那一行都只能由这里跟上（3c Task 13 评审 Important 1 /
     终审 I4）。在 ``write_scope()`` 之外：投影读回的必须是刚提交的那份 status，而这
     两件事失败都绝不该把已经翻成功的 id 吞掉——调用方拿这些 id 去补 ``turn_end``。"""
+    from app.repositories import agent_run_inbox_redelivery
     from app.services.liveness.crash_rollup import record_crash_terminal_runs
     from app.services.search.projection import project_run_id_best_effort
 
@@ -90,6 +91,10 @@ async def _after_crash_flip(rows) -> list[int]:
     for run_id in swept:
         await project_run_id_best_effort(run_id)
     await record_crash_terminal_runs(rows)
+    # fh5 T5: an item these runs claimed at a step that never answered was
+    # injected into a call that died with the process — give it back (logged,
+    # never raised: the flip already stands).
+    await agent_run_inbox_redelivery.release_orphaned_claims(swept, reason=reason)
     return swept
 
 
@@ -1480,7 +1485,7 @@ class AgentRunsRepository(AsyncpgRepository):
         except Exception as e:
             logger.error(f"Failed to mark heartbeat_lost: {e}")
             return []
-        return await _after_crash_flip(rows)
+        return await _after_crash_flip(rows, reason="heartbeat_lost")
 
     async def mark_worker_shutdown_ids(self, run_ids: List[int]) -> list[int]:
         """fh2 T3: close the given in-flight runs on worker shutdown (see
@@ -1494,7 +1499,7 @@ class AgentRunsRepository(AsyncpgRepository):
         except Exception as e:
             logger.error(f"Failed to mark worker_shutdown runs {run_ids}: {e}")
             return []
-        return await _after_crash_flip(rows)
+        return await _after_crash_flip(rows, reason=WORKER_SHUTDOWN_ERROR_CODE)
 
     # ------------------------------------------------------------------
     # Aggregate
