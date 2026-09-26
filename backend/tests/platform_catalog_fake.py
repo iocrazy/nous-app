@@ -69,8 +69,8 @@ def open_platform_view(
 ) -> None:
     """Governance on and a stored platform card (default: nothing disabled)."""
     monkeypatch.setattr(
-        "app.services.ai.governance.ai_governance.is_nous_globally_enabled",
-        AsyncMock(return_value=True),
+        "app.services.ai.governance.ai_governance.nous_global_state",
+        AsyncMock(return_value="on"),
     )
     monkeypatch.setattr(
         "app.services.ai.platform_model_visibility.stored_nous_settings",

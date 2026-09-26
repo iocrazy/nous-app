@@ -49,6 +49,8 @@ _GENERATION_TYPES = frozenset({"image", "video"})
 
 PLATFORM_MODEL_NOT_AVAILABLE = "platform_model_not_available"
 
+GovernanceState = Literal["on", "off", "unknown"]
+
 #: Who is asking, which decides what the rows may contain and how a failed
 #: read surfaces (see :func:`platform_rows`).
 PlatformRowsPurpose = Literal["picker", "dispatch", "system"]
@@ -166,6 +168,9 @@ class PlatformProviderView:
     enabled_models: tuple[str, ...]
     disabled_models: tuple[str, ...]
     engine: Optional[PlatformEngine]
+    #: ``nous.user_enabled`` as read: ``on`` / ``off`` / ``unknown`` (the read
+    #: failed — the list is computed as if on; see ``nous_global_state``).
+    governance: GovernanceState = "on"
 
     def provider_entry(self) -> dict[str, Any]:
         """``ai_providers.nous`` (``AiPlatformProviderEntry``)."""
@@ -304,6 +309,16 @@ async def _overlay(
 
 
 @dataclass(frozen=True)
+class PlatformRows:
+    """:func:`platform_rows_and_engine`'s answer: the rows plus what they were
+    computed against (engine reachability, governance as read)."""
+
+    rows: list[PlatformRow]
+    engine: Optional[PlatformEngine]
+    governance: GovernanceState
+
+
+@dataclass(frozen=True)
 class _UserGate:
     """The user's stored platform-card choices. ``enabled`` is the master
     switch; ``disabled`` the per-model blacklist (stored names)."""
@@ -332,7 +347,7 @@ _OPEN_GATE = _UserGate(True, ())
 @dataclass(frozen=True)
 class _Computed:
     gate: _UserGate
-    governance_on: bool
+    governance: GovernanceState
     rows: tuple[PlatformRow, ...]
     enabled_names: frozenset[str]
     engine: Optional[PlatformEngine]
@@ -345,7 +360,7 @@ async def _compute(
     view: platform-wide rows only, governance and engine applied, no user
     gate. Raises when the catalog or the user's settings cannot be read."""
     from app.repositories.nous_model_repository import get_nous_model_repository
-    from app.services.ai.governance.ai_governance import is_nous_globally_enabled
+    from app.services.ai.governance.ai_governance import nous_global_state
     from app.services.ai.platform_model_visibility import stored_nous_settings
 
     if user_id is None:
@@ -357,13 +372,18 @@ async def _compute(
             else await stored_nous_settings(user_id)
         )
         gate = _UserGate.of(nous)
-    if not await is_nous_globally_enabled():
-        return _Computed(gate, False, (), frozenset(), None)
+    # Only a read that ANSWERED off closes the view. A failed read is
+    # "unknown": listed as if on and reported as such (the empty-output-is-
+    # not-a-negative-result rule) — a DB blip must not empty every picker and
+    # every dispatch. ``nous_global_state`` logs the WARNING.
+    governance = await nous_global_state()
+    if governance == "off":
+        return _Computed(gate, governance, (), frozenset(), None)
     catalog = await get_nous_model_repository().list_enabled_private(user_id)
     rows, engine = await _overlay(catalog)
     hidden = gate.hidden_names([r.model.name for r in rows])
     enabled_names = frozenset(r.model.name for r in rows) - hidden
-    return _Computed(gate, True, tuple(rows), enabled_names, engine)
+    return _Computed(gate, governance, tuple(rows), enabled_names, engine)
 
 
 async def platform_rows(
@@ -373,8 +393,7 @@ async def platform_rows(
     purpose: PlatformRowsPurpose,
 ) -> list[PlatformRow]:
     """:func:`platform_rows_and_engine` without the engine state."""
-    rows, _ = await platform_rows_and_engine(user_id, type=type, purpose=purpose)
-    return rows
+    return (await platform_rows_and_engine(user_id, type=type, purpose=purpose)).rows
 
 
 async def platform_rows_and_engine(
@@ -382,7 +401,7 @@ async def platform_rows_and_engine(
     *,
     type: Optional[str] = None,  # noqa: A002 — the catalog column's name
     purpose: PlatformRowsPurpose,
-) -> tuple[list[PlatformRow], Optional[PlatformEngine]]:
+) -> "PlatformRows":
     """The platform rows ``user_id`` may use, in catalog order — the same
     computation as :func:`platform_provider_view`'s ``enabled_models``.
 
@@ -415,9 +434,9 @@ async def platform_rows_and_engine(
             f"[platform_provider] platform rows ({purpose}) failed for "
             f"{user_id}: {exc!r}"
         )
-        return [], None
+        return PlatformRows([], None, "unknown")
     if not comp.gate.enabled:
-        return [], comp.engine
+        return PlatformRows([], comp.engine, comp.governance)
     out: list[PlatformRow] = []
     for r in comp.rows:
         m = r.model
@@ -428,7 +447,7 @@ async def platform_rows_and_engine(
         if purpose == "picker" and m.type in _GENERATION_TYPES and not m.generatable:
             continue
         out.append(r)
-    return out, comp.engine
+    return PlatformRows(out, comp.engine, comp.governance)
 
 
 async def platform_rows_with_status(
@@ -478,6 +497,7 @@ async def platform_provider_view(
         enabled_models=tuple(m.name for m in models if m.name in comp.enabled_names),
         disabled_models=comp.gate.disabled,
         engine=comp.engine,
+        governance=comp.governance,
     )
 
 
@@ -510,11 +530,14 @@ async def platform_status(user_id: str) -> dict[str, Any]:
     return {
         "models": models,
         "engine": view.engine.as_dict() if view.engine else None,
+        "governance": view.governance,
     }
 
 
 __all__ = [
     "PLATFORM_MODEL_NOT_AVAILABLE",
+    "GovernanceState",
+    "PlatformRows",
     "PlatformEngine",
     "PlatformModel",
     "PlatformModelNotAvailableError",

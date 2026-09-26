@@ -102,6 +102,10 @@ def _catalog(monkeypatch, rows: list[dict]) -> None:
         "app.services.ai.governance.ai_governance.is_nous_globally_enabled",
         AsyncMock(return_value=True),
     )
+    monkeypatch.setattr(
+        "app.services.ai.governance.ai_governance.nous_global_state",
+        AsyncMock(return_value="on"),
+    )
 
 
 def _gate(monkeypatch, *, allowed: bool = True, disabled: frozenset[str] = frozenset()):

@@ -119,6 +119,10 @@ class AiNousModelPublic(BaseModel):
 
 AiPlatformModelStatus = Literal["ok", "idle", "not_probed"]
 
+#: ``nous.user_enabled`` as the platform view read it. ``unknown`` = the read
+#: FAILED and the view listed rows as if on (a failed read is not "off").
+AiPlatformGovernance = Literal["on", "off", "unknown"]
+
 
 class AiPlatformModelEntry(BaseModel):
     """``platform_models[<name>]`` in ``GET/PUT /ai/settings``.
@@ -167,6 +171,7 @@ class AiNousModelsResponse(BaseModel):
 
     models: List[AiNousModelPublic]
     engine: Optional[AiPlatformEngineState] = None
+    governance: Optional[AiPlatformGovernance] = None
 
 
 class AiPlatformProviderEntry(BaseModel):
@@ -201,3 +206,4 @@ class AiPlatformStatusResponse(BaseModel):
 
     models: Dict[str, AiPlatformModelRuntime]
     engine: Optional[AiPlatformEngineState]
+    governance: Optional[AiPlatformGovernance] = None

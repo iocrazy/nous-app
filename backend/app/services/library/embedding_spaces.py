@@ -122,12 +122,11 @@ async def platform_embedding_models() -> Dict[str, Any]:
     ``not_probed``). A failed read degrades to no models (logged)."""
     from app.services.ai.platform_provider import platform_rows_and_engine
 
-    rows, engine = await platform_rows_and_engine(
-        None, type="embedding", purpose="system"
-    )
+    result = await platform_rows_and_engine(None, type="embedding", purpose="system")
     return {
-        "models": [r.model.public_row() for r in rows],
-        "engine": engine.as_dict() if engine else None,
+        "models": [r.model.public_row() for r in result.rows],
+        "engine": result.engine.as_dict() if result.engine else None,
+        "governance": result.governance,
     }
 
 

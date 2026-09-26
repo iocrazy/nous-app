@@ -210,6 +210,7 @@ async def test_platform_embedding_models_reads_the_system_view(monkeypatch):
     assert out["models"][0]["last_test_status"] == "ok"
     assert not {"api_key", "base_url", "actual_provider"} & set(out["models"][0])
     assert out["engine"] is None
+    assert out["governance"] == "on"
 
 
 @pytest.mark.asyncio

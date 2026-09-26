@@ -70,6 +70,12 @@ def listed(*services: tuple[str, bool]) -> ec._Read:
     )
 
 
+def _governance_state(value) -> str:
+    if isinstance(value, str):
+        return value
+    return "on" if value else "off"
+
+
 class Env:
     def __init__(self, monkeypatch):
         ec.reset_engine_cache()
@@ -85,9 +91,10 @@ class Env:
             "app.repositories.nous_model_repository.get_nous_model_repository",
             lambda: repo,
         )
+        # ``governance``: True / False as read, or "unknown" (the read failed).
         monkeypatch.setattr(
-            "app.services.ai.governance.ai_governance.is_nous_globally_enabled",
-            AsyncMock(side_effect=lambda: self.governance),
+            "app.services.ai.governance.ai_governance.nous_global_state",
+            AsyncMock(side_effect=lambda: _governance_state(self.governance)),
         )
         monkeypatch.setattr(ec, "_fetch", self._fetch)
         monkeypatch.setattr(ec, "_clock", lambda: self.now)
@@ -479,3 +486,61 @@ def test_last_good_snapshots_are_bounded(monkeypatch):
     ec._remember("k20", (99.0, snap))  # re-stored → newest
     assert list(ec._last_good)[-1] == "k20"
     ec.reset_engine_cache()
+
+
+# ─── governance read failure is "unknown", not "off" ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_governance_read_failure_lists_rows_and_says_unknown(monkeypatch, caplog):
+    """A failed ``nous.user_enabled`` read is not a negative answer: the view
+    lists rows as if on, marks ``governance="unknown"`` and logs a WARNING —
+    dispatch, defaults, vectors and bundles must not go empty on a DB blip."""
+    import logging
+
+    from app.services.ai.governance import ai_governance as gov
+
+    real_reader = gov.nous_global_state
+    env = Env(monkeypatch)
+    # Undo Env's stub: exercise the real three-state reader over a failing read.
+    monkeypatch.setattr(gov, "nous_global_state", real_reader)
+    monkeypatch.setattr(
+        gov, "_read_raw_strict", AsyncMock(side_effect=RuntimeError("db down"))
+    )
+    monkeypatch.setattr(
+        "app.services.ai.platform_model_visibility.stored_nous_settings",
+        AsyncMock(return_value={}),
+    )
+    env.rows = [catalog_row("nous-a"), catalog_row("pic", type="image")]
+    with caplog.at_level(logging.WARNING, logger=gov.logger.name):
+        view = await pp.platform_provider_view(USER, stored_nous={})
+        rows = await pp.platform_rows(USER, purpose="dispatch")
+        system = await pp.platform_rows_and_engine(None, purpose="system")
+    assert view.governance == "unknown"
+    assert list(view.enabled_models) == ["nous-a", "pic"]
+    assert row_names(rows) == ["nous-a", "pic"]
+    assert system.governance == "unknown" and row_names(system.rows) == [
+        "nous-a",
+        "pic",
+    ]
+    assert any("nous.user_enabled" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_governance_read_as_false_empties_the_view(monkeypatch):
+    """Only a read that ANSWERED off closes the view."""
+    from app.services.ai.governance import ai_governance as gov
+
+    real_reader = gov.nous_global_state
+    env = Env(monkeypatch)
+    monkeypatch.setattr(gov, "nous_global_state", real_reader)
+    monkeypatch.setattr(gov, "_read_raw_strict", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        "app.services.ai.platform_model_visibility.stored_nous_settings",
+        AsyncMock(return_value={}),
+    )
+    env.rows = [catalog_row("nous-a")]
+    view = await pp.platform_provider_view(USER, stored_nous={})
+    assert view.governance == "off" and view.models == ()
+    assert await pp.platform_rows(USER, purpose="dispatch") == []
+    env.repo.list_enabled_private.assert_not_awaited()

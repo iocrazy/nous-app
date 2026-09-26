@@ -238,10 +238,11 @@ async def _engine_verdicts(
     snapshot) and does not list it; could-not-read is not a verdict."""
     from app.services.ai.platform_provider import platform_rows_and_engine
 
-    live, engine = await platform_rows_and_engine(None, purpose="dispatch")
+    live = await platform_rows_and_engine(None, purpose="dispatch")
+    engine = live.engine
     if engine is None or not engine.reachable or engine.stale:
         return {}
-    listed = {r.model.name for r in live}
+    listed = {r.model.name for r in live.rows}
     return {
         model: ("fail", "nous-engine no longer lists this service for its key")
         for model, row in engine_rows.items()

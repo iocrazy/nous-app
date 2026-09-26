@@ -135,8 +135,9 @@ def _strip_computed_platform_fields(
 
 async def _with_platform_view(
     user_id: str, masked_providers: dict, stored_nous: Any
-) -> tuple[dict, dict | None, dict | None]:
-    """``(ai_providers, platform_models, platform_engine)`` for the response.
+) -> tuple[dict, dict | None, dict | None, str | None]:
+    """``(ai_providers, platform_models, platform_engine, platform_governance)``
+    for the response.
 
     ``ai_providers.nous`` is replaced by the computed platform card. When the
     view cannot be computed the stored entry is returned untouched and both
@@ -151,13 +152,13 @@ async def _with_platform_view(
         )
     except Exception as exc:  # noqa: BLE001 — degraded, logged, not swallowed
         logger.error(f"platform provider view failed for {user_id}: {exc!r}")
-        return masked_providers, None, None
+        return masked_providers, None, None, None
     # Validated through the declared model so the entry can only ever carry
     # the documented keys (ai_providers itself is an open dict on the wire).
     entry = AiPlatformProviderEntry(**view.provider_entry()).model_dump()
     providers = {**masked_providers, _NOUS_PROVIDER_KEY: entry}
     engine = view.engine.as_dict() if view.engine else None
-    return providers, view.platform_models(), engine
+    return providers, view.platform_models(), engine, view.governance
 
 
 def _is_blank(value) -> bool:
@@ -255,7 +256,12 @@ async def get_ai_settings(auth: AuthDep):
         plaintext_providers = reveal_byok_providers(
             ai_settings.get("ai_providers", {}), user_id=str(auth.user_id)
         )
-        providers, platform_models, platform_engine = await _with_platform_view(
+        (
+            providers,
+            platform_models,
+            platform_engine,
+            platform_governance,
+        ) = await _with_platform_view(
             auth.user_id,
             mask_ai_providers(plaintext_providers),
             (ai_settings.get("ai_providers") or {}).get(_NOUS_PROVIDER_KEY),
@@ -274,6 +280,7 @@ async def get_ai_settings(auth: AuthDep):
             provider_health=provider_health,
             platform_models=platform_models,
             platform_engine=platform_engine,
+            platform_governance=platform_governance,
         )
 
     except Exception as e:
@@ -341,7 +348,12 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
         plaintext_providers = reveal_byok_providers(
             ai_settings.get("ai_providers", {}), user_id=str(auth.user_id)
         )
-        providers, platform_models, platform_engine = await _with_platform_view(
+        (
+            providers,
+            platform_models,
+            platform_engine,
+            platform_governance,
+        ) = await _with_platform_view(
             auth.user_id,
             mask_ai_providers(plaintext_providers),
             (ai_settings.get("ai_providers") or {}).get(_NOUS_PROVIDER_KEY),
@@ -362,6 +374,7 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
             provider_health=settings_json.get("ai_provider_health", {}) or {},
             platform_models=platform_models,
             platform_engine=platform_engine,
+            platform_governance=platform_governance,
         )
 
     except HTTPException:
@@ -528,4 +541,4 @@ async def get_platform_status(auth: AuthDep):
         # Same fallback as ``GET /ai/settings``: the list still renders from
         # the statuses it carried; "unknown" is not "no models".
         logger.warning(f"platform status failed for {auth.user_id}: {exc!r}")
-        return {"models": {}, "engine": None}
+        return {"models": {}, "engine": None, "governance": None}

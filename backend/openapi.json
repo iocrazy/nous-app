@@ -269,6 +269,23 @@
             ],
             "description": "nous-engine reachability behind the platform list; null when no listed row is served by nous-engine or the view is unknown."
           },
+          "platform_governance": {
+            "anyOf": [
+              {
+                "enum": [
+                  "on",
+                  "off",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Admin governance nous.user_enabled as the platform view read it: on / off (off = empty list) / unknown (the read failed; the list is computed as if on). null = the view is unknown.",
+            "title": "Platform Governance"
+          },
           "platform_models": {
             "anyOf": [
               {
@@ -9280,6 +9297,22 @@
               }
             ]
           },
+          "governance": {
+            "anyOf": [
+              {
+                "enum": [
+                  "on",
+                  "off",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Governance"
+          },
           "models": {
             "items": {
               "$ref": "#/components/schemas/AiNousModelPublic"
@@ -9449,6 +9482,22 @@
                 "type": "null"
               }
             ]
+          },
+          "governance": {
+            "anyOf": [
+              {
+                "enum": [
+                  "on",
+                  "off",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Governance"
           },
           "models": {
             "additionalProperties": {

@@ -83,8 +83,8 @@ async def test_default_text_model_is_first_enabled_llm_from_catalog():
         ),
         # The default reads the platform provider view (P4): governance on.
         patch(
-            "app.services.ai.governance.ai_governance.is_nous_globally_enabled",
-            new=AsyncMock(return_value=True),
+            "app.services.ai.governance.ai_governance.nous_global_state",
+            new=AsyncMock(return_value="on"),
         ),
     ):
         model = await svc._default_text_model()
