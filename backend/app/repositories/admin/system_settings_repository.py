@@ -145,12 +145,14 @@ class SystemSettingsRepository:
         return out
 
     async def upsert_setting(
-        self, key: str, value: Any, updated_by: str
+        self, key: str, value: Any, updated_by: str | None
     ) -> dict[str, Any]:
         """Insert-or-update via ``INSERT ... ON CONFLICT DO UPDATE``.
 
         Safe for first-time writes where the row may not exist yet (no seed
-        migration required).  Commits via ``write_scope()``.
+        migration required).  Commits via ``write_scope()``. ``updated_by``
+        is the admin's uuid, or None for a system writer (the column is a
+        nullable ``uuid``; any other string is a DataError).
 
         SECRETS: same ``conceal_for_key`` chokepoint as ``update`` (see its
         docstring) — applied before the INSERT/ON CONFLICT UPDATE.
