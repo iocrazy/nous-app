@@ -37,6 +37,7 @@ from typing import Iterable, Optional
 
 from loguru import logger
 
+from app.boundary.frame_markers import escape_frame_prose
 from app.services.ai.prompts.link_understanding import (
     LinkSummary,
     LinkUnderstandingError,
@@ -139,6 +140,40 @@ The agent should not invent its contents.
 """
 
 
+# Third-party ``<title>`` / meta description caps. The fetch cap is 2 MiB, so
+# without these a single page title is an unbounded number of tokens inside
+# the system message.
+LINK_TITLE_MAX = 200
+LINK_DESC_MAX = 500
+
+# ``[/link-summary]`` is the block's own close marker. It is square-bracketed,
+# so ``escape_frame_body`` (which only knows ``</name>``) cannot defuse it —
+# this module owns that job. Whitespace inside the brackets is tolerated for
+# the same reason ``frame_markers._CLOSE_RE`` tolerates it: a model reads
+# ``[ /link-summary ]`` as the same marker.
+_LINK_CLOSE_RE = re.compile(r"\[\s*/\s*link-summary\s*\]", re.IGNORECASE)
+
+
+def _defuse_link_close(text: str) -> str:
+    """Rewrite a forged ``[/link-summary]`` to ``[\\/link-summary]``.
+
+    Same move as ``escape_frame_body``'s ``<\\/name>``: the words stay
+    readable, the marker loses its authority.
+    """
+    return _LINK_CLOSE_RE.sub(r"[\\/link-summary]", text)
+
+
+def _meta_line(value: Optional[str], limit: int, fallback: str) -> str:
+    """One untrusted metadata value, made safe for its single ``key: value``
+    line: capped (raw, before escaping, so an entity is never cut in half),
+    flattened + entity-escaped by ``escape_frame_prose`` (one line; no forged
+    ``<system-reminder>``), then the bracket close defused."""
+    if not value:
+        return fallback
+    clipped = value if len(value) <= limit else value[:limit] + "…"
+    return _defuse_link_close(escape_frame_prose(clipped))
+
+
 def render_block(summary: LinkSummary) -> str:
     """Convert a successful LinkSummary into a system-side text block
     ready to drop into the prompt's request_instructions section.
@@ -147,14 +182,24 @@ def render_block(summary: LinkSummary) -> str:
     inside the page body. Title + description live OUTSIDE the wrapper
     because they're already short-summarised by the upstream site;
     putting them in the wrapper would just waste tokens.
+
+    Outside the wrapper is still inside the system message, and both values
+    are third-party text (the page's ``<title>`` / meta). So each is capped
+    (``LINK_TITLE_MAX`` / ``LINK_DESC_MAX``) and escaped onto its one line;
+    a title carrying ``[/link-summary]`` or a newline cannot end the block or
+    start a line that reads as harness-authored. The body's random-id wrapper
+    does not stop a literal ``[/link-summary]`` either, so the same defusal
+    runs over the content.
     """
     content = (
-        summary.neutralized.wrapped if summary.neutralized else "(no body extracted)"
+        _defuse_link_close(summary.neutralized.wrapped)
+        if summary.neutralized
+        else "(no body extracted)"
     )
     return _OK_TEMPLATE.format(
         url=summary.url,
-        title=summary.title or "(no title)",
-        description=summary.description or "(none)",
+        title=_meta_line(summary.title, LINK_TITLE_MAX, "(no title)"),
+        description=_meta_line(summary.description, LINK_DESC_MAX, "(none)"),
         content=content,
     )
 
@@ -166,7 +211,10 @@ def render_failure_block(url: str, reason: str) -> str:
     # Truncate reason so an attacker's extra-long error message can't
     # blow up the prompt; first line + 200 chars is plenty.
     line = reason.splitlines()[0] if reason else "unknown"
-    return _ERR_TEMPLATE.format(url=url, reason=line[:200])
+    # The reason can quote server-supplied text; it must not close the block.
+    return _ERR_TEMPLATE.format(
+        url=url, reason=_defuse_link_close(escape_frame_prose(line[:200]))
+    )
 
 
 # ─── Aggregator ───────────────────────────────────────────────────────
@@ -261,6 +309,8 @@ async def fetch_and_render(
 
 
 __all__ = [
+    "LINK_DESC_MAX",
+    "LINK_TITLE_MAX",
     "LinkInjectionResult",
     "extract_urls",
     "extract_urls_from_messages",

@@ -39,6 +39,10 @@ from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.scope.scope_binding import resolve_dispatch_scope
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.script.scene_ops import ELEMENT_TYPES
+from app.services.storyboard.script.script_prompt_frames import (
+    render_previous_error,
+    render_script_input,
+)
 
 ALLOWED_HTML_TAGS = ["h2", "h3", "p", "strong", "em", "hr", "br"]
 
@@ -338,11 +342,15 @@ class ScriptAIService:
             "Return ONLY a JSON array, no other text."
         )
 
-        user_prompt = f"Story premise:\n{premise}"
+        user_prompt = render_script_input(
+            [
+                ("Story premise", premise),
+                ("Genre", genre),
+                ("Style guide", style_guide),
+            ]
+        )
         if genre:
-            user_prompt += f"\n\n故事风格为{genre}，请围绕该风格创作。"
-        if style_guide:
-            user_prompt += f"\n\nStyle guide:\n{style_guide}"
+            user_prompt += "\n\n故事风格见上方 Genre，请围绕该风格创作。"
 
         response = await self._run_agent(request_instructions, user_prompt)
         chapters = self._extract_json(response)
@@ -386,11 +394,14 @@ class ScriptAIService:
             "- Do NOT output markdown. Only the HTML tags listed above."
         )
 
-        user_prompt = f"Chapter title: {title}\nSummary: {summary}"
-        if context:
-            user_prompt = f"Story context:\n{context}\n\n{user_prompt}"
-        if expansion_request:
-            user_prompt += f"\n\nAdditional requirements: {expansion_request}"
+        user_prompt = render_script_input(
+            [
+                ("Story context", context),
+                ("Chapter title", title),
+                ("Summary", summary),
+                ("Additional requirements", expansion_request),
+            ]
+        )
 
         content = await self._run_agent(request_instructions, user_prompt)
         return sanitize_ai_html(content[:MAX_CONTENT_LENGTH])
@@ -419,9 +430,9 @@ class ScriptAIService:
             "Return ONLY a JSON array, no other text."
         )
 
-        user_prompt = f"Chapter: {title}\nSummary: {summary}"
-        if context:
-            user_prompt = f"Story context:\n{context}\n\n{user_prompt}"
+        user_prompt = render_script_input(
+            [("Story context", context), ("Chapter", title), ("Summary", summary)]
+        )
 
         response = await self._run_agent(request_instructions, user_prompt)
         branches = self._extract_json(response)
@@ -647,7 +658,13 @@ class ScriptAIService:
         if not element_lines:
             element_lines = "(empty scene — no elements yet)"
 
-        heading_line = f"Scene heading: {_flatten_ws(heading)}\n\n" if heading else ""
+        # The heading sits OUTSIDE the fence, so a forged `</scene_elements>`
+        # in it must be defused too, not only flattened.
+        heading_line = (
+            f"Scene heading: {escape_frame_body(_flatten_ws(heading))}\n\n"
+            if heading
+            else ""
+        )
         user_prompt = (
             f"{heading_line}"
             "The scene elements are listed inside the <scene_elements> fence "
@@ -755,12 +772,7 @@ class ScriptAIService:
             "</user_instruction>"
         )
         if error_context:
-            user_prompt += (
-                "\n\nYour previous attempt produced ops that FAILED server "
-                f"validation with: {error_context}\n"
-                "Regenerate the batch: ensure every anchor references an "
-                "element id that exists above and every op is well-formed."
-            )
+            user_prompt += "\n\n" + render_previous_error(error_context)
 
         response = await self._run_agent(request_instructions, user_prompt)
         parsed = self._extract_json(response)

@@ -49693,14 +49693,17 @@
           },
           "element_ids": {
             "items": {
+              "maxLength": 64,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Element Ids",
             "type": "array"
           },
           "element_type": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -49712,6 +49715,7 @@
           "scene_id": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -49723,6 +49727,7 @@
           "scene_label": {
             "anyOf": [
               {
+                "maxLength": 500,
                 "type": "string"
               },
               {

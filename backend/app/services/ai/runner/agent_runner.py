@@ -36,6 +36,7 @@ from app.agent_framework import ContextCompactor
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.llm.empty_response import diagnose_empty_response
 from app.services.ai.runner.events import emit as emit_event
+from app.services.ai.runner.mcp_errors import mcp_transport_error_text
 from app.services.ai.runner.narration_events import emit_partial_narration
 from app.services.ai.runner.reasoning import (
     ReasoningStreamFilter,
@@ -1061,7 +1062,7 @@ class AgentRunner:
                     except Exception as exc:
                         inc_metric("mcp_tool_call_transport_error")
                         result = {
-                            "error": f"MCP transport failure: {exc}",
+                            "error": mcp_transport_error_text(exc),
                             "tool": tool_name,
                         }
                 else:  # Delegate
@@ -2370,7 +2371,7 @@ class AgentRunner:
                     except Exception as exc:
                         inc_metric("mcp_tool_call_transport_error")
                         result = {
-                            "error": f"MCP transport failure: {exc}",
+                            "error": mcp_transport_error_text(exc),
                             "tool": tool_name,
                         }
                 else:  # tool_name == "Delegate"

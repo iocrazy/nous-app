@@ -49,13 +49,28 @@ OWNED_FRAMES: Final[frozenset[str]] = frozenset(
         # 压缩摘要：唯一渲染方是 app/boundary/summary_frame.py（压缩器与
         # replay 共用）。摘要源自用户可控的对话，正文必须 escape_frame_body。
         "conversation_summary",
+        # 团队频道 @agent 的记忆块（services/chat/conversation_memory_service.py）：
+        # 滚动摘要 + recall 命中，全部源自频道里用户说过的话。
+        "conversation_memory",
         "graph_facts",
         # harness p4 §1-③: a claimed inbox item injected at a step boundary
         "inbox_message",
+        # 链接摘要块（services/ai/prompts/link_injection.py）。⚠️ 它是方括号框
+        # ``[link-summary …]…[/link-summary]``，不是尖括号框：本表驱动的
+        # ``_CLOSE_RE`` 只认 ``</name>``，所以方括号闭合由 link_injection 自己
+        # 的 ``_defuse_link_close`` 负责；登记在这里是为了让尖括号拼写
+        # ``</link-summary>`` 同样关不掉它，并让这张表完整列出我们拥有的框。
+        "link-summary",
         "pending_followups",
+        # script_ai_service 元素批改重试：上一次 dry-run 的 OpError 文本，
+        # 可能引用元素原文或用户指令。
+        "previous_error",
         # 三期 3a-④: 本轮被人引用的产出版本（只有坐标，没有内容）
         "referenced_outputs",
         "scene_elements",
+        # script_ai_service 大纲 / 扩写 / 分支的用户输入（premise、summary、
+        # context、style_guide …）。
+        "script_input",
         # 内建 todo 的清单（agent_framework/agent_todo.py），经 Skill 工具结果
         # 进模型；条目文字由模型写，可被它本轮读到的任何内容带偏。逐行框，
         # 每条走 escape_frame_prose。

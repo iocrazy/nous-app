@@ -29,7 +29,7 @@ from fastapi import HTTPException, status
 from loguru import logger
 
 from app.agent_framework.abort_controller import RunAborted
-from app.boundary.frame_markers import escape_frame_body
+from app.boundary.frame_markers import escape_frame_attr, escape_frame_body
 from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
@@ -2148,7 +2148,11 @@ class AILibraryChatService:
 
 def format_script_context_block(script_context: Optional[dict]) -> str:
     """script_context handle → <user_selection> 指令块（空/无效返回 ""）。
-    只带 id 与标签，不带文本——文本已折叠在用户消息里，重复注入是双份 token。"""
+    只带 id 与标签，不带文本——文本已折叠在用户消息里，重复注入是双份 token。
+
+    id 来自请求体（``ScriptContextRequest`` 是自由字符串），客户端能塞进
+    ``</user_selection>`` 或换行提前关框。id 是标识符形状的值，所以走
+    ``escape_frame_attr``：压平换行、实体转义 ``&<>"``；正常 id 原样不变。"""
     sc = script_context or {}
     scene_id = sc.get("scene_id")
     element_ids = [e for e in (sc.get("element_ids") or []) if e]
@@ -2158,9 +2162,10 @@ def format_script_context_block(script_context: Optional[dict]) -> str:
     if sc.get("scene_label"):
         lines.append(f"scene: {escape_frame_body(sc['scene_label'])}")
     if scene_id:
-        lines.append(f"scene_id: {scene_id}")
+        lines.append(f"scene_id: {escape_frame_attr(scene_id)}")
     if element_ids:
-        lines.append(f"element_ids: {', '.join(element_ids)}")
+        ids = ", ".join(escape_frame_attr(e) for e in element_ids)
+        lines.append(f"element_ids: {ids}")
     if sc.get("element_type"):
         lines.append(f"element_type: {escape_frame_body(sc['element_type'])}")
     if sc.get("cross_scene"):

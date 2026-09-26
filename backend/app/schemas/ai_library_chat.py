@@ -9,7 +9,7 @@ produces an agent_runs row (with tokens, cost, budget check, pulse).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -230,15 +230,30 @@ class AttachmentRequest(BaseModel):
         return v
 
 
+# 上限（fh4 T6）：这些值原样进 ``<user_selection>`` 框（请求指令区，模型可见）。
+# id 是 snowflake 数字串或 ``el_<hex>``，64 远超真实长度；前端一次只带一个
+# element id，100 是给多选留的余量。
+SCRIPT_CONTEXT_ID_MAX = 64
+SCRIPT_CONTEXT_ELEMENTS_MAX = 100
+SCRIPT_CONTEXT_TYPE_MAX = 64
+SCRIPT_CONTEXT_LABEL_MAX = 500
+
+
 class ScriptContextRequest(BaseModel):
     """§5.3：随消息携带的剧本选区 handle。文本折叠仍在 content 里（展示/
     持久化不变）；这里只携带 id，让 agent 能用 ReadScene/ProposeEdit 精确
     定位，而不是拿文本再搜一遍。id 全部字符串（BIGINT snowflake 精度）。"""
 
-    scene_id: Optional[str] = None
-    element_ids: list[str] = Field(default_factory=list)
-    element_type: Optional[str] = None
-    scene_label: Optional[str] = None
+    scene_id: Optional[str] = Field(default=None, max_length=SCRIPT_CONTEXT_ID_MAX)
+    element_ids: list[Annotated[str, Field(max_length=SCRIPT_CONTEXT_ID_MAX)]] = Field(
+        default_factory=list, max_length=SCRIPT_CONTEXT_ELEMENTS_MAX
+    )
+    element_type: Optional[str] = Field(
+        default=None, max_length=SCRIPT_CONTEXT_TYPE_MAX
+    )
+    scene_label: Optional[str] = Field(
+        default=None, max_length=SCRIPT_CONTEXT_LABEL_MAX
+    )
     cross_scene: bool = False
 
 
