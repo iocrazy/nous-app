@@ -134,6 +134,8 @@ _KNOWN_FRAME_RENDERERS = {
     # fh4 T6：团队频道记忆块、剧本输入 / 上次错误两个新框
     "services/chat/conversation_memory_service.py",
     "services/storyboard/script/script_prompt_frames.py",
+    # fh5 T1：claude adapter 中段 system 消息的 <system_note> 框
+    "boundary/system_note.py",
 }
 
 _OPENING_RE = re.compile(r"<\s*([a-z][a-z0-9_-]*)[\s>/]")

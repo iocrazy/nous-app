@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.agent_framework.message_truncation import (
@@ -103,6 +105,10 @@ def test_oversized_tool_call_args_replaced_with_placeholder():
     new_args = out.message["tool_calls"][0]["function"]["arguments"]
     assert "tool_call replaced" in new_args
     assert "tc-42" in new_args  # tcid preserved for debugging
+    # fh5 T1: the placeholder is valid JSON, so every adapter sees real args
+    parsed = json.loads(new_args)
+    assert set(parsed) == {"_truncated"}
+    assert "tc-42" in parsed["_truncated"]
 
 
 @pytest.mark.unit

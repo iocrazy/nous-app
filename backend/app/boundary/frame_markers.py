@@ -71,6 +71,10 @@ OWNED_FRAMES: Final[frozenset[str]] = frozenset(
         # script_ai_service 大纲 / 扩写 / 分支的用户输入（premise、summary、
         # context、style_guide …）。
         "script_input",
+        # 中段 role=system 消息在 claude adapter 里原位转成的 user 轮外框
+        # （fh5 T1）。唯一渲染方是 app/boundary/system_note.py；内容里的其它
+        # 自有框由各自的生产方转义，本框只单框转义自己的闭合标记。
+        "system_note",
         # 内建 todo 的清单（agent_framework/agent_todo.py），经 Skill 工具结果
         # 进模型；条目文字由模型写，可被它本轮读到的任何内容带偏。逐行框，
         # 每条走 escape_frame_prose。
@@ -110,6 +114,41 @@ def escape_frame_body(text: Any) -> str:
     if not text:
         return ""
     return _CLOSE_RE.sub(lambda m: f"<\\/{m.group(1)}>", str(text))
+
+
+def escape_frame_close(text: Any, frame: str, *, bracket: bool = False) -> str:
+    """Defuse the closing marker of ONE owned frame, leaving everything else.
+
+    ``escape_frame_body`` defuses every owned closer at once, which is wrong
+    for a wrapper whose content legitimately carries OTHER owned frames: the
+    ``<system_note>`` around a compaction summary must keep the summary's own
+    ``</conversation_summary>`` intact. Those inner frames are escaped by
+    their own renderers; the wrapper only has to make sure nothing inside can
+    close the wrapper itself.
+
+    ``</ frame >`` (any case, inner whitespace) becomes ``<\\/frame>``. With
+    ``bracket=True`` the square-bracket spelling ``[/frame]`` is defused too,
+    as ``[\\/frame]``. Idempotent: the defused forms no longer match.
+    """
+    if frame not in OWNED_FRAMES:
+        raise ValueError(f"escape_frame_close: {frame!r} is not an owned frame")
+    if not text:
+        return ""
+    name = re.escape(frame)
+    out = re.sub(
+        rf"</\s*({name})\s*>",
+        lambda m: f"<\\/{m.group(1)}>",
+        str(text),
+        flags=re.IGNORECASE,
+    )
+    if bracket:
+        out = re.sub(
+            rf"\[\s*/\s*({name})\s*\]",
+            lambda m: f"[\\/{m.group(1)}]",
+            out,
+            flags=re.IGNORECASE,
+        )
+    return out
 
 
 def escape_frame_attr(value: Any) -> str:
