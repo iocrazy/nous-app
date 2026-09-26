@@ -487,6 +487,214 @@ Each <output/> above is a CITATION the human made — one specific version of an
 
 本模块不缓存登记表内容：框是每轮从本轮附件重新拼的，附件里的坐标与标题快照来自发帖口那一次校验。
 
+### `[link-summary]` 链接摘要块（仅当本轮用户消息含 URL）
+
+#### What the model sees
+
+聊天路径从**本轮**用户消息里抽 URL（`link_injection.extract_urls`），抓取后每个 URL 渲染成一个块，块之间空一行，整体前置到请求指令最外层（顺序见 `app/services/ai/chat/README.md`）。成功时（`render_block`）：
+
+```text
+[link-summary url={url}]
+title: {title}
+description: {description}
+content: {content}
+[/link-summary]
+```
+
+`{content}` 是 `neutralize_external_text` 包裹后的正文摘录（随机 id 包裹，形状见 `../../../boundary/README.md`），抓不到正文时是 `(no body extracted)`；没有标题写 `(no title)`，没有描述写 `(none)`。`{title}` / `{description}` 取自页面的 `<title>` 与 meta，**在包裹之外**。#2472 起它们各自先截断（`LINK_TITLE_MAX = 200` / `LINK_DESC_MAX = 500` 字符，超出补 `…`），再经 `escape_frame_prose` 压成一行并实体转义，最后把伪造的 `[/link-summary]`（容许括号内空白）改写成 `[\/link-summary]`。同样的方括号闭合改写也作用于 `{content}`。
+
+失败时（`render_failure_block`，`{reason}` 是 `异常类名: 消息` 的第一行、截到 200 字符，再经 `escape_frame_prose` 与方括号闭合改写）：
+
+```text
+[link-summary url={url} error=true]
+We tried to fetch this URL but failed: {reason}.
+The agent should not invent its contents.
+[/link-summary]
+```
+
+#### Token effect
+
+每轮最多 3 个 URL；单个抓取超时 15 秒、整体 30 秒；抓取上限 2 MiB（`DEFAULT_FETCH_CAP_BYTES`）；正文摘录 8 KiB 字符（`DEFAULT_BODY_EXCERPT_CHARS`，约 2k token）；标题 200、描述 500 字符。块只在本轮存在、不持久化，下一轮就没有了。
+
+#### KV Cache effect
+
+在缓存边界之后的请求指令里，**不影响稳定前缀**。因为不持久化，下一轮模型看不到页面内容，只看到自己上一轮基于它写的答复。
+
+### 工具 schema 与指令：`FinishIssue`（仅 issue 触发）
+
+#### What the model sees
+
+issue 触发的轮次（`issue_dispatch` / `issue_dispatch_auto` / `issue_reply`）在 tools 里追加 `FinishIssue`（在 `AskUser` 之前）。`options` 的子 schema 是 `question.OPTIONS_JSON_SCHEMA`，与 `AskUser.options` 同一个对象（见上文 `AskUser` 块）：
+
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "FinishIssue",
+    "description": "Declare the outcome of your work on this issue. Call this once when you are done with the turn: use 'completed' if the task is finished, 'needs_input' if you are blocked and need a human decision or information, or 'continue' if you made progress but need another turn to finish. Always include a short 'reason'.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "needs_input",
+            "continue"
+          ],
+          "description": "completed | needs_input | continue"
+        },
+        "reason": {
+          "type": "string",
+          "description": "One sentence: what was done, or what you need from a human, or what remains."
+        },
+        "options": "<OPTIONS_JSON_SCHEMA>"
+      },
+      "required": [
+        "outcome"
+      ]
+    }
+  }
+}
+```
+
+同时在**整条系统消息末尾**追加两个换行加 `FINISH_ISSUE_INSTRUCTION`，逐字如下：
+
+```text
+You are working an assigned issue. Before you end this turn you MUST call the FinishIssue tool exactly once to declare the outcome:
+- 'completed' — the task is done and ready for a human to review.
+- 'needs_input' — you are blocked and need a human decision or information; state precisely what you need in 'reason'.
+- 'continue' — you made real progress but need another turn to finish.
+Always include a one-sentence 'reason'. Do not end the turn without calling FinishIssue.
+```
+
+轮次结束时模型若没有声明结果，`forced_finish_declaration` 另发**一次独立请求**：系统消息是 `You just worked on an assigned issue but your turn ended without declaring an outcome.` 加两个换行加上面那段指令，tools 只有 `FinishIssue`，消息只有一条 user：
+
+```text
+Your last message on this issue was:
+
+{assistant_text}
+
+Call FinishIssue now to declare the outcome that best matches what you just did.
+```
+
+adapter 接受 `tool_choice` 时强制 `{"type": "function", "function": {"name": "FinishIssue"}}`，否则不强制。
+
+#### Token effect
+
+schema 约 200 token（不含 `options` 子 schema），指令约 110 token，都固定。强制声明请求 `max_tokens = 300`、温度 0.2；`{assistant_text}` 是上一轮完整的最终文本，**没有上限**。
+
+#### KV Cache effect
+
+指令追加在 `# Runtime` 行之后，不占稳定前缀；但 tools 列表多了 `FinishIssue`，所以 issue 轮次与聊天轮次是两个缓存族（同上文 tools 顺序的说明）。强制声明是**独立请求**，与轮次本身没有共享前缀。
+
+### 工具 schema：`GenerateImage` / `GenerateVideo`（按能力授予）
+
+#### What the model sees
+
+聊天路径在 agent 有 `media.image` / `media.video` 授予且全站开关 `media_kill_switch_engaged()` 未拉下时，把对应 schema 追加到 tools（`ai_library_chat_service.py`）。逐字如下：
+
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "GenerateImage",
+    "description": "Generate an image from a text prompt. The image is saved to the user's Generations library and a reference is returned. Use when the user asks you to create / draw / render an image.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "What to depict."
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "description": "Optional, e.g. '16:9', '1:1'. Default 16:9."
+        },
+        "model": {
+          "type": "string",
+          "description": "Optional model override."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Which image provider to use: a catalog model name, or a model id / provider key the user enabled under Settings → AI (e.g. 'doubao'). Without it, resolution falls back to the platform catalog, which may have no image model enabled."
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    }
+  }
+}
+```
+
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "GenerateVideo",
+    "description": "Generate a short video from a source image. Asynchronous: this call only submits the job and returns a task_id at once. Rendering can take up to ~27 minutes; the finished video (its generated_media_id and url) or the failure reason arrives later as an inbox message. Do not poll, and do not re-submit the same request while it is rendering. The video is saved to the user's Generations library.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Motion / scene description."
+        },
+        "source_image_url": {
+          "type": "string",
+          "description": "URL of the image to animate."
+        },
+        "model": {
+          "type": "string",
+          "description": "Optional model override."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Optional provider override."
+        }
+      },
+      "required": [
+        "prompt",
+        "source_image_url"
+      ]
+    }
+  }
+}
+```
+
+#### Token effect
+
+两份合计约 450 token，固定。
+
+#### KV Cache effect
+
+在 tools 列表里，属于请求前缀的一部分。授予变化、或全站开关拉下 / 恢复，都会改变 tools 列表，让该 agent 的请求换到另一个缓存族。真正的拦截在 `HighRiskCapabilityGateHook`，这里只决定给不给模型看。
+
+### 工具 schema：写剧本工具组（按 write_level 授予）
+
+#### What the model sees
+
+`PromptComposer._build_tools` 对**每一条**组装路径都按 agent 的 `write_level` 过滤后追加（`screenwriting_specs.screenwriting_tool_specs`）：`ListScenes` / `ReadScene` 要 `read`，`ProposeEdit` 要 `propose`，`CreateShot` / `UpdateShot` / `ApplyEdit` 要 `write`；`GenerateShotImage` 不看 write_level，只在 `media.image` 授予且全站开关未拉下时出现。顺序固定如下，每行一个工具，逐字：
+
+```json
+{"type": "function", "function": {"name": "ListScenes", "description": "List the scenes you can work on, in script order. Returns for each: scene_id (the handle to pass to other tools), scene_no_in_episode (the human-facing scene number, unique within its episode), INT/EXT, location, time of day, and whether the scene has any written content yet. Start here — you cannot address a scene without its scene_id.", "parameters": {"type": "object", "properties": {"episode_id": {"type": "string", "description": "Optional: restrict to one episode. Omit to list everything in reach."}, "limit": {"type": "integer", "description": "Optional max rows (capped server-side)."}}, "required": []}}}
+{"type": "function", "function": {"name": "ReadScene", "description": "Read one scene's content. Returns its heading, its scene_no_in_episode, its existing shot cards, and its elements as an ordered list of {element_id, type, text}. element_id values are the anchors ProposeEdit addresses; content_version is the concurrency token to quote back when proposing an edit.", "parameters": {"type": "object", "properties": {"scene_id": {"type": "string", "description": "Opaque scene handle from ListScenes/ReadScene. Never construct or guess one."}}, "required": ["scene_id"]}}}
+{"type": "function", "function": {"name": "CreateShot", "description": "Add one shot card to a scene's storyboard. The shot's number is assigned by the server (next in that scene) — do not pass one. Returns the created card including shot_label, the human-facing '<scene_no>-<shot_no>' reference.", "parameters": {"type": "object", "properties": {"scene_id": {"type": "string", "description": "Opaque scene handle from ListScenes/ReadScene. Never construct or guess one."}, "shot_type": {"type": "string", "description": "Shot size, e.g. 'WIDE', 'MEDIUM', 'CLOSE UP', 'OTS'."}, "camera_angle": {"type": "string", "description": "e.g. 'EYE LEVEL', 'LOW ANGLE', 'HIGH ANGLE'."}, "camera_movement": {"type": "string", "description": "e.g. 'STATIC', 'PAN LEFT', 'DOLLY IN', 'HANDHELD'."}, "focal_length": {"type": "string", "description": "Lens, e.g. '24mm', '50mm', '85mm'."}, "lighting": {"type": "string", "description": "Lighting note for this shot."}, "description": {"type": "string", "description": "One sentence describing what the shot shows."}}, "required": ["scene_id"]}}}
+{"type": "function", "function": {"name": "UpdateShot", "description": "Revise an existing shot card's parameters or description. Only the fields you pass change. Cannot move, renumber, delete, or mark a card as rendered.", "parameters": {"type": "object", "properties": {"shot_id": {"type": "string", "description": "Shot handle from ReadScene's shots list."}, "shot_type": {"type": "string", "description": "Shot size, e.g. 'WIDE', 'MEDIUM', 'CLOSE UP', 'OTS'."}, "camera_angle": {"type": "string", "description": "e.g. 'EYE LEVEL', 'LOW ANGLE', 'HIGH ANGLE'."}, "camera_movement": {"type": "string", "description": "e.g. 'STATIC', 'PAN LEFT', 'DOLLY IN', 'HANDHELD'."}, "focal_length": {"type": "string", "description": "Lens, e.g. '24mm', '50mm', '85mm'."}, "lighting": {"type": "string", "description": "Lighting note for this shot."}, "description": {"type": "string", "description": "One sentence describing what the shot shows."}}, "required": ["shot_id"]}}}
+{"type": "function", "function": {"name": "ProposeEdit", "description": "Propose a revision to specific elements of a scene, for the writer to accept or reject. This does NOT change the script — it returns a reviewable proposal anchored to the element_ids you name, having checked that the proposal could be applied right now. Quote the content_version you got from ReadScene so a proposal the writer has already overtaken comes back flagged stale.", "parameters": {"type": "object", "properties": {"scene_id": {"type": "string", "description": "Opaque scene handle from ListScenes/ReadScene. Never construct or guess one."}, "element_ids": {"type": "array", "items": {"type": "string"}, "description": "element_id values from ReadScene naming the passage you are rewriting. Ignored when the writer attached a selection to this turn — theirs wins."}, "edits": {"type": "array", "description": "The replacement text, bound to the element it replaces. One entry per element you are changing.", "items": {"type": "object", "properties": {"element_id": {"type": "string"}, "text": {"type": "string"}}, "required": ["element_id", "text"]}}, "rationale": {"type": "string", "description": "One sentence: why this change."}, "base_content_version": {"type": "integer", "description": "The content_version ReadScene returned for this scene. This is the proof you are rewriting the text you actually read: if the writer changed those same elements meanwhile, the edit is refused instead of overwriting them."}}, "required": ["scene_id", "element_ids", "edits"]}}}
+{"type": "function", "function": {"name": "ApplyEdit", "description": "Write a revision into the script, replacing the text of the elements you name. Read the scene first and pass the content_version it returned as base_content_version — it is REQUIRED. If the writer changed those same elements while you were working, nothing is written and you get their current text back to rebase on; if they changed something else in the scene, your edit is applied on top of their work. Element type is preserved — you can rewrite a line of dialogue, not turn it into an action line.", "parameters": {"type": "object", "properties": {"scene_id": {"type": "string", "description": "Opaque scene handle from ListScenes/ReadScene. Never construct or guess one."}, "element_ids": {"type": "array", "items": {"type": "string"}, "description": "element_id values from ReadScene naming the passage you are rewriting. Ignored when the writer attached a selection to this turn — theirs wins."}, "edits": {"type": "array", "description": "The replacement text, bound to the element it replaces. One entry per element you are changing.", "items": {"type": "object", "properties": {"element_id": {"type": "string"}, "text": {"type": "string"}}, "required": ["element_id", "text"]}}, "rationale": {"type": "string", "description": "One sentence: why this change."}, "base_content_version": {"type": "integer", "description": "The content_version ReadScene returned for this scene. This is the proof you are rewriting the text you actually read: if the writer changed those same elements meanwhile, the edit is refused instead of overwriting them."}}, "required": ["scene_id", "element_ids", "edits", "base_content_version"]}}}
+{"type": "function", "function": {"name": "GenerateShotImage", "description": "Dispatch AI image generation for one existing shot card, using its cinematography tags, description, and scene heading as the prompt. This call is ASYNCHRONOUS: it only confirms the generation was dispatched — the produced image lands on the shot some time after this call returns, not in its result. It costs real money per call, so do not call it again for the same shot_id just because you have not seen the result yet; wait and re-read the shot instead.", "parameters": {"type": "object", "properties": {"shot_id": {"type": "string", "description": "Shot handle from ReadScene's shots list or CreateShot's result. Never construct or guess one."}}, "required": ["shot_id"]}}}
+```
+
+#### Token effect
+
+七个全给时约 2k token（约 7.3k 字符），固定；按 write_level 少给几个。
+
+#### KV Cache effect
+
+在 tools 列表里，属于请求前缀。改任何一个描述、改过滤规则、改 agent 的 write_level，都会换缓存族。执行期的强制在 `AgentRunner._dispatch_screenwriting`（没有能力门的 runner 直接拒绝，见 `../runner/README.md`），这里只是展示过滤。
+
 ## Known Limitations and Deferred Work
 
 - **`LibrarySearch` 只搜调用者自己的库，不含团队库**。`SearchService.hybrid_search` 只按 `user_id` 限定、没有 team 参数；会话 @agent 路因此搜的是**召唤者个人的库**，而结果会贴进团队频道——所以那条路与 `ResourceFetch` 共用 `read_team_resources` 门。补团队库要先给 hybrid 的两个 RPC 加 scope，再把门换成真正的团队可读判定。
@@ -508,3 +716,7 @@ Each <output/> above is a CITATION the human made — one specific version of an
 - **legacy 路径（issue 没有 assignee agent）根本不转发附件**，所以那条路上的引用既不被校验也不到达任何人。这对所有附件 kind 都成立，不是 `output_ref` 引进的；在那里加校验只会给出「引用有效」的假保证，因为它随后照样被丢掉。
 - **`script_chapter` 今天没有生产者**，所以引用它必然是 `output_ref_unresolvable`。没有特判——登记表说没有就是没有。
 - **`link_injection` 失败会落显式占位块**，不是静默跳过——但占位块的文案目前只有英文，与 UI 的 i18n 口径不一致。
+- **`[link-summary]` 是方括号框**。`OWNED_FRAMES` 里登记了 `link-summary`，但 `escape_frame_body` 只认 `</name>`，方括号闭合 `[/link-summary]` 由 `link_injection._defuse_link_close` 自己负责；新增往块里写外部文本的地方必须同样过它。#2472 之前标题与描述未转义、无上限，记录在此供对照。非 HTML 页面只有响应头信息。
+- **强制声明的 `tool_choice` 从不穿过 `LLMFallbackChain`**（链的 `call` 不收这个参数），所以生产上那次强制请求实际是「不强制」。已记票（fh4 计划留票 E）。
+- **`{assistant_text}` 进强制声明请求时没有上限**。
+- **两份工具 schema 没有自己的三问块**：`Delegate`（`prompt_composer.py` 内联构造）与 1:1 聊天的 `ResourceFetch`（`ai_library_chat_service.py` 内联构造，描述与团队频道那份不同，团队频道那份见 `app/services/chat/README.md`）。fh4 守卫按模块登记，这两个模块已被其他块覆盖，所以守卫看不见它们。留票：把守卫改成按 `(模块, 工具名)` 登记，每个 `{"type": "function"}` 字面量各自要一个块，再补这两块。
