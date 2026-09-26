@@ -140,6 +140,9 @@ async def create_issue(payload: IssueCreate, auth: AuthDep) -> Issue:
     callers may NOT spoof it via the payload."""
     body = payload.model_dump(exclude_none=True)
     body["created_by_user_id"] = str(auth.user_id)
+    # 509: criteria written by a person are theirs (locks the agent out).
+    if body.get("acceptance_criteria"):
+        body["acceptance_criteria_source"] = "user"
     # Coerce enums to their .value for JSON serialization
     for field in ("status", "priority", "origin_kind"):
         if field in body and hasattr(body[field], "value"):
@@ -319,6 +322,13 @@ async def update_issue(issue_id: int, payload: IssueUpdate, auth: AuthDep) -> Is
     # an exclude_none payload; it wins over a budget_cents sent alongside.
     if patch.pop("clear_budget", None):
         patch["budget_cents"] = None
+    # 509: a person's criteria are theirs — the write stamps source='user',
+    # which locks the agent out (SetAcceptanceCriteria → criteria_locked).
+    if patch.pop("clear_acceptance_criteria", None):
+        patch["acceptance_criteria"] = None
+        patch["acceptance_criteria_source"] = None
+    elif patch.get("acceptance_criteria") is not None:
+        patch["acceptance_criteria_source"] = "user"
 
     if not patch:
         return Issue.model_validate(_normalise_uuid_strs(existing))

@@ -31,6 +31,82 @@ COMMENT ON COLUMN public.issues.acceptance_criteria IS
 COMMENT ON COLUMN public.issues.acceptance_criteria_source IS
   '509: who wrote acceptance_criteria — user (locked for the agent) | agent (proposal).';
 
+-- issue_create_atomic (173) INSERTs an explicit column list, so without this
+-- POST /issues would accept acceptance_criteria and silently drop it. Same
+-- signature → CREATE OR REPLACE keeps the ACL, but the grant is restated
+-- anyway (CLAUDE.md: a SECURITY DEFINER rewrite handles its ACL in the same
+-- migration). Backend-only function: never executable by anon / authenticated.
+CREATE OR REPLACE FUNCTION public.issue_create_atomic(payload JSONB)
+RETURNS public.issues
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  next_n  INTEGER;
+  pfx     TEXT;
+  ident   TEXT;
+  new_row public.issues;
+BEGIN
+  UPDATE public.issue_sequence
+  SET counter = counter + 1
+  WHERE scope = 'global'
+  RETURNING counter, prefix INTO next_n, pfx;
+
+  IF next_n IS NULL THEN
+    RAISE EXCEPTION 'issue_sequence row missing for scope=global';
+  END IF;
+
+  ident := pfx || '-' || next_n::text;
+
+  INSERT INTO public.issues (
+    issue_number, identifier,
+    team_id, project_id, parent_id,
+    title, description,
+    status, priority,
+    assignee_agent_id, assignee_user_id,
+    created_by_agent_id, created_by_user_id,
+    dbos_workflow_id, execution_state,
+    origin_kind, origin_id, origin_fingerprint,
+    request_depth, billing_code,
+    acceptance_criteria, acceptance_criteria_source
+  ) VALUES (
+    next_n, ident,
+    (payload->>'team_id')::BIGINT,
+    (payload->>'project_id')::BIGINT,
+    (payload->>'parent_id')::BIGINT,
+    payload->>'title',
+    payload->>'description',
+    COALESCE(payload->>'status', 'backlog'),
+    COALESCE(payload->>'priority', 'medium'),
+    (payload->>'assignee_agent_id')::UUID,
+    (payload->>'assignee_user_id')::UUID,
+    (payload->>'created_by_agent_id')::UUID,
+    (payload->>'created_by_user_id')::UUID,
+    payload->>'dbos_workflow_id',
+    payload->'execution_state',
+    COALESCE(payload->>'origin_kind', 'manual'),
+    payload->>'origin_id',
+    COALESCE(payload->>'origin_fingerprint', 'default'),
+    COALESCE((payload->>'request_depth')::INTEGER, 0),
+    payload->>'billing_code',
+    payload->>'acceptance_criteria',
+    payload->>'acceptance_criteria_source'
+  )
+  RETURNING * INTO new_row;
+
+  RETURN new_row;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.issue_create_atomic(JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.issue_create_atomic(JSONB)
+  TO service_role, mediahub_app, mediahub_dbos;
+
+COMMENT ON FUNCTION public.issue_create_atomic IS
+  'Atomic issue creation: allocates MH-N identifier and inserts in a single PG transaction. PR-D2.1. '
+  '509: also inserts acceptance_criteria / acceptance_criteria_source.';
+
 -- Transcript event whitelist: 492's list + 'verification'. The event-type array
 -- must stay the FIRST array literal in this file, and no comment above it may
 -- spell the array constructor (tests/models/test_transcript_event_types_phase2a

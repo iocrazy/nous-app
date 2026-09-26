@@ -472,6 +472,14 @@
         "title": "AcceptInviteResponse",
         "type": "object"
       },
+      "AcceptanceCriteriaSource": {
+        "enum": [
+          "user",
+          "agent"
+        ],
+        "title": "AcceptanceCriteriaSource",
+        "type": "string"
+      },
       "AccountConfigOverride": {
         "properties": {
           "description": {
@@ -27265,6 +27273,28 @@
       "Issue": {
         "description": "Read response — all server-set fields included.",
         "properties": {
+          "acceptance_criteria": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptance Criteria"
+          },
+          "acceptance_criteria_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AcceptanceCriteriaSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "ai_session_id": {
             "anyOf": [
               {
@@ -27551,6 +27581,18 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "verification": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification"
           }
         },
         "required": [
@@ -27567,6 +27609,18 @@
       "IssueCreate": {
         "description": "Caller payload for POST /issues. created_by_* is set by the router from auth context.",
         "properties": {
+          "acceptance_criteria": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptance Criteria"
+          },
           "assignee_agent_id": {
             "anyOf": [
               {
@@ -28880,6 +28934,18 @@
       "IssueUpdate": {
         "description": "PATCH payload — every field optional. Status changes go through dedicated endpoint.",
         "properties": {
+          "acceptance_criteria": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptance Criteria"
+          },
           "assignee_agent_id": {
             "anyOf": [
               {
@@ -28926,6 +28992,17 @@
               }
             ],
             "title": "Budget Cents"
+          },
+          "clear_acceptance_criteria": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clear Acceptance Criteria"
           },
           "clear_budget": {
             "anyOf": [
