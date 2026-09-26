@@ -283,8 +283,10 @@ const DOT_LABELS: Record<string, string> = {
   unreachable: 'nous-engine unreachable',
 }
 // Replaces the persisted detail in the tooltip where the label alone would
-// read like a fault. The hourly poll writes `idle` from nous-engine's readiness
-// read, which never loads a model; the admin Test loads it for real.
+// read like a fault. For nous-engine rows the dot reads the live engine list
+// (`engine_status` / `engine_ready`): `idle` = listed but not loaded. The
+// hourly probe skips those rows and never writes them, so the admin Test is
+// the only writer of their stored result.
 const DOT_HINTS: Record<string, string> = {
   idle: 'Authorized on nous-engine; the model is not loaded right now',
   missing:

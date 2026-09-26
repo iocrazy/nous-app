@@ -1,8 +1,11 @@
 // features/canvas-core/smart/nodes/useModelCapabilities.ts
 //
 // Per-model generation capabilities for the composer's knobs (P4). Fetched
-// once per session (module cache) like useGenerationModels — the projection
-// changes with the catalog, not mid-edit.
+// once per session (module cache) — the projection changes with the catalog,
+// not mid-edit. The model LIST itself is not fetched here or anywhere else:
+// useGenerationModels maps it from the AI settings' platform view, and the
+// backend keys this capability map by exactly those rows
+// (platform_provider.generation_picker_models).
 //
 // The return value is `ModelCapabilities | null`, and `null` is a deliberate
 // value rather than an error state: it means "capabilities unknown" (still

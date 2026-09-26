@@ -338,6 +338,14 @@ def test_display_name_for(service_id: str, expected: str) -> None:
     assert display_name_for(service_id) == expected
 
 
+@pytest.mark.parametrize("engine_type", ["app", "comfy_template", "tts"])
+def test_bridge_and_app_services_are_not_mapped(engine_type: str) -> None:
+    """``/v1/models`` ``type`` is the service category; ComfyUI bridge
+    services are ``app`` and run respond-async, so no catalog row is built
+    for them (a ``comfy_template`` type would also be skipped, not guessed)."""
+    assert engine_type not in nous_engine_sync.ENGINE_TYPE_TO_CATALOG
+
+
 def test_type_map_matches_catalog_vocabulary() -> None:
     from typing import get_args
 

@@ -28,6 +28,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 
 import httpx
 
+from app.repositories.nous_model_repository import NOUS_ENGINE_PROVIDER
 from app.services.ai.providers.ai_provider import AIProviderFactory
 from app.services.ai.providers.embedding_config import _is_multimodal
 
@@ -74,11 +75,12 @@ LOCAL_ENGINE_PROVIDERS = frozenset({"codex-local", "jimeng-local"})
 #
 # Since spec 2026-09-25 §3.4 the scheduled poll does not touch these rows at
 # all: the platform view reads authorization and ``ready`` from the engine's
-# own ``/v1/models`` list on every request (``engine_catalog``), so the poll
-# records ``not_probed`` with ``NOUS_ENGINE_LIVE_DETAIL``. The admin Test
-# button (``allow_costly=True``) still does the real call — a human clicking
-# Test wants the model loaded and exercised once.
-NOUS_ENGINE_PROVIDER = "nous"
+# own ``/v1/models`` list on every request (``engine_catalog``), and the poll
+# skips them without writing (P4), so the stored columns hold only what the
+# admin Test button found. A non-costly probe of such a row still answers
+# ``not_probed`` with ``NOUS_ENGINE_LIVE_DETAIL``; the admin Test button
+# (``allow_costly=True``) does the real call — a human clicking Test wants the
+# model loaded and exercised once.
 NOUS_ENGINE_LIVE_DETAIL = "live: status comes from nous-engine"
 
 # Values ``nous_models.last_test_status`` may hold. Twin of the DB CHECK in

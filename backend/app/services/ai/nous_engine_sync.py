@@ -50,13 +50,21 @@ from app.services.ai.engine_catalog import (
 )
 
 # engine service ``type`` → catalog ``type`` (schemas.nous_model.NousModelType).
+#
+# The engine's ``/v1/models`` ``type`` is the service CATEGORY
+# (``ServiceInstance.category``; ``openai_compat._model_object``), never its
+# ``source_type``. So there is no ``comfy_template`` key here: ComfyUI bridge
+# services are created with ``category="app"`` (nous-engine
+# ``routes/comfy_templates.py::create_template``), run respond-async through
+# the services API with a video output, and cannot be dispatched through
+# ``/v1/images/generations`` — they are skipped as ``unsupported_type:app``
+# like any other app. Image services (``studio-upscale`` …) list as ``image``.
 ENGINE_TYPE_TO_CATALOG: Mapping[str, str] = {
     "llm": "llm",
     "inference": "llm",
     "embedding": "embedding",
     "asr": "asr",
     "image": "image",
-    "comfy_template": "image",
 }
 
 CATALOG_NAME_PREFIX = "nous-"

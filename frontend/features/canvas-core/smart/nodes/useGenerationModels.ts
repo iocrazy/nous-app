@@ -5,8 +5,9 @@
 // request: the rows are the enabled platform image/video rows carried by the
 // AI settings, with the runtime state from hooks/usePlatformStatus on top.
 //
-// The daemon rule the server used to apply to this list (`apply_readiness`)
-// is applied here from the same status payload:
+// The daemon rule is computed server-side per row
+// (`services/generation/local_readiness.local_verdict`, served by
+// `GET /ai/platform-status`) and applied here from that payload:
 //   - a row that runs on the user's machine is hidden while the daemon cannot
 //     run it (`local_ready === false`);
 //   - a server twin is hidden while its local twin can run (`superseded`).

@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.repositories.nous_model_repository import NOUS_ENGINE_PROVIDER
 from app.services.ai.ai_health_runtime import fetch_runtime_summary
 from app.services.ai.providers.ai_provider_helpers import (
     get_ai_settings,
@@ -228,6 +229,26 @@ async def get_capability_health(user_id: str) -> list[dict[str, Any]]:
     return rows
 
 
+async def _engine_verdicts(
+    engine_rows: dict[str, dict[str, Any]],
+) -> dict[str, tuple[str, str]]:
+    """``fail`` verdicts for nous-engine rows, from the platform provider
+    view's live read (system view: platform-wide rows). A row counts as
+    failing only when the engine was actually read (reachable, not a carried
+    snapshot) and does not list it; could-not-read is not a verdict."""
+    from app.services.ai.platform_provider import platform_rows_and_engine
+
+    live, engine = await platform_rows_and_engine(None, purpose="dispatch")
+    if engine is None or not engine.reachable or engine.stale:
+        return {}
+    listed = {r.model.name for r in live}
+    return {
+        model: ("fail", "nous-engine no longer lists this service for its key")
+        for model, row in engine_rows.items()
+        if not row.get("owner_user_id") and row.get("name") not in listed
+    }
+
+
 async def _overlay_probe_health(rows: list[dict[str, Any]], ai_settings: dict) -> None:
     """Overlay LIVE key verdicts onto config-healthy rows.
 
@@ -240,6 +261,10 @@ async def _overlay_probe_health(rows: list[dict[str, Any]], ai_settings: dict) -
         (``nous_models.last_test_status`` / ``last_test_detail``). For a
         governance row the admin's manual key usually IS the catalog key, so
         the probe verdict is the best available signal (hint says so).
+        nous-engine rows are the exception: nothing probes them hourly any
+        more, so their verdict comes from the platform provider view's live
+        engine read (``platform_rows_and_engine``) — a platform row the engine
+        answered for and no longer lists is failing; ``idle`` is not.
       - byok rows → the user's persisted test-connection verdicts
         (``settings_json.ai_provider_health.<provider>`` — #973). Never
         tested ≠ failing: absence stays green.
@@ -267,15 +292,22 @@ async def _overlay_probe_health(rows: list[dict[str, Any]], ai_settings: dict) -
             )
 
             repo = get_nous_model_repository()
+            engine_rows: dict[str, dict[str, Any]] = {}
             for model in catalog_models:
                 row = await repo.get_by_name(model)
                 if not row:
                     row = await repo.get_by_actual_model(model)
-                if row and (row.get("last_test_status") or "") == "fail":
+                if not row:
+                    continue
+                if row.get("actual_provider") == NOUS_ENGINE_PROVIDER:
+                    engine_rows[model] = row
+                elif (row.get("last_test_status") or "") == "fail":
                     verdicts[model] = (
                         "fail",
                         (row.get("last_test_detail") or "").strip(),
                     )
+            if engine_rows:
+                verdicts.update(await _engine_verdicts(engine_rows))
         except Exception as exc:  # noqa: BLE001 — overlay must not sink the board
             logger.warning("[ai_health] probe overlay lookup failed: %s", exc)
             return
