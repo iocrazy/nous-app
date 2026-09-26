@@ -29,7 +29,7 @@ import en from '../public/locales/en.json';
 
 // Resolve against the REAL shipped English copy rather than a hand-written
 // table, so a missing/renamed key surfaces here as a failing assertion instead
-// of a raw `aiSettings.modelHealthFailedAgo` shown to users. The component's
+// of a raw `aiSettings.*` key shown to users. The component's
 // own i18n instance is never initialized in tests (nothing loads i18n.ts), so
 // react-i18next would otherwise hand back bare keys.
 vi.mock('react-i18next', () => ({

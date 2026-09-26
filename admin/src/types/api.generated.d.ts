@@ -1169,14 +1169,14 @@ export interface paths {
         put?: never;
         /**
          * Sync Nous Engine Models
-         * @description Mirror nous-engine's ``/v1/models`` into the catalog now.
+         * @description Create catalog rows for the services nous-engine lists and the
+         *     catalog lacks, now.
          *
-         *     Same sync the hourly health step runs first (``nous_engine_sync``): every
-         *     listed service without a row gets ``nous-<id>`` (credentials copied from
-         *     an existing engine row, zero price row), existing rows take a newer
-         *     ``context_window`` and follow ``ready`` (ok/idle); enabled platform rows
-         *     whose grant was revoked (missing from the list, or the key answered 401)
-         *     are disabled. Nothing is ever re-enabled.
+         *     Every listed service without a row gets ``nous-<id>`` (credentials copied
+         *     from an existing engine row, zero price row); existing rows take a newer
+         *     ``context_window``. Nothing is disabled or re-statused: availability is
+         *     read live from the engine (spec 2026-09-25 §3.4). This button is the only
+         *     thing that creates engine rows.
          *
          *     400 ``no_engine_row`` when no enabled ``actual_provider='nous'`` row exists
          *     to take the endpoint and key from. An engine that cannot be read is NOT a
@@ -4575,36 +4575,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ai/nous-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Nous Models
-         * @description List enabled Nous models (public, no API keys), optionally filtered by
-         *     model type (``llm`` / ``embedding`` / ``tts`` / ``asr``).
-         *
-         *     Returns models available for users to select. If none are configured,
-         *     returns an empty list. Requires auth (added with owner scoping, migration
-         *     431): the list is scoped to the caller so owner-private rows never leak.
-         *
-         *     Row for row the ``models`` of the platform provider view that
-         *     ``GET /ai/settings`` carries (spec 2026-09-25 §3.1 — same function);
-         *     ``last_test_status`` is the computed status. Kept until the frontend
-         *     reads the settings view (P3 deletes it).
-         */
-        get: operations["list_nous_models_api_v1_ai_nous_models_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/ai/platform-status": {
         parameters: {
             query?: never;
@@ -6036,35 +6006,15 @@ export interface paths {
          *     Server-side projection of each row's protocol capabilities, so the UI can
          *     hide what a model cannot honour without ever learning ``actual_provider``
          *     or re-implementing the registry lookup — one predicate, one place.
-         *     Visibility follows ``generation-models`` exactly because both read
-         *     ``_visible_generation_rows``: a model the picker shows always has an
-         *     entry here.
+         *     Visibility is ``platform_provider.generation_picker_models`` over the same
+         *     view ``GET /ai/settings`` carries (spec 2026-09-25 §3.8), i.e. the rows
+         *     the frontend's generation pickers map from before their daemon overlay:
+         *     a model a picker shows always has an entry here.
          *
          *     ``honours_ratio`` is deliberately NOT exposed: it describes an internal
          *     strategy, not something the UI can act on.
          */
         get: operations["list_generation_capabilities_api_v1_canvases_generation_capabilities_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/canvases/generation-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Generation Models
-         * @description Image/video rows from the nous_models catalog (public columns
-         *     only — no api_key/base_url) for the composer's model picker.
-         */
-        get: operations["list_generation_models_api_v1_canvases_generation_models_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6198,32 +6148,6 @@ export interface paths {
          *     BEFORE /canvases/{canvas_id} — static segments must win the match.
          */
         get: operations["list_team_canvas_trash_api_v1_canvases_team__team_id__trash_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/canvases/text-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Text Models
-         * @description Enabled ``llm`` rows from the nous_models catalog (public columns
-         *     only — no api_key/base_url) for the prompt node's text-model picker.
-         *
-         *     Same catalog and public-field contract as ``generation-models``; the two
-         *     endpoints differ only in the ``type`` they surface (text vs image/video),
-         *     so the smart-canvas text prompt and the image/video composer read one
-         *     consistent source of truth instead of a hardcoded frontend list.
-         */
-        get: operations["list_text_models_api_v1_canvases_text_models_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -19684,7 +19608,8 @@ export interface components {
          *
          *     ``local_ready`` is ``None`` for rows that do not run on the user's own
          *     machine; ``superseded`` marks a server twin hidden because its local twin
-         *     can run (the picker rule ``apply_readiness`` applies today).
+         *     can run (``local_readiness.local_verdict``; the generation pickers hide
+         *     both kinds client side).
          */
         AiPlatformModelRuntime: {
             /** Local Ready */
@@ -21940,30 +21865,6 @@ export interface components {
             xs?: number[];
             /** Ys */
             ys?: number[];
-        };
-        /**
-         * CanvasModelOption
-         * @description A catalog model a canvas picker may offer (public columns only).
-         *
-         *     The router projects ``_GENERATION_MODEL_PUBLIC_FIELDS`` off each row;
-         *     ``tests/api/test_canvases_wire.py`` pins this field set to that tuple.
-         *     No credential, host or ``actual_provider`` ever appears here.
-         */
-        CanvasModelOption: {
-            /** Actual Model */
-            actual_model: string;
-            /** Display Name */
-            display_name: string;
-            /** Is Local */
-            is_local: boolean;
-            /** Last Test Status */
-            last_test_status: ("ok" | "fail" | "idle" | "not_probed") | null;
-            /** Name */
-            name: string;
-            /** Sort Order */
-            sort_order: number;
-            /** Type */
-            type: string;
         };
         /** CanvasOutpaintDeriveRequest */
         CanvasOutpaintDeriveRequest: {
@@ -25639,16 +25540,6 @@ export interface components {
             data: {
                 [key: string]: components["schemas"]["CanvasGenerationCapability"];
             };
-            /**
-             * Success
-             * @default true
-             */
-            success: boolean;
-        };
-        /** Envelope[list[CanvasModelOption]] */
-        Envelope_list_CanvasModelOption__: {
-            /** Data */
-            data: components["schemas"]["CanvasModelOption"][];
             /**
              * Success
              * @default true
@@ -30429,31 +30320,22 @@ export interface components {
          * NousEngineSyncResponse
          * @description POST /admin/nous-models/sync-engine — merged over every engine endpoint.
          *
-         *     ``created`` / ``updated`` / ``disabled`` are catalog names. The engine list
-         *     is read with ``include_unready=1`` and holds every AUTHORIZED service,
-         *     loaded or not, so an enabled platform row whose service is missing had its
-         *     grant revoked and is in ``disabled``. ``unauthorized`` means an endpoint
-         *     answered 401 (the key itself was revoked) and all its enabled platform rows
-         *     were disabled. Disabled rows are never re-enabled by a sync.
-         *     ``ready_changed`` counts rows whose ok/idle status followed the engine's
-         *     ``ready``. ``error`` is set when at least one endpoint's ``/v1/models``
-         *     could not be read (the others still synced).
+         *     ``created`` / ``updated`` are catalog names: rows created for services the
+         *     engine lists and the catalog lacked, and rows whose ``context_window``
+         *     changed. Nothing is ever disabled — whether a service is authorized and
+         *     loaded is read live (spec 2026-09-25 §3.4). ``error`` is set when at least
+         *     one endpoint's ``/v1/models`` could not be read (a refused key reads
+         *     ``HTTP 401: …``); the others still synced.
          */
         NousEngineSyncResponse: {
             /** Created */
             created: string[];
-            /** Disabled */
-            disabled: string[];
             /** Discovered */
             discovered: number;
             /** Error */
             error?: string | null;
-            /** Ready Changed */
-            ready_changed: number;
             /** Skipped */
             skipped: components["schemas"]["NousEngineSyncSkipped"][];
-            /** Unauthorized */
-            unauthorized: boolean;
             /** Updated */
             updated: string[];
         };
@@ -48378,40 +48260,6 @@ export interface operations {
             };
         };
     };
-    list_nous_models_api_v1_ai_nous_models_get: {
-        parameters: {
-            query?: {
-                type?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AiNousModelsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_platform_status_api_v1_ai_platform_status_get: {
         parameters: {
             query?: never;
@@ -51725,38 +51573,6 @@ export interface operations {
             };
         };
     };
-    list_generation_models_api_v1_canvases_generation_models_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_list_CanvasModelOption__"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_canvas_generation_api_v1_canvases_generations__task_id__get: {
         parameters: {
             query?: never;
@@ -51950,38 +51766,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_list_TeamTrashedCanvas__"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_text_models_api_v1_canvases_text_models_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_list_CanvasModelOption__"];
                 };
             };
             /** @description Validation Error */

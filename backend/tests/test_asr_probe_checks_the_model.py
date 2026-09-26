@@ -41,9 +41,10 @@ three-state vocabulary already has a word for that.
 SCOPE SINCE 2026-09-24
 ----------------------
 For ``actual_provider='nous'`` this list-membership branch is now the ACTIVE
-path only (the admin Test, ``allow_costly=True``). The hourly poll reads the
-engine's ``GET /v1/models/{id}`` readiness instead, which answers "is it
-loaded" directly -- see test_nous_engine_passive_probe.py.
+path only (the admin Test, ``allow_costly=True``). The hourly poll does not
+touch nous rows at all since spec 2026-09-25 §3.4 (``not_probed``; the
+platform view reads the engine list live) -- see
+test_nous_engine_rows_not_probed.py.
 """
 
 from __future__ import annotations

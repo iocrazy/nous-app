@@ -1,10 +1,6 @@
 /**
- * renderModelSelect — the model picker's health marking.
- *
- * A model whose hourly probe is failing stays SELECTABLE on purpose: the probe
- * has been wrong before (2026-08-14, a model marked unreachable that worked
- * end-to-end), so the picker warns and lets the user decide. Disabling the
- * option would hand the probe a veto it hasn't earned.
+ * renderModelSelect — the grouped model picker: labels, non-chat notes, stale
+ * saved values and nous-engine rows that are not loaded.
  */
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
@@ -52,50 +48,14 @@ const optionFor = (name: string): HTMLOptionElement => {
   return el as HTMLOptionElement;
 };
 
-describe('renderModelSelect — health marking', () => {
-  it('marks a failing model in its label', () => {
-    renderSelect({
-      unhealthyLabels: { 'mediahub-deepseek-v4-flash': 'health check failed, checked 20m ago' },
-    });
-    const flash = optionFor('mediahub-deepseek-v4-flash');
-    expect(flash.textContent).toContain('health check failed');
-    expect(flash.textContent).toContain('checked 20m ago');
-    expect(flash.dataset.health).toBe('fail');
-  });
-
-  it('never disables the marked option — warn, do not stop', () => {
-    renderSelect({
-      unhealthyLabels: { 'mediahub-deepseek-v4-flash': 'health check failed' },
-    });
-    expect(optionFor('mediahub-deepseek-v4-flash').disabled).toBe(false);
-  });
-
-  it('leaves healthy models untouched', () => {
-    renderSelect({
-      unhealthyLabels: { 'mediahub-deepseek-v4-flash': 'health check failed' },
-    });
-    const pro = optionFor('mediahub-deepseek-v4-pro');
-    expect(pro.textContent).toBe('mediahub-deepseek-v4-pro');
-    expect(pro.dataset.health).toBeUndefined();
-  });
-
-  it('renders exactly as before when no health is known', () => {
+describe('renderModelSelect — plain options', () => {
+  it('renders one plain option per model when nothing is annotated', () => {
     renderSelect();
     expect(optionFor('mediahub-deepseek-v4-flash').textContent).toBe(
       'mediahub-deepseek-v4-flash',
     );
     expect(container.querySelectorAll('option')).toHaveLength(2);
-  });
-
-  it('shows the warning on the closed trigger when the failing model is selected', () => {
-    // The menu is closed nearly all the time — a marking only visible after
-    // opening the dropdown would not reach the user who already picked it.
-    renderSelect({
-      value: 'mediahub-deepseek-v4-flash',
-      unhealthyLabels: { 'mediahub-deepseek-v4-flash': 'health check failed' },
-    });
-    const trigger = screen.getByRole('button');
-    expect(trigger.textContent).toContain('health check failed');
+    expect(container.querySelectorAll('option[data-health]')).toHaveLength(0);
   });
 });
 
@@ -203,44 +163,19 @@ describe('renderModelSelect — non-chat note', () => {
     expect(chat.textContent).toBe('doubao-seed-2-0-lite-260428');
     expect(chat.dataset.note).toBeUndefined();
   });
-
-  it('carries both suffixes when a model is failing AND non-chat', () => {
-    // Can happen on a platform row: both maps are keyed by model name and
-    // neither knows about the other, so the option must not drop one.
-    renderSelect({
-      unhealthyLabels: { 'mediahub-deepseek-v4-flash': 'health check failed' },
-      noteLabels: { 'mediahub-deepseek-v4-flash': 'not a chat model' },
-    });
-
-    const flash = optionFor('mediahub-deepseek-v4-flash');
-    expect(flash.textContent).toContain('health check failed');
-    expect(flash.textContent).toContain('not a chat model');
-    expect(flash.dataset.health).toBe('fail');
-    expect(flash.dataset.note).toBe('non-chat');
-  });
 });
 
-describe('renderModelSelect — orphan labels', () => {
-  it('says "unavailable" for a saved model the caller knows was hidden', () => {
-    renderSelect({
-      value: 'nous-hidden',
-      orphanLabels: { 'nous-hidden': 'hidden-model-id (unavailable)' },
-    });
-    const opt = document.querySelector('option[data-orphan="unavailable"]');
-    expect(opt?.textContent).toBe('hidden-model-id (unavailable)');
-    expect(screen.queryByText(/provider not enabled/)).toBeNull();
-  });
-
-  it('keeps the generic stale wording for any other orphan', () => {
-    renderSelect({ value: 'gone-model', orphanLabels: {} });
+describe('renderModelSelect — stale saved value', () => {
+  it('keeps a saved model no group lists as a leading stale option', () => {
+    renderSelect({ value: 'gone-model' });
     const opt = document.querySelector('option[data-orphan="stale"]');
-    expect(opt?.textContent).toContain('gone-model');
+    expect(opt?.textContent).toBe('gone-model (provider not enabled)');
   });
 });
 
 // ── idle platform rows (nous-engine authorized, not loaded) ─────────────────
-// Unlike a failing probe (advice, stays selectable), an idle row answered a
-// real chat with 503 "not loaded" on 2026-09-24 — picking it cannot work, so
+// An idle row answered a real chat with 503 "not loaded" on 2026-09-24 —
+// picking it cannot work, so
 // the option is visible but disabled, with the reason as its description.
 describe('renderModelSelect — not loaded on nous-engine', () => {
   const NOT_LOADED = { 'mediahub-deepseek-v4-flash': 'Not loaded on nous-engine' };

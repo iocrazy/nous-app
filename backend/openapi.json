@@ -9392,7 +9392,7 @@
         "type": "object"
       },
       "AiPlatformModelRuntime": {
-        "description": "One row of ``GET /ai/platform-status``.\n\n``local_ready`` is ``None`` for rows that do not run on the user's own\nmachine; ``superseded`` marks a server twin hidden because its local twin\ncan run (the picker rule ``apply_readiness`` applies today).",
+        "description": "One row of ``GET /ai/platform-status``.\n\n``local_ready`` is ``None`` for rows that do not run on the user's own\nmachine; ``superseded`` marks a server twin hidden because its local twin\ncan run (``local_readiness.local_verdict``; the generation pickers hide\nboth kinds client side).",
         "properties": {
           "local_ready": {
             "anyOf": [
@@ -14668,63 +14668,6 @@
           "source_url"
         ],
         "title": "CanvasGridDeriveRequest",
-        "type": "object"
-      },
-      "CanvasModelOption": {
-        "description": "A catalog model a canvas picker may offer (public columns only).\n\nThe router projects ``_GENERATION_MODEL_PUBLIC_FIELDS`` off each row;\n``tests/api/test_canvases_wire.py`` pins this field set to that tuple.\nNo credential, host or ``actual_provider`` ever appears here.",
-        "properties": {
-          "actual_model": {
-            "title": "Actual Model",
-            "type": "string"
-          },
-          "display_name": {
-            "title": "Display Name",
-            "type": "string"
-          },
-          "is_local": {
-            "title": "Is Local",
-            "type": "boolean"
-          },
-          "last_test_status": {
-            "anyOf": [
-              {
-                "enum": [
-                  "ok",
-                  "fail",
-                  "idle",
-                  "not_probed"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Test Status"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "sort_order": {
-            "title": "Sort Order",
-            "type": "integer"
-          },
-          "type": {
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "display_name",
-          "actual_model",
-          "type",
-          "is_local",
-          "sort_order",
-          "last_test_status"
-        ],
-        "title": "CanvasModelOption",
         "type": "object"
       },
       "CanvasOutpaintDeriveRequest": {
@@ -22487,27 +22430,6 @@
           "data"
         ],
         "title": "Envelope[dict[str, CanvasGenerationCapability]]",
-        "type": "object"
-      },
-      "Envelope_list_CanvasModelOption__": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/CanvasModelOption"
-            },
-            "title": "Data",
-            "type": "array"
-          },
-          "success": {
-            "default": true,
-            "title": "Success",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "Envelope[list[CanvasModelOption]]",
         "type": "object"
       },
       "Envelope_list_CanvasSummary__": {
@@ -35479,20 +35401,13 @@
         "type": "object"
       },
       "NousEngineSyncResponse": {
-        "description": "POST /admin/nous-models/sync-engine — merged over every engine endpoint.\n\n``created`` / ``updated`` / ``disabled`` are catalog names. The engine list\nis read with ``include_unready=1`` and holds every AUTHORIZED service,\nloaded or not, so an enabled platform row whose service is missing had its\ngrant revoked and is in ``disabled``. ``unauthorized`` means an endpoint\nanswered 401 (the key itself was revoked) and all its enabled platform rows\nwere disabled. Disabled rows are never re-enabled by a sync.\n``ready_changed`` counts rows whose ok/idle status followed the engine's\n``ready``. ``error`` is set when at least one endpoint's ``/v1/models``\ncould not be read (the others still synced).",
+        "description": "POST /admin/nous-models/sync-engine — merged over every engine endpoint.\n\n``created`` / ``updated`` are catalog names: rows created for services the\nengine lists and the catalog lacked, and rows whose ``context_window``\nchanged. Nothing is ever disabled — whether a service is authorized and\nloaded is read live (spec 2026-09-25 §3.4). ``error`` is set when at least\none endpoint's ``/v1/models`` could not be read (a refused key reads\n``HTTP 401: …``); the others still synced.",
         "properties": {
           "created": {
             "items": {
               "type": "string"
             },
             "title": "Created",
-            "type": "array"
-          },
-          "disabled": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Disabled",
             "type": "array"
           },
           "discovered": {
@@ -35510,20 +35425,12 @@
             ],
             "title": "Error"
           },
-          "ready_changed": {
-            "title": "Ready Changed",
-            "type": "integer"
-          },
           "skipped": {
             "items": {
               "$ref": "#/components/schemas/NousEngineSyncSkipped"
             },
             "title": "Skipped",
             "type": "array"
-          },
-          "unauthorized": {
-            "title": "Unauthorized",
-            "type": "boolean"
           },
           "updated": {
             "items": {
@@ -35537,10 +35444,7 @@
           "discovered",
           "created",
           "updated",
-          "skipped",
-          "disabled",
-          "ready_changed",
-          "unauthorized"
+          "skipped"
         ],
         "title": "NousEngineSyncResponse",
         "type": "object"
@@ -67907,7 +67811,7 @@
     },
     "/api/v1/admin/nous-models/sync-engine": {
       "post": {
-        "description": "Mirror nous-engine's ``/v1/models`` into the catalog now.\n\nSame sync the hourly health step runs first (``nous_engine_sync``): every\nlisted service without a row gets ``nous-<id>`` (credentials copied from\nan existing engine row, zero price row), existing rows take a newer\n``context_window`` and follow ``ready`` (ok/idle); enabled platform rows\nwhose grant was revoked (missing from the list, or the key answered 401)\nare disabled. Nothing is ever re-enabled.\n\n400 ``no_engine_row`` when no enabled ``actual_provider='nous'`` row exists\nto take the endpoint and key from. An engine that cannot be read is NOT a\n5xx: the report comes back with ``error`` set (admin-only text, same as\nthe probe endpoints; a 5xx would be scrubbed by the error shell).",
+        "description": "Create catalog rows for the services nous-engine lists and the\ncatalog lacks, now.\n\nEvery listed service without a row gets ``nous-<id>`` (credentials copied\nfrom an existing engine row, zero price row); existing rows take a newer\n``context_window``. Nothing is disabled or re-statused: availability is\nread live from the engine (spec 2026-09-25 §3.4). This button is the only\nthing that creates engine rows.\n\n400 ``no_engine_row`` when no enabled ``actual_provider='nous'`` row exists\nto take the endpoint and key from. An engine that cannot be read is NOT a\n5xx: the report comes back with ``error`` set (admin-only text, same as\nthe probe endpoints; a 5xx would be scrubbed by the error shell).",
         "operationId": "sync_nous_engine_models_api_v1_admin_nous_models_sync_engine_post",
         "parameters": [
           {
@@ -82386,89 +82290,6 @@
         ]
       }
     },
-    "/api/v1/ai/nous-models": {
-      "get": {
-        "description": "List enabled Nous models (public, no API keys), optionally filtered by\nmodel type (``llm`` / ``embedding`` / ``tts`` / ``asr``).\n\nReturns models available for users to select. If none are configured,\nreturns an empty list. Requires auth (added with owner scoping, migration\n431): the list is scoped to the caller so owner-private rows never leak.\n\nRow for row the ``models`` of the platform provider view that\n``GET /ai/settings`` carries (spec 2026-09-25 §3.1 — same function);\n``last_test_status`` is the computed status. Kept until the frontend\nreads the settings view (P3 deletes it).",
-        "operationId": "list_nous_models_api_v1_ai_nous_models_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "type",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Type"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AiNousModelsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Nous Models",
-        "tags": [
-          "AI",
-          "AI"
-        ]
-      }
-    },
     "/api/v1/ai/platform-status": {
       "get": {
         "description": "Runtime state of the platform models (spec 2026-09-25 §3.3).\n\nThe list itself comes with ``GET /ai/settings``; this light endpoint only\nanswers what changes fast — engine ``ok``/``idle``, engine reachability,\nand whether the user's own daemon can run each local row right now.",
@@ -89041,7 +88862,7 @@
     },
     "/api/v1/canvases/generation-capabilities": {
       "get": {
-        "description": "Per-model knob capabilities, keyed by catalog row name.\n\nServer-side projection of each row's protocol capabilities, so the UI can\nhide what a model cannot honour without ever learning ``actual_provider``\nor re-implementing the registry lookup — one predicate, one place.\nVisibility follows ``generation-models`` exactly because both read\n``_visible_generation_rows``: a model the picker shows always has an\nentry here.\n\n``honours_ratio`` is deliberately NOT exposed: it describes an internal\nstrategy, not something the UI can act on.",
+        "description": "Per-model knob capabilities, keyed by catalog row name.\n\nServer-side projection of each row's protocol capabilities, so the UI can\nhide what a model cannot honour without ever learning ``actual_provider``\nor re-implementing the registry lookup — one predicate, one place.\nVisibility is ``platform_provider.generation_picker_models`` over the same\nview ``GET /ai/settings`` carries (spec 2026-09-25 §3.8), i.e. the rows\nthe frontend's generation pickers map from before their daemon overlay:\na model a picker shows always has an entry here.\n\n``honours_ratio`` is deliberately NOT exposed: it describes an internal\nstrategy, not something the UI can act on.",
         "operationId": "list_generation_capabilities_api_v1_canvases_generation_capabilities_get",
         "parameters": [
           {
@@ -89100,72 +88921,6 @@
           }
         },
         "summary": "List Generation Capabilities",
-        "tags": [
-          "Canvas"
-        ]
-      }
-    },
-    "/api/v1/canvases/generation-models": {
-      "get": {
-        "description": "Image/video rows from the nous_models catalog (public columns\nonly — no api_key/base_url) for the composer's model picker.",
-        "operationId": "list_generation_models_api_v1_canvases_generation_models_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_list_CanvasModelOption__"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Generation Models",
         "tags": [
           "Canvas"
         ]
@@ -89615,72 +89370,6 @@
           }
         },
         "summary": "List Team Canvas Trash",
-        "tags": [
-          "Canvas"
-        ]
-      }
-    },
-    "/api/v1/canvases/text-models": {
-      "get": {
-        "description": "Enabled ``llm`` rows from the nous_models catalog (public columns\nonly — no api_key/base_url) for the prompt node's text-model picker.\n\nSame catalog and public-field contract as ``generation-models``; the two\nendpoints differ only in the ``type`` they surface (text vs image/video),\nso the smart-canvas text prompt and the image/video composer read one\nconsistent source of truth instead of a hardcoded frontend list.",
-        "operationId": "list_text_models_api_v1_canvases_text_models_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_list_CanvasModelOption__"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Text Models",
         "tags": [
           "Canvas"
         ]
