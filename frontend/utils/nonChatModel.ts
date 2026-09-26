@@ -24,8 +24,7 @@
 //   - Anything unmatched returns null — "unknown", never "fine" and never
 //     "broken". A wrong red line on a working model teaches the user to ignore
 //     red lines, which is the failure this guard exists to prevent, not a
-//     smaller version of it (same rule as utils/modelHealth's never-probed
-//     models).
+//     smaller version of it.
 //
 // Deliberately NOT here: any notion of blocking. The caller warns; the user
 // still decides — consistent with the platform-model health line (#1838).

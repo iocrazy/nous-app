@@ -4223,20 +4223,6 @@
     "archiveFailed": "归档失败：{{message}}"
   },
   "aiSettings": {
-    "modelHealthFailed": "自检失败",
-    "modelHealthFailedAgo": "自检失败，检查于 {{ago}}",
-    "modelHealthFailedReason": "自检失败：{{reason}}",
-    "modelHealthFailedReasonAgo": "自检失败：{{reason}}，检查于 {{ago}}",
-    "healthReason": {
-      "timeout": "请求超时",
-      "unreachable": "无法连接",
-      "auth": "凭证被拒绝",
-      "rate_limit": "触发限流",
-      "model_not_found": "模型不存在",
-      "upstream_error": "服务商报错",
-      "bad_response": "响应异常",
-      "other": "原因未知"
-    },
     "nonChatSelected": "「{{model}}」看起来是{{kind}}，不是对话模型。使用该服务商的聊天、摘要等文本任务会直接失败，请改选一个对话模型。",
     "nonChatKind": {
       "embedding": "向量（embedding）模型",
@@ -4404,8 +4390,6 @@
       "maxTokensLabel": "最大 Token",
       "enabledLabel": "启用",
       "modelProviderNotEnabled": "提供方未启用",
-      "modelUnavailableOption": "{{name}}（当前不可用）",
-      "modelUnavailableHint": "当前所选模型不可用，已不在列表中 —— 请改选其他模型。",
       "forkAgent": "复制到我的智能体",
       "forkedToast": "已创建 {{slug}}",
       "scopeLabel": "可见范围",
@@ -4450,12 +4434,6 @@
       "providerDisabledBody": "模型 {{model}} 所属的提供方尚未在此账户配置。该 Agent 的调用将失败。请在下方选择其它模型，或在 AI 设置中配置该提供方。",
       "switchToModel": "切换到 {{model}}",
       "goToAISettings": "去 AI 设置",
-      "modelHealthFailed": "上次自检失败 — 使用该模型的对话可能会失败。",
-      "modelHealthFailedReason": "上次自检失败（{{reason}}）— 使用该模型的对话可能会失败。",
-      "modelHealthFailedShort": "自检失败",
-      "modelHealthFailedReasonShort": "自检失败：{{reason}}",
-      "modelHealthPassed": "自检通过",
-      "modelHealthCheckedAgo": "检查于 {{ago}}",
       "nonChatModelShort": "非对话模型",
       "usage": {
         "title": "使用方",
