@@ -1,8 +1,9 @@
 /**
  * FloatingChatWidget — the global AI chat shell (replaces AIChatDrawer).
  *
- * Collapsed: the mascot FAB on every page, with the window still mounted
- * but hidden (so an in-flight turn keeps streaming). Expanded: a floating window
+ * Collapsed: the mascot FAB on every page; once the window has been opened
+ * in this tab it stays mounted but hidden (see the render below). Expanded:
+ * a floating window
  * that can be dragged by its title bar and resized from every edge and
  * corner (anchored bottom-right: east/south drags adjust width/height AND
  * right/bottom together so the grabbed edge tracks the pointer). Rect +
@@ -59,6 +60,14 @@ export function FloatingChatWidget(): React.ReactElement | null {
   const setOpen = useGlobalChatStore((s) => s.setOpen);
   const toggle = useGlobalChatStore((s) => s.toggle);
   const setRect = useGlobalChatStore((s) => s.setRect);
+
+  // Lazy persistence: the panel mounts on the first open in this tab and
+  // stays mounted from then on. A tab that never opens the chat (and every
+  // phone — AppLayout hides the widget below md) keeps paying nothing for
+  // it: no agent/session fetches, no auto-created session. In memory only;
+  // a reload starts lazy again.
+  const [everOpened, setEverOpened] = useState(open);
+  if (open && !everOpened) setEverOpened(true);
 
   const minimize = useCallback(() => setOpen(false), [setOpen]);
   // Laper-style Chat History: the title-bar history button slides the session
@@ -242,13 +251,18 @@ export function FloatingChatWidget(): React.ReactElement | null {
   // data-testid="sb-toggle-chat" and the ⌘I toggle above; position lives in
   // the same store as the window rect.
   //
-  // Collapsing HIDES the window instead of unmounting it: AIChatPanel owns
-  // the SSE stream of an in-flight turn, so unmounting it cut the stream
-  // and dropped the mascot back to idle mid-turn, and nothing was left to
-  // notice a reply landing while collapsed. The `hidden` attribute is
-  // display:none !important in Tailwind's preflight, so the `flex` class
-  // below cannot override it. The Chat page still unmounts (return null
-  // above) — that is a real route change, not a minimize.
+  // Collapsing HIDES the window instead of unmounting it. AIChatPanel is the
+  // consumer of an in-flight turn's stream: unmounting it detaches that
+  // consumer (the request itself keeps running — there is no abort — but
+  // its updates land on an unmounted component), drops the mascot back to
+  // idle mid-turn, and leaves nothing to notice the reply arriving. The
+  // `hidden` attribute is display:none !important in Tailwind's preflight,
+  // so the `flex` class below cannot override it, and it already takes the
+  // subtree out of the accessibility tree. The Chat page still unmounts
+  // everything (the `return null` above) — a real route change, not a
+  // minimize.
+  if (!open && !everOpened) return <ChatFab />;
+
   return (
     <>
       {!open && <ChatFab />}
@@ -257,7 +271,6 @@ export function FloatingChatWidget(): React.ReactElement | null {
         aria-label="AI Chat"
         data-testid="sb-panel-chat"
         hidden={!open}
-        aria-hidden={!open}
         style={{ right, bottom, width, height }}
         className="fixed z-40 flex flex-col overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-2xl"
       >
@@ -311,6 +324,7 @@ export function FloatingChatWidget(): React.ReactElement | null {
             contextId={pageContext?.contextId}
             onApplyContent={pageContext?.onApplyContent}
             onClose={minimize}
+            host="floating"
             collapsed={!open}
             sessionsOverlayOpen={sessionsOpen}
             onSessionsOverlayClose={() => setSessionsOpen(false)}

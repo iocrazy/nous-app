@@ -100,15 +100,14 @@ describe('FloatingChatWidget drag handle', () => {
     expect(useGlobalChatStore.getState().bottom).toBe(16);
   });
 
-  it('collapses to the FAB when closed, keeping the window mounted but hidden', () => {
+  it('collapses to the FAB alone when the window was never opened', () => {
     useGlobalChatStore.setState({ open: false });
     renderWidget();
     expect(screen.getByTestId('sb-toggle-chat')).toBeVisible();
-    const win = screen.getByTestId('sb-panel-chat');
-    expect(win).toBeInTheDocument();
-    expect(win).not.toBeVisible();
-    expect(win).toHaveAttribute('aria-hidden', 'true');
-    expect(panel.lastProps?.collapsed).toBe(true);
+    // Lazy persistence: a tab that never opened the chat pays nothing for it
+    // — no panel, no agent/session fetches, no editor bundle.
+    expect(screen.queryByTestId('sb-panel-chat')).toBeNull();
+    expect(screen.queryByTestId('chat-panel')).toBeNull();
   });
 });
 
@@ -127,6 +126,26 @@ describe('FloatingChatWidget keeps the panel mounted across collapse', () => {
       fabActivity: 'idle',
       fabUnread: 0,
     });
+  });
+
+  it('mounts lazily on first open, then only hides on collapse', () => {
+    useGlobalChatStore.setState({ open: false });
+    renderWidget();
+    expect(screen.queryByTestId('sb-panel-chat')).toBeNull();
+
+    act(() => useGlobalChatStore.getState().setOpen(true));
+    const node = screen.getByTestId('chat-panel');
+    expect(panel.lastProps?.host).toBe('floating');
+
+    act(() => useGlobalChatStore.getState().setOpen(false));
+    const win = screen.getByTestId('sb-panel-chat');
+    expect(win).toBeInTheDocument();
+    expect(win).not.toBeVisible();
+    expect(panel.lastProps?.collapsed).toBe(true);
+
+    act(() => useGlobalChatStore.getState().setOpen(true));
+    expect(screen.getByTestId('chat-panel')).toBe(node);
+    expect(panel.mounts).toBe(1);
   });
 
   it('collapse then expand reuses the same panel instance', () => {

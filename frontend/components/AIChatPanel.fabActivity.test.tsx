@@ -155,10 +155,10 @@ describe('AIChatPanel → mascot unread', () => {
     return () => release();
   }
 
-  function renderFloating(collapsed: boolean | undefined) {
+  function renderFloating(collapsed: boolean | undefined, host: 'floating' | 'page' = 'floating') {
     const ui = (c: boolean | undefined) => (
       <ToastProvider>
-        <AIChatPanel projectId="1" agentSlug="analyze" collapsed={c} />
+        <AIChatPanel projectId="1" agentSlug="analyze" collapsed={c} host={host} />
       </ToastProvider>
     );
     const view = render(ui(collapsed));
@@ -229,12 +229,80 @@ describe('AIChatPanel → mascot unread', () => {
   it('never counts for a panel the floating window does not host (Chat page)', async () => {
     const release = hangingTurn();
     useGlobalChatStore.setState({ open: false });
-    renderFloating(undefined);
+    renderFloating(true, 'page');
     await waitFor(() => expect(composerProps?.disabled).toBe(false));
     composerProps!.onSend('hello', []);
     await waitFor(() => expect(activity()).toBe('running'));
     release();
     await waitFor(() => expect(activity()).toBe('idle'));
     expect(unread()).toBe(0);
+  });
+
+  it('counts a reply that streamed in while collapsed even if the history reload fails', async () => {
+    const release = hangingTurn();
+    const { setCollapsed } = renderFloating(false);
+    await waitFor(() => expect(composerProps?.disabled).toBe(false));
+    await waitFor(() => expect(aiLibraryService.getChatSession).toHaveBeenCalledTimes(1));
+    vi.mocked(aiLibraryService.getChatSession).mockRejectedValueOnce(new Error('offline'));
+    composerProps!.onSend('hello', []);
+    await waitFor(() => expect(activity()).toBe('running'));
+
+    useGlobalChatStore.setState({ open: false });
+    setCollapsed(true);
+    release();
+    await waitFor(() => expect(activity()).toBe('idle'));
+    expect(unread()).toBe(1);
+  });
+
+  it('judges unread when the stream ends, not when the reload finishes', async () => {
+    const release = hangingTurn();
+    const { setCollapsed } = renderFloating(false);
+    await waitFor(() => expect(composerProps?.disabled).toBe(false));
+    await waitFor(() => expect(aiLibraryService.getChatSession).toHaveBeenCalledTimes(1));
+    let finishReload: () => void = () => undefined;
+    vi.mocked(aiLibraryService.getChatSession).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishReload = () => resolve({ ...session, messages: historyMessages } as never);
+        }),
+    );
+    composerProps!.onSend('hello', []);
+    await waitFor(() => expect(activity()).toBe('running'));
+    release();
+    // The stream is over (the reload is in flight) while the window is open:
+    // the user watched the reply land, so collapsing now must not count it.
+    await waitFor(() => expect(aiLibraryService.getChatSession).toHaveBeenCalledTimes(2));
+    useGlobalChatStore.setState({ open: false });
+    setCollapsed(true);
+    finishReload();
+    await waitFor(() => expect(activity()).toBe('idle'));
+    expect(unread()).toBe(0);
+  });
+});
+
+describe('AIChatPanel refreshes its lists when the floating window is revealed', () => {
+  function renderHosted(collapsed: boolean) {
+    const ui = (c: boolean) => (
+      <ToastProvider>
+        <AIChatPanel projectId="1" agentSlug="analyze" collapsed={c} host="floating" />
+      </ToastProvider>
+    );
+    const view = render(ui(collapsed));
+    return { setCollapsed: (c: boolean) => view.rerender(ui(c)) };
+  }
+
+  it('re-fetches agents and sessions on expand, but not on first mount or collapse', async () => {
+    const { setCollapsed } = renderHosted(false);
+    await waitFor(() => expect(composerProps?.disabled).toBe(false));
+    expect(aiLibraryService.listAgents).toHaveBeenCalledTimes(1);
+    expect(aiLibraryService.listChatSessions).toHaveBeenCalledTimes(1);
+
+    setCollapsed(true);
+    expect(aiLibraryService.listAgents).toHaveBeenCalledTimes(1);
+    expect(aiLibraryService.listChatSessions).toHaveBeenCalledTimes(1);
+
+    setCollapsed(false);
+    await waitFor(() => expect(aiLibraryService.listAgents).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(aiLibraryService.listChatSessions).toHaveBeenCalledTimes(2));
   });
 });
