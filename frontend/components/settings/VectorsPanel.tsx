@@ -28,14 +28,18 @@ import type { BackfillResult, BackfillShotsResponse } from '../../types/api';
 import { ApiError } from '../../services/apiClient';
 import {
   activateVectorSpace,
+  clearVisualSpace,
   createVectorSpace,
   deleteVectorSpace,
   getVectorSpaceCatalog,
   getVectorsStatus,
+  setVisualSpace,
+  updateShotsPolicy,
   type VectorSpaceCatalog,
   type VectorsStatus,
 } from '../../services/searchService';
-import type { NousModelPublic, PlatformEngineState } from '../../types/api';
+import type { NousModelPublic, PlatformEngineState, ShotsPolicyUpdate } from '../../types/api';
+import { IndexingPolicySection } from './IndexingPolicySection';
 import { AddSpacePicker, CandidateCard, Capabilities, SpaceRow } from './VectorSpaceCards';
 
 // Same ceiling as the backend (BackfillEmbeddingsBody.limit le=200).
@@ -88,6 +92,10 @@ function spaceErrorLine(err: unknown, t: TFn, model?: string): string {
       return t('settings.vectors.errorByokRow');
     case 'active_space_unknown':
       return t('settings.vectors.errorActiveUnknown');
+    case 'space_in_use_visual':
+      return t('settings.vectors.deleteServesVisual');
+    case 'provider_no_image':
+      return t('settings.vectors.visualNeedsImage');
     default:
       return errorLine(err, t);
   }
@@ -162,6 +170,45 @@ function formatShotsResult(r: BackfillShotsResponse, t: TFn): string {
 function shotsErrorLine(err: unknown, t: TFn): string {
   if (typedErrorCode(err) === 'provider_no_image') return t('settings.vectors.errorProviderNoImage');
   return errorLine(err, t);
+}
+
+function policyErrorLine(err: unknown, t: TFn): string {
+  if (typedErrorCode(err) === 'policy_invalid') {
+    const d = typedDetails(err) ?? {};
+    return t('settings.vectors.errorPolicyInvalid', {
+      field: String(d.field ?? '?'),
+      message: String(d.message ?? ''),
+    });
+  }
+  return errorLine(err, t);
+}
+
+/** Videos still without a frame vector in the visual space: the Visual
+ *  row's total − covered (what the sweeper still has to do). */
+function visualRemaining(status: VectorsStatus): number | null {
+  const visual = status.layers.find((l) => l.layer === 'visual');
+  if (!visual) return null;
+  return Math.max(0, visual.total - visual.covered);
+}
+
+/** One line naming where the visual layer lives, for the current-space card
+ *  and the Visual row's Source cell. */
+function visualSpaceLine(status: VectorsStatus, t: TFn, kind: 'card' | 'source'): string | null {
+  const vs = status.visual_space;
+  if (vs === undefined) return null; // older backend: no per-layer spaces
+  if (vs === null || vs.follows_active) {
+    return kind === 'card' ? t('settings.vectors.visualFollowsCurrent') : t('settings.vectors.visualSourceFollows');
+  }
+  const model = vs.catalog_name ?? vs.actual_model;
+  return kind === 'card'
+    ? t('settings.vectors.visualSeparateSpace', { model })
+    : t('settings.vectors.visualSourceSpace', { model });
+}
+
+function visualStatusLine(status: VectorsStatus, t: TFn): string | null {
+  if (status.visual_status === 'visual_space_unavailable') return t('settings.vectors.visualStatusUnavailable');
+  if (status.visual_status === 'provider_no_image') return t('settings.vectors.visualStatusNoImage');
+  return null;
 }
 
 export function VectorsPanel() {
@@ -310,6 +357,42 @@ export function VectorsPanel() {
       await loadStatus();
     });
 
+  const pointVisualAt = (spaceId: string) =>
+    spaceAction(async () => {
+      const next = await setVisualSpace(spaceId);
+      setStatus(next);
+      setSpaceNotice(
+        t('settings.vectors.visualSpaceSet', {
+          model: next.visual_space?.catalog_name ?? next.visual_space?.actual_model ?? spaceId,
+        }),
+      );
+    });
+
+  const followCurrent = () =>
+    spaceAction(async () => {
+      setStatus(await clearVisualSpace());
+      setSpaceNotice(t('settings.vectors.visualSpaceCleared'));
+    });
+
+  // Indexing policy: its own busy flag and lines, separate from space actions.
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [policyError, setPolicyError] = useState<string | null>(null);
+  const [policyNotice, setPolicyNotice] = useState<string | null>(null);
+  const savePolicy = async (patch: ShotsPolicyUpdate) => {
+    setPolicyBusy(true);
+    setPolicyError(null);
+    setPolicyNotice(null);
+    try {
+      setStatus(await updateShotsPolicy(patch));
+      setPolicyNotice(t('settings.vectors.policySaved'));
+    } catch (err) {
+      console.error('VectorsPanel: policy save failed', err);
+      setPolicyError(policyErrorLine(err, t));
+    } finally {
+      setPolicyBusy(false);
+    }
+  };
+
   if (loadState === 'loading') {
     return <p className="text-sm text-ink-400">{t('settings.vectors.loading')}</p>;
   }
@@ -335,6 +418,8 @@ export function VectorsPanel() {
         onClosePicker={() => setPickerOpen(false)}
         onAdd={(m) => void addSpace(m)}
         onBackfill={(id) => void backfillCandidate(id)}
+        onUseForVisual={status.visual_space === undefined ? undefined : (id) => void pointVisualAt(id)}
+        onFollowCurrent={status.visual_space === undefined ? undefined : () => void followCurrent()}
         onSwitch={(id) => void switchTo(id)}
         onDelete={(id) => void removeSpace(id)}
       />
@@ -351,6 +436,18 @@ export function VectorsPanel() {
         shotsError={shotsError}
         shotsDryRunSeen={shotsDryRunSeen}
       />
+      {status.shots_policy && (
+        <IndexingPolicySection
+          policy={status.shots_policy}
+          remaining={visualRemaining(status)}
+          canManage={status.can_manage === true}
+          busy={policyBusy}
+          t={t}
+          notice={policyNotice}
+          error={policyError}
+          onSave={(patch) => void savePolicy(patch)}
+        />
+      )}
     </div>
   );
 }
@@ -373,6 +470,8 @@ interface SpaceSectionProps {
   onBackfill: (spaceId: string) => void;
   onSwitch: (spaceId: string) => void;
   onDelete: (spaceId: string) => void;
+  onUseForVisual?: (spaceId: string) => void;
+  onFollowCurrent?: () => void;
 }
 
 function SpaceSection({
@@ -393,6 +492,8 @@ function SpaceSection({
   onBackfill,
   onSwitch,
   onDelete,
+  onUseForVisual,
+  onFollowCurrent,
 }: SpaceSectionProps) {
   const space = status.space;
   const canManage = status.can_manage === true;
@@ -442,7 +543,17 @@ function SpaceSection({
               {t('settings.vectors.dimensionsValue', { dims: space.dims })}
             </SpaceRow>
             <SpaceRow label={t('settings.vectors.instruction')}>{space.instruction_version}</SpaceRow>
+            {visualSpaceLine(status, t, 'card') && (
+              <SpaceRow label={t('settings.vectors.visualLayer')}>
+                <span data-testid="vector-visual-layer-line">{visualSpaceLine(status, t, 'card')}</span>
+              </SpaceRow>
+            )}
           </dl>
+        )}
+        {visualStatusLine(status, t) && (
+          <p className="mt-2 text-xs text-warn" data-testid="vector-visual-status">
+            {visualStatusLine(status, t)}
+          </p>
         )}
       </div>
       {pickerOpen && (
@@ -468,6 +579,8 @@ function SpaceSection({
           onBackfill={onBackfill}
           onSwitch={onSwitch}
           onDelete={onDelete}
+          onUseForVisual={onUseForVisual}
+          onFollowCurrent={onFollowCurrent}
         />
       ))}
       {notice && (
@@ -585,7 +698,9 @@ function LayersSection({
               <td className="py-2 pr-3">
                 <Coverage covered={visual?.covered} total={visual?.total} stale={visual?.stale} t={t} />
               </td>
-              <td className="py-2 pr-3 text-xs text-ink-400">{t('settings.vectors.visualSource')}</td>
+              <td className="py-2 pr-3 text-xs text-ink-400" data-testid="vector-visual-source">
+                {visualSpaceLine(status, t, 'source') ?? t('settings.vectors.visualSource')}
+              </td>
               <td className="py-2">
                 <span className="flex gap-1.5">
                   <button

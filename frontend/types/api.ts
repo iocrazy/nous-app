@@ -702,4 +702,9 @@ export type ShotIndexInfo = Schemas['ShotIndexInfo'];
 export type ShotsResponse = Schemas['ShotsResponse'];
 export type IndexShotsResponse = Schemas['IndexShotsResponse'];
 export type BackfillShotsResponse = Schemas['BackfillShotsResponse'];
+/** Visual-layer space + shot-index automation (spec 2026-09-26). */
+export type VisualSpaceInfo = Schemas['VisualSpaceInfo'];
+export type ShotsPolicyStatus = Schemas['ShotsPolicyStatus'];
+export type ShotsPolicyUpdate = Schemas['ShotsPolicyUpdate'];
+export type VisualStatus = NonNullable<Schemas['VectorsStatusResponse']['visual_status']>;
 export type BackfillShotsSkip = Schemas['BackfillShotsSkip'];
