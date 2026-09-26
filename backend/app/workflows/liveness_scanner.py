@@ -239,6 +239,11 @@ _DEAD_TURN_END: dict[str, str] = {
 }
 
 
+#: fh5 T5: the ``_mark_dead`` reasons that mean the process is gone, so its
+#: unanswered inbox claims go back to the queue. Not ``liveness_dead``.
+_RELEASE_CLAIMS_ON = frozenset({"heartbeat_lost"})
+
+
 async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
     """Mark a run dead + flip status='failed' with the liveness reason.
     The bridge trigger from migration 206 picks this up and emits a
@@ -303,12 +308,18 @@ async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
         await record_crash_terminal_runs(killed_rows)
 
         # fh5 T5: give back what the dead run claimed at a step that never
-        # answered (logged, never raised).
-        from app.repositories import agent_run_inbox_redelivery
+        # answered (logged, never raised) — ONLY when its heartbeat is gone.
+        # ``liveness_dead`` judges a run whose process may still be alive
+        # (heartbeat fresh; ``last_useful_action_at`` has no writer, so healthy
+        # runs are flagged after ~9 min). Releasing then, mid-call, would let
+        # the same live run's next InboxClaimHook take the item again and
+        # inject it twice into one ``messages`` (fh5 review M1).
+        if reason in _RELEASE_CLAIMS_ON:
+            from app.repositories import agent_run_inbox_redelivery
 
-        await agent_run_inbox_redelivery.release_orphaned_claims(
-            [int(run_id)], reason=reason
-        )
+            await agent_run_inbox_redelivery.release_orphaned_claims(
+                [int(run_id)], reason=reason
+            )
 
         # 这条 run 永远不会走到 ``RunRecorder._finish``，所以树收口也只能由这里
         # 跟上 —— 漏掉这一处，含一条崩溃 run 的树永远收不了口，整棵树一分不扣

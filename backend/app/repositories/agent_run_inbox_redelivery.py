@@ -114,6 +114,11 @@ def _not_on_a_finished_issue():
 
 
 def _no_answer_at_claimed_step():
+    """Matched on ``step`` only, never ``turn``: ``AgentRunner._step_ended``
+    writes every ``step_end`` with a hard-coded ``turn=1`` while the hook
+    stamps ``claimed_turn = ctx.turn``. A step number is unique within one run
+    (one run = one turn), so ``(run_id, step)`` is the bracket. If runs ever
+    span several turns, add the turn here AND fix ``_step_ended`` together."""
     ev = AgentRunTranscriptEvents
     return not_(
         exists(

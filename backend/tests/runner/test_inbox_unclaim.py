@@ -341,7 +341,23 @@ def test_both_crash_writers_pass_their_reason():
     )
 
 
-async def test_mark_dead_releases_the_killed_run(monkeypatch):
+@pytest.mark.parametrize(
+    "reason,released", [("heartbeat_lost", True), ("liveness_dead", False)]
+)
+async def test_mark_dead_releases_only_when_the_heartbeat_is_gone(
+    monkeypatch, reason, released
+):
+    """fh5 review M1: ``liveness_dead`` flags runs whose process is alive with a
+    fresh heartbeat; releasing mid-call would let the same run re-claim the item
+    and inject it twice."""
+    release = await _drive_mark_dead(monkeypatch, reason)
+    if released:
+        release.assert_awaited_once_with([5], reason=reason)
+    else:
+        release.assert_not_awaited()
+
+
+async def _drive_mark_dead(monkeypatch, reason):
     from app.workflows import liveness_scanner
 
     class _S:
@@ -367,8 +383,8 @@ async def test_mark_dead_releases_the_killed_run(monkeypatch):
         ),
         patch("app.services.ai.billing.tree_charge.settle_tree_if_closed", AsyncMock()),
     ):
-        await liveness_scanner._mark_dead(5, "stuck", reason="liveness_dead")
-    release.assert_awaited_once_with([5], reason="liveness_dead")
+        await liveness_scanner._mark_dead(5, "stuck", reason=reason)
+    return release
 
 
 async def test_startup_reconcile_releases_the_stranded_runs(monkeypatch):
