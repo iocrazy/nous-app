@@ -116,7 +116,7 @@ class AiNousModelPublic(BaseModel):
 
 
 class AiNousModelsResponse(BaseModel):
-    """``GET /ai/nous-models``."""
+    """``GET /search/vectors/catalog``: platform embedding rows."""
 
     models: List[AiNousModelPublic]
 
@@ -182,7 +182,8 @@ class AiPlatformModelRuntime(BaseModel):
 
     ``local_ready`` is ``None`` for rows that do not run on the user's own
     machine; ``superseded`` marks a server twin hidden because its local twin
-    can run (the picker rule ``apply_readiness`` applies today).
+    can run (``local_readiness.local_verdict``; the generation pickers hide
+    both kinds client side).
     """
 
     status: AiPlatformModelStatus

@@ -8,8 +8,9 @@
     max_connections; WARNING at 80%, ERROR at 95%. Informational only —
     see app/services/infra/pg_connection_monitor.py for why it must never
     gate readiness.
-  - nous_engine_sync     (every 1m)   — mirror nous-engine's /v1/models into
-    the platform catalog: revoked grants disabled, ready → ok/idle.
+  - nous_model_health    (hourly)     — probe the non-engine platform models.
+    nous-engine rows are not probed: their status is read live from the
+    engine (spec 2026-09-25 §3.4, ``engine_catalog``).
 
 The 30s cadence is preserved using 6-field cron ("*/30 * * * * *");
 DBOS croniter is initialized with second_at_beginning=True so seconds
@@ -202,28 +203,6 @@ async def pg_connection_pressure_workflow(
     await sample_pg_connections_step()
 
 
-async def _sync_engine_catalog(rows: list[dict[str, Any]]) -> bool:
-    """Mirror nous-engine's ``/v1/models`` into the catalog before probing.
-
-    Plain async helper called from INSIDE ``probe_nous_models_step`` — not a
-    step, and the workflow body is untouched. Best-effort: any failure is a
-    WARNING and the probes run regardless. Returns True when rows changed
-    (the window cache is reloaded then, and the caller re-reads the catalog).
-    """
-    from app.agent_framework.catalog_windows import refresh_catalog_windows
-    from app.services.ai.nous_engine_sync import sync_all_engines
-
-    try:
-        results = await sync_all_engines(rows)
-    except Exception as exc:  # noqa: BLE001 — sync must never block probes
-        logger.warning(f"[nous_engine_sync] skipped this run: {exc!r}")
-        return False
-    changed = any(r.created or r.updated for _, r in results)
-    if changed:
-        await refresh_catalog_windows()
-    return changed
-
-
 @DBOS.step()
 async def probe_nous_models_step() -> dict[str, Any]:
     """Probe every ENABLED admin-configured platform (Nous) model and persist
@@ -235,18 +214,18 @@ async def probe_nous_models_step() -> dict[str, Any]:
     logic, no new table, no new scheduler. Each probe is a tiny ping
     (max_tokens=8 for chat); a failure is recorded, never raised.
 
-    Local nous-engine rows (``actual_provider='nous'``) are NOT pinged with an
-    inference here: the engine loads models on demand, so an hourly chat call
-    per row forced it to swap models on a shared card. The probe reads the
-    engine's ``GET /v1/models/{id}`` readiness instead, which loads nothing.
+    nous-engine rows (``actual_provider='nous'``) are skipped and recorded as
+    ``not_probed`` (detail ``live: status comes from nous-engine``): the
+    platform view reads their status from the engine's own list on every
+    request (spec 2026-09-25 §3.4), so a stored hourly answer would only be a
+    second, staler source.
 
-    Four buckets: ``ok`` / ``fail`` / ``idle`` / ``not_probed``. ``idle`` is a
-    local model that is authorized but not loaded right now — healthy but cold,
-    it loads on the first real request — and a type this poll may not dial is
-    ``not_probed``. Neither is a failure. Counting ``not_probed`` as failed is
-    what kept three healthy image/video models red on the admin page and
-    produced a WARNING per model per hour about nothing (2026-08-14); ``idle``
-    as failed would repaint every cold 27B variant red the same way.
+    Three buckets here: ``ok`` / ``fail`` / ``not_probed``. A type this poll
+    may not dial is ``not_probed`` too; it is not a failure. Counting
+    ``not_probed`` as failed is what kept three healthy image/video models red
+    on the admin page and produced a WARNING per model per hour about nothing
+    (2026-08-14). ``idle`` stays in the tally for the shared status vocabulary
+    but this poll no longer produces it.
     """
     from app.repositories.nous_model_repository import get_nous_model_repository
     from app.services.ai.nous_model_health import (
@@ -256,9 +235,6 @@ async def probe_nous_models_step() -> dict[str, Any]:
 
     repo = get_nous_model_repository()
     rows = await repo.list_all()
-    if await _sync_engine_catalog(rows):
-        # Re-read so a service the engine just started serving is probed now.
-        rows = await repo.list_all()
     enabled = [r for r in rows if r.get("is_enabled")]
 
     counts = {"ok": 0, "fail": 0, "idle": 0, "not_probed": 0}
@@ -322,59 +298,3 @@ async def nous_model_health_workflow(
             f"[nous_model_health] all {summary['ok']} probeable platform "
             f"models reachable (not_probed={skipped})"
         )
-
-
-@DBOS.step()
-async def sync_engine_catalog_step() -> dict[str, Any]:
-    """Mirror nous-engine's ``/v1/models`` into the catalog (every minute).
-
-    The same sync the hourly probe step runs first, on its own cadence so the
-    catalog follows the engine within a minute: a revoked grant disables its
-    row, a 401 disables the key's rows, and ``ready`` moves ok/idle as the
-    engine loads and unloads models (``nous_engine_sync`` module doc). One
-    list read per endpoint — the engine answers it from memory.
-
-    Never raises: a catalog read failure is a WARNING and counts as an error,
-    so a DB blip cannot turn a monitoring tick into a failed workflow.
-    """
-    from app.agent_framework.catalog_windows import refresh_catalog_windows
-    from app.repositories.nous_model_repository import get_nous_model_repository
-    from app.services.ai.nous_engine_sync import sync_all_engines
-
-    summary = {
-        "discovered": 0,
-        "created": 0,
-        "updated": 0,
-        "disabled": 0,
-        "ready_changed": 0,
-        "errors": 0,
-    }
-    try:
-        rows = await get_nous_model_repository().list_all()
-    except Exception as exc:  # noqa: BLE001 — counted and logged, never raised
-        logger.warning(f"[nous_engine_sync] catalog read failed: {exc!r}")
-        return {**summary, "errors": 1}
-    reports = [r for _, r in await sync_all_engines(rows)]
-    if any(r.created or r.updated for r in reports):
-        await refresh_catalog_windows()
-    return {
-        "discovered": sum(r.discovered for r in reports),
-        "created": sum(len(r.created) for r in reports),
-        "updated": sum(len(r.updated) for r in reports),
-        "disabled": sum(len(r.disabled) for r in reports),
-        "ready_changed": sum(r.ready_changed for r in reports),
-        "errors": sum(1 for r in reports if r.error),
-    }
-
-
-# Every minute: the engine unloads an idle model after an hour and a revoked
-# grant should stop routing within a minute, not at the next hourly probe.
-# Cost is one in-memory list read per engine endpoint; nothing is written
-# unless something changed. Its own workflow — nothing added to the hourly
-# body.
-@DBOS.scheduled("* * * * *")
-@DBOS.workflow()
-async def nous_engine_sync_workflow(
-    scheduled_time: datetime, actual_time: datetime
-) -> None:
-    await sync_engine_catalog_step()

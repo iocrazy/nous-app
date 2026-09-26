@@ -39,7 +39,6 @@ from app.workflows.scheduled_commitment_sweeper import (  # noqa: F401
 )
 from app.workflows.scheduled_health import (  # noqa: F401
     health_check_workflow,
-    nous_engine_sync_workflow,
     nous_model_health_workflow,
     pg_connection_pressure_workflow,
     update_system_status_workflow,

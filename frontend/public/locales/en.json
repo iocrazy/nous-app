@@ -4223,20 +4223,6 @@
     "archiveFailed": "Archive failed: {{message}}"
   },
   "aiSettings": {
-    "modelHealthFailed": "health check failed",
-    "modelHealthFailedAgo": "health check failed, checked {{ago}}",
-    "modelHealthFailedReason": "health check failed: {{reason}}",
-    "modelHealthFailedReasonAgo": "health check failed: {{reason}}, checked {{ago}}",
-    "healthReason": {
-      "timeout": "Request timed out",
-      "unreachable": "Could not connect",
-      "auth": "Credentials rejected",
-      "rate_limit": "Rate limited",
-      "model_not_found": "Model not found",
-      "upstream_error": "Provider error",
-      "bad_response": "Unexpected response",
-      "other": "Unknown reason"
-    },
     "nonChatSelected": "\"{{model}}\" looks like {{kind}}, not a chat model. Chat, summarization and other text tasks that use this provider will fail. Enable a chat model instead.",
     "nonChatKind": {
       "embedding": "an embedding model",
@@ -4404,8 +4390,6 @@
       "maxTokensLabel": "Max tokens",
       "enabledLabel": "Enabled",
       "modelProviderNotEnabled": "provider not enabled",
-      "modelUnavailableOption": "{{name}} (unavailable)",
-      "modelUnavailableHint": "The selected model is unavailable and no longer listed — pick another model.",
       "forkAgent": "Fork to My Agents",
       "forkedToast": "Forked as {{slug}}",
       "scopeLabel": "Scope",
@@ -4450,12 +4434,6 @@
       "providerDisabledBody": "Model {{model}} belongs to a provider this account hasn't configured. Invocations of this agent will fail. Pick another model below or configure the provider in AI Settings.",
       "switchToModel": "Switch to {{model}}",
       "goToAISettings": "Go to AI Settings",
-      "modelHealthFailed": "Last health check failed — chats using this model may fail.",
-      "modelHealthFailedReason": "Last health check failed ({{reason}}) — chats using this model may fail.",
-      "modelHealthFailedShort": "health check failed",
-      "modelHealthFailedReasonShort": "health check failed: {{reason}}",
-      "modelHealthPassed": "Health check passed",
-      "modelHealthCheckedAgo": "checked {{ago}}",
       "nonChatModelShort": "not a chat model",
       "usage": {
         "title": "Used By",

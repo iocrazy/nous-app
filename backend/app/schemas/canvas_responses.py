@@ -30,9 +30,6 @@ from app.schemas.envelope import Envelope
 
 # ``canvas_resource_refs_role_check`` (mig 290).
 CanvasRefRole = Literal["reference", "output"]
-# ``nous_models_last_test_status_check`` (mig 503); the code-side twin is
-# ``nous_model_health.PROBE_STATUSES``, pinned equal by the canvas wire test.
-ProbeStatus = Literal["ok", "fail", "idle", "not_probed"]
 
 
 class CanvasRow(BaseModel):
@@ -154,23 +151,6 @@ class ResourceCanvasRef(BaseModel):
 
 class ResourceCanvasRefsEnvelope(Envelope[List[ResourceCanvasRef]]):
     count: int
-
-
-class CanvasModelOption(BaseModel):
-    """A catalog model a canvas picker may offer (public columns only).
-
-    The router projects ``_GENERATION_MODEL_PUBLIC_FIELDS`` off each row;
-    ``tests/api/test_canvases_wire.py`` pins this field set to that tuple.
-    No credential, host or ``actual_provider`` ever appears here.
-    """
-
-    name: str
-    display_name: str
-    actual_model: str
-    type: str
-    is_local: bool
-    sort_order: int
-    last_test_status: Optional[ProbeStatus]
 
 
 class CanvasGenerationCapability(BaseModel):

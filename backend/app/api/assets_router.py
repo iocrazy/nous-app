@@ -620,7 +620,7 @@ async def asset_canvas_refs(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQu
 
 
 # The catalog row name, not a provider key — same vocabulary the model picker
-# shows (``GET /canvases/generation-models``).
+# shows (``platform_models`` in ``GET /ai/settings``).
 #
 # The 100-character bound is OURS, not the column's: ``nous_models.name``
 # is unbounded ``Text``. It keeps a hostile query string from buying a full

@@ -386,7 +386,7 @@ export const activateVectorSpace = (spaceId: string): Promise<VectorsStatus> =>
 export const deleteVectorSpace = (spaceId: string): Promise<DeleteVectorSpaceResult> =>
   apiClient.delete<DeleteVectorSpaceResult>(`/api/v1/search/vectors/spaces/${encodeURIComponent(spaceId)}`);
 
-/** Catalog models Add Space may pick: enabled PLATFORM embedding rows only.
- *  (`/ai/nous-models` also returns the caller's own BYOK rows.) */
+/** Catalog models Add Space may pick: enabled PLATFORM embedding rows only
+ *  (no owner-scoped BYOK rows). */
 export const getVectorSpaceCatalog = async (): Promise<NousModelPublic[]> =>
   (await apiClient.get<{ models: NousModelPublic[] }>('/api/v1/search/vectors/catalog')).models;

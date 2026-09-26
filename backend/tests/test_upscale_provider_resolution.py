@@ -128,6 +128,35 @@ async def test_default_image_pick_skips_the_upscaler(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_default_image_pick_uses_the_shared_predicate(monkeypatch):
+    """The default pick and ``platform_models[name].generatable`` answer from
+    ONE function. If ``generates_from_prompt`` said the upscaler generates,
+    the default pick (upscaler sorted first) must land on it — proving there
+    is no second, private copy of the text-to-image rule in db_registry."""
+    import inspect
+
+    from app.services.generation import model_capabilities as mc
+
+    src = inspect.getsource(db_registry)
+    assert "_is_text_to_image" not in src
+    assert "generates_from_prompt" in src
+
+    real = mc.generates_from_prompt
+    seen: list = []
+
+    def _spy(row_type, provider):
+        seen.append((row_type, provider))
+        return True if provider == "nous" else real(row_type, provider)
+
+    monkeypatch.setattr(mc, "generates_from_prompt", _spy)
+    _catalog(monkeypatch, [_nous(), _ark()])
+    with pytest.raises(RuntimeError, match="upscale-only"):
+        await db_registry.resolve_image_provider(None, user_id=USER)
+    assert ("image", "nous") in seen
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_naming_the_upscaler_for_text_to_image_is_refused_by_name(monkeypatch):
     """Named explicitly it must RAISE naming the row — never quietly
     substitute another model."""

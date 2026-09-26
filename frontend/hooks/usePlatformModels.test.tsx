@@ -225,8 +225,8 @@ describe('every surface shows the same list from the same settings', () => {
     getAvailableModels(SETTINGS);
     render(<AISettings settings={SETTINGS} onSave={vi.fn()} />);
     await waitFor(() => expect(getPlatformStatus).toHaveBeenCalledTimes(1));
-    // Nothing else went to the network: no /ai/nous-models, no
-    // /canvases/text-models, no /canvases/generation-models.
+    // Nothing else went to the network: no catalog request of any kind (the
+    // per-surface list endpoints were deleted in P3).
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

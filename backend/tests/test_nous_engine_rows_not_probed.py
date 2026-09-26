@@ -1,16 +1,16 @@
-"""Hourly probe of local nous-engine rows must not force the engine to load.
+"""The hourly probe leaves nous-engine rows alone (spec 2026-09-25 §3.4).
 
-nous-engine loads models on demand and one GPU card now carries three 27B
-variants. A scheduled ``POST /chat/completions`` per row made the engine swap
-models every hour. The engine already exposes a readiness read that never loads
-anything: ``GET {base}/models/{id}`` answers 200 when the model is authorized
-AND loaded, 503 (``ModelNotReadyError``) when it is authorized but not loaded,
-404 when the key has no grant, 401/403 when the key is bad.
+nous-engine loads models on demand and one GPU card carries several 27B
+variants, so a scheduled real call per row made the engine swap models every
+hour. The later passive readiness read (``GET /models/{id}``) stopped the
+loading but still wrote a second, hourly copy of a status the platform view
+now reads live from the engine's own list on every request.
 
-So the scheduled path (``allow_costly=False``) reads that endpoint for
-``actual_provider == 'nous'`` llm / embedding / asr rows, and the admin Test
-button (``allow_costly=True``) still performs the real call, because a human
-clicking Test wants the model loaded and exercised once.
+So the scheduled path (``allow_costly=False``) sends nothing for an
+``actual_provider == 'nous'`` row and records ``not_probed`` with the detail
+``live: status comes from nous-engine``; the admin Test button
+(``allow_costly=True``) still performs the real call, because a human clicking
+Test wants the model loaded and exercised once.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services.ai.nous_model_health import (
+    NOUS_ENGINE_LIVE_DETAIL,
     PROBE_STATUSES,
     probe_nous_model,
     probe_result_status,
@@ -89,8 +90,8 @@ def _row(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("typ", ["llm", "embedding", "asr"])
-async def test_scheduled_probe_of_nous_row_only_reads_readiness(typ: str) -> None:
+@pytest.mark.parametrize("typ", ["llm", "embedding", "asr", "image"])
+async def test_scheduled_probe_of_nous_row_sends_nothing(typ: str) -> None:
     factory = AsyncMock(return_value={"success": True, "models": []})
     with (
         _patch(_Resp(200, {"id": "qwen3-8-27b-huihui", "object": "model"})),
@@ -100,63 +101,17 @@ async def test_scheduled_probe_of_nous_row_only_reads_readiness(typ: str) -> Non
         ),
     ):
         out = await probe_nous_model(_row(typ))
-    assert _Client.gets == [f"{_BASE}/models/qwen3-8-27b-huihui"]
-    assert _Client.posts == []
+    assert _Client.gets == [] and _Client.posts == []
     factory.assert_not_awaited()
-    assert _Client.headers["Authorization"] == "Bearer sk-instance"
-    assert out["ok"] is True
-    assert out["detail"] == "loaded"
-    assert out["code"] is None
-    assert probe_result_status(out) == "ok"
-
-
-@pytest.mark.asyncio
-async def test_503_means_authorized_but_not_loaded_and_is_idle() -> None:
-    with _patch(
-        _Resp(503, {"error": {"message": "model is not loaded"}}, "not loaded")
-    ):
-        out = await probe_nous_model(_row())
     assert out["ok"] is False
-    assert out["idle"] is True
-    assert out["detail"] == "authorized, not loaded"
-    assert out["code"] is None
-    assert out["error"] is None
-    assert probe_result_status(out) == "idle"
-
-
-@pytest.mark.asyncio
-async def test_404_is_a_model_not_found_failure() -> None:
-    with _patch(_Resp(404, {"error": "not found"}, "not found")):
-        out = await probe_nous_model(_row())
-    assert out["ok"] is False
-    assert not out.get("idle")
-    assert out["code"] == "model_not_found"
-    assert "404" in out["error"]
-    assert probe_result_status(out) == "fail"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status", [401, 403])
-async def test_bad_key_is_an_auth_failure(status: int) -> None:
-    with _patch(_Resp(status, {}, "unauthorized")):
-        out = await probe_nous_model(_row())
-    assert out["code"] == "auth"
-    assert probe_result_status(out) == "fail"
-
-
-@pytest.mark.asyncio
-async def test_transport_error_on_readiness_read_is_classified() -> None:
-    import httpx
-
-    class _Boom(_Client):
-        async def get(self, url: str, headers: Any = None, **k: Any) -> _Resp:
-            raise httpx.ConnectError("")
-
-    with patch("app.services.ai.nous_model_health.httpx.AsyncClient", _Boom):
-        out = await probe_nous_model(_row())
-    assert out["code"] == "unreachable"
-    assert out["error"].startswith("ConnectError")
-    assert probe_result_status(out) == "fail"
+    assert out["not_probed"] is True
+    assert (
+        out["detail"]
+        == NOUS_ENGINE_LIVE_DETAIL
+        == ("live: status comes from nous-engine")
+    )
+    assert out["code"] is None and out["error"] is None
+    assert probe_result_status(out) == "not_probed"
 
 
 @pytest.mark.asyncio
@@ -179,14 +134,6 @@ async def test_non_nous_provider_scheduled_probe_is_unchanged() -> None:
     assert out["detail"] == "chat ok"
 
 
-@pytest.mark.asyncio
-async def test_nous_image_row_stays_not_probed_on_the_schedule() -> None:
-    with _patch(_Resp(200)):
-        out = await probe_nous_model(_row(typ="image", model="studio-upscale"))
-    assert _Client.gets == [] and _Client.posts == []
-    assert probe_result_status(out) == "not_probed"
-
-
 def test_probe_result_status_maps_idle() -> None:
     assert "idle" in PROBE_STATUSES
     assert probe_result_status({"ok": False, "idle": True}) == "idle"
@@ -196,23 +143,32 @@ def test_probe_result_status_maps_idle() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduled_step_counts_idle_in_its_own_bucket() -> None:
+async def test_scheduled_step_records_nous_rows_as_not_probed() -> None:
     from app.workflows.scheduled_health import probe_nous_models_step
 
     repo = AsyncMock()
-    repo.list_all.return_value = [dict(_row(), is_enabled=True)]
+    repo.list_all.return_value = [
+        dict(_row(), is_enabled=True),
+        dict(_row(model="off"), is_enabled=False),
+    ]
     with (
         patch(
             "app.repositories.nous_model_repository.get_nous_model_repository",
             return_value=repo,
         ),
-        _patch(_Resp(503, {}, "not loaded")),
+        _patch(_Resp(200)),
     ):
         summary = await probe_nous_models_step()
-    assert summary["idle"] == 1
-    assert summary["failed"] == 0
-    assert summary["ok"] == 0
+    assert _Client.gets == [] and _Client.posts == []
+    assert summary == {
+        "total": 1,
+        "ok": 0,
+        "failed": 0,
+        "idle": 0,
+        "not_probed": 1,
+    }
+    repo.list_all.assert_awaited_once()
     args = repo.record_test_result.await_args.args
-    assert args[1] == "idle"
-    assert args[2] == "authorized, not loaded"
-    assert repo.record_test_result.await_args.args[3] is None
+    assert args[1] == "not_probed"
+    assert args[2] == NOUS_ENGINE_LIVE_DETAIL
+    assert args[3] is None

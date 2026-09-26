@@ -46,7 +46,6 @@ from app.schemas.canvas_responses import (
     CanvasAck,
     CanvasAssetRefsEnvelope,
     CanvasGenerationCapability,
-    CanvasModelOption,
     CanvasRow,
     CanvasSummary,
     ProjectTrashedCanvas,
@@ -236,72 +235,6 @@ async def _read_media_bytes(row: dict):
         return fh.read()
 
 
-_GENERATION_MODEL_PUBLIC_FIELDS = (
-    "name",
-    "display_name",
-    # The label the admin AI Models card shows; the canvas pickers print the
-    # same string (2026-09-24). A model id, not a credential.
-    "actual_model",
-    "type",
-    "is_local",
-    "sort_order",
-    # Lets the picker drop a failed row with the same predicate as Settings.
-    # generation-models already filters failed rows server-side
-    # (apply_readiness); text-models does not, so the client filter is the one
-    # that holds for both.
-    "last_test_status",
-)
-
-
-async def _visible_generation_rows(
-    user_id: str, *, include_actual_provider: bool = False
-) -> list[dict]:
-    """The image/video catalog rows this user may see, in one place.
-
-    ``generation-models`` and ``generation-capabilities`` MUST agree row for
-    row — a picker entry with no caps entry means the UI shows a knob it was
-    told to hide. Two hand-rolled copies of "list, filter by Settings, keep
-    image/video" is exactly the "two predicates that must agree" shape that
-    drifts silently, so both endpoints call this and neither re-derives it.
-
-    The implementation moved to ``services/generation/model_capabilities.py``
-    when the asset library's bundle endpoint became the third consumer — same
-    rule, one more caller. This thin wrapper stays because both routes below
-    and their tests name it.
-    """
-    from app.services.generation.local_readiness import (
-        apply_readiness,
-        local_engine_readiness,
-    )
-    from app.services.generation.model_capabilities import visible_generation_rows
-
-    # What to OFFER, not what the user may use: the picker lists only rows
-    # that can generate right now (a local engine needs the user's daemon
-    # online and ready; a ready local twin hides its server twin; a failed
-    # probe hides). Authorization stays in visible_generation_rows so the
-    # dispatch path still answers "daemon offline" as a typed refusal rather
-    # than "no such model". actual_provider is fetched for the filter and
-    # stripped again unless asked for — the public projection does not widen.
-    rows = await visible_generation_rows(user_id, include_actual_provider=True)
-    rows = apply_readiness(rows, await local_engine_readiness(user_id))
-    if include_actual_provider:
-        return rows
-    return [{k: v for k, v in r.items() if k != "actual_provider"} for r in rows]
-
-
-@router.get(
-    "/canvases/generation-models", response_model=Envelope[list[CanvasModelOption]]
-)
-async def list_generation_models(auth: AuthDep) -> dict:
-    """Image/video rows from the nous_models catalog (public columns
-    only — no api_key/base_url) for the composer's model picker."""
-    data = [
-        {k: r.get(k) for k in _GENERATION_MODEL_PUBLIC_FIELDS}
-        for r in await _visible_generation_rows(auth.user_id)
-    ]
-    return {"success": True, "data": data}
-
-
 @router.get(
     "/canvases/generation-capabilities",
     response_model=Envelope[dict[str, CanvasGenerationCapability]],
@@ -312,13 +245,18 @@ async def list_generation_capabilities(auth: AuthDep) -> dict:
     Server-side projection of each row's protocol capabilities, so the UI can
     hide what a model cannot honour without ever learning ``actual_provider``
     or re-implementing the registry lookup — one predicate, one place.
-    Visibility follows ``generation-models`` exactly because both read
-    ``_visible_generation_rows``: a model the picker shows always has an
-    entry here.
+    Visibility is ``platform_provider.generation_picker_models`` over the same
+    view ``GET /ai/settings`` carries (spec 2026-09-25 §3.8), i.e. the rows
+    the frontend's generation pickers map from before their daemon overlay:
+    a model a picker shows always has an entry here.
 
     ``honours_ratio`` is deliberately NOT exposed: it describes an internal
     strategy, not something the UI can act on.
     """
+    from app.services.ai.platform_provider import (
+        generation_picker_models,
+        platform_provider_view,
+    )
     from app.services.ai.provider_protocols import resolve_generation_protocol
     from app.services.ai.provider_protocols.base import (
         QUALITY_TIER_ORDER,
@@ -330,11 +268,11 @@ async def list_generation_capabilities(auth: AuthDep) -> dict:
     data: dict[str, dict] = {}
     # The provider string is asked for explicitly and consumed HERE: only the
     # derived capability values reach the response, never the provider itself.
-    rows = await _visible_generation_rows(auth.user_id, include_actual_provider=True)
-    for r in rows:
-        proto = resolve_generation_protocol((r.get("actual_provider") or "").lower())
+    view = await platform_provider_view(auth.user_id)
+    for m in generation_picker_models(view):
+        proto = resolve_generation_protocol(m.actual_provider.lower())
         caps = proto.capabilities if proto else ProviderCapabilities.none()
-        data[str(r.get("name"))] = {
+        data[m.name] = {
             "ratios": [x for x in order if x in caps.ratios],
             "quality": caps.quality,
             # Ordered low→max from the one ordering constant, never re-listed
@@ -346,24 +284,6 @@ async def list_generation_capabilities(auth: AuthDep) -> dict:
             "negative": caps.negative,
             "video_modes": sorted(caps.video_modes),
         }
-    return {"success": True, "data": data}
-
-
-@router.get("/canvases/text-models", response_model=Envelope[list[CanvasModelOption]])
-async def list_text_models(auth: AuthDep) -> dict:
-    """Enabled ``llm`` rows from the nous_models catalog (public columns
-    only — no api_key/base_url) for the prompt node's text-model picker.
-
-    Same catalog and public-field contract as ``generation-models``; the two
-    endpoints differ only in the ``type`` they surface (text vs image/video),
-    so the smart-canvas text prompt and the image/video composer read one
-    consistent source of truth instead of a hardcoded frontend list."""
-    from app.repositories import nous_model_repository as _repo_mod
-
-    rows = await _repo_mod.get_nous_model_repository().list_enabled(
-        "llm", viewer_user_id=auth.user_id
-    )
-    data = [{k: r.get(k) for k in _GENERATION_MODEL_PUBLIC_FIELDS} for r in rows]
     return {"success": True, "data": data}
 
 

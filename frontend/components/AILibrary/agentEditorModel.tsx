@@ -151,21 +151,10 @@ export function nonChatModelNotes(
  * we still show it as a leading disabled option so the user sees the stale
  * selection rather than it silently flipping to the first option.
  *
- * ``unhealthyLabels`` maps a model name to an already-localized warning suffix
- * (built by the caller, so this module stays free of i18n). A marked option is
- * still SELECTABLE: the health probe has produced a false negative in
- * production, so it advises rather than vetoes.
- *
- * ``orphanLabels`` overrides the text of that leading stale option for a value
- * the caller knows more about — a platform model hidden because its probe
- * failed is "unavailable", not "provider not enabled".
- *
- * ``noteLabels`` is the same shape for a NON-alarming remark — today, "this id
- * looks like an embedding/image model". It is a separate map rather than a
- * second kind of entry in ``unhealthyLabels`` so the DOM never claims a health
- * probe failed on a model that was never probed: these options carry
- * ``data-note``, not ``data-health="fail"``. Both are suffixes, both stay
- * selectable, and an option can carry one of each.
+ * ``noteLabels`` maps a model name to an already-localized, NON-alarming
+ * suffix (built by the caller, so this module stays free of i18n) — today,
+ * "this id looks like an embedding/image model". The option carries
+ * ``data-note`` and stays selectable.
  *
  * ``notLoadedLabels`` is the one map that DOES disable: a platform row that is
  * `idle` on nous-engine (authorized, not loaded) cannot answer a chat — a real
@@ -180,9 +169,7 @@ export function renderModelSelect(params: {
   onChange: (v: string) => void;
   providerNotEnabledLabel: string;
   noModelsLabel: string;
-  unhealthyLabels?: Record<string, string>;
   noteLabels?: Record<string, string>;
-  orphanLabels?: Record<string, string>;
   notLoadedLabels?: Record<string, string>;
 }): React.ReactElement {
   const {
@@ -192,9 +179,7 @@ export function renderModelSelect(params: {
     onChange,
     providerNotEnabledLabel,
     noModelsLabel,
-    unhealthyLabels,
     noteLabels,
-    orphanLabels,
     notLoadedLabels,
   } = params;
   const knownModels = new Set(groups.flatMap((g) => g.models));
@@ -208,8 +193,8 @@ export function renderModelSelect(params: {
       className="mt-1 w-full font-mono"
     >
       {showOrphan && (
-        <option value={value} data-orphan={orphanLabels?.[value] ? 'unavailable' : 'stale'}>
-          {orphanLabels?.[value] ?? `${value} (${providerNotEnabledLabel})`}
+        <option value={value} data-orphan="stale">
+          {`${value} (${providerNotEnabledLabel})`}
         </option>
       )}
       {groups.length === 0 && !showOrphan && (
@@ -218,24 +203,19 @@ export function renderModelSelect(params: {
       {groups.map((group) => (
         <optgroup key={group.providerKey} label={group.providerName}>
           {group.models.map((m) => {
-            const warning = unhealthyLabels?.[m];
             const note = noteLabels?.[m];
             const notLoaded = notLoadedLabels?.[m];
             const label = group.labels?.[m] ?? m;
-            const suffixes = [warning, note].filter(Boolean);
             return (
               <option
                 key={`${group.providerKey}:${m}`}
                 value={m}
-                data-health={warning ? 'fail' : undefined}
                 data-note={note ? 'non-chat' : undefined}
                 disabled={Boolean(notLoaded)}
                 data-availability={notLoaded ? 'not_loaded' : undefined}
                 data-description={notLoaded}
               >
-                {suffixes.length > 0
-                  ? `${label} — ${suffixes.join(' · ')}`
-                  : label}
+                {note ? `${label} — ${note}` : label}
               </option>
             );
           })}

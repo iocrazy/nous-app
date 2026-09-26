@@ -223,6 +223,7 @@ async def resolve_image_provider(
             ``actual_provider`` has no wired implementation.
     """
     from app.services.ai.provider_protocols import resolve_generation_protocol
+    from app.services.generation.model_capabilities import generates_from_prompt
 
     catalog = await _enabled_rows("image")
     byok = await byok_image_rows(user_id)
@@ -232,7 +233,13 @@ async def resolve_image_provider(
     # they need an input image a prompt request does not have. Named
     # explicitly they stay in, so the refusal below names the row instead of
     # silently substituting some other model.
-    image_rows = [r for r in visible if r is explicit or _is_text_to_image(r)]
+    # Same predicate as the pickers and ``platform_models[name].generatable``
+    # (``generates_from_prompt``); every row here is an image row.
+    image_rows = [
+        r
+        for r in visible
+        if r is explicit or generates_from_prompt("image", r.get("actual_provider"))
+    ]
     if not image_rows:
         raise RuntimeError(
             "no image model configured (nous_models catalog or user " "BYOK providers)"
@@ -267,18 +274,6 @@ async def resolve_image_provider(
         actual_model,
     )
     return provider, actual_model
-
-
-def _is_text_to_image(row: dict) -> bool:
-    """Whether ``row`` may serve a prompt → picture request.
-
-    A row whose protocol does not resolve counts as text-to-image here on
-    purpose: ``resolve_image_provider`` then raises its "no implementation"
-    error naming the row, which is the existing, louder behaviour."""
-    from app.services.ai.provider_protocols import resolve_generation_protocol
-
-    protocol = resolve_generation_protocol((row.get("actual_provider") or "").lower())
-    return protocol is None or getattr(protocol, "text_to_image", True)
 
 
 # Upscale preference: the self-hosted engine first (our GPU, no per-call

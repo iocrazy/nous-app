@@ -22,20 +22,9 @@ vi.mock('./agentEditorModel', () => ({
   ),
 }));
 
-// Interpolating stand-in for i18next: the health line reads its relative time
-// through t('common.time.minutesAgo', { count }), so a mock that drops
-// variables would make "shows when the check ran" pass on an empty string.
-const TRANSLATIONS: Record<string, string> = {
-  'common.time.justNow': 'just now',
-  'common.time.minutesAgo': '{{count}}m ago',
-  'common.time.hoursAgo': '{{count}}h ago',
-  'common.time.daysAgo': '{{count}}d ago',
-  // Failure-reason wording lives only in the locale files (the component passes
-  // no default for these — the key comes from a lookup table), so the mock has
-  // to carry them or the reason would render as an empty string.
-  'aiSettings.healthReason.timeout': 'Request timed out',
-  'aiSettings.healthReason.rate_limit': 'Rate limited',
-};
+// Interpolating stand-in for i18next, so a mock that drops variables cannot
+// make an assertion pass on an empty string.
+const TRANSLATIONS: Record<string, string> = {};
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, second?: unknown, third?: unknown): string => {
@@ -47,9 +36,9 @@ vi.mock('react-i18next', () => ({
       return template.replace(/\{\{(\w+)\}\}/g, (_m, name) => String(vars[name] ?? ''));
     },
   }),
-  // The health line reaches utils/relativeTime -> utils/formatDate -> i18n.ts,
-  // which calls i18n.use(initReactI18next) at module-eval time: the named
-  // export must exist on the mock or vitest throws before any test runs.
+  // Anything that reaches i18n.ts calls i18n.use(initReactI18next) at
+  // module-eval time: the named export must exist on the mock or vitest
+  // throws before any test runs.
   initReactI18next: { type: '3rdParty', init: () => {} },
 }));
 
@@ -199,162 +188,6 @@ describe('AgentPersonaTab — persona hint banner', () => {
     renderTab({ agent: { ...agent, override_fields: ['soul_md'] } as AILibraryAgent });
     expect(screen.queryByTestId('agent-override-banner')).toBeNull();
     expect(screen.queryByTestId('agent-preset-hint-banner')).toBeNull();
-  });
-});
-
-/**
- * Health of the SELECTED model, inline under the picker.
- *
- * Before this, a failing model was invisible here: the user picked it, saved,
- * and learned about it when the chat failed with nothing to go on. The line
- * carries the check time because the probe runs hourly — a green light from 50
- * minutes ago is not a statement about right now.
- */
-describe('AgentPersonaTab — selected model health', () => {
-  const health = {
-    'mediahub-deepseek-v4-flash': { status: 'fail' as const, testedAt: null, code: null },
-  };
-
-  it('warns when the selected model failed its last health check', () => {
-    renderTab({
-      draft: { model: 'mediahub-deepseek-v4-flash' },
-      modelHealth: health,
-    });
-    const el = screen.getByTestId('model-health-warning');
-    expect(el.textContent).toContain('may fail');
-  });
-
-  it('names the reason when the backend classified the failure', () => {
-    // The point of the whole reason-code change: "timed out" (a local engine
-    // still loading — usually wait) and "rate limited" (quota — go act) were
-    // the same sentence under #1838, and they ask for opposite things.
-    renderTab({
-      draft: { model: 'mediahub-deepseek-v4-flash' },
-      modelHealth: {
-        'mediahub-deepseek-v4-flash': { status: 'fail', testedAt: null, code: 'timeout' },
-      },
-    });
-    expect(screen.getByTestId('model-health-warning').textContent).toContain(
-      'Request timed out',
-    );
-  });
-
-  it('keeps the plain wording for a failure with no code', () => {
-    // Rows probed before the column existed. Saying "unknown reason" would be
-    // inventing a diagnosis out of our own missing data.
-    renderTab({ draft: { model: 'mediahub-deepseek-v4-flash' }, modelHealth: health });
-    const text = screen.getByTestId('model-health-warning').textContent ?? '';
-    expect(text).toContain('may fail');
-    expect(text).not.toContain('(');
-  });
-
-  it('keeps the plain wording for a code this build cannot name', () => {
-    // The backend enum can grow ahead of a frontend deploy; the user must never
-    // see a raw key or an untranslated code string.
-    renderTab({
-      draft: { model: 'mediahub-deepseek-v4-flash' },
-      modelHealth: {
-        'mediahub-deepseek-v4-flash': {
-          status: 'fail',
-          testedAt: null,
-          code: 'quota_exhausted',
-        },
-      },
-    });
-    const text = screen.getByTestId('model-health-warning').textContent ?? '';
-    expect(text).toContain('may fail');
-    expect(text).not.toContain('quota_exhausted');
-    expect(text).not.toContain('healthReason');
-  });
-
-  it('still lets the user keep an unhealthy model selected', () => {
-    // #1838's rule, unchanged: the probe has produced a false negative in
-    // production, so a red light advises and never vetoes. Nothing here
-    // disables the picker or clears the draft's model.
-    const updateDraft = vi.fn();
-    renderTab({
-      draft: { model: 'mediahub-deepseek-v4-flash' },
-      modelHealth: {
-        'mediahub-deepseek-v4-flash': { status: 'fail', testedAt: null, code: 'rate_limit' },
-      },
-      updateDraft,
-    });
-    expect(screen.getByTestId('model-health-warning')).toBeTruthy();
-    expect(updateDraft).not.toHaveBeenCalled();
-  });
-
-  it('stays quiet when the selected model is healthy', () => {
-    renderTab({
-      draft: { model: 'mediahub-deepseek-v4-pro' },
-      modelHealth: {
-        ...health,
-        'mediahub-deepseek-v4-pro': { status: 'ok' as const, testedAt: null, code: null },
-      },
-    });
-    expect(screen.queryByTestId('model-health-warning')).toBeNull();
-  });
-
-  it('says nothing about a model that has never been probed', () => {
-    // Silence, not a green light: an unprobed model has no health to report.
-    renderTab({ draft: { model: 'byok-gpt-4o' }, modelHealth: health });
-    expect(screen.queryByTestId('model-health-warning')).toBeNull();
-    expect(screen.queryByTestId('model-health-ok')).toBeNull();
-  });
-
-  it('shows when the check ran, so a stale reading reads as stale', () => {
-    const fortyMinutesAgo = new Date(Date.now() - 40 * 60_000).toISOString();
-    renderTab({
-      draft: { model: 'mediahub-deepseek-v4-flash' },
-      modelHealth: {
-        'mediahub-deepseek-v4-flash': {
-          status: 'fail',
-          testedAt: fortyMinutesAgo,
-          code: null,
-        },
-      },
-    });
-    expect(screen.getByTestId('model-health-warning').textContent).toContain('40m ago');
-  });
-
-  it('reports a healthy model check time too — quietly', () => {
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
-    renderTab({
-      draft: { model: 'mediahub-deepseek-v4-pro' },
-      modelHealth: {
-        'mediahub-deepseek-v4-pro': { status: 'ok', testedAt: tenMinutesAgo, code: null },
-      },
-    });
-    expect(screen.getByTestId('model-health-ok').textContent).toContain('10m ago');
-  });
-});
-
-/**
- * 2026-09-24: failing platform models are no longer listed. An agent that
- * already uses one keeps its saved value; the picker labels it "unavailable"
- * and the warning line says to pick another model.
- */
-describe('AgentPersonaTab — saved model hidden as unavailable', () => {
-  const health = {
-    'nous-broken-llm': { status: 'fail' as const, testedAt: null, code: 'timeout' },
-  };
-
-  it('says to pick another model when the saved one is hidden', () => {
-    renderTab({
-      draft: { model: 'nous-broken-llm' },
-      modelHealth: health,
-      unavailableModelLabels: { 'nous-broken-llm': 'broken-llm-0101 (unavailable)' },
-    });
-    // The option label itself is renderModelSelect's job (mocked here; see
-    // agentEditorModel.test.tsx › orphan labels).
-    expect(screen.getByTestId('model-unavailable-hint').textContent).toContain(
-      'pick another model',
-    );
-  });
-
-  it('says nothing extra for a failing model that is not hidden', () => {
-    renderTab({ draft: { model: 'nous-broken-llm' }, modelHealth: health });
-    expect(screen.getByTestId('model-health-warning')).toBeTruthy();
-    expect(screen.queryByTestId('model-unavailable-hint')).toBeNull();
   });
 });
 

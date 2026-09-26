@@ -9,8 +9,8 @@ was a ``ReadTimeout`` (a local engine loading, usually nothing to do) while
 fix it) — and the UI said the same thing about both.
 
 The raw reason cannot simply be forwarded: it routinely embeds the upstream
-host, the private ``base_url`` and the upstream model id, and the public
-``GET /api/v1/ai/nous-models`` is served to every user. A closed enum is
+host, the private ``base_url`` and the upstream model id, and the platform
+model list (``GET /api/v1/ai/settings``) is served to every user. A closed enum is
 the one shape that carries the actionable part and cannot carry a secret,
 because it is not built from the message at all — it is derived from the
 exception TYPE and the HTTP status the probe already holds.

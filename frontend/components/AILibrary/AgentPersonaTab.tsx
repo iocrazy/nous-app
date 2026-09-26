@@ -18,14 +18,12 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowDown, ArrowUp, AlertTriangle } from 'lucide-react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import type { AILibraryAgent, AILibrarySkill } from '../../types';
 import { MarkdownEditor } from './MarkdownEditor';
 import { AgentIconPicker } from './AgentIconPicker';
 import { renderModelSelect, type ProviderModelGroup } from './agentEditorModel';
 import { overrideFieldCount, personaHintKind } from './agentOverride';
-import { healthReasonKey, type ModelHealth } from '../../utils/modelHealth';
-import { formatRelativeTime } from '../../utils/relativeTime';
 
 type PersonaDoc = 'identity_md' | 'soul_md' | 'agent_md';
 
@@ -48,25 +46,12 @@ interface AgentPersonaTabProps {
   catalogLocked: boolean;
   modelGroups: ProviderModelGroup[];
   /**
-   * Last self-check per platform model, keyed by model name. Models absent
-   * from the map have never been probed — the picker stays silent about them.
-   */
-  modelHealth?: Record<string, ModelHealth>;
-  /** Localized warning suffixes for failing models, passed to the picker. */
-  unhealthyModelLabels?: Record<string, string>;
-  /**
    * Localized neutral suffixes for BYOK models whose id looks like an
    * embedding / image / speech model. Separate from the warning map on
    * purpose — these are still perfectly valid things to have enabled, so the
    * picker states the fact and leaves the option selectable.
    */
   nonChatModelLabels?: Record<string, string>;
-  /**
-   * Localized labels for platform models hidden from the picker because their
-   * last probe failed, keyed by model name. Only consulted when the agent's
-   * saved model is one of them.
-   */
-  unavailableModelLabels?: Record<string, string>;
   /**
    * Localized reason per platform model that is `idle` on nous-engine
    * (authorized, not loaded). Those options are shown but disabled; when the
@@ -95,10 +80,7 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
   readOnly,
   catalogLocked,
   modelGroups,
-  modelHealth,
-  unhealthyModelLabels,
   nonChatModelLabels,
-  unavailableModelLabels,
   notLoadedModelLabels,
   localModelNames,
   localSkillIds,
@@ -112,23 +94,6 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
   const navigate = useNavigate();
   const [doc, setDoc] = useState<PersonaDoc>('identity_md');
 
-  // Health of the model this agent will actually run on. The probe is hourly,
-  // so the check time travels with the verdict in both directions — a green
-  // light nobody dates is indistinguishable from a stale one.
-  const selectedHealth = modelHealth?.[draft.model ?? ''];
-  const selectedCheckedLabel = selectedHealth?.testedAt
-    ? t('aiLibrary.agents.modelHealthCheckedAgo', 'checked {{ago}}', {
-        ago: formatRelativeTime(selectedHealth.testedAt, t),
-      })
-    : '';
-  // Why it failed, from the backend's closed enum (mig 427) — "timed out" and
-  // "rate limited" want opposite things from the reader, and this line used to
-  // say the same sentence for both. Null (pre-427 row, or a code newer than
-  // this build) keeps the original wording rather than showing a raw key.
-  const selectedReasonKey = healthReasonKey(selectedHealth?.code);
-  // The saved model was hidden from the list (failed probe). Said out loud
-  // rather than silently swapped: the user decides what to pick instead.
-  const selectedUnavailable = Boolean(unavailableModelLabels?.[draft.model ?? '']);
   // The saved model is idle on nous-engine: kept as the value, but a chat on
   // it would get 503 "not loaded" until the engine loads it.
   const selectedNotLoaded = notLoadedModelLabels?.[draft.model ?? ''];
@@ -282,9 +247,7 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
               'provider not enabled',
             ),
             noModelsLabel: t('aiLibrary.agents.noModelsAvailable'),
-            unhealthyLabels: unhealthyModelLabels,
             noteLabels: nonChatModelLabels,
-            orphanLabels: unavailableModelLabels,
             notLoadedLabels: notLoadedModelLabels,
           })}
           {selectedNotLoaded && (
@@ -302,42 +265,6 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
           {localModelNames.includes(draft.model ?? '') && localSkillIds.length > 0 && (
             <p className="mt-1 text-xs text-warn" data-testid="local-model-plain-text-hint">
               {t('aiLibrary.localModelPlainTextHint')}
-            </p>
-          )}
-          {selectedHealth?.status === 'fail' && (
-            <div
-              data-testid="model-health-warning"
-              className="mt-1.5 flex items-start gap-1.5 rounded-md border border-warn-line bg-warn-soft px-2 py-1.5 text-xs text-warn"
-            >
-              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <span>
-                {selectedReasonKey
-                  ? t(
-                      'aiLibrary.agents.modelHealthFailedReason',
-                      'Last health check failed ({{reason}}) — chats using this model may fail.',
-                      { reason: t(selectedReasonKey) },
-                    )
-                  : t(
-                      'aiLibrary.agents.modelHealthFailed',
-                      'Last health check failed — chats using this model may fail.',
-                    )}
-                {selectedCheckedLabel && ` (${selectedCheckedLabel})`}
-                {selectedUnavailable && (
-                  <span data-testid="model-unavailable-hint">
-                    {' '}
-                    {t(
-                      'aiLibrary.agents.modelUnavailableHint',
-                      'The selected model is unavailable and no longer listed — pick another model.',
-                    )}
-                  </span>
-                )}
-              </span>
-            </div>
-          )}
-          {selectedHealth?.status === 'ok' && selectedCheckedLabel && (
-            <p data-testid="model-health-ok" className="mt-1.5 text-xs text-ink-500">
-              {t('aiLibrary.agents.modelHealthPassed', 'Health check passed')} ·{' '}
-              {selectedCheckedLabel}
             </p>
           )}
           {modelGroups.every((g) => g.models.length === 0) && (

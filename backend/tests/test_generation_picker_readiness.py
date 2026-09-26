@@ -2,21 +2,22 @@
 
 User report: the picker listed everything — a server codex row AND its local
 twin (labelled "· local"), a Seedream row whose upstream model is Shutdown,
-Dreamina server AND local. Rules, in one place (`visible_generation_rows`, so
-picker / capabilities / asset bundle stay row-for-row equal):
+Dreamina server AND local. The daemon rule lives in ONE pure function,
+``local_readiness.local_verdict``; ``GET /ai/platform-status`` publishes its
+answer per row (``local_ready`` / ``superseded``) and every generation picker
+applies it client side (spec 2026-09-25 §3.7, ``useGenerationModels``):
 
-* a LOCAL row (codex-local / jimeng-local) is shown only while the user's
+* a LOCAL row (codex-local / jimeng-local) is offered only while the user's
   daemon is online and its env_report says that engine is ready;
-* when a local twin is shown, the SERVER row of the same engine is hidden
+* when a local twin is offered, the SERVER row of the same engine is hidden
   (same account either way). Since 2026-09-23 only Dreamina has a server
-  twin — the server codex row was retired (mig 498), GPT image is local-only;
-* a row whose last probe failed is hidden.
+  twin — the server codex row was retired (mig 498), GPT image is local-only.
+
+Failed rows never reach a picker at all: the platform view drops them.
 """
 
 from __future__ import annotations
 
-import sys
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -25,111 +26,52 @@ from app.services.generation import local_readiness as lr
 from app.services.generation.local_readiness import (
     LocalReadiness,
     local_engine_readiness,
+    local_verdict,
 )
 
-# ``from app.api import canvases_router`` hands back the APIRouter OBJECT
-# (``app/api/__init__.py`` re-exports it), not the module.
-canvases_router = sys.modules.get("app.api.canvases_router") or __import__(
-    "app.api.canvases_router", fromlist=["x"]
-)
-
-ROWS = [
-    {
-        "name": "codex-local-image",
-        "display_name": "GPT Image 2 (Local)",
-        "type": "image",
-        "actual_provider": "codex-local",
-        "is_local": True,
-    },
-    {
-        "name": "jimeng-cli-image",
-        "display_name": "Dreamina (即梦) Image",
-        "type": "image",
-        "actual_provider": "jimeng-cli",
-        "is_local": False,
-    },
-    {
-        "name": "jimeng-local-image",
-        "display_name": "Dreamina (Local)",
-        "type": "image",
-        "actual_provider": "jimeng-local",
-        "is_local": True,
-    },
-    {
-        "name": "mediahub-doubao-seedream-t2i",
-        "display_name": "Doubao Seedream (T2I)",
-        "type": "image",
-        "actual_provider": "doubao",
-        "is_local": False,
-    },
-]
+PROVIDERS = {
+    "codex-local-image": "codex-local",
+    "jimeng-cli-image": "jimeng-cli",
+    "jimeng-local-image": "jimeng-local",
+    "mediahub-doubao-seedream-t2i": "doubao",
+}
 
 
-def _install(monkeypatch, rows, readiness: LocalReadiness):
-    from app.repositories import nous_model_repository as repo_mod
-
-    repo = SimpleNamespace(list_enabled=AsyncMock(return_value=[dict(r) for r in rows]))
-    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
-    from app.services.ai import platform_model_visibility as pmv
-
-    monkeypatch.setattr(
-        pmv, "filter_platform_models_for_user", AsyncMock(side_effect=lambda _u, r: r)
-    )
-    monkeypatch.setattr(lr, "local_engine_readiness", AsyncMock(return_value=readiness))
-    return repo
+def _offered(readiness: LocalReadiness) -> set[str]:
+    return {
+        name
+        for name, provider in PROVIDERS.items()
+        if local_verdict(provider, readiness).offered
+    }
 
 
-async def _names(user="u1"):
-    return [r["name"] for r in await canvases_router._visible_generation_rows(user)]
-
-
-@pytest.mark.asyncio
-async def test_no_daemon_online_hides_local_rows_and_keeps_server_rows(monkeypatch):
-    _install(monkeypatch, ROWS, LocalReadiness(codex=False, dreamina=False))
-    names = await _names()
+def test_no_daemon_online_hides_local_rows_and_keeps_server_rows():
+    names = _offered(LocalReadiness(codex=False, dreamina=False))
     assert "codex-local-image" not in names and "jimeng-local-image" not in names
     assert "jimeng-cli-image" in names
 
 
-@pytest.mark.asyncio
-async def test_ready_local_codex_is_shown_and_has_no_server_twin(monkeypatch):
+def test_ready_local_codex_is_shown_and_has_no_server_twin():
     # The server-side codex twin was retired 2026-09-23 (mig 498): GPT image
     # is local-only, so there is nothing left for the local row to replace.
     assert "codex" not in lr.SERVER_TWIN_OF
-    _install(monkeypatch, ROWS, LocalReadiness(codex=True, dreamina=False))
-    names = await _names()
+    names = _offered(LocalReadiness(codex=True, dreamina=False))
     assert "codex-local-image" in names
     # dreamina not ready locally → its server row stays, local hidden
     assert "jimeng-cli-image" in names and "jimeng-local-image" not in names
 
 
-@pytest.mark.asyncio
-async def test_both_ready_hides_both_server_twins(monkeypatch):
-    _install(monkeypatch, ROWS, LocalReadiness(codex=True, dreamina=True))
-    names = await _names()
-    assert names.count("codex-local-image") == 1
-    assert names.count("jimeng-local-image") == 1 and "jimeng-cli-image" not in names
+def test_both_ready_hides_the_server_twin():
+    names = _offered(LocalReadiness(codex=True, dreamina=True))
+    assert {"codex-local-image", "jimeng-local-image"} <= names
+    assert "jimeng-cli-image" not in names
+    verdict = local_verdict("jimeng-cli", LocalReadiness(codex=True, dreamina=True))
+    assert verdict.superseded is True and verdict.local_ready is None
 
 
-@pytest.mark.asyncio
-async def test_a_row_whose_last_probe_failed_is_hidden(monkeypatch):
-    rows = [dict(r) for r in ROWS]
-    rows[3]["last_test_status"] = "failed"
-    _install(monkeypatch, rows, LocalReadiness(codex=False, dreamina=False))
-    assert "mediahub-doubao-seedream-t2i" not in await _names()
-
-
-@pytest.mark.asyncio
-async def test_actual_provider_is_still_stripped_unless_asked_for(monkeypatch):
-    """The filter needs actual_provider; callers that did not ask must not
-    start receiving it (the picker response is public fields only)."""
-    _install(monkeypatch, ROWS, LocalReadiness(codex=False, dreamina=False))
-    rows = await canvases_router._visible_generation_rows("u1")
-    assert all("actual_provider" not in r for r in rows)
-    rows2 = await canvases_router._visible_generation_rows(
-        "u1", include_actual_provider=True
-    )
-    assert all("actual_provider" in r for r in rows2)
+def test_server_rows_have_no_local_verdict():
+    verdict = local_verdict("doubao", LocalReadiness(codex=False, dreamina=False))
+    assert verdict.local_ready is None and verdict.superseded is False
 
 
 # ── readiness derivation from presence + env_report ────────────────────────

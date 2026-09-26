@@ -356,7 +356,7 @@ export type BackfillResult = Schemas['AiBackfillEmbeddingsResponse'];
 export type CapabilityHealth = Schemas['AiCapabilityHealthRow'];
 /** `GET /ai/governance`: one bool per governed module + the Nous switches. */
 export type AIGovernanceFlags = Schemas['AiGovernanceResponse'];
-/** `GET /ai/nous-models` row. `id` is a BIGINT sent as a JSON number. No
+/** `GET /search/vectors/catalog` row. `id` is a BIGINT sent as a JSON number. No
  * key, host or upstream provider — `is_local` is the one derived bit. */
 export type NousModelPublic = Schemas['AiNousModelPublic'];
 /** `platform_models[<name>]` in `GET/PUT /ai/settings` (spec 2026-09-25

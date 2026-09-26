@@ -27,8 +27,7 @@
 // picker uses, so the Providers card, the task pickers, the agent editor and
 // the canvas all show the same rows.
 //
-// Pure and i18n-free on purpose, like utils/modelHealth: any component can
-// import it cheaply.
+// Pure and i18n-free on purpose: any component can import it cheaply.
 
 import type { AISettings } from '../types';
 import type { PlatformModelEntry, PlatformModelStatus, PlatformModelType } from '../types/api';

@@ -239,6 +239,21 @@ async def _load(key: str, base_url: str, api_key: str) -> EngineSnapshot:
     return EngineSnapshot(services=None, fetched_at=None, reachable=False, error=error)
 
 
+def invalidate_engine_snapshot(base_url: Optional[str], api_key: Optional[str]) -> None:
+    """Drop the cached snapshot for this credential so the next
+    :func:`engine_snapshot` reads the engine now.
+
+    For the admin "Sync from nous-engine" button, pressed right after a grant
+    changed on the engine: waiting out ``ENGINE_TTL_S`` there would create
+    nothing. The keep-last-good copy is left alone — if the fresh read fails,
+    the caller sees a stale snapshot and decides for itself. The platform view
+    never calls this.
+    """
+    base = normalize_base_url(base_url)
+    if base:
+        _cache.invalidate(_cache_key(base, (api_key or "").strip()))
+
+
 async def engine_snapshot(
     base_url: Optional[str], api_key: Optional[str]
 ) -> EngineSnapshot:
@@ -323,6 +338,7 @@ __all__ = [
     "engine_presence",
     "engine_snapshot",
     "ensure_engine_serves",
+    "invalidate_engine_snapshot",
     "normalize_base_url",
     "reset_engine_cache",
     "snapshots_for",

@@ -29,7 +29,6 @@ from app.schemas.ai import (
 from app.schemas.ai_settings_responses import (
     AiGovernanceResponse,
     AiHealthResponse,
-    AiNousModelsResponse,
     AiPlatformProviderEntry,
     AiPlatformStatusResponse,
     AiProviderHealthReportResponse,
@@ -508,30 +507,6 @@ async def get_ai_governance(auth: AuthDep):
         module: await is_nous_allowed(module) for module in sorted(ALL_MODULES)
     }
     return result
-
-
-@router.get("/nous-models", response_model=AiNousModelsResponse)
-async def list_nous_models(auth: AuthDep, type: str | None = None):
-    """List enabled Nous models (public, no API keys), optionally filtered by
-    model type (``llm`` / ``embedding`` / ``tts`` / ``asr``).
-
-    Returns models available for users to select. If none are configured,
-    returns an empty list. Requires auth (added with owner scoping, migration
-    431): the list is scoped to the caller so owner-private rows never leak.
-
-    Row for row the ``models`` of the platform provider view that
-    ``GET /ai/settings`` carries (spec 2026-09-25 §3.1 — same function);
-    ``last_test_status`` is the computed status. Kept until the frontend
-    reads the settings view (P3 deletes it).
-    """
-    from app.services.ai.platform_provider import platform_provider_view
-
-    view = await platform_provider_view(auth.user_id)
-    return {
-        "models": [
-            m.public_row() for m in view.models if type is None or m.type == type
-        ]
-    }
 
 
 @router.get("/platform-status", response_model=AiPlatformStatusResponse)

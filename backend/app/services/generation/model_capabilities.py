@@ -1,19 +1,18 @@
-"""Catalog model name → :class:`ProviderCapabilities`, in ONE place.
+"""Catalog model name → :class:`ProviderCapabilities`, and the one
+"generates from a prompt" predicate.
 
-``GET /canvases/generation-capabilities`` was the first consumer and owned this
-lookup privately (``canvases_router._visible_generation_rows`` + a protocol
-resolve). The asset library's bundle endpoint is the second, and it must answer
-the same question the same way: a bundle trimmed to a ceiling the picker never
-showed — or shown for a model the picker hides — is the "two predicates that
-must agree" shape ``_visible_generation_rows``' own docstring was written to
-prevent. So the predicate moved here and the router delegates; there is still
-exactly one implementation.
+``GET /canvases/generation-capabilities`` was the first consumer of this
+lookup; the asset library's bundle endpoint is the second. Since spec
+2026-09-25 §3.8 the capabilities endpoint keys its answer by the platform
+provider view (``platform_provider.generation_picker_models``) — the same rows
+the generation pickers map from — while the bundle still asks
+:func:`visible_generation_rows` here. Both share :func:`generates_from_prompt`,
+so an upscale-only row is excluded from both.
 
 What lives here and what deliberately does not:
 
-* **visibility** (enabled + owner-scoped catalog rows + the user's Settings
-  platform-model gate + image/video only) — here, because both consumers need
-  the SAME row set;
+* **visibility for the bundle** (enabled + owner-scoped catalog rows + the
+  user's Settings platform-model gate + image/video only);
 * **the projection onto the wire** — NOT here. ``generation-capabilities``
   hides ``honours_ratio`` and ``actual_provider`` on purpose; the bundle emits
   only ``max_refs``. Each consumer picks what it publishes.
@@ -40,8 +39,8 @@ def generates_from_prompt(
 ) -> bool:
     """Whether a catalog row can generate a picture or a clip from a prompt.
 
-    The ONE predicate behind both the generation pickers' row set
-    (:func:`visible_generation_rows`) and ``platform_models[name].generatable``
+    The ONE predicate behind both :func:`visible_generation_rows` and
+    ``platform_models[name].generatable``
     on the AI settings (``services/ai/platform_provider``), so the two cannot
     drift. False for every non-image/video row, and for upscale-only image
     services (nous-engine super-resolution: the protocol's ``text_to_image`` is
@@ -64,10 +63,9 @@ async def visible_generation_rows(
 ) -> List[Dict[str, Any]]:
     """The image/video catalog rows this user may see.
 
-    ``generation-models``, ``generation-capabilities`` and the asset bundle MUST
-    agree row for row — a picker entry with no caps entry means the UI shows a
-    knob it was told to hide, and a bundle for a model the picker hides means a
-    reference trim nobody can explain.
+    Catalog + owner scope + the user's Settings card, image/video rows that
+    generate from a prompt. The asset bundle reads it; the generation pickers
+    and ``generation-capabilities`` read the platform provider view instead.
     """
     from app.repositories import nous_model_repository as _repo_mod
     from app.services.ai.platform_model_visibility import (
