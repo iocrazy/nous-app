@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase } from './supabase'
+import { resolveSupabaseUrl } from './supabaseUrl'
 
 interface UserIdentity {
   id: string
@@ -46,7 +47,7 @@ function recoverSessionFromStorage(): { user: User; access_token: string } | nul
   return null
 }
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_URL = resolveSupabaseUrl(import.meta.env.VITE_SUPABASE_URL, window.location.origin)
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 /**

@@ -257,11 +257,13 @@ services:
       context: ../../admin
       dockerfile: Dockerfile
       args:
-        # 本机专用(2026-08-27 起不再走 admin.nous.ink):API 留空 → 同源 /api,
-        # 由镜像内 nginx 代理到 nous-backend;Supabase 走 kong 的回环口。
+        # 内网专用(2026-08-27 起不再走 admin.nous.ink):API 与 Supabase 都留空 →
+        # 同源 /api 与 /sb,由镜像内 nginx 分别代理到 nous-backend 与 nous-kong。
+        # 2026-09-26 前 Supabase 写死 http://127.0.0.1:9082,只有在 gpupc 本机开
+        # 浏览器才登得进 —— 从别的机器打开时,浏览器会去连它自己的回环口。
         # anon key 是公开的。
         VITE_API_URL: ""
-        VITE_SUPABASE_URL: http://127.0.0.1:9082
+        VITE_SUPABASE_URL: ""
         # 默认值写死是刻意的,它消掉一整类静默故障:${NOUS_ANON_KEY} 未设时
         # compose 只警告不失败,会 build 出一个 anon key 为空、却照常返回 200
         # 的 admin —— 探针全绿而管理台登不进去。这个 key 是 **publishable**
@@ -271,9 +273,13 @@ services:
     image: nous-admin:local
     container_name: nous-admin
     restart: unless-stopped
-    # 只绑回环:admin 不对外,浏览器开 http://127.0.0.1:8090
+    # 回环 + VPN 内网两条绑定:本机 http://127.0.0.1:8090(部署 smoke 也探它),
+    # 局域网/Tailscale 上开 http://heygo-ubuntu:8090(MagicDNS → NOUS_BIND_IP)。
+    # 与 gateway/kong 同模式:地址来自 secrets/stack.env,刻意不给默认值,缺了
+    # 就拒绝起栈,不让端口静默绑到 0.0.0.0。
     ports:
       - "127.0.0.1:8090:8080"
+      - "${NOUS_BIND_IP:?NOUS_BIND_IP unset - see secrets/stack.env}:8090:8080"
 
 networks:
   default:

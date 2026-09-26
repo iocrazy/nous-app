@@ -177,7 +177,25 @@ jobs:
             echo "::error::nous-admin 产物里找不到 anon key —— 构建参数没进去。管理台会登不进去,而它照样返回 200"
             exit 1
           fi
-          echo "nous-admin: ready (anon key 已烤入产物)"
+          # ③ 同源 Supabase 代理真的通到 kong(2026-09-26 起 admin 从别的机器打开
+          #    全靠它):/sb/auth/v1/health 不带 apikey 时 kong 回 401,带则 200 ——
+          #    两者都证明代理到达了 kong;000/502/504 才是断的。
+          # ④ VPN 内网那条绑定也发布了(http://heygo-ubuntu:8090 走的就是它)。
+          sb_code=$(curl -sS -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/sb/auth/v1/health || echo 000)
+          case "$sb_code" in
+            200|401) echo "nous-admin: /sb proxy reaches kong (HTTP $sb_code)" ;;
+            *) echo "::error::nous-admin /sb proxy does not reach kong (HTTP $sb_code)"; docker logs --tail 40 nous-admin; exit 1 ;;
+          esac
+          bind_ip=$(grep -E '^NOUS_BIND_IP=' /media/heygo/program/datahub/nous/secrets/stack.env | cut -d= -f2- | tr -d '"' | tr -d "'")
+          if [ -z "$bind_ip" ]; then
+            echo "::error::NOUS_BIND_IP not found in stack.env — cannot verify the LAN binding of nous-admin"
+            exit 1
+          fi
+          if ! curl -fsS -m 8 -o /dev/null "http://$bind_ip:8090/" 2>/dev/null; then
+            echo "::error::nous-admin is not reachable on $bind_ip:8090 (the LAN / Tailscale binding)"
+            exit 1
+          fi
+          echo "nous-admin: ready (anon key 已烤入产物; /sb 通 kong; $bind_ip:8090 已发布)"
 
           # gateway 的 nginx 在启动时解析一次 upstream IP;容器 destroy/recreate
           # 后 IP 可能漂移(单次部署常拿回同 IP,连换两轮就会错位 —— 2026-08-24
