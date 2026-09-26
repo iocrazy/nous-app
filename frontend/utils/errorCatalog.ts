@@ -37,6 +37,12 @@ export const AI_ERROR_CODES = [
   'OUTPUT_PARSE',
   'TASK_TIMEOUT',
   'INTERNAL',
+  // In-band provider errors typed by the backend provider contract
+  // (backend/app/services/ai/provider_contract.py) — before it these three
+  // reached the runner as a *successful* empty reply.
+  'PROVIDER_BAD_RESPONSE',
+  'PROVIDER_CONTENT_FILTER',
+  'PROVIDER_EMPTY_RESPONSE',
   // codex-local(本机 daemon)链路。小写是刻意的:后端 error_catalog 里这一族同时也是
   // HTTP/SSE 的字面 code(见 core/provider_errors._MAPPING),而那一面全 API 都是小写
   // ——一个字符串,一个含义。上面 8 个只走 task_tracking.metadata,所以保持大写。
@@ -92,6 +98,18 @@ const DEFAULTS: Record<AiErrorCode, { title: string; hint: string }> = {
   INTERNAL: {
     title: 'Something went wrong on our side',
     hint: 'Retry — if it persists, the details are in Task Center.',
+  },
+  PROVIDER_BAD_RESPONSE: {
+    title: 'The AI provider returned an unusable reply',
+    hint: 'Retry — if it keeps happening, the provider may be degraded. Switch this task to another model in Settings → AI.',
+  },
+  PROVIDER_CONTENT_FILTER: {
+    title: 'The AI provider withheld the reply',
+    hint: "The provider's content filter blocked this request. Rephrase it, or point this task at a different model in Settings → AI.",
+  },
+  PROVIDER_EMPTY_RESPONSE: {
+    title: 'The AI provider returned an empty reply',
+    hint: 'Retry usually works. If it keeps happening, switch this task to another model in Settings → AI.',
   },
   // codex-local: 修复动作全部落在**用户自己的电脑上**,所以 hint 指向那台机器上的
   // 一条具体命令或一个具体开关,而不是 "Settings → AI 换个模型"——对这条链路来说

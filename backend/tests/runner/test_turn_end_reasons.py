@@ -380,3 +380,61 @@ async def test_stream_turn_buffered_fallback_carries_the_hook_decision(
     assert ends[0]["reason"] == (
         "cancelled" if decision == "abort" else "awaiting_approval"
     ), ends
+
+
+# ── fh4 T5: finish markers through the buffered branch ────────────────────
+
+
+class _UnnormalisedAdapter:  # no ``stream``; skips normalize_envelope on purpose
+    def __init__(self, finish):
+        self._finish = finish
+
+    async def call(self, *a, **k):
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "partial"},
+                    "finish_reason": self._finish,
+                }
+            ],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+        }
+
+
+@pytest.mark.parametrize(
+    "finish, reason, code",
+    [
+        ("content_filter", "error", "PROVIDER_CONTENT_FILTER"),
+        ("error", "error", "PROVIDER_BAD_RESPONSE"),
+        ("length", "provider_length", None),
+        ("stop", "completed", None),
+    ],
+)
+async def test_buffered_fallback_files_finish_markers(finish, reason, code):
+    """Belt-and-braces for the provider contract: an adapter that skipped
+    ``normalize_envelope`` hands back a content-filtered / errored reply as a
+    normal result. The buffered branch (production's only path) must still
+    not file it ``completed`` — its terminal chunk carries the raw finish."""
+    from app.services.ai.runner.agent_runner import AgentRunner
+
+    class _Tool:
+        recorder = None
+
+        async def execute(self, args):
+            return {}
+
+    rec = _Rec()
+    runner = AgentRunner(adapter=_UnnormalisedAdapter(finish), skill_tool=_Tool())
+    chunks = [
+        ch
+        async for ch in runner.stream_turn(
+            _composed(),
+            [{"role": "user", "content": "q"}],
+            recorder=rec,
+            auto_recorder=False,
+        )
+    ]
+    assert chunks[-1].finish_reason == finish
+    ends = rec.turn_ends()
+    assert len(ends) == 1 and ends[0]["reason"] == reason, ends
+    assert ends[0].get("error_code") == code, ends[0]

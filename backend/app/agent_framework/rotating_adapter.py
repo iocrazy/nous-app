@@ -90,7 +90,11 @@ class RotatingAdapter:
             try:
                 return await adapter.call(composed, messages)
             except Exception as exc:
-                status = _extract_http_status(exc)
+                if not _is_key_fault(exc):
+                    # Not the key's fault — another key would get the same
+                    # answer. Surface it instead of burning the key pool.
+                    raise
+                status = _typed_status(exc) or _extract_http_status(exc)
                 if status in (429, 401, 403, 500, 502, 503, 504):
                     logger.info(
                         f"[RotatingAdapter] key cooldown: status={status} "
@@ -106,6 +110,37 @@ class RotatingAdapter:
         if last_exc is not None:
             raise last_exc
         raise AllKeysCooledDown("rotated through all keys without success")
+
+
+# Catalog codes that mean "this KEY is the problem" (fh4 T5). A typed error
+# from the provider contract with any other code — a content filter, a 200
+# error body, an empty reply — is about the request or the provider, and
+# rotating would only cool a healthy key down. (A content-filter message used
+# to rotate whenever its prose happened to contain "403" or "500": the
+# status fallback below parses digits out of the message.)
+_KEY_FAULT_CODES = frozenset(
+    {"PROVIDER_AUTH", "PROVIDER_RATE_LIMIT", "PROVIDER_QUOTA_CAP"}
+)
+
+
+def _is_key_fault(exc: BaseException) -> bool:
+    """Typed errors rotate only on auth/quota codes; untyped transport
+    errors keep the status heuristic below."""
+    code = getattr(exc, "error_code", None)
+    if isinstance(code, str) and code:
+        return code in _KEY_FAULT_CODES
+    return True
+
+
+def _typed_status(exc: BaseException) -> int | None:
+    """A typed key-fault may arrive in a 200 body with no numeric status —
+    give the rotator the status its cooldown table understands."""
+    code = getattr(exc, "error_code", None)
+    if code == "PROVIDER_AUTH":
+        return 401
+    if code in ("PROVIDER_RATE_LIMIT", "PROVIDER_QUOTA_CAP"):
+        return 429
+    return None
 
 
 def _extract_http_status(exc: BaseException) -> int | None:

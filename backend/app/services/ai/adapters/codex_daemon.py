@@ -16,6 +16,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from loguru import logger
 
 from app.schemas.ai_library import ComposedSystemPrompt
+from app.services.ai.provider_contract import normalize_envelope
 from app.services.codex.daemon_dispatch import DaemonOfflineError, dispatch_to_daemon
 
 # Version judgement moved to ``services/codex/daemon_version.py`` so the image
@@ -205,7 +206,7 @@ class CodexDaemonAdapter:
         usage = raw_usage if isinstance(raw_usage, dict) else {}
         prompt_tokens = int(usage.get("input_tokens") or 0)
         completion_tokens = int(usage.get("output_tokens") or 0)
-        return {
+        envelope = {
             "choices": [
                 {
                     "message": {
@@ -225,6 +226,9 @@ class CodexDaemonAdapter:
                 },
             },
         }
+        # Always a success here (empty text raised above) — routed through
+        # the contract anyway so every adapter ends the same way.
+        return normalize_envelope(envelope, model=self.model or None)
 
 
 __all__ = [

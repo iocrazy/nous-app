@@ -33,6 +33,7 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 from app.schemas.ai_library import ComposedSystemPrompt
+from app.services.ai.error_catalog import classify_ai_error, error_code_marker
 from app.services.ai.llm.llm_retry_middleware import (
     CancelCheck,
     LLMCallError,
@@ -59,11 +60,22 @@ class AllModelsFailed(Exception):
     ``attempts`` keeps the same information structured for in-process callers
     (classification, tests, future UI) — but never assume it survives a
     workflow boundary; only the message string does.
+
+    ``error_code`` is the catalog code of the LAST model that actually failed
+    (fh4 T5) — the one whose failure ended the run. It is also written into
+    the message as an ``[error_code:X]`` marker so it survives DBOS pickling.
     """
 
-    def __init__(self, message: str, *, attempts: Optional[list[dict]] = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        attempts: Optional[list[dict]] = None,
+        error_code: Optional[str] = None,
+    ):
         super().__init__(message)
         self.attempts: list[dict] = list(attempts or [])
+        self.error_code: Optional[str] = error_code
 
 
 # Adapter factory contract: given a model id, return a fresh adapter
@@ -203,6 +215,7 @@ class LLMFallbackChain:
                         "model": model,
                         "outcome": "adapter_init_failed",
                         "error": describe_llm_error(exc),
+                        "error_code": classify_ai_error(exc),
                     }
                 )
                 if idx > 0:
@@ -279,6 +292,7 @@ class LLMFallbackChain:
                         "model": model,
                         "outcome": "retries_exhausted",
                         "error": reason,
+                        "error_code": classify_ai_error(exc.__cause__ or exc),
                     }
                 )
                 last_exc = exc
@@ -286,7 +300,14 @@ class LLMFallbackChain:
                 # calls skip this model until cooldown expires. Use 429
                 # as the proxy status for "exhausted retries" — same
                 # cooldown duration as a single 429.
-                if self.health_registry is not None:
+                #
+                # fh4 T5 review H1: NOT for a content filter. That verdict is
+                # about THIS request, not the model's health — cooling the
+                # model would take it offline for every other turn in the
+                # worker for 60 s (a single-model chain: everything fails).
+                if self.health_registry is not None and not _request_scoped(
+                    attempts[-1].get("error_code")
+                ):
                     self.health_registry.report_status(model, 429)
                 if idx < len(models) - 1:
                     self._switch_log.append(
@@ -323,9 +344,11 @@ class LLMFallbackChain:
 
         # Every model exhausted. The message must stand alone — see the
         # AllModelsFailed docstring for why ``from last_exc`` is not enough.
-        raise AllModelsFailed(
-            self._exhausted_message(attempts), attempts=attempts
-        ) from last_exc
+        code = _last_error_code(attempts)
+        message = self._exhausted_message(attempts)
+        if code:
+            message = f"{message} {error_code_marker(code)}"
+        raise AllModelsFailed(message, attempts=attempts, error_code=code) from last_exc
 
     def _exhausted_message(self, attempts: list[dict]) -> str:
         """Human-readable summary of an exhausted chain.
@@ -354,6 +377,24 @@ class LLMFallbackChain:
 
     def _build_adapter(self, model: str) -> Any:
         return self.adapter_factory(model)
+
+
+# Codes whose failure belongs to the request, not the model: exhausting them
+# must not put the model in cooldown for everyone else.
+_REQUEST_SCOPED_CODES = frozenset({"PROVIDER_CONTENT_FILTER"})
+
+
+def _request_scoped(code: Optional[str]) -> bool:
+    return code in _REQUEST_SCOPED_CODES
+
+
+def _last_error_code(attempts: list[dict]) -> Optional[str]:
+    """Code of the last attempt that actually failed (a cooled-down or
+    deadline-skipped model was never tried, so it has none)."""
+    for a in reversed(attempts):
+        if a.get("error_code"):
+            return a["error_code"]
+    return None
 
 
 __all__ = [

@@ -54,6 +54,11 @@ PROVIDER_BAD_MODEL: Final = "PROVIDER_BAD_MODEL"
 OUTPUT_PARSE: Final = "OUTPUT_PARSE"
 TASK_TIMEOUT: Final = "TASK_TIMEOUT"
 INTERNAL: Final = "INTERNAL"
+# In-band provider errors, typed by ``provider_contract.normalize_envelope``
+# (fh4 T5). Before it, all three reached the runner as a *successful* reply.
+PROVIDER_BAD_RESPONSE: Final = "PROVIDER_BAD_RESPONSE"  # 200 error body / bad shape
+PROVIDER_CONTENT_FILTER: Final = "PROVIDER_CONTENT_FILTER"  # withheld by safety
+PROVIDER_EMPTY_RESPONSE: Final = "PROVIDER_EMPTY_RESPONSE"  # nothing, nothing billed
 
 # codex-local (per-user daemon) failures. Lowercase on purpose: unlike the
 # codes above — which travel through ``task_tracking.metadata`` and are keyed
@@ -77,6 +82,9 @@ ALL_ERROR_CODES: Final[tuple[str, ...]] = (
     OUTPUT_PARSE,
     TASK_TIMEOUT,
     INTERNAL,
+    PROVIDER_BAD_RESPONSE,
+    PROVIDER_CONTENT_FILTER,
+    PROVIDER_EMPTY_RESPONSE,
     LOCAL_DAEMON_OFFLINE,
     LOCAL_CLI_MISSING,
     LOCAL_TOOLS_UNSUPPORTED,
@@ -99,6 +107,28 @@ _QUOTA_CAP_PATTERN: Final["re.Pattern[str]"] = re.compile(
     r"setlimitexceeded|reached the set inference limit",
     re.IGNORECASE,
 )
+
+# ── Our own typed marker ──────────────────────────────────────────────
+# ``[error_code:X]`` is written by code that already classified a failure
+# (``ProviderResponseError``, ``AllModelsFailed``). DBOS pickles only an
+# exception's ``args``, so the marker is how the code survives a workflow
+# boundary as a bare string. Only codes in ``ALL_ERROR_CODES`` are honoured.
+_ERROR_CODE_MARKER: Final["re.Pattern[str]"] = re.compile(
+    r"\[error_code:([A-Za-z_]+)\]"
+)
+
+
+def error_code_marker(code: Optional[str]) -> str:
+    """The marker string for ``code`` (empty for ``None``)."""
+    return f"[error_code:{code}]" if code else ""
+
+
+def _marked_code(text: str) -> Optional[str]:
+    for m in _ERROR_CODE_MARKER.finditer(text):
+        if m.group(1) in ALL_ERROR_CODES:
+            return m.group(1)
+    return None
+
 
 # ── Structured signal: HTTP status ────────────────────────────────────
 # Read before the text rules — an SDK exception that exposes a status code
@@ -204,7 +234,10 @@ _RULES: Final[tuple[tuple[str, "re.Pattern[str]"], ...]] = _CODEX_LOCAL_RULES + 
             r"|nodename nor servname|getaddrinfo|\bdns\b"
             r"|connect[ _-]?timeout|timeout connecting|connecttimeout"
             r"|\b50[234]\b|bad gateway|service unavailable|gateway time-?out"
-            r"|ssl.{0,20}(error|handshake)",
+            r"|ssl.{0,20}(error|handshake)"
+            # httpx transport drops: the peer closed mid-response.
+            r"|remoteprotocolerror|\breaderror\b|server disconnected"
+            r"|peer closed connection|incomplete chunked read",
             re.IGNORECASE,
         ),
     ),
@@ -271,6 +304,24 @@ def _status_code(exc: BaseException) -> Optional[int]:
     return None
 
 
+_BODY_MAX: Final = 500
+
+
+def _body_of(exc: BaseException) -> str:
+    """`` | body: …`` off an httpx/requests-shaped exception, or ``""``.
+    Never raises (a streamed body that was never read raises on ``.text``)."""
+    response = getattr(exc, "response", None)
+    if response is None:
+        return ""
+    try:
+        body = getattr(response, "text", "")
+    except Exception:  # noqa: BLE001 — an unreadable body is not fatal here
+        return ""
+    if not isinstance(body, str) or not body.strip():
+        return ""
+    return f" | body: {body[:_BODY_MAX]}"
+
+
 def classify_ai_error(exc_or_message: Union[BaseException, str, None]) -> Optional[str]:
     """Map a raw failure to one of ``ALL_ERROR_CODES``, or ``None``.
 
@@ -287,10 +338,22 @@ def classify_ai_error(exc_or_message: Union[BaseException, str, None]) -> Option
 
     if isinstance(exc_or_message, BaseException):
         chain = _walk(exc_or_message)
+        # Our own typed code outranks everything below: whoever set it had
+        # the structured failure in hand and already applied these rules.
+        for member in chain:
+            typed = getattr(member, "error_code", None)
+            if isinstance(typed, str) and typed in ALL_ERROR_CODES:
+                return typed
         # The DBOS wrapper's own message ("… exceeded its maximum of N
         # retries") never classifies; joining the whole chain means the
         # underlying provider text still gets its shot at the rules.
-        text = "\n".join(f"{type(m).__name__}: {m}" for m in chain)
+        # The provider's response BODY rides along: ``str(HTTPStatusError)``
+        # stops at "Client error '429 …'", and only the body can tell an
+        # account cap (SetLimitExceeded) from a burst limit.
+        text = "\n".join(f"{type(m).__name__}: {m}{_body_of(m)}" for m in chain)
+        marked = _marked_code(text)
+        if marked:
+            return marked
         # Built BEFORE the status scan on purpose: a provider error code in
         # the body outranks the status class it was transported in. Without
         # this, a 429 short-circuits to PROVIDER_RATE_LIMIT and an account
@@ -313,6 +376,9 @@ def classify_ai_error(exc_or_message: Union[BaseException, str, None]) -> Option
                 return _STATUS_TO_CODE[status]
     else:
         text = str(exc_or_message)
+        marked = _marked_code(text)
+        if marked:
+            return marked
 
     if not text.strip():
         return None
@@ -321,6 +387,19 @@ def classify_ai_error(exc_or_message: Union[BaseException, str, None]) -> Option
         if pattern.search(text):
             return code
     return None
+
+
+def error_code_for(exc: BaseException) -> str:
+    """The one ``error_code`` a failed run / turn is filed under.
+
+    Catalog code when there is one, else the exception class name — never
+    empty. ``agent_runs.error_code`` and the ``turn_end`` event both read
+    this, so the two can never disagree about the same failure.
+    """
+    typed = getattr(exc, "error_code", None)
+    if isinstance(typed, str) and typed:
+        return typed
+    return classify_ai_error(exc) or type(exc).__name__
 
 
 async def record_ai_error_code(
@@ -368,10 +447,15 @@ __all__ = [
     "OUTPUT_PARSE",
     "PROVIDER_AUTH",
     "PROVIDER_BAD_MODEL",
+    "PROVIDER_BAD_RESPONSE",
+    "PROVIDER_CONTENT_FILTER",
+    "PROVIDER_EMPTY_RESPONSE",
     "PROVIDER_QUOTA_CAP",
     "PROVIDER_RATE_LIMIT",
     "PROVIDER_UNREACHABLE",
     "TASK_TIMEOUT",
     "classify_ai_error",
+    "error_code_for",
+    "error_code_marker",
     "record_ai_error_code",
 ]

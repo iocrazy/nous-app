@@ -73,6 +73,15 @@ class RunCancelled(Exception):
     """Cancel observed during retry backoff — caller should terminate run."""
 
 
+def _non_retryable(exc: BaseException) -> LLMCallError:
+    """The error to raise for a non-retryable failure. A typed contract error
+    already IS an ``LLMCallError`` carrying its code — re-raise it as is
+    rather than burying the code one ``__cause__`` down."""
+    if isinstance(exc, LLMCallError):
+        return exc
+    return LLMCallError(f"non-retryable: {exc}")
+
+
 CancelCheck = Callable[[], Awaitable[bool]]
 
 # Called once per retry, BEFORE the backoff sleep. Receives the event payload.
@@ -82,33 +91,64 @@ CancelCheck = Callable[[], Awaitable[bool]]
 RetryObserver = Callable[[dict], Awaitable[None]]
 
 
+# A typed error (``provider_contract.ProviderResponseError``) states its own
+# same-model policy; these are the classification words it maps to.
+_POLICY_TO_CLASSIFICATION = {
+    "retry": "retryable",
+    "retry_once": "retry_once",
+    "fallback_only": "fallback_only",
+    "fail": "non_retryable",
+}
+
+
+def classify_status(status: int) -> str:
+    """``'retryable'`` / ``'non_retryable'`` for an HTTP status."""
+    if status in _NON_RETRYABLE_STATUSES:
+        return "non_retryable"
+    if status in _RETRYABLE_STATUSES:
+        return "retryable"
+    # 5xx not in the explicit set — retry. 2xx/3xx shouldn't reach here.
+    if 500 <= status < 600:
+        return "retryable"
+    if 400 <= status < 500:
+        return "non_retryable"
+    return "unknown"
+
+
 def classify_error(exc: BaseException) -> str:
-    """Return ``'retryable'`` / ``'non_retryable'`` / ``'unknown'``.
+    """Return ``'retryable'`` / ``'retry_once'`` / ``'fallback_only'`` /
+    ``'non_retryable'`` / ``'unknown'``.
 
-    Heuristics:
-      - Reads ``status_code`` attribute if present (httpx, openai, etc.).
-      - Reads ``response.status_code`` if nested.
-      - Falls back to exception type name (``TimeoutError`` → retryable).
-      - Unknown exceptions are RETRYABLE by default (fail-open philosophy
-        is wrong for cost reasons; default to retry but log loudly).
+    Heuristics, in order:
+      - A typed error's own ``retry_policy`` (the provider contract), then a
+        plain boolean ``retryable`` attribute — the raiser knew best.
+      - ``status_code`` attribute if present (httpx, openai, etc.), or
+        ``response.status_code`` if nested.
+      - Exception type name (``TimeoutError`` / httpx transport drops →
+        retryable).
+      - Anything else is ``'unknown'`` (retried once, see ``call``).
 
-    No model dispatch logic here — middleware is provider-agnostic. The
-    adapter wraps provider exceptions in ones that expose ``status_code``.
+    No model dispatch logic here — middleware is provider-agnostic.
     """
+    policy = getattr(exc, "retry_policy", None)
+    if policy in _POLICY_TO_CLASSIFICATION:
+        return _POLICY_TO_CLASSIFICATION[policy]
+    retryable = getattr(exc, "retryable", None)
+    if isinstance(retryable, bool):
+        return "retryable" if retryable else "non_retryable"
+
     status = _extract_status_code(exc)
     if status is not None:
-        if status in _NON_RETRYABLE_STATUSES:
-            return "non_retryable"
-        if status in _RETRYABLE_STATUSES:
-            return "retryable"
-        # 5xx not in the explicit set — retry. 2xx/3xx shouldn't reach here.
-        if 500 <= status < 600:
-            return "retryable"
-        if 400 <= status < 500:
-            return "non_retryable"
+        klass = classify_status(status)
+        if klass != "unknown":
+            return klass
 
     name = type(exc).__name__
     if "Timeout" in name or "Connection" in name or "Network" in name:
+        return "retryable"
+    # httpx: the peer closed mid-response. A transient transport drop, not a
+    # hard error — it used to fall to "unknown" and lose the fallback.
+    if name in ("RemoteProtocolError", "ReadError", "WriteError"):
         return "retryable"
 
     return "unknown"
@@ -385,7 +425,21 @@ class LLMRetryMiddleware:
                 )
                 last_exc = exc
                 if classification == "non_retryable":
-                    raise LLMCallError(f"non-retryable: {exc}") from exc
+                    typed = _non_retryable(exc)
+                    if typed is exc:
+                        raise
+                    raise typed from exc
+                if classification == "fallback_only":
+                    # Same model would answer the same way (content filter);
+                    # hand straight to the next model, no backoff.
+                    raise LLMRetryExhausted(
+                        f"not retried on this model: {describe_llm_error(exc)}"
+                    ) from exc
+                if classification == "retry_once" and attempt >= 1:
+                    raise LLMRetryExhausted(
+                        f"retried once, giving up on this model: "
+                        f"{describe_llm_error(exc)}"
+                    ) from exc
                 if classification == "unknown":
                     unknown_failures += 1
                     # First unknown → retry once; second → give up (don't
@@ -491,6 +545,7 @@ __all__ = [
     "LLMRetryMiddleware",
     "RunCancelled",
     "classify_error",
+    "classify_status",
     "compute_backoff",
     "describe_llm_error",
 ]

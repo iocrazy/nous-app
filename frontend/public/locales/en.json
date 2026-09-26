@@ -5679,6 +5679,18 @@
       "title": "Something went wrong on our side",
       "hint": "Retry — if it persists, the details are in Task Center."
     },
+    "PROVIDER_BAD_RESPONSE": {
+      "title": "The AI provider returned an unusable reply",
+      "hint": "Retry — if it keeps happening, the provider may be degraded. Switch this task to another model in Settings → AI."
+    },
+    "PROVIDER_CONTENT_FILTER": {
+      "title": "The AI provider withheld the reply",
+      "hint": "The provider's content filter blocked this request. Rephrase it, or point this task at a different model in Settings → AI."
+    },
+    "PROVIDER_EMPTY_RESPONSE": {
+      "title": "The AI provider returned an empty reply",
+      "hint": "Retry usually works. If it keeps happening, switch this task to another model in Settings → AI."
+    },
     "UNKNOWN": {
       "title": "The task failed"
     },
