@@ -910,15 +910,27 @@ class AgentWorkforceRepository:
         """The newest ``agent_runs`` row linked to this task via
         ``agent_runs.task_id`` (mig 282, partial index), or None.
 
-        Returns ``{"id": str, "status": str}`` — id as a numeric string (Snowflake BIGINT; JS-safe and what every run-id
-        consumer downstream expects). Raises on a DB error: "no run" is a
-        decision input (it permits a requeue), so a failed read must not be
-        mistaken for one."""
+        Returns ``{"id": str, "status": str, "error_code", "error_message",
+        "output_summary", "cost_cents", "total_tokens"}`` — id as a numeric
+        string (Snowflake BIGINT; JS-safe and what every run-id consumer
+        downstream expects). The outcome columns (fh4 E2) let the reaper tell a
+        deliberate ``worker_shutdown`` from a loss, and let a replayed worker
+        step deliver a child that already finished instead of running it again.
+        Raises on a DB error: "no run" is a decision input (it permits a
+        requeue or a re-run), so a failed read must not be mistaken for one."""
         async with read_scope() as session:
             row = (
                 (
                     await session.execute(
-                        select(AgentRuns.id, AgentRuns.status)
+                        select(
+                            AgentRuns.id,
+                            AgentRuns.status,
+                            AgentRuns.error_code,
+                            AgentRuns.error_message,
+                            AgentRuns.output_summary,
+                            AgentRuns.cost_cents,
+                            AgentRuns.total_tokens,
+                        )
                         .where(AgentRuns.task_id == str(task_id))
                         .order_by(AgentRuns.started_at.desc())
                         .limit(1)
@@ -929,7 +941,17 @@ class AgentWorkforceRepository:
             )
         if row is None:
             return None
-        return {"id": str(row["id"]), "status": str(row["status"])}
+        return {
+            "id": str(row["id"]),
+            "status": str(row["status"]),
+            "error_code": row["error_code"],
+            "error_message": row["error_message"],
+            "output_summary": row["output_summary"],
+            "cost_cents": (
+                float(row["cost_cents"]) if row["cost_cents"] is not None else None
+            ),
+            "total_tokens": row["total_tokens"],
+        }
 
     async def subagent_done_status(
         self, *, parent_run_id: str, task_id: str

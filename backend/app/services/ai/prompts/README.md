@@ -145,15 +145,17 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 </inbox_message>
 ```
 
-`kind="subagent_result"`（2026-09-10，harness 二期 2b-2）多带两个属性，正文只有子 agent 的 summary：
+`kind="subagent_result"`（2026-09-10，harness 二期 2b-2；2026-09-26 fh4 E2 加 `status` / `reason`）多带四个属性，正文只有子 agent 的 summary：
 
 ```
-<inbox_message kind="subagent_result" at="…" child_run_id="52" subagent_type="librarian">
+<inbox_message kind="subagent_result" at="…" child_run_id="52" subagent_type="librarian" status="success" reason="producer">
 found three docs
 </inbox_message>
 ```
 
-`child_run_id` 是给父 agent 下一轮 `Skill(skill="task", child_run_id=…)` 续聊用的。信封里其余字段（`status` / `cost_cents` / `tokens_used` / `description`）**刻意不进框** —— 模型无法据它们行动，进框只是白烧 token。
+`child_run_id` 是给父 agent 下一轮 `Skill(skill="task", child_run_id=…)` 续聊用的。`status` 是结果本身（`success` / `failed` / `cancelled`），`reason` 是谁结束了它（`app/services/workforce/settle.py::SettleReason`）：`producer` 子 agent 自己跑到头（含它自己崩溃）、`kill` 被外部取消、`teardown` 所在 worker 被有意停机、`lost` 所在 worker 死了。两者正交 —— `status="failed" reason="lost"` 说的是「没有答案」，`status="failed" reason="producer"` 说的是「答案是失败」，模型据此决定重派还是换思路。fh4 之前框里没有 `status`，失败的子 agent 只能从正文猜；worker 死掉的子 agent 根本不进收件箱。崩溃的子 agent 正文是错误文本（以前是空框）。fh4 之前入库的行没有 `settle_reason`，渲染为 `reason=""`。信封里其余字段（`cost_cents` / `tokens_used` / `description`）**刻意不进框** —— 模型无法据它们行动，进框只是白烧 token。
+
+同一个后台任务的结果只进收件箱一次（`dedupe_key=subagent-result-<task_id>`，mig 462 唯一索引）：worker 正常完成、DBOS 重放的 step、reaper 关闭丢失的子 agent，三个写方收敛到第一个写入的那一行，所以模型不会看到同一个孩子的两个框、也不会看到互相矛盾的两个 status。
 
 正文取值顺序是 `content.text` → `content.body`（2026-09-23 FH2 T1，与 `claimed_event_content` 同序）。在此之前定时唤醒的 steer 是 `{"text", "source"}`、没有 `body`，正文会落到整行 JSON，模型读到的是 `{"text": "…", "source": {"kind": "schedule", …}}`。
 
@@ -172,7 +174,7 @@ Attached to this message (listed for reference; the files are not loaded into th
 
 #### Token effect
 
-每条一个框，长度就是那条消息的正文长度，外加每个附件一行（几十 token，不含文件内容）。`subagent_result` 只放 summary，所以一次后台子 agent 的回执通常是几十到几百 token，而不是整个信封的 JSON。领取本身有条数上限（见 `agent_run_inbox_repository.claim`），所以单个步骤边界注入的量是有界的。
+每条一个框，长度就是那条消息的正文长度，外加每个附件一行（几十 token，不含文件内容）。`subagent_result` 只放 summary（加 fh4 的两个短属性，约 10 token），所以一次后台子 agent 的回执通常是几十到几百 token，而不是整个信封的 JSON。领取本身有条数上限（见 `agent_run_inbox_repository.claim`），所以单个步骤边界注入的量是有界的。
 
 #### KV Cache effect
 

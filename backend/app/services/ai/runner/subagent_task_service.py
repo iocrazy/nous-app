@@ -79,6 +79,7 @@ from app.services.workforce.delegate_tool import (
     MAX_DELEGATION_DEPTH,
     _check_rate_limit,
 )
+from app.services.workforce.settle import SettleReason, settle_reason_for_envelope
 
 # Envelope keys returned to the parent agent. Pinned in tests so
 # downstream consumers (parent agent prompt, frontend Runs UI) can
@@ -712,6 +713,10 @@ class SubAgentTaskService:
                         "mode": "sync",
                         "subagent_type": slug,
                         "status": envelope["status"],
+                        # fh4 E2: who ended it — the child, or a cancel.
+                        "settle_reason": str(
+                            settle_reason_for_envelope(envelope["status"])
+                        ),
                         # Same key, same bound as the background path's, so
                         # the card renders a summary line whichever mode ran.
                         "summary": clip_claimed_text(envelope["summary"]),
@@ -768,6 +773,8 @@ class SubAgentTaskService:
                     "mode": "sync",
                     "subagent_type": slug,
                     "status": "failed",
+                    # A crash inside the child is still the child's own end.
+                    "settle_reason": str(SettleReason.PRODUCER),
                     # There is no envelope to summarise, so the card says
                     # WHY instead of going blank — the parent's trajectory
                     # is the only place that reason is ever shown.

@@ -78,6 +78,12 @@ from app.services.ai.prompts.prompt_composer import ComposerInput, PromptCompose
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.runner.turn_end import result_was_cancelled
 from app.services.ai.scope.scope_binding import resolve_dispatch_scope, team_of_run
+from app.services.workforce.settle import SettleReason, settle_reason_for_envelope
+from app.services.workforce.subagent_delivery import (
+    deliver_subagent_result,
+    envelope_from_prior_run,
+    terminal_run_for_task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -415,6 +421,12 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             "run_id": str(run_id),
             "content": assistant_content,
             "depth": inherited_depth,
+            # fh4 E2 (ruling 3): Delegate says why it settled too. Its result
+            # never enters the parent run's inbox (it becomes a task for the
+            # sender agent), so this is the only place the reason travels.
+            "settle_reason": str(
+                SettleReason.KILL if turn_cancelled else SettleReason.PRODUCER
+            ),
         },
         task_id=task_id,
     )
@@ -518,14 +530,25 @@ async def _run_subagent_task(
             "idle_dispatch": None,
         }
 
-    # ── run the child ────────────────────────────────────────────────
+    # ── run the child (or deliver the run a replayed step already made) ──
     failures: list[str] = []
-    try:
-        envelope = await service.run_background_task(payload, task_id=str(task_id))
-    except Exception as err:  # noqa: BLE001 — the child must not sink the task
-        logger.exception(f"[agent-worker] subagent task {task_id} crashed: {err}")
-        envelope = {"status": "failed", "error": f"{err!s:.200}", "summary": ""}
-        failures.append("subagent_crashed")
+    prior = await terminal_run_for_task(workforce, task_id)
+    if prior is not None:
+        # fh4 E2c: DBOS replayed this step after the child had finished. The
+        # row IS the result; running the child again would bill twice.
+        logger.warning(
+            f"[agent-worker] subagent task {task_id}: run {prior['id']} already "
+            f"ended ({prior.get('status')}); delivering it instead of re-running"
+        )
+        envelope, settle = envelope_from_prior_run(prior)
+    else:
+        try:
+            envelope = await service.run_background_task(payload, task_id=str(task_id))
+        except Exception as err:  # noqa: BLE001 — the child must not sink the task
+            logger.exception(f"[agent-worker] subagent task {task_id} crashed: {err}")
+            envelope = {"status": "failed", "error": f"{err!s:.200}", "summary": ""}
+            failures.append("subagent_crashed")
+        settle = settle_reason_for_envelope(envelope.get("status"))
 
     # 子 run id **解析一次，两处都用**。两处指：下面 ``content["child_run_id"]``
     # 与花费回落读的那一行。分开解析过一次，代价是回落读回来的钱当场又被丢掉 ——
@@ -557,7 +580,12 @@ async def _run_subagent_task(
         "subagent_type": payload.get("subagent_type"),
         "description": payload.get("description"),
         "status": envelope.get("status"),
-        "summary": envelope.get("summary") or "",
+        # fh4 E2a: who ended it (``settle.SettleReason``), beside what it is.
+        "settle_reason": str(settle),
+        # A crashed child has NO summary. The model used to get an empty frame
+        # for it while the card fell through to the error text; both read the
+        # same text now (fh4 E2, recon 1d.5).
+        "summary": envelope.get("summary") or envelope.get("error") or "",
         "cost_cents": cost_cents,
         # 同海拔的 BYOK 分量（整棵子树），落到父行的 cost.by_child_byok。
         # ⚠️ 当前无消费方（终审 I3）：扣费按行聚合，不看 by_child*——子 run 的
@@ -568,36 +596,17 @@ async def _run_subagent_task(
     }
 
     # ── deliver: inbox row, audit outbox, wake ───────────────────────
-    # A malformed reply_to must not raise either: the child already ran, and
-    # an exception here would lose its result AND leave the row un-finalised.
-    reply_to = payload.get("reply_to") or {}
-    target_kind = str(reply_to.get("target_kind") or "")
-    try:
-        target_id = int(reply_to["target_id"]) if target_kind else None
-    except (KeyError, TypeError, ValueError):
-        target_kind, target_id = "", None
-
-    if target_kind and target_id is not None:
-        try:
-            await get_agent_run_inbox_repository().enqueue(
-                target_kind=target_kind,
-                target_id=target_id,
-                user_id=str(payload["user_id"]),
-                kind="subagent_result",
-                content=content,
-            )
-        except Exception as err:  # noqa: BLE001
-            logger.exception(
-                f"[agent-worker] subagent task {task_id}: the result could not "
-                f"be delivered to {target_kind} {target_id}: {err}"
-            )
-            failures.append("result_delivery_failed")
-    else:
-        logger.error(
-            f"[agent-worker] subagent task {task_id} has no usable reply "
-            f"target ({reply_to!r}); the result has nowhere to go"
-        )
-        failures.append("no_reply_target")
+    # One delivery, shared with the stale-task reaper and keyed by the task
+    # (fh4 E2c), so a replayed step or a reaper racing this worker converges on
+    # the first writer's row. It never raises: the child already ran.
+    delivery = await deliver_subagent_result(
+        inbox_repo=get_agent_run_inbox_repository(),
+        task_id=str(task_id),
+        payload=payload,
+        content=content,
+    )
+    if delivery.failure:
+        failures.append(delivery.failure)
 
     # spec §2.2 item 4: the audit trail beside the delivery. It is NOT the
     # delivery — losing it is logged, but calling the task failed over it
@@ -615,6 +624,7 @@ async def _run_subagent_task(
                 "content": content["summary"],
                 "kind": "subagent",
                 "status": content["status"],
+                "settle_reason": content["settle_reason"],
             },
             task_id=task_id,
         )
@@ -623,15 +633,11 @@ async def _run_subagent_task(
             f"[agent-worker] subagent task {task_id}: audit outbox write failed: {err}"
         )
 
-    # The wake ORDER, not the wake. Only an issue has turns to start, so a
-    # conversation target carries None — and the key is present either way:
-    # an absent key would leave the workflow body guessing whether this branch
-    # considered the question at all.
-    idle_dispatch: Optional[dict[str, Any]] = (
-        {"issue_id": int(target_id), "user_id": str(payload["user_id"])}
-        if target_kind == "issue" and target_id is not None
-        else None
-    )
+    # The wake ORDER, not the wake (``delivery.idle_dispatch``): only an issue
+    # has turns to start, so a conversation target carries None — and the key
+    # is present either way, so the workflow body never has to guess whether
+    # this branch considered the question at all.
+    idle_dispatch = delivery.idle_dispatch
 
     # ── always: the parent's transcript, then the task row ───────────
     if parent_run_id:
@@ -641,15 +647,17 @@ async def _run_subagent_task(
             child_run_id=content["child_run_id"],
             subagent_type=content["subagent_type"],
             status=content["status"],
+            settle_reason=settle,
             # The card's summary line. A background child's inbox claim lands
             # in a LATER run — the parent had already finished — so the fold's
             # same-run claim/card pairing never fires and this is the only
             # source the card has (MH-90/91/92).
             #
-            # A crashed child has NO summary — falling through to the error
-            # text is what keeps its card from going blank, which is defect
-            # J's own symptom. The synchronous crash branch does the same.
-            summary=content["summary"] or envelope.get("error") or "",
+            # A crashed child has NO summary; ``content["summary"]`` already
+            # falls through to the error text, which is what keeps its card
+            # from going blank (defect J's own symptom) — and since fh4 the
+            # model's frame reads the same words.
+            summary=content["summary"],
             cost_cents=content["cost_cents"],
             byok_cents=content["byok_cents"],
             tokens_used=content["tokens_used"],
@@ -690,6 +698,7 @@ async def emit_async_subagent_done(
     child_run_id: Optional[str],
     subagent_type: Optional[str],
     status: Optional[str],
+    settle_reason: SettleReason,
     summary: str,
     cost_cents: Any,
     byok_cents: Any,
@@ -726,6 +735,7 @@ async def emit_async_subagent_done(
                 "mode": "async",
                 "subagent_type": subagent_type,
                 "status": status,
+                "settle_reason": str(settle_reason),
                 # Bounded by the helper ``inbox_claimed`` uses, so the two
                 # projections of one result agree.
                 "summary": clip_claimed_text(summary or ""),
