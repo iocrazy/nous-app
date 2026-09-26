@@ -258,6 +258,32 @@
             "title": "Default Summary Model",
             "type": "string"
           },
+          "platform_engine": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AiPlatformEngineState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "nous-engine reachability behind the platform list; null when no listed row is served by nous-engine or the view is unknown."
+          },
+          "platform_models": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/AiPlatformModelEntry"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Platform catalog name → mapping for every name in ai_providers.nous.models (spec 2026-09-25 §3.1). null = the platform view could not be computed (unknown, not empty).",
+            "title": "Platform Models"
+          },
           "preferred_language": {
             "default": "auto",
             "title": "Preferred Language",
@@ -9256,6 +9282,171 @@
           "models"
         ],
         "title": "AiNousModelsResponse",
+        "type": "object"
+      },
+      "AiPlatformEngineState": {
+        "description": "nous-engine reachability behind the platform list.\n\n``reachable=False`` means the list could not be read (it is NOT \"no\nmodels\" — rows stay listed as ``not_probed``); ``stale=True`` means the\nlist is a carried-over snapshot at most 10 minutes old.",
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "reachable": {
+            "title": "Reachable",
+            "type": "boolean"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reachable",
+          "stale",
+          "checked_at"
+        ],
+        "title": "AiPlatformEngineState",
+        "type": "object"
+      },
+      "AiPlatformModelEntry": {
+        "description": "``platform_models[<name>]`` in ``GET/PUT /ai/settings``.\n\nThe mapping from a platform row name to what a picker shows. No\n``base_url`` / key / upstream provider (the 2026-08-14 leak tripwire);\n``status`` never carries ``fail`` — failed rows are not in the list.",
+        "properties": {
+          "actual_model": {
+            "title": "Actual Model",
+            "type": "string"
+          },
+          "context_window_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window Tokens"
+          },
+          "is_local": {
+            "title": "Is Local",
+            "type": "boolean"
+          },
+          "pricing_type": {
+            "enum": [
+              "per_hour",
+              "per_request",
+              "per_token"
+            ],
+            "title": "Pricing Type",
+            "type": "string"
+          },
+          "pricing_value": {
+            "title": "Pricing Value",
+            "type": "number"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "idle",
+              "not_probed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "llm",
+              "embedding",
+              "tts",
+              "asr",
+              "image",
+              "video"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actual_model",
+          "type",
+          "status",
+          "is_local",
+          "pricing_type",
+          "pricing_value",
+          "context_window_tokens"
+        ],
+        "title": "AiPlatformModelEntry",
+        "type": "object"
+      },
+      "AiPlatformModelRuntime": {
+        "description": "One row of ``GET /ai/platform-status``.\n\n``local_ready`` is ``None`` for rows that do not run on the user's own\nmachine; ``superseded`` marks a server twin hidden because its local twin\ncan run (the picker rule ``apply_readiness`` applies today).",
+        "properties": {
+          "local_ready": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Ready"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "idle",
+              "not_probed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "superseded": {
+            "title": "Superseded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "local_ready",
+          "superseded"
+        ],
+        "title": "AiPlatformModelRuntime",
+        "type": "object"
+      },
+      "AiPlatformStatusResponse": {
+        "description": "``GET /ai/platform-status``.",
+        "properties": {
+          "engine": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AiPlatformEngineState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "models": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AiPlatformModelRuntime"
+            },
+            "title": "Models",
+            "type": "object"
+          }
+        },
+        "required": [
+          "models",
+          "engine"
+        ],
+        "title": "AiPlatformStatusResponse",
         "type": "object"
       },
       "AiProviderHealthReportResponse": {
@@ -35631,6 +35822,33 @@
           "display_name": {
             "title": "Display Name",
             "type": "string"
+          },
+          "engine_ready": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Ready"
+          },
+          "engine_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "listed",
+                  "missing",
+                  "unreachable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Status"
           },
           "id": {
             "title": "Id",
@@ -82164,7 +82382,7 @@
     },
     "/api/v1/ai/nous-models": {
       "get": {
-        "description": "List enabled Nous models (public, no API keys), optionally filtered by\nmodel type (``llm`` / ``embedding`` / ``tts`` / ``asr``).\n\nReturns models available for users to select. If none are configured,\nreturns an empty list. Requires auth (added with owner scoping, migration\n431): the list is scoped to the caller so owner-private rows never leak.",
+        "description": "List enabled Nous models (public, no API keys), optionally filtered by\nmodel type (``llm`` / ``embedding`` / ``tts`` / ``asr``).\n\nReturns models available for users to select. If none are configured,\nreturns an empty list. Requires auth (added with owner scoping, migration\n431): the list is scoped to the caller so owner-private rows never leak.\n\nRow for row the ``models`` of the platform provider view that\n``GET /ai/settings`` carries (spec 2026-09-25 §3.1 — same function);\n``last_test_status`` is the computed status. Kept until the frontend\nreads the settings view (P3 deletes it).",
         "operationId": "list_nous_models_api_v1_ai_nous_models_get",
         "parameters": [
           {
@@ -82239,6 +82457,73 @@
           }
         },
         "summary": "List Nous Models",
+        "tags": [
+          "AI",
+          "AI"
+        ]
+      }
+    },
+    "/api/v1/ai/platform-status": {
+      "get": {
+        "description": "Runtime state of the platform models (spec 2026-09-25 §3.3).\n\nThe list itself comes with ``GET /ai/settings``; this light endpoint only\nanswers what changes fast — engine ``ok``/``idle``, engine reachability,\nand whether the user's own daemon can run each local row right now.",
+        "operationId": "get_platform_status_api_v1_ai_platform_status_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiPlatformStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Platform Status",
         "tags": [
           "AI",
           "AI"

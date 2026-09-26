@@ -29,7 +29,7 @@ from app.schemas.ai_settings_responses import (
     AiNousModelPublic,
 )
 from app.services.ai.governance.ai_governance import ALL_MODULES, AIModuleGovernance
-from tests.api.wire_parity import assert_wire_unchanged, sample_row
+from tests.api.wire_parity import assert_wire_unchanged, sample_orm
 
 ai_settings_router = sys.modules["app.api.ai_settings_router"]
 ai_memory_router = sys.modules["app.api.ai_memory_router"]
@@ -172,57 +172,310 @@ async def test_governance(client, monkeypatch) -> None:
     assert body["nous_modules"]["chat"] is False
 
 
-# ─── nous-models (real repository projection) ─────────────────────
+# ─── platform provider view (real repository + scripted engine) ───
 
-_PUBLIC = [
-    "id",
-    "name",
-    "display_name",
-    "actual_model",
-    "type",
-    "pricing_type",
-    "pricing_value",
-    "sort_order",
-    "last_test_status",
-    "last_tested_at",
-    "last_test_code",
-    "actual_provider",
-]
+ENGINE = "http://engine.test/v1"
 
 
-def _model_row(**over: Any) -> dict[str, Any]:
-    row = sample_row(NousModels, only=_PUBLIC)
-    row.update(type="llm", pricing_type="per_token", last_test_status="ok")
-    row.update(last_test_code=None, actual_provider="ark")
-    row.update(over)
-    return row
+def _orm_row(name: str, **over: Any) -> NousModels:
+    values = {
+        "name": name,
+        "display_name": name.title(),
+        "type": "llm",
+        "actual_provider": "ark",
+        "actual_model": f"{name}-upstream",
+        "api_key": "sk-platform",
+        "base_url": "https://ark.example/api/v3",
+        "pricing_type": "per_token",
+        "is_enabled": True,
+        "owner_user_id": None,
+        "last_test_status": "ok",
+        "last_test_code": None,
+    }
+    values.update(over)
+    return sample_orm(NousModels, **values)
 
 
-@pytest.mark.asyncio
-async def test_nous_models(client, monkeypatch) -> None:
+# nous-engine /v1/models?include_unready=1 — the real wire body.
+ENGINE_BODY = {
+    "object": "list",
+    "data": [
+        {
+            "id": "qwen3-8b",
+            "object": "model",
+            "type": "llm",
+            "ready": True,
+            "context_window": 32768,
+            "capabilities": {"vision": False},
+        },
+        {
+            "id": "wemm-2b",
+            "object": "model",
+            "type": "embedding",
+            "ready": False,
+            "context_window": None,
+            "capabilities": None,
+        },
+    ],
+}
+
+
+@pytest.fixture
+def platform(monkeypatch):
+    """Real ``list_enabled_private`` over ORM rows, governance on, and an
+    engine answering through ``httpx.MockTransport``."""
+    import httpx
+
     import app.repositories.nous_model_repository as repo_mod
+    import app.services.ai.engine_catalog as ec
+    import app.services.ai.governance.ai_governance as gov
 
-    rows = [
-        _model_row(),
-        _model_row(
-            actual_provider="codex-local",
-            last_test_status=None,
-            last_tested_at=None,
-            type="image",
-        ),
-    ]
+    state = SimpleNamespace(
+        rows=[
+            _orm_row("nous-doubao", sort_order=1),
+            _orm_row(
+                "nous-qwen3-8b",
+                actual_provider="nous",
+                actual_model="qwen3-8b",
+                base_url=ENGINE,
+                api_key="sk-engine",
+                context_window_tokens=32768,
+                sort_order=2,
+            ),
+            _orm_row(
+                "nous-wemm-2b",
+                type="embedding",
+                actual_provider="nous",
+                actual_model="wemm-2b",
+                base_url=ENGINE,
+                api_key="sk-engine",
+                sort_order=3,
+            ),
+            _orm_row(
+                "nous-revoked",
+                actual_provider="nous",
+                actual_model="revoked",
+                base_url=ENGINE,
+                api_key="sk-engine",
+                sort_order=4,
+            ),
+            _orm_row("nous-broken", last_test_status="fail", sort_order=5),
+            _orm_row(
+                "nous-codex-image",
+                type="image",
+                actual_provider="codex-local",
+                last_test_status=None,
+                sort_order=6,
+            ),
+        ],
+        engine=lambda request: httpx.Response(200, json=ENGINE_BODY),
+        engine_calls=0,
+    )
 
     class _Session:
         async def execute(self, _stmt):
             result = MagicMock()
-            result.mappings.return_value.all.return_value = [dict(r) for r in rows]
+            result.scalars.return_value.all.return_value = list(state.rows)
             return result
 
     @asynccontextmanager
     async def _scope():
         yield _Session()
 
+    def _handler(request):
+        state.engine_calls += 1
+        return state.engine(request)
+
+    real_client = httpx.AsyncClient
     monkeypatch.setattr(repo_mod, "read_scope", _scope)
+    monkeypatch.setattr(gov, "is_nous_globally_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        ec.httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(_handler), **kw),
+    )
+    ec.reset_engine_cache()
+    yield state
+    ec.reset_engine_cache()
+
+
+def _stored_settings(nous: dict | None = None, **ai: Any) -> dict:
+    providers: dict[str, Any] = {
+        "deepseek": {
+            "enabled": True,
+            "api_key": "sk-deepseek-1234",
+            "models": ["deepseek-chat"],
+            "enabled_models": ["deepseek-chat"],
+        }
+    }
+    if nous is not None:
+        providers["nous"] = nous
+    return {"settings_json": {"ai_settings": {"ai_providers": providers, **ai}}}
+
+
+@pytest.fixture
+def settings_repo(monkeypatch):
+    from cryptography.fernet import Fernet
+
+    # A PUT re-conceals the stored BYOK key; that needs a real key.
+    monkeypatch.setenv("NOUS_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    repo = MagicMock()
+    repo.get_by_user_id = AsyncMock(
+        return_value=_stored_settings(
+            {"enabled": True, "disabled_models": ["nous-doubao"]}
+        )
+    )
+    repo.patch_settings_json = AsyncMock()
+    monkeypatch.setattr(ai_settings_router, "UserSettingsRepository", lambda: repo)
+    monkeypatch.setattr(
+        "app.services.ai.platform_model_visibility.stored_nous_settings",
+        AsyncMock(return_value={"enabled": True, "disabled_models": ["nous-doubao"]}),
+    )
+    return repo
+
+
+@pytest.mark.asyncio
+async def test_settings_carry_the_platform_view(
+    client, platform, settings_repo
+) -> None:
+    raw = await ai_settings_router.get_ai_settings(_ctx())
+    response = await client.get("/api/v1/ai/settings")
+    assert_wire_unchanged(response, raw)
+    body = response.json()
+    assert body["ai_providers"]["nous"] == {
+        "enabled": True,
+        "managed": True,
+        # revoked (not listed by the engine) and broken (fail) are gone.
+        "models": ["nous-doubao", "nous-qwen3-8b", "nous-wemm-2b", "nous-codex-image"],
+        "enabled_models": ["nous-qwen3-8b", "nous-wemm-2b", "nous-codex-image"],
+        "disabled_models": ["nous-doubao"],
+    }
+    models = body["platform_models"]
+    assert set(models) == set(body["ai_providers"]["nous"]["models"])
+    assert models["nous-qwen3-8b"] == {
+        "actual_model": "qwen3-8b",
+        "type": "llm",
+        "status": "ok",
+        "is_local": False,
+        "pricing_type": "per_token",
+        "pricing_value": models["nous-qwen3-8b"]["pricing_value"],
+        "context_window_tokens": 32768,
+    }
+    assert models["nous-wemm-2b"]["status"] == "idle"
+    assert models["nous-codex-image"]["is_local"] is True
+    assert models["nous-codex-image"]["status"] == "not_probed"
+    engine = body["platform_engine"]
+    assert engine["reachable"] is True and engine["stale"] is False
+    assert isinstance(engine["checked_at"], str)
+    # BYOK entries are untouched apart from the usual key masking.
+    assert body["ai_providers"]["deepseek"]["api_key_hint"] == "1234"
+    assert "api_key" not in body["ai_providers"]["deepseek"]
+    # Nothing credential-shaped anywhere in the platform part.
+    text = response.text
+    for secret in ("sk-engine", "sk-platform", ENGINE, "ark.example"):
+        assert secret not in text
+
+
+@pytest.mark.asyncio
+async def test_unreachable_engine_keeps_the_list(
+    client, platform, settings_repo
+) -> None:
+    import httpx
+
+    def _down(request):
+        raise httpx.ConnectError("connection refused")
+
+    platform.engine = _down
+    body = (await client.get("/api/v1/ai/settings")).json()
+    assert body["platform_engine"] == {
+        "reachable": False,
+        "stale": False,
+        "checked_at": None,
+    }
+    models = body["platform_models"]
+    # Could not reach ≠ revoked: every engine row stays, unknown.
+    assert models["nous-revoked"]["status"] == "not_probed"
+    assert models["nous-qwen3-8b"]["status"] == "not_probed"
+    assert "nous-qwen3-8b" in body["ai_providers"]["nous"]["enabled_models"]
+
+
+@pytest.mark.asyncio
+async def test_view_failure_is_unknown_not_empty(
+    client, platform, settings_repo, monkeypatch
+) -> None:
+    import app.services.ai.platform_provider as pp
+
+    monkeypatch.setattr(
+        pp, "live_platform_rows", AsyncMock(side_effect=RuntimeError("db down"))
+    )
+    body = (await client.get("/api/v1/ai/settings")).json()
+    assert body["platform_models"] is None and body["platform_engine"] is None
+    assert body["ai_providers"]["nous"]["disabled_models"] == ["nous-doubao"]
+
+
+@pytest.mark.asyncio
+async def test_put_persists_only_the_user_owned_nous_fields(
+    client, platform, settings_repo
+) -> None:
+    payload = {
+        "ai_providers": {
+            "nous": {
+                "enabled": False,
+                "managed": True,
+                "models": ["nous-doubao", "nous-qwen3-8b"],
+                "enabled_models": ["nous-qwen3-8b"],
+                "disabled_models": ["nous-doubao", "nous-wemm-2b"],
+            },
+            "deepseek": {
+                "enabled": True,
+                "api_key": "",
+                "models": ["deepseek-chat"],
+                "enabled_models": ["deepseek-chat"],
+            },
+        }
+    }
+    response = await client.put("/api/v1/ai/settings", json=payload)
+    assert response.status_code == 200, response.text
+    stored = settings_repo.patch_settings_json.await_args.args[1]
+    nous = stored["ai_settings"]["ai_providers"]["nous"]
+    assert nous == {
+        "enabled": False,
+        "disabled_models": ["nous-doubao", "nous-wemm-2b"],
+    }
+    # BYOK entries keep their own models/enabled_models (they ARE stored).
+    deepseek = stored["ai_settings"]["ai_providers"]["deepseek"]
+    assert deepseek["enabled_models"] == ["deepseek-chat"]
+    # The echo is the recomputed view, not the payload.
+    body = response.json()
+    assert body["ai_providers"]["nous"]["enabled"] is False
+    assert body["ai_providers"]["nous"]["enabled_models"] == [
+        "nous-qwen3-8b",
+        "nous-codex-image",
+    ]
+    assert set(body["platform_models"]) == set(body["ai_providers"]["nous"]["models"])
+
+
+@pytest.mark.asyncio
+async def test_put_without_enabled_keeps_the_stored_switch(
+    client, platform, settings_repo
+) -> None:
+    settings_repo.get_by_user_id = AsyncMock(
+        return_value=_stored_settings({"enabled": False, "disabled_models": []})
+    )
+    payload = {"ai_providers": {"nous": {"disabled_models": ["nous-wemm-2b"]}}}
+    response = await client.put("/api/v1/ai/settings", json=payload)
+    assert response.status_code == 200, response.text
+    stored = settings_repo.patch_settings_json.await_args.args[1]
+    assert stored["ai_settings"]["ai_providers"]["nous"] == {
+        "enabled": False,
+        "disabled_models": ["nous-wemm-2b"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_nous_models_is_row_for_row_the_settings_view(
+    client, platform, settings_repo
+) -> None:
     raw = await ai_settings_router.list_nous_models(_ctx())
     response = await client.get("/api/v1/ai/nous-models")
     assert_wire_unchanged(response, raw)
@@ -230,9 +483,45 @@ async def test_nous_models(client, monkeypatch) -> None:
     assert set(models[0]) == set(AiNousModelPublic.model_fields)
     # Native BIGINT, as it always was on this route; upstream identity stays
     # private, only the derived bit leaves.
-    assert models[0]["id"] == rows[0]["id"]
+    assert isinstance(models[0]["id"], int)
     assert "actual_provider" not in models[0]
-    assert [m["is_local"] for m in models] == [False, True]
+    settings = (await client.get("/api/v1/ai/settings")).json()
+    assert [m["name"] for m in models] == settings["ai_providers"]["nous"]["models"]
+    assert {m["name"]: m["last_test_status"] for m in models} == {
+        name: entry["status"] for name, entry in settings["platform_models"].items()
+    }
+    llm = (await client.get("/api/v1/ai/nous-models?type=llm")).json()["models"]
+    assert [m["name"] for m in llm] == ["nous-doubao", "nous-qwen3-8b"]
+
+
+@pytest.mark.asyncio
+async def test_engine_is_read_once_per_ttl(client, platform, settings_repo) -> None:
+    await client.get("/api/v1/ai/settings")
+    await client.get("/api/v1/ai/nous-models")
+    await client.get("/api/v1/ai/platform-status")
+    assert platform.engine_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_platform_status(client, platform, settings_repo, monkeypatch) -> None:
+    from app.services.generation import local_readiness as lr
+
+    monkeypatch.setattr(
+        lr,
+        "local_engine_readiness",
+        AsyncMock(return_value=lr.LocalReadiness(codex=True)),
+    )
+    raw = await ai_settings_router.get_platform_status(_ctx())
+    response = await client.get("/api/v1/ai/platform-status")
+    assert_wire_unchanged(response, raw)
+    body = response.json()
+    assert body["models"]["nous-qwen3-8b"] == {
+        "status": "ok",
+        "local_ready": None,
+        "superseded": False,
+    }
+    assert body["models"]["nous-codex-image"]["local_ready"] is True
+    assert body["engine"]["reachable"] is True
 
 
 @pytest.mark.asyncio

@@ -60,6 +60,18 @@ interface NousModel {
   // is why this page carried three permanent red lights for healthy models.
   last_test_status?: 'ok' | 'fail' | 'idle' | 'not_probed' | null
   last_test_detail?: string | null
+  // nous-engine rows only (actual_provider 'nous'), null for every other row.
+  // Read live from the engine's own /v1/models with the row's key on every
+  // list load (spec 2026-09-25 §3.5); the dot reads these instead of
+  // last_test_status for such rows.
+  //   listed       the engine lists the service for this key
+  //   missing      the engine answered without it (grant revoked / service
+  //                removed) — nothing is disabled automatically; the admin
+  //                decides whether to disable or delete the row
+  //   unreachable  no usable list (engine down, timeout, key refused)
+  engine_status?: 'listed' | 'missing' | 'unreachable' | null
+  // listed rows only: loaded right now.
+  engine_ready?: boolean | null
   last_tested_at?: string | null
   // Does RunRecorder have an ai_model_prices row to snapshot for this model?
   // Independent of the probe: a model can be reachable AND unpriced, and an
@@ -218,13 +230,29 @@ function timeAgo(iso?: string | null): string {
 // is neither: an authorized-but-cold local model is not broken, so it never
 // drags the card red, but it is not loaded (and not callable) either, so it does
 // not claim green.
-function aggregateStatus(
-  models: NousModel[],
-): 'ok' | 'fail' | 'idle' | 'not_probed' | undefined {
-  if (models.some((m) => m.last_test_status === 'fail')) return 'fail'
-  if (models.some((m) => m.last_test_status === 'ok')) return 'ok'
-  if (models.some((m) => m.last_test_status === 'idle')) return 'idle'
-  if (models.some((m) => m.last_test_status === 'not_probed')) return 'not_probed'
+//
+// nous-engine rows fold in through `dotStatus`: `missing` ranks right after
+// `fail` (the admin has something to decide), `unreachable` with `not_probed`
+// (no verdict — could not reach is not revoked).
+type DotStatus = 'ok' | 'fail' | 'idle' | 'not_probed' | 'missing' | 'unreachable'
+
+// The status a row's dot shows: the engine's live answer for nous-engine
+// rows, the persisted probe for every other row.
+function dotStatus(m: NousModel): DotStatus | null | undefined {
+  if (m.engine_status === 'listed') return m.engine_ready ? 'ok' : 'idle'
+  if (m.engine_status === 'missing') return 'missing'
+  if (m.engine_status === 'unreachable') return 'unreachable'
+  return m.last_test_status
+}
+
+function aggregateStatus(models: NousModel[]): DotStatus | undefined {
+  const statuses = models.map(dotStatus)
+  if (statuses.includes('fail')) return 'fail'
+  if (statuses.includes('missing')) return 'missing'
+  if (statuses.includes('ok')) return 'ok'
+  if (statuses.includes('idle')) return 'idle'
+  if (statuses.includes('unreachable')) return 'unreachable'
+  if (statuses.includes('not_probed')) return 'not_probed'
   return undefined
 }
 
@@ -234,7 +262,7 @@ function aggregateStatus(
 // `not_probed` is NOT in here, and that is the point of this change: it is not
 // a failure, so it gets no red line and does not drag the provider dot red.
 function failingModels(models: NousModel[]): NousModel[] {
-  return models.filter((m) => m.last_test_status === 'fail')
+  return models.filter((m) => dotStatus(m) === 'fail')
 }
 
 // Connectivity dot from the LAST persisted Test: green = reachable, red =
@@ -249,20 +277,28 @@ function failingModels(models: NousModel[]): NousModel[] {
 const DOT_COLORS: Record<string, string> = {
   ok: '#00b42a',
   fail: '#f53f3f',
+  missing: '#ff7d00',
   idle: 'var(--color-text-3)',
   not_probed: 'var(--color-text-4)',
+  unreachable: 'var(--color-text-4)',
 }
 const DOT_LABELS: Record<string, string> = {
   ok: 'Reachable',
   fail: 'Failed',
+  missing: 'Not listed by nous-engine',
   idle: 'Not loaded',
   not_probed: 'Not probed',
+  unreachable: 'nous-engine unreachable',
 }
 // Replaces the persisted detail in the tooltip where the label alone would
 // read like a fault. The hourly poll writes `idle` from nous-engine's readiness
 // read, which never loads a model; the admin Test loads it for real.
 const DOT_HINTS: Record<string, string> = {
   idle: 'Authorized on nous-engine; the model is not loaded right now',
+  missing:
+    'nous-engine answered and does not list this service for its key (grant revoked or ' +
+    'service removed). Users no longer see it; disable or delete the row if that is final.',
+  unreachable: 'Could not read the nous-engine list; this is not a verdict on the model',
 }
 
 // "No price row" is its own tag, not a StatusDot state: the probe answers
@@ -326,7 +362,7 @@ function StatusDot({
   detail,
   at,
 }: {
-  status?: 'ok' | 'fail' | 'idle' | 'not_probed' | null
+  status?: DotStatus | null
   detail?: string | null
   at?: string | null
 }) {
@@ -410,9 +446,9 @@ export function AIModelsPage() {
 
   useEffect(() => { fetchModels() }, [fetchModels])
 
-  // Mirror nous-engine's /v1/models into the catalog (same sync the hourly
-  // health poll runs first). Rows the engine does not list are never disabled:
-  // today it lists only LOADED services.
+  // Runs the backend nous-engine sync (services/ai/nous_engine_sync) once, on
+  // demand. What it does to existing rows is that module's contract; spec
+  // 2026-09-25 P3 narrows it to creating missing rows + refreshing windows.
   const handleSyncEngine = async () => {
     setSyncingEngine(true)
     try {
@@ -1160,9 +1196,9 @@ export function AIModelsPage() {
                     }}
                   >
                     <StatusDot
-                      status={m.last_test_status}
-                      detail={m.last_test_detail}
-                      at={m.last_tested_at}
+                      status={dotStatus(m)}
+                      detail={m.engine_status ? undefined : m.last_test_detail}
+                      at={m.engine_status ? undefined : m.last_tested_at}
                     />
                     <Tag color={TYPE_COLORS[m.type] || 'gray'} size="small">{m.type}</Tag>
                     {/* actual_model 可以合法为空：本地 daemon 协议(jimeng-local)

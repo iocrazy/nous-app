@@ -30,6 +30,8 @@ from app.schemas.ai_settings_responses import (
     AiGovernanceResponse,
     AiHealthResponse,
     AiNousModelsResponse,
+    AiPlatformProviderEntry,
+    AiPlatformStatusResponse,
     AiProviderHealthReportResponse,
 )
 from app.services.ai.provider_health import (
@@ -98,6 +100,65 @@ def mask_ai_providers(plaintext_providers: dict) -> dict:
     return {
         name: _mask_provider_entry(cfg) for name, cfg in plaintext_providers.items()
     }
+
+
+# ``ai_providers.nous`` keys the user actually owns. Everything else on that
+# entry (models / enabled_models / managed …) is computed by the server on
+# every read (services/ai/platform_provider) and must never be persisted —
+# a stored copy would go stale the moment the catalog or engine changes.
+_NOUS_PROVIDER_KEY = "nous"
+_NOUS_STORED_FIELDS = ("enabled", "disabled_models")
+
+
+def _strip_computed_platform_fields(
+    incoming: dict | None, stored: dict | None
+) -> dict | None:
+    """Reduce an incoming ``ai_providers.nous`` entry to its stored fields.
+
+    Keys absent from the payload keep their stored value (a PUT that only
+    carries ``disabled_models`` does not reset ``enabled``). Returns a new
+    dict; neither input is mutated.
+    """
+    if not isinstance(incoming, dict) or not isinstance(
+        incoming.get(_NOUS_PROVIDER_KEY), dict
+    ):
+        return incoming
+    previous = (stored or {}).get(_NOUS_PROVIDER_KEY)
+    previous = previous if isinstance(previous, dict) else {}
+    entry = incoming[_NOUS_PROVIDER_KEY]
+    kept = {
+        key: entry[key] if key in entry else previous[key]
+        for key in _NOUS_STORED_FIELDS
+        if key in entry or key in previous
+    }
+    return {**incoming, _NOUS_PROVIDER_KEY: kept}
+
+
+async def _with_platform_view(
+    user_id: str, masked_providers: dict, stored_nous: Any
+) -> tuple[dict, dict | None, dict | None]:
+    """``(ai_providers, platform_models, platform_engine)`` for the response.
+
+    ``ai_providers.nous`` is replaced by the computed platform card. When the
+    view cannot be computed the stored entry is returned untouched and both
+    platform fields are ``None`` — "unknown", which a client must not read
+    as "no platform models" (``{}``).
+    """
+    from app.services.ai.platform_provider import platform_provider_view
+
+    try:
+        view = await platform_provider_view(
+            user_id, stored_nous=stored_nous if isinstance(stored_nous, dict) else {}
+        )
+    except Exception as exc:  # noqa: BLE001 — degraded, logged, not swallowed
+        logger.error(f"platform provider view failed for {user_id}: {exc!r}")
+        return masked_providers, None, None
+    # Validated through the declared model so the entry can only ever carry
+    # the documented keys (ai_providers itself is an open dict on the wire).
+    entry = AiPlatformProviderEntry(**view.provider_entry()).model_dump()
+    providers = {**masked_providers, _NOUS_PROVIDER_KEY: entry}
+    engine = view.engine.as_dict() if view.engine else None
+    return providers, view.platform_models(), engine
 
 
 def _is_blank(value) -> bool:
@@ -195,8 +256,13 @@ async def get_ai_settings(auth: AuthDep):
         plaintext_providers = reveal_byok_providers(
             ai_settings.get("ai_providers", {}), user_id=str(auth.user_id)
         )
+        providers, platform_models, platform_engine = await _with_platform_view(
+            auth.user_id,
+            mask_ai_providers(plaintext_providers),
+            (ai_settings.get("ai_providers") or {}).get(_NOUS_PROVIDER_KEY),
+        )
         return AISettingsResponse(
-            ai_providers=mask_ai_providers(plaintext_providers),
+            ai_providers=providers,
             whisper_provider=ai_settings.get("whisper_provider", "openai_api"),
             default_summary_model=ai_settings.get(
                 "default_summary_model", "gpt-4o-mini"
@@ -207,6 +273,8 @@ async def get_ai_settings(auth: AuthDep):
             transcription_hotwords=ai_settings.get("transcription_hotwords", ""),
             task_assignment=ai_settings.get("task_assignment", {}),
             provider_health=provider_health,
+            platform_models=platform_models,
+            platform_engine=platform_engine,
         )
 
     except Exception as e:
@@ -232,6 +300,9 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
             # enc:v1: ciphertext (422). Runs BEFORE the merge so a planted
             # ciphertext never even reaches the stored map.
             reject_client_ciphertext(body.ai_providers)
+            incoming = _strip_computed_platform_fields(
+                body.ai_providers, ai_settings.get("ai_providers")
+            )
             # merge_ai_providers runs against the STORED (possibly enc:v1:
             # ciphertext) previous value: a blank incoming secret field falls
             # back to the previous value byte-for-byte, so an unchanged key
@@ -239,9 +310,7 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
             # conceal_byok_providers is idempotent (marker check) — encrypts
             # only the fields the caller actually supplied plaintext for,
             # BOUND to the requesting user (layer-2 anti-replay).
-            merged = merge_ai_providers(
-                ai_settings.get("ai_providers"), body.ai_providers
-            )
+            merged = merge_ai_providers(ai_settings.get("ai_providers"), incoming)
             ai_settings["ai_providers"] = conceal_byok_providers(
                 merged, user_id=str(auth.user_id)
             )
@@ -273,8 +342,13 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
         plaintext_providers = reveal_byok_providers(
             ai_settings.get("ai_providers", {}), user_id=str(auth.user_id)
         )
+        providers, platform_models, platform_engine = await _with_platform_view(
+            auth.user_id,
+            mask_ai_providers(plaintext_providers),
+            (ai_settings.get("ai_providers") or {}).get(_NOUS_PROVIDER_KEY),
+        )
         return AISettingsResponse(
-            ai_providers=mask_ai_providers(plaintext_providers),
+            ai_providers=providers,
             whisper_provider=ai_settings.get("whisper_provider", "openai_api"),
             default_summary_model=ai_settings.get(
                 "default_summary_model", "gpt-4o-mini"
@@ -284,6 +358,8 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
             preferred_language=ai_settings.get("preferred_language", "auto"),
             transcription_hotwords=ai_settings.get("transcription_hotwords", ""),
             task_assignment=ai_settings.get("task_assignment", {}),
+            platform_models=platform_models,
+            platform_engine=platform_engine,
         )
 
     except HTTPException:
@@ -442,9 +518,30 @@ async def list_nous_models(auth: AuthDep, type: str | None = None):
     Returns models available for users to select. If none are configured,
     returns an empty list. Requires auth (added with owner scoping, migration
     431): the list is scoped to the caller so owner-private rows never leak.
-    """
-    from app.repositories.nous_model_repository import get_nous_model_repository
 
-    repo = get_nous_model_repository()
-    models = await repo.list_enabled(type, viewer_user_id=auth.user_id)
-    return {"models": models}
+    Row for row the ``models`` of the platform provider view that
+    ``GET /ai/settings`` carries (spec 2026-09-25 §3.1 — same function);
+    ``last_test_status`` is the computed status. Kept until the frontend
+    reads the settings view (P3 deletes it).
+    """
+    from app.services.ai.platform_provider import platform_provider_view
+
+    view = await platform_provider_view(auth.user_id)
+    return {
+        "models": [
+            m.public_row() for m in view.models if type is None or m.type == type
+        ]
+    }
+
+
+@router.get("/platform-status", response_model=AiPlatformStatusResponse)
+async def get_platform_status(auth: AuthDep):
+    """Runtime state of the platform models (spec 2026-09-25 §3.3).
+
+    The list itself comes with ``GET /ai/settings``; this light endpoint only
+    answers what changes fast — engine ``ok``/``idle``, engine reachability,
+    and whether the user's own daemon can run each local row right now.
+    """
+    from app.services.ai.platform_provider import platform_status
+
+    return await platform_status(auth.user_id)

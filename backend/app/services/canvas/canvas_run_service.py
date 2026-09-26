@@ -235,8 +235,8 @@ def _row_name(row: Dict[str, Any]) -> Optional[str]:
 
 def _pick_default_row(rows: List[Dict[str, Any]]) -> Optional[str]:
     """First named row under the shared implicit-default rule
-    (``app.services.ai.default_model_pick``: ok → unprobed, idle/fail skipped,
-    catalog order + WARN when nothing qualifies)."""
+    (``app.services.ai.default_model_pick``: ok → not_probed → idle over the
+    view status, catalog order + WARN when nothing qualifies)."""
     named = [row for row in rows if _row_name(row)]
     ranked = rank_default_candidates(named, context="canvas catalog default")
     return _row_name(ranked[0]) if ranked else None
@@ -256,27 +256,20 @@ class CanvasRunService:
         """The catalog model an empty ``provider_slug`` resolves to.
 
         Best enabled ``llm`` row in the platform ``nous_models`` catalog (see
-        ``_pick_default_row`` for the probe-status ranking), falling back to
+        ``_pick_default_row`` for the live-status ranking), falling back to
         the governed maintenance model (itself a catalog entry). DB-only, so
         the default text Run always names a model the platform actually has
         configured — the root cause of the 2026-07-12
         "default prompt won't run" report was a hardcoded ``qwen-plus`` that
         the catalog no longer carries.
         """
-        from app.repositories.nous_model_repository import (
-            get_nous_model_repository,
-        )
+        from app.services.ai.platform_provider import platform_rows_with_status
         from app.services.ai.providers.ai_provider_helpers import (
             get_maintenance_model,
         )
 
-        try:
-            rows = await get_nous_model_repository().list_enabled("llm")
-        except Exception:  # noqa: BLE001 — degrade to the governed default
-            logger.opt(exception=True).warning(
-                "canvas: enabled-llm catalog read failed; using maintenance model"
-            )
-            rows = []
+        # Degrades to [] (logged) on a catalog read failure → maintenance model.
+        rows = await platform_rows_with_status("llm")
         picked = _pick_default_row(rows)
         if picked is not None:
             return picked

@@ -8,6 +8,11 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.ai_settings_responses import (
+    AiPlatformEngineState,
+    AiPlatformModelEntry,
+)
+
 
 class AISettingsUpdate(BaseModel):
     """Request body for saving AI settings."""
@@ -92,6 +97,21 @@ class AISettingsResponse(BaseModel):
             "Lives at the settings_json top level (NOT under ai_settings) — see "
             "app.services.ai.provider_health. Read-only in this response; "
             "written by /ai/test-connection + /ai/provider-health."
+        ),
+    )
+    platform_models: Optional[Dict[str, AiPlatformModelEntry]] = Field(
+        default=None,
+        description=(
+            "Platform catalog name → mapping for every name in "
+            "ai_providers.nous.models (spec 2026-09-25 §3.1). null = the "
+            "platform view could not be computed (unknown, not empty)."
+        ),
+    )
+    platform_engine: Optional[AiPlatformEngineState] = Field(
+        default=None,
+        description=(
+            "nous-engine reachability behind the platform list; null when "
+            "no listed row is served by nous-engine or the view is unknown."
         ),
     )
 

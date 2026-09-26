@@ -86,6 +86,36 @@ async def local_engine_readiness(
         return LocalReadiness()
 
 
+@dataclass(frozen=True)
+class LocalVerdict:
+    """What the user's own machine says about one catalog row.
+
+    ``local_ready`` is ``None`` for a row that does not run locally;
+    ``superseded`` marks a server twin hidden because its local twin can run.
+    """
+
+    local_ready: Optional[bool]
+    superseded: bool
+
+    @property
+    def offered(self) -> bool:
+        """Whether a picker should offer the row right now."""
+        return self.local_ready is not False and not self.superseded
+
+
+def local_verdict(
+    actual_provider: Optional[str], ready: LocalReadiness
+) -> LocalVerdict:
+    """The daemon rule for one row, shared by :func:`apply_readiness` and the
+    platform status endpoint (``services/ai/platform_provider``). Pure."""
+    provider = str(actual_provider or "").lower()
+    twin = SERVER_TWIN_OF.get(provider)
+    return LocalVerdict(
+        local_ready=ready.for_engine(provider),
+        superseded=bool(twin and ready.for_engine(twin)),
+    )
+
+
 def apply_readiness(
     rows: list[dict[str, Any]], ready: LocalReadiness
 ) -> list[dict[str, Any]]:
@@ -94,12 +124,7 @@ def apply_readiness(
     for r in rows:
         if str(r.get("last_test_status") or "") in ("fail", "failed", "error"):
             continue
-        provider = str(r.get("actual_provider") or "").lower()
-        local = ready.for_engine(provider)
-        if local is False:
-            continue
-        twin = SERVER_TWIN_OF.get(provider)
-        if twin and ready.for_engine(twin):
+        if not local_verdict(r.get("actual_provider"), ready).offered:
             continue
         out.append(r)
     return out
