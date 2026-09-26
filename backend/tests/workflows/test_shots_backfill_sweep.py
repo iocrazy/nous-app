@@ -228,3 +228,12 @@ async def test_workflow_body_end_to_end(monkeypatch):
         user_id="u", resource_id="7", title="t", flow_id=None
     )
     recorded.assert_awaited_once_with(dispatched=1, error=None, skip=None)
+
+
+def test_plan_step_reads_under_system_scope():
+    """Cross-user reads in a DBOS step: no request scope exists there, and
+    under SCOPE_ENFORCE_RESOURCES an unscoped resources read is refused or
+    empty (2026-09-26: the first production tick saw 0 pending)."""
+    src = inspect.getsource(inspect.unwrap(mod.plan_shots_backfill_step))
+    assert "system_request_scope(" in src
+    assert src.index("system_request_scope(") < src.index("_plan()")

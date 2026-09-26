@@ -25,6 +25,8 @@ from typing import Any, Dict, List
 from dbos import DBOS
 from loguru import logger
 
+from app.db.scope import system_request_scope
+
 #: One dispatch attempt's error, clipped for the state row.
 _ERROR_CLIP = 200
 
@@ -34,6 +36,15 @@ async def plan_shots_backfill_step() -> Dict[str, Any]:
     """Decide this tick: ``{"skip": reason}`` or ``{"rows": [...], ...}``.
     Every read (policy, provider, visual space, active count, pending page)
     happens here; nothing is dispatched."""
+    # Cross-user reads (every user's videos, every user's tasks): a DBOS step
+    # has no request scope, and under SCOPE_ENFORCE_RESOURCES an unscoped
+    # ``resources`` read is either refused or empty — the 2026-09-26 tick read
+    # 0 pending against a 1,100-video backlog. System scope names the intent.
+    async with system_request_scope("shots backfill sweep: cross-user pending videos"):
+        return await _plan()
+
+
+async def _plan() -> Dict[str, Any]:
     from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
     from app.repositories.video_shots_repository import (
         FRAME_KIND,

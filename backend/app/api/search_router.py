@@ -9,6 +9,7 @@ from app.core.admin_deps import AdminAuthDep, is_admin_user
 from app.core.deps import AuthDep
 from app.core.embedding_space import SEMANTIC_LAYER, EmbeddingDimensionMismatch
 from app.core.scope_dep import scoped_request
+from app.db.scope import system_request_scope
 from app.repositories.admin.system_settings_repository import (
     get_system_settings_repository,
 )
@@ -632,12 +633,21 @@ async def _shots_policy_status(
     pending_total: Optional[int] = None
     if visual_space is not None:
         try:
-            _, pending_total = await get_video_shot_embeddings_repository().pending_all(
-                space_id=int(visual_space["id"]),
-                kind=FRAME_KIND,
-                algo_version=SHOT_ALGO_VERSION,
-                limit=0,
-            )
+            # Every user's backlog (what the sweeper will work through), not
+            # the caller's: a deliberate cross-user COUNT under system scope
+            # — the user-scoped read counted only the caller's own videos.
+            async with system_request_scope(
+                "vectors status: cross-user shots pending count"
+            ):
+                (
+                    _,
+                    pending_total,
+                ) = await get_video_shot_embeddings_repository().pending_all(
+                    space_id=int(visual_space["id"]),
+                    kind=FRAME_KIND,
+                    algo_version=SHOT_ALGO_VERSION,
+                    limit=0,
+                )
         except EmbeddingStoreMissing:
             pending_total = None
         except Exception as e:  # noqa: BLE001

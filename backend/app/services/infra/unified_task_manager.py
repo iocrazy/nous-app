@@ -581,7 +581,11 @@ class UnifiedTaskManager:
                     await session.execute(insert(tbl).values(**row).returning(tbl.c.id))
                 ).scalar()
             logger.debug(f"[TaskManager] Created flow {flow_id}: {name[:40]}")
-            return flow_id
+            # ``task_flows.id`` is a uuid column (mig 203), so the RETURNING
+            # scalar is a ``uuid.UUID`` — normalise here so every caller gets
+            # the ``str`` this signature promises (a UUID object leaks into
+            # JSON response bodies as a 500; backfill-shots did, 2026-09-26).
+            return str(flow_id) if flow_id is not None else None
         except Exception as e:
             logger.warning(f"[TaskManager] create_flow failed (non-fatal): {e}")
             return None

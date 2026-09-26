@@ -10,6 +10,7 @@ frame's content type + private cache header."""
 
 from __future__ import annotations
 
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,6 +35,7 @@ pytestmark = pytest.mark.unit
 USER = "00000000-0000-0000-0000-000000000042"
 RID = str(SAMPLE_BIGINT)
 SPACE = {"id": SAMPLE_BIGINT + 7, "actual_model": "doubao-embedding-vision-251215"}
+FLOW_UUID = uuid.UUID("3f1d2a4e-9b7c-4c1e-8a2f-5d6e7f8a9b0c")
 
 
 async def _fake_auth() -> AuthContext:
@@ -168,7 +170,9 @@ def backfill_stack(monkeypatch):
         "app.repositories.video_shots_repository.get_video_shot_embeddings_repository",
         lambda: repo,
     )
-    manager = SimpleNamespace(create_flow=AsyncMock(return_value="flow-1"))
+    # create_flow's documented return: task_flows.id normalised to ``str``
+    # (the row scalar is a uuid.UUID; the manager stringifies at its boundary).
+    manager = SimpleNamespace(create_flow=AsyncMock(return_value=str(FLOW_UUID)))
     monkeypatch.setattr(
         "app.services.infra.unified_task_manager.get_task_manager", lambda: manager
     )
@@ -202,14 +206,16 @@ async def test_backfill_run_dispatches_under_one_flow(client, backfill_stack):
     r = await client.post("/api/v1/ai/analyze/backfill-shots", json={"limit": 5})
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["parent_task_id"] == "flow-1"
+    assert out["parent_task_id"] == str(FLOW_UUID)  # a string on the wire
     assert out["dispatched"] == ["wf-a"]
     assert out["skipped"] == [
         {"resource_id": str(SAMPLE_BIGINT + 2), "reason": "dispatch_failed"}
     ]
     flow_kwargs = backfill_stack.manager.create_flow.await_args.kwargs
     assert flow_kwargs["name"] == "Index shots · 2 videos"
-    assert backfill_stack.dispatch.await_args_list[0].kwargs["flow_id"] == "flow-1"
+    assert backfill_stack.dispatch.await_args_list[0].kwargs["flow_id"] == str(
+        FLOW_UUID
+    )
 
 
 @pytest.mark.asyncio
