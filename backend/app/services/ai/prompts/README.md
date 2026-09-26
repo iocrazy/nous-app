@@ -410,6 +410,30 @@ schema 约 130 token，固定。结果体 ≤ 4000 字符（`ACCEPTANCE_CRITERIA
 
 只在 tools 列表里，与 `FinishIssue` / `ScheduleWakeup` 同族：issue 轮次与聊天轮次本来就是两个缓存族，本工具不再分裂族。改这份 schema 的任何一个字会让 issue 族的 tools 前缀失效一次，之后逐轮不变。
 
+### 续跑消息里的 `<verifier_feedback>`（仅核验驳回后的下一轮）
+
+#### What the model sees
+
+issue 声明 completed 被核验驳回、且还有重试额度时，下一轮续跑的 user 消息是 `CONTINUATION_NUDGE` + 两个换行 + 下面这个框（`services/issues/verification/feedback.py`）；同一判定只注入一次（`consumed_at`）：
+
+```text
+<verifier_feedback attempt="1" of="2">
+The completion check rejected your last declaration. Unmet:
+- {criterion}: {why}
+Fix these and call FinishIssue again.
+</verifier_feedback>
+```
+
+`criterion` / `why` 来自判定模型的 JSON，经 `escape_frame_body`；没有 unmet 时用判定 `reason` 一行。首轮 user 消息在 `Details:` 之后多一段 `Acceptance criteria (source=user|agent):` + 标准原文（`escape_frame_body`，`services/issues/acceptance_criteria.py::criteria_section`）；标准在首轮前重新读库（agent 可能刚用 `SetAcceptanceCriteria` 写过），读失败退回 issue 字典里的值。
+
+#### Token effect
+
+框固定部分约 40 token；unmet 条数由判定输出决定（`max_tokens=400` 封顶）。标准段 ≤ 4000 字符。
+
+#### KV Cache effect
+
+都在 user 消息里，不碰系统前缀。续跑消息与上一版只差这个框，历史前缀不变。
+
 ### 工具 schema：`LibrarySearch`（请求的 `tools` 参数，两条路都有）
 
 #### What the model sees

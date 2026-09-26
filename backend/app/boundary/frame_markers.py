@@ -80,6 +80,10 @@ OWNED_FRAMES: Final[frozenset[str]] = frozenset(
         "todo_list",
         "user_context",
         "user_instruction",
+        # issue completion loop: the verifier's rejection, injected into the
+        # continuation user message (services/issues/verification/feedback.py).
+        # unmet[].criterion / why come from the judge model → escape_frame_body.
+        "verifier_feedback",
         "user_selection",
         # Not emitted by this backend today, but models are trained to treat
         # it as harness-owned — never let repository content forge one.

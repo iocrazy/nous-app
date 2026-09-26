@@ -68,6 +68,7 @@ _H_INBOX = "### 收件箱消息框 `<inbox_message>`（步骤边界注入的 use
 _H_ASK_USER = "### 工具 schema：`AskUser`（请求的 `tools` 参数，两条路都有）"
 _H_WAKEUP = "### 工具 schema：`ScheduleWakeup`（仅 issue 根 run）"
 _H_SET_CRITERIA = "### 工具 schema：`SetAcceptanceCriteria`（仅 issue 根 run）"
+_H_VERIFIER_FEEDBACK = "### 续跑消息里的 `<verifier_feedback>`（仅核验驳回后的下一轮）"
 _H_LIBRARY = "### 工具 schema：`LibrarySearch`（请求的 `tools` 参数，两条路都有）"
 _H_TIMEOUT = "### 工具结果：超时（任何工具，两条路都有）"
 _H_RESOURCES = "### `<available_resources>`（仅当本轮有 @-mention）"
@@ -93,6 +94,8 @@ MODEL_SURFACES: tuple[Surface, ...] = (
     Surface(
         "services/ai/tools/set_acceptance_criteria_tool.py", _PROMPTS, _H_SET_CRITERIA
     ),
+    Surface("services/issues/verification/feedback.py", _PROMPTS, _H_VERIFIER_FEEDBACK),
+    Surface("services/issues/acceptance_criteria.py", _PROMPTS, _H_VERIFIER_FEEDBACK),
     Surface("services/ai/tools/library_search_tool.py", _PROMPTS, _H_LIBRARY),
     Surface("services/ai/runner/tool_exec.py", _PROMPTS, _H_TIMEOUT),
     Surface("services/ai/runner/tool_timeouts.py", _PROMPTS, _H_TIMEOUT),
