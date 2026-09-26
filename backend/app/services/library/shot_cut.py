@@ -46,7 +46,11 @@ from PIL import Image
 #: ``scene_v1`` (2026-09-26): ffmpeg scene score at native frame rate
 #: (``detector="scene"``) replaces the histogram ratio; the index step also
 #: folds adjacent shots whose frame vectors are near-identical
-#: (``shot_merge``). Scored in bench-shot-cut.yml — see the PR for the table.
+#: (``shot_merge``). bench-shot-cut.yml, 30 production videos (seed 7, 29
+#: scored), against ContentDetector: mean F1 0.676 (hist_v3) → 0.780,
+#: precision 0.65 → 0.79, recall 0.75 → 0.79; 0.825 on the 25 videos where
+#: the reference found any cut (two where it found none cap the mean at
+#: 27/29). Threshold 0.18–0.19 is a plateau; 0.15 / 0.3 fall to 0.71 / 0.72.
 ALGO_VERSION = "scene_v1"
 #: The histogram cutter's version, still selectable with ``detector="hist"``.
 #: ``hist_v3`` (2026-09-26): min shot 800 ms, ratio 2.0, min_abs 0.12 — the
@@ -99,9 +103,10 @@ class CutParams:
     #: ``"scene"`` (ffmpeg scene score, native fps) or ``"hist"`` (hist_v3).
     detector: str = DETECTOR_SCENE
     #: scene: a frame whose ffmpeg scene score reaches this opens a shot.
-    #: Chosen on bench-shot-cut.yml (see ALGO_VERSION); the score is in
-    #: [0, 1] and a hard cut between unrelated pictures scores 0.3–0.6.
-    scene_threshold: float = 0.3
+    #: The score is in [0, 1]; a hard cut between unrelated pictures scores
+    #: 0.3–0.6, a cut between two angles of one room lower. 0.18 is the best
+    #: of 0.12–0.4 on bench-shot-cut.yml (see ALGO_VERSION).
+    scene_threshold: float = 0.18
     #: d[i] / rolling-mean(d around i) must reach this. 2.0 at 3 fps (hist_v3;
     #: 2.5 in v2, 3.0 at 1 fps in v1): the within-shot distance between frames
     #: 333 ms apart is small enough that a real cut clears it.
@@ -115,9 +120,11 @@ class CutParams:
     #: A cut followed by a frame that returns to the pre-cut picture within
     #: this distance is a flash, not two cuts.
     flash_threshold: float = 0.10
-    #: 800 ms (1500 in v1/v2): talking-head videos cut in fast b-roll shorter
-    #: than 1.5 s, and merging those away was the largest single recall loss.
-    min_shot_ms: int = 800
+    #: 500 ms in scene_v1 (the bench's best with 0.18; 400 / 650 lose 0.3 /
+    #: 0.4 points). 800 in hist_v3, 1500 in v1/v2: talking-head videos cut in
+    #: fast b-roll shorter than 1.5 s, and merging those away was the largest
+    #: single recall loss.
+    min_shot_ms: int = 500
     max_shot_ms: int = 30_000
     max_shots: int = 600
     #: Adjacent shots whose representative frames are closer than this merge.
@@ -126,7 +133,7 @@ class CutParams:
 
 DEFAULT_PARAMS = CutParams()
 #: Exactly the production cutter before scene_v1 (the benchmark's baseline).
-HIST_V3_PARAMS = CutParams(detector=DETECTOR_HIST)
+HIST_V3_PARAMS = CutParams(detector=DETECTOR_HIST, min_shot_ms=800)
 
 
 def algo_version(params: CutParams) -> str:

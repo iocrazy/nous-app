@@ -217,9 +217,9 @@ def test_steady_change_below_the_threshold_never_cuts():
 
 def test_scene_threshold_is_the_knob():
     sigs, duration = _sequence((RED, 10), (GREEN, 10))
-    scores = _scores(20, {10_000: 0.25})
+    scores = _scores(20, {10_000: 0.15})
     assert len(cut_video(sigs, duration, DEFAULT_PARAMS, scores)) == 1
-    lower = CutParams(scene_threshold=0.2)
+    lower = CutParams(scene_threshold=0.12)
     assert len(cut_video(sigs, duration, lower, scores)) == 2
 
 

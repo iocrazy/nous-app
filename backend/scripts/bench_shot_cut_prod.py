@@ -51,7 +51,12 @@ from typing import Any, Sequence
 
 from sqlalchemy import func, or_, select
 
-from app.services.library.shot_cut import DEFAULT_PARAMS, CutParams, cut_video
+from app.services.library.shot_cut import (
+    DEFAULT_PARAMS,
+    HIST_V3_PARAMS,
+    CutParams,
+    cut_video,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_shot_cut import _f1  # noqa: E402 — sibling script, same matching rule
@@ -88,7 +93,10 @@ def parse_variants(spec: str | None) -> list[tuple[str, CutParams]]:
             if not sep or not hasattr(DEFAULT_PARAMS, key):
                 raise ValueError(f"unknown CutParams field in variant: {pair!r}")
             overrides[key] = _typed(key, raw)
-        out.append((chunk, replace(DEFAULT_PARAMS, **overrides)))
+        # ``detector=hist`` starts from hist_v3's own params (its min shot
+        # length differs from scene_v1's), so it alone IS the old cutter.
+        base = HIST_V3_PARAMS if overrides.get("detector") == "hist" else DEFAULT_PARAMS
+        out.append((chunk, replace(base, **overrides)))
     return out
 
 

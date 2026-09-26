@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.library.shot_cut import DEFAULT_PARAMS
+from app.services.library.shot_cut import DEFAULT_PARAMS, HIST_V3_PARAMS
 from scripts.bench_shot_cut_prod import (
     _top_creator,
     choose_sample,
@@ -92,9 +92,10 @@ def test_parse_variants_always_starts_with_the_defaults_and_types_fields():
 
 
 def test_parse_variants_takes_the_detector_as_a_string():
-    out = parse_variants("detector=hist;scene_threshold=0.2,min_shot_ms=500")
-    assert out[1][1].detector == "hist" and out[1][1].ratio == DEFAULT_PARAMS.ratio
-    assert out[2][1].scene_threshold == 0.2 and out[2][1].min_shot_ms == 500
+    out = parse_variants("detector=hist;scene_threshold=0.2,min_shot_ms=650")
+    # detector=hist alone is exactly hist_v3 (its own 800 ms min shot).
+    assert out[1][1] == HIST_V3_PARAMS and out[1][1].min_shot_ms == 800
+    assert out[2][1].scene_threshold == 0.2 and out[2][1].min_shot_ms == 650
     assert out[2][1].detector == DEFAULT_PARAMS.detector == "scene"
 
 

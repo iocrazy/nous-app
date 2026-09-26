@@ -47,7 +47,7 @@ video_shot_indexes     resource_id bigint PK FK resources ON DELETE CASCADE,
 5. 代表帧 = 镜头中点帧（母 spec 的「离均值向量最近」需要帧向量，本期不付这个钱）；相邻镜头直方图距离 < 0.05 合并（口播视频去重）。
 6. 输出 `list[Shot(start_ms, end_ms, rep_frame_ms, cut_score)]` + `algo_version = "hist_v3"`（3 fps、ratio 2.0、min_abs 0.12、最短镜头 0.8 s；`hist_v2` = ratio 2.5 / min_abs 0.15 / 1.5 s，`hist_v1` = 1 fps、ratio 3.0；被旧版本切过的索引读作 `stale`）。
 
-**`scene_v1`（2026-09-26）替换第 2–3 步的切点信号**：同一遍 ffmpeg 用 `split` 分两路，一路照旧出 3 fps JPEG，另一路把**每一帧**（原生帧率）缩到 256 宽后过 `select='gte(scene,0)'`，`metadata=print` 把每帧 scene score 写进临时目录的文本文件；score ≥ `scene_threshold` 即切点，切点时间取该帧的 pts（不再对齐到 3 fps 采样点）。闪光抑制改为：两个切点相距 < 最短镜头、且第一个切点前的采样帧与第二个切点后的采样帧直方图距离 < 0.1，则两点都丢。第 4–5 步整形不变。直方图法保留为 `detector="hist"`（=`hist_v3`），只给基准比对用。动机：录屏 + 画中画口播的视频里，手势/鼠标/旋转文字让直方图比值在基线≈0 时轻松过线（一支 3:01 的录屏被切成 17 段，其中 0:33–1:35 三段画面几乎一样）；ffmpeg 的 score 是 `min(mafd, |mafd − prev_mafd|)`，持续的小变化让 |Δmafd| ≈ 0，不会切。
+**`scene_v1`（2026-09-26）替换第 2–3 步的切点信号**：同一遍 ffmpeg 用 `split` 分两路，一路照旧出 3 fps JPEG，另一路把**每一帧**（原生帧率）缩到 256 宽后过 `select='gte(scene,0)'`，`metadata=print` 把每帧 scene score 写进临时目录的文本文件；score ≥ `scene_threshold`（0.18，最短镜头改为 0.5 s；生产 30 支扫参见 `ALGO_VERSION` 注释：mean F1 0.676 → 0.780）即切点，切点时间取该帧的 pts（不再对齐到 3 fps 采样点）。闪光抑制改为：两个切点相距 < 最短镜头、且第一个切点前的采样帧与第二个切点后的采样帧直方图距离 < 0.1，则两点都丢。第 4–5 步整形不变。直方图法保留为 `detector="hist"`（=`hist_v3`），只给基准比对用。动机：录屏 + 画中画口播的视频里，手势/鼠标/旋转文字让直方图比值在基线≈0 时轻松过线（一支 3:01 的录屏被切成 17 段，其中 0:33–1:35 三段画面几乎一样）；ffmpeg 的 score 是 `min(mafd, |mafd − prev_mafd|)`，持续的小变化让 |Δmafd| ≈ 0，不会切。
 
 **索引步的向量合并**（`shot_merge.py`，与 `scene_v1` 同批上线）：代表帧向量算完、写库之前，相邻两镜头向量余弦 ≥ 0.95 即合并（只跨检测到的切点，不跨 30 s 硬切；起点取前者、终点取后者；代表帧与向量取 cut_score 高的一侧），重新编号 `shot_index`，`metadata.shots.merged` 记合并数。不增加嵌入调用。
 
