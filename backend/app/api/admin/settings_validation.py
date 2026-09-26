@@ -259,6 +259,10 @@ SETTING_VALIDATORS: dict[str, SettingRule] = {
         _string_bool,
         "mig 293 seeds 'false'; issue_lifecycle matches truthy words on str()",
     ),
+    "issue_verification_enabled": SettingRule(
+        _string_bool,
+        "completion verifier rollback switch; unset = on (verification.judge.verification_enabled)",
+    ),
     "memory.l2_provider": SettingRule(
         _provider("l2"), "memory registry; same table as PUT /memory/slot"
     ),
