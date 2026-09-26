@@ -516,3 +516,46 @@ async def test_empty_list_creates_nothing_and_disables_nothing() -> None:
     assert report.error is None
     assert report.discovered == 0 and report.created == ()
     assert repo.rows == before
+
+
+@pytest.mark.asyncio
+async def test_manual_sync_reads_the_engine_now_not_the_cached_list(
+    monkeypatch,
+) -> None:
+    """The platform view may have cached the list seconds ago; an admin who
+    just granted a service must not wait out ``ENGINE_TTL_S`` for the button
+    to see it. The view path itself keeps using the cache."""
+
+    def _service(sid: str) -> ec.EngineService:
+        return ec.EngineService(
+            id=sid, type="llm", ready=True, context_window=None, capabilities=None
+        )
+
+    answers = [
+        ec._Read(services={"qwen3-8-27b": _service("qwen3-8-27b")}),
+        ec._Read(
+            services={
+                "qwen3-8-27b": _service("qwen3-8-27b"),
+                "qwen3-new": _service("qwen3-new"),
+            }
+        ),
+    ]
+    calls: list[str] = []
+
+    async def _fetch(base_url, api_key):
+        calls.append(base_url)
+        return answers.pop(0)
+
+    monkeypatch.setattr(ec, "_fetch", _fetch)
+    monkeypatch.setattr(ec, "_clock", lambda: 1000.0)  # well inside the TTL
+
+    cached = await ec.engine_snapshot(_BASE, _KEY)  # the platform view's read
+    assert set(cached.services or {}) == {"qwen3-8-27b"}
+    again = await ec.engine_snapshot(_BASE, _KEY)
+    assert again is cached and len(calls) == 1  # the view path stays cached
+
+    repo = FakeRepo([_row()])
+    report = await _sync(repo)
+
+    assert len(calls) == 2  # the button went to the engine
+    assert report.created == ("nous-qwen3-new",)

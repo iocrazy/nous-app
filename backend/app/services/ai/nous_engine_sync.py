@@ -18,8 +18,9 @@ run only when an admin presses the button:
 * engine types the catalog has no type for (``app`` / ``workflow`` / …) →
   reported as skipped, never guessed.
 
-The list is ``engine_catalog.engine_snapshot`` — the same cached read the
-platform view uses. A list that cannot be read (401, transport, 5xx, or only a
+The list is ``engine_catalog.engine_snapshot``, read fresh (the cached entry
+for this credential is invalidated first, so a grant made seconds ago is
+seen). A list that cannot be read (401, transport, 5xx, or only a
 stale carried-over snapshot) is an ``error`` and writes nothing. ``null``
 fields never overwrite a stored value: an invalid or null window is not
 written, and ``capabilities.vision`` only seeds a NEW row's price-table
@@ -44,6 +45,7 @@ from app.services.ai.engine_catalog import (
     EngineService,
     EngineSnapshot,
     engine_snapshot,
+    invalidate_engine_snapshot,
     normalize_base_url,
 )
 
@@ -241,6 +243,9 @@ async def sync_engine_models(
     writing one service is logged and reported as skipped, the rest continue.
     """
     repo = repo or get_nous_engine_sync_repository()
+    # An admin presses this right after authorizing a service on the engine:
+    # read the engine now, not the platform view's cached list.
+    invalidate_engine_snapshot(base_url, api_key)
     snapshot = await engine_snapshot(base_url, api_key)
     error = _read_error(snapshot)
     if error is not None:
