@@ -830,7 +830,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       {/* Content area */}
       <div
         ref={contentScrollRef}
-        className="flex-1 md:min-h-0 overflow-y-auto p-3 md:p-6 relative"
+        className="flex-1 md:min-h-0 overflow-y-auto [scrollbar-gutter:stable] p-3 md:p-6 relative"
         onDragEnter={canUploadDrop ? onDragEnter : undefined}
         onDragOver={canUploadDrop ? onDragOver : undefined}
         onDragLeave={canUploadDrop ? onDragLeave : undefined}

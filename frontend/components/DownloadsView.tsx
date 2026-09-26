@@ -59,6 +59,7 @@ import Loading from './common/Loading';
 import { CompactMediaCard } from './CompactMediaCard';
 import { ViewModeMenu } from './ViewModeMenu';
 import type { LibraryViewMode } from '../hooks/useLibrary';
+import { useFillViewport } from '../hooks/useFillViewport';
 import { LibraryTable } from './LibraryTable';
 import { LibraryFeed } from './LibraryFeed';
 import { ToolbarSearch } from './ToolbarSearch';
@@ -399,6 +400,21 @@ export const DownloadsView: React.FC = () => {
     loadMoreLibrary,
     library.length,
   ]);
+
+  // First page shorter than the screen: keep loading until it overflows.
+  // The two triggers above only fire on a visibility change / a scroll.
+  useFillViewport({
+    sentinelRef: loadMoreRef,
+    scrollRef: contentScrollRef,
+    enabled:
+      hasMoreData &&
+      !isLoadingMore &&
+      !isLoadingLibrary &&
+      !isSearchActive &&
+      searchQuery.trim().length === 0,
+    contentKey: library.length,
+    loadMore: loadMoreLibrary,
+  });
 
   // ─── Filtered library ─────────────────────────────────
   // Chip filters are now applied server-side (see libraryFilterParams
@@ -1470,7 +1486,7 @@ export const DownloadsView: React.FC = () => {
       {/* Content */}
       <div
         ref={contentScrollRef}
-        className={`flex-1 md:min-h-0 md:overflow-y-auto md:px-5 md:pt-4 ${
+        className={`flex-1 md:min-h-0 md:overflow-y-auto [scrollbar-gutter:stable] md:px-5 md:pt-4 ${
           libraryViewMode === 'feed'
             ? 'px-0 pt-0 pb-0 h-full min-h-0'
             // Mobile: leave enough room so the last grid row is never
