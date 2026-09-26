@@ -76,9 +76,16 @@ async def test_default_text_model_is_first_enabled_llm_from_catalog():
     the first enabled ``llm`` row's ``name`` — not a hardcoded constant."""
     svc = _make_service()
     repo = _repo(name_hit=_enabled_llm_row(), enabled_llm=[_enabled_llm_row()])
-    with patch(
-        "app.repositories.nous_model_repository.get_nous_model_repository",
-        return_value=repo,
+    with (
+        patch(
+            "app.repositories.nous_model_repository.get_nous_model_repository",
+            return_value=repo,
+        ),
+        # The default reads the platform provider view (P4): governance on.
+        patch(
+            "app.services.ai.governance.ai_governance.is_nous_globally_enabled",
+            new=AsyncMock(return_value=True),
+        ),
     ):
         model = await svc._default_text_model()
     assert model == "mediahub-doubao-llm"

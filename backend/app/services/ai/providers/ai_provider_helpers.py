@@ -102,7 +102,7 @@ def get_provider_config(ai_settings: dict, provider_key: str) -> dict:
 
 
 async def resolve_nous_model(
-    model_name: str, module: str
+    model_name: str, module: str, *, user_id: Optional[str] = None
 ) -> Optional[Tuple[str, Dict[str, Any], str]]:
     """Resolve a model name against the platform ``nous_models`` registry.
 
@@ -125,6 +125,12 @@ async def resolve_nous_model(
         — the platform config, ready for the existing adapter factory.
       - found + (disabled OR nous gated off) → **fail-closed** (RuntimeError);
         never silently fall back to a guessed BYOK provider.
+      - ``user_id`` given (the model is that user's pick or their agent's)
+        and the row is another user's owner-scoped row, or the user switched
+        the platform card off, or put the model on their blacklist →
+        ``PlatformModelNotAvailableError`` (typed 409, also a RuntimeError;
+        ``platform_provider.user_may_use`` — the view's own user gates).
+        No ``user_id`` (system / admin-chosen models) → unchanged.
       - found + served by nous-engine + a fresh engine list without its
         service → ``EngineServiceUnavailableError`` (a typed 503 that is
         also a RuntimeError); an unreachable engine lets the call through.
@@ -148,6 +154,10 @@ async def resolve_nous_model(
         )
     if not row.get("is_enabled"):
         raise RuntimeError(f"Platform model '{model_name}' is no longer available.")
+    if user_id:
+        from app.services.ai.platform_provider import user_may_use
+
+        await user_may_use(user_id, row)
     if row.get("actual_provider") == NOUS_ENGINE_PROVIDER:
         # The engine's own list is the authority on "is this service still
         # granted" (spec 2026-09-25 §3.6). Typed refusal, never a guess.
@@ -375,6 +385,7 @@ async def resolve_db_adapter(
     user_provider_config: Optional[Dict[str, Any]] = None,
     *,
     user_id: Optional[str] = None,
+    gate_user_id: Optional[str] = None,
 ):
     """DB-first adapter resolution (铁律 2026-07-07: LLM credentials never
     come from env). Order:
@@ -396,6 +407,12 @@ async def resolve_db_adapter(
     dispatch per-user (``codex-local`` runs the turn on that user's own paired
     machine). Callers with no user in hand may omit it; ``codex-local`` then
     refuses to build instead of dialing someone else's daemon.
+
+    ``gate_user_id`` is different: pass it only when ``model`` is that user's
+    OWN pick (a canvas node's model), so a catalog hit is checked against
+    their platform card (:func:`resolve_nous_model`'s ``user_id``). Admin- or
+    system-chosen models (maintenance, compaction) must not pass it — a user's
+    blacklist does not govern models they never picked.
     """
     from app.services.ai.adapters.factory import (
         get_adapter_for_key,
@@ -403,7 +420,7 @@ async def resolve_db_adapter(
         resolve_provider_key,
     )
 
-    hit = await resolve_nous_model(model, module)
+    hit = await resolve_nous_model(model, module, user_id=gate_user_id)
     if hit:
         actual_provider, cfg, actual_model = hit
         creds = {"api_key": cfg["api_key"], "base_url": cfg["base_url"]}
@@ -611,7 +628,9 @@ async def resolve_task_ai_config(
     # gone/disabled, degrade to the default agent rather than erroring the task.
     if assigned_slug.startswith("nous:"):
         try:
-            nous = await resolve_nous_model(assigned_slug[len("nous:") :], task_key)
+            nous = await resolve_nous_model(
+                assigned_slug[len("nous:") :], task_key, user_id=user_id
+            )
         except RuntimeError:
             nous = None
         if nous is not None:
@@ -669,7 +688,7 @@ async def resolve_task_ai_config(
     # Shared nous lookup: if the agent's model names a platform Nous model,
     # return the platform config while KEEPING resolved_slug so the caller
     # still composes THIS agent's custom prompt (prompt preserved).
-    nous = await resolve_nous_model(model, task_key)
+    nous = await resolve_nous_model(model, task_key, user_id=user_id)
     if nous is not None:
         n_provider_key, n_provider_config, n_model = nous
         return ResolvedAIConfig(
@@ -831,7 +850,7 @@ async def resolve_transcription_config(
     # route through the SAME ASR dispatch.
     if task_assignment.startswith("nous:"):
         nous_name = task_assignment.split(":", 1)[1]
-        nous = await resolve_nous_model(nous_name, "transcription")
+        nous = await resolve_nous_model(nous_name, "transcription", user_id=user_id)
         if nous is None:
             raise RuntimeError(
                 f"transcription references unknown platform model '{nous_name}'"

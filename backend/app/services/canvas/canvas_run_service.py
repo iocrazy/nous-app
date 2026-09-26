@@ -245,14 +245,18 @@ def _pick_default_row(rows: List[Dict[str, Any]]) -> Optional[str]:
 class CanvasRunService:
     """Single entrypoint: ``await svc.run_prompt(...)`` returns a result."""
 
-    async def _get_adapter(self, model: str):
+    async def _get_adapter(self, model: str, user_id: Optional[str] = None):
         # DB-only credential resolution (铁律 2026-07-07): platform
         # ``nous_models`` catalog → ProviderNotConfiguredError. No env.
+        # The model is the user's pick (or the default picked from their
+        # view), so their platform-card gates apply (``gate_user_id``).
         from app.services.ai.providers.ai_provider_helpers import resolve_db_adapter
 
-        return await resolve_db_adapter(model, "canvas")
+        return await resolve_db_adapter(
+            model, "canvas", user_id=user_id, gate_user_id=user_id
+        )
 
-    async def _default_text_model(self) -> str:
+    async def _default_text_model(self, user_id: Optional[str] = None) -> str:
         """The catalog model an empty ``provider_slug`` resolves to.
 
         Best enabled ``llm`` row in the platform ``nous_models`` catalog (see
@@ -263,13 +267,24 @@ class CanvasRunService:
         "default prompt won't run" report was a hardcoded ``qwen-plus`` that
         the catalog no longer carries.
         """
-        from app.services.ai.platform_provider import platform_rows_with_status
+        from app.services.ai.platform_provider import (
+            platform_rows,
+            platform_rows_with_status,
+        )
         from app.services.ai.providers.ai_provider_helpers import (
             get_maintenance_model,
         )
 
-        # Degrades to [] (logged) on a catalog read failure → maintenance model.
-        rows = await platform_rows_with_status("llm")
+        # The user's platform view (their switch, blacklist, owner rows, live
+        # engine state) — the same rows the canvas text picker lists. Degrades
+        # to [] (logged) on a read failure → maintenance model.
+        if user_id:
+            rows = [
+                r.public_row()
+                for r in await platform_rows(user_id, type="llm", purpose="picker")
+            ]
+        else:
+            rows = await platform_rows_with_status("llm")
         picked = _pick_default_row(rows)
         if picked is not None:
             return picked
@@ -281,6 +296,7 @@ class CanvasRunService:
         body: str,
         provider_slug: Optional[str] = None,
         agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> CanvasPromptRunResult:
         body = (body or "").strip()
 
@@ -295,11 +311,11 @@ class CanvasRunService:
             )
 
         # Empty parse → DB catalog default (never a hardcoded slug).
-        model = _resolve_model(provider_slug) or await self._default_text_model()
+        model = _resolve_model(provider_slug) or await self._default_text_model(user_id)
         system_message = await _compose_system_message_with_agent(agent_id)
 
         try:
-            adapter = await self._get_adapter(model)
+            adapter = await self._get_adapter(model, user_id)
         except Exception as exc:
             logger.exception("canvas run: adapter init failed for {}", model)
             return CanvasPromptRunResult(
