@@ -19,6 +19,7 @@ import pytest
 from app.core.embedding_space import SpaceSpec
 from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
 from app.services.library import semantic_store as store_mod
+from app.services.library.embedding_spaces import VisualSpaceError
 from app.services.library.search_service import (
     VISUAL_QUERY_INSTRUCTION,
     SearchResult,
@@ -121,6 +122,10 @@ def _svc(*, shots, docs=None, embedder=None) -> SearchService:
         shot_embeddings_repo=shots,
     )
     svc.embedding_service = embedder or _Embedder()
+    # The visual layer's own embedder + space (spec 2026-09-26 §2.2); the
+    # semantic leg above keeps its own. Same stub for both here.
+    svc.visual_embedding_service = svc.embedding_service
+    svc.visual_space_id = 5
     return svc
 
 
@@ -175,6 +180,63 @@ async def test_visual_leg_outcomes_mirror_the_vector_leg(shots, embedder, expect
     svc = _svc(shots=shots, embedder=embedder)
     hits, outcome = await svc._visual_hits("q", "u-1", limit=5, threshold=0.4)
     assert hits == [] and outcome == expected
+
+
+@pytest.mark.asyncio
+async def test_visual_leg_resolves_its_own_space_once(monkeypatch):
+    """Not preset: the visual leg asks embedding_spaces for the VISUAL
+    layer's space + embedder (not the semantic leg's), once per service."""
+    from app.services.library import search_service as ss
+
+    shots = _Repo(rows=[_shot_row(1, 0.62)])
+    visual = _Embedder()
+    calls = []
+
+    async def _resolve():
+        calls.append(1)
+        return {"id": 42, "actual_model": "wemm-embedding-2b"}, visual
+
+    monkeypatch.setattr(ss, "resolve_visual_space_and_embedder", _resolve)
+    svc = SearchService(
+        space_repo=_SpaceRepo(), embeddings_repo=_Repo(), shot_embeddings_repo=shots
+    )
+    semantic = _Embedder()
+    svc.embedding_service = semantic
+    for _ in range(2):
+        hits, outcome = await svc._visual_hits("q", "u-1", limit=5, threshold=0.4)
+        assert outcome == "ok" and len(hits) == 1
+    assert calls == [1] and svc.visual_space_id == 42
+    assert semantic.texts == [] and len(visual.texts) == 2
+    assert {s["space_id"] for s in shots.searches} == {42}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error, expected",
+    [
+        (VisualSpaceError("embedder_unconfigured"), "unconfigured"),
+        (VisualSpaceError("visual_space_unavailable", "row gone"), "unconfigured"),
+        (VisualSpaceError("provider_no_image", "text only"), "unconfigured"),
+        (VisualSpaceError("store_missing", "mig 499"), "store_missing"),
+        (RuntimeError("db down"), "error"),
+    ],
+)
+async def test_visual_leg_without_a_space_is_typed_and_leaves_the_rest(
+    monkeypatch, error, expected
+):
+    from app.services.library import search_service as ss
+
+    async def _resolve():
+        raise error
+
+    monkeypatch.setattr(ss, "resolve_visual_space_and_embedder", _resolve)
+    shots = _Repo(rows=[_shot_row(1, 0.62)])
+    svc = SearchService(
+        space_repo=_SpaceRepo(), embeddings_repo=_Repo(), shot_embeddings_repo=shots
+    )
+    svc.embedding_service = _Embedder()
+    hits, outcome = await svc._visual_hits("q", "u-1", limit=5, threshold=0.4)
+    assert hits == [] and outcome == expected and shots.searches == []
 
 
 @pytest.mark.asyncio

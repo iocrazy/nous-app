@@ -27,8 +27,6 @@ from typing import Any, Awaitable, Callable, Optional
 
 from loguru import logger
 
-from app.services.ai.providers.embedding_capabilities import capabilities_for
-from app.services.ai.providers.embedding_config import resolve_embedding_config
 from app.services.ai.providers.embedding_items import ImageUrlItem
 from app.services.ai.providers.embedding_service import (
     EmbeddingService,
@@ -47,6 +45,7 @@ MAX_PROVIDER_ERRORS = 3
 ABORT_REASONS = frozenset(
     {
         "embedder_unconfigured",
+        "visual_space_unavailable",
         "dimension_mismatch",
         "store_missing",
         "provider_no_image",
@@ -58,8 +57,8 @@ ProgressFn = Callable[[int, str], Awaitable[None]]
 
 class ShotIndexError(RuntimeError):
     """``reason`` is a stable code: ``resource_not_found`` / ``not_a_video`` /
-    ``no_video_file`` / ``embedder_unconfigured`` / ``provider_no_image`` /
-    ``dimension_mismatch`` / ``store_missing`` / ``provider_error`` / the
+    ``no_video_file`` / ``embedder_unconfigured`` / ``visual_space_unavailable``
+    / ``provider_no_image`` / ``dimension_mismatch`` / ``store_missing`` / ``provider_error`` / the
     :class:`ShotFramesError` reasons (``ffmpeg_missing`` / ``video_missing``
     / ``probe_failed`` / ``ffmpeg_failed`` / ``timeout``)."""
 
@@ -90,33 +89,21 @@ class ShotIndexResult:
 
 
 async def resolve_space_and_embedder() -> tuple[dict, EmbeddingService]:
-    """The ACTIVE space and its embedder, checked for image input. Typed
-    ``embedder_unconfigured`` / ``provider_no_image`` / ``store_missing``."""
-    from app.repositories.embedding_space_repository import (
-        get_embedding_space_repository,
+    """The VISUAL layer's space and its embedder, checked for image input
+    (``embedding_spaces.resolve_visual_space_and_embedder``: the visual
+    governance key, else the active space). Typed ``embedder_unconfigured``
+    / ``visual_space_unavailable`` / ``provider_no_image`` / ``store_missing``
+    as :class:`ShotIndexError` — the four callers (the index workflow, the
+    two ``/shots`` endpoints, the coverage read) keep their error handling."""
+    from app.services.library.embedding_spaces import (
+        VisualSpaceError,
+        resolve_visual_space_and_embedder,
     )
-    from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
 
-    cfg = await resolve_embedding_config()
-    if cfg is None:
-        raise ShotIndexError("embedder_unconfigured")
-    caps = capabilities_for(cfg)
-    if "image" not in caps.modalities:
-        raise ShotIndexError(
-            "provider_no_image",
-            f"{cfg.model} declares {sorted(caps.modalities)}; shots need image input",
-        )
-    embedder = EmbeddingService(cfg=cfg)
-    spec = await embedder.space_spec()
-    if spec is None:
-        raise ShotIndexError(
-            "embedder_unconfigured", "no client for the configured embedder"
-        )
     try:
-        space = await get_embedding_space_repository().get_or_create(spec)
-    except EmbeddingStoreMissing as e:
-        raise ShotIndexError("store_missing", str(e)) from e
-    return space, embedder
+        return await resolve_visual_space_and_embedder()
+    except VisualSpaceError as e:
+        raise ShotIndexError(e.code, e.detail) from e
 
 
 def _data_uri(jpeg: bytes) -> str:

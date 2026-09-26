@@ -36,8 +36,25 @@ EMBEDDING_MODEL_SETTING = "ai_module.embedding.model"
 #: governance key is blank.
 LEGACY_EMBEDDING_MODEL_SETTING = "graph_embedder_model"
 
+#: The governance key that names the VISUAL layer's embedder (a catalog
+#: ``name``). Blank = the visual layer follows the active space. Only the
+#: visual layer can be pointed at another space (spec 2026-09-26 §2.1).
+VISUAL_MODEL_SETTING = "ai_module.embedding.visual_model"
+
 #: What the Add Space probe embeds: any short text; only the width matters.
 PROBE_TEXT = "probe"
+
+VISUAL_SPACE_CODES = (
+    # No embedder at all (blank key and nothing active), or the client
+    # could not be built.
+    "embedder_unconfigured",
+    # The visual key names a catalog row that is gone / disabled / personal.
+    "visual_space_unavailable",
+    # The resolved embedder declares no image input.
+    "provider_no_image",
+    # ``embedding_spaces`` is not there yet (migration 499).
+    "store_missing",
+)
 
 #: ``nous_models.type`` of an embedding model.
 _EMBEDDING_TYPE = "embedding"
@@ -68,6 +85,18 @@ class ActiveSpaceUnknown(RuntimeError):
     """The active embedder could not be determined (settings unreadable, or
     the configured catalog row cannot be resolved). Anything destructive must
     refuse on it — "could not tell" is never "nothing is active"."""
+
+
+class VisualSpaceError(RuntimeError):
+    """The visual layer has no usable space. ``code`` is one of
+    :data:`VISUAL_SPACE_CODES`; ``detail`` is for logs and messages."""
+
+    def __init__(self, code: str, detail: str = "") -> None:
+        if code not in VISUAL_SPACE_CODES:
+            raise ValueError(f"unknown visual space code {code!r}")
+        super().__init__(f"{code}: {detail}" if detail else code)
+        self.code = code
+        self.detail = detail
 
 
 def _repo():
@@ -185,8 +214,113 @@ async def active_actual_model() -> Optional[str]:
     return None
 
 
+async def visual_catalog_name() -> Optional[str]:
+    """The catalog ``name`` the visual layer embeds with: the visual key when
+    set, else the active key (then the legacy key). None when nothing is
+    configured; every read failure raises :class:`ActiveSpaceUnknown`."""
+    repo = get_system_settings_repository()
+    try:
+        for key in (
+            VISUAL_MODEL_SETTING,
+            EMBEDDING_MODEL_SETTING,
+            LEGACY_EMBEDDING_MODEL_SETTING,
+        ):
+            name = str(await repo.get_value(key) or "").strip()
+            if name:
+                return name
+    except Exception as e:  # noqa: BLE001 — every failure is "unknown"
+        raise ActiveSpaceUnknown(f"visual embedding model unknown: {e}") from e
+    return None
+
+
+async def visual_follows_active() -> bool:
+    """True when the visual key is blank (the visual layer follows the
+    active space). Raises :class:`ActiveSpaceUnknown` on a read failure."""
+    try:
+        value = await get_system_settings_repository().get_value(VISUAL_MODEL_SETTING)
+    except Exception as e:  # noqa: BLE001
+        raise ActiveSpaceUnknown(f"visual embedding model unknown: {e}") from e
+    return not str(value or "").strip()
+
+
+async def visual_actual_model() -> Optional[str]:
+    """``actual_model`` of the space the visual key points at, or None when
+    the key is blank (the visual layer follows the active space — the
+    active-space checks already cover it). Raises :class:`ActiveSpaceUnknown`
+    — a delete must refuse rather than read "unknown" as "not in use"."""
+    try:
+        name = str(
+            await get_system_settings_repository().get_value(VISUAL_MODEL_SETTING) or ""
+        ).strip()
+        return await _actual_model_of(name) if name else None
+    except Exception as e:  # noqa: BLE001
+        raise ActiveSpaceUnknown(f"visual embedding model unknown: {e}") from e
+
+
+async def resolve_visual_space_and_embedder() -> (
+    tuple[Dict[str, Any], EmbeddingService]
+):
+    """The VISUAL layer's space and its embedder, checked for image input.
+
+    Blank visual key: the active embedder exactly as ``resolve_embedding_config``
+    resolves it (catalog / manual / legacy), so a deployment that never set
+    the key behaves as before. A set key: that catalog row alone, never a
+    fallback — a removed or disabled row is ``visual_space_unavailable``, not
+    a silent hop to the active space (the frames would land in the wrong
+    space). Typed :class:`VisualSpaceError`; the embedder is checked for
+    ``image`` in both cases."""
+    from app.repositories.embedding_space_repository import (
+        get_embedding_space_repository,
+    )
+    from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
+    from app.services.ai.providers.embedding_capabilities import capabilities_for
+    from app.services.ai.providers.embedding_config import resolve_embedding_config
+
+    try:
+        follows = await visual_follows_active()
+    except ActiveSpaceUnknown as e:
+        raise VisualSpaceError("embedder_unconfigured", str(e)) from e
+    if follows:
+        cfg = await resolve_embedding_config()
+        if cfg is None:
+            raise VisualSpaceError("embedder_unconfigured")
+    else:
+        name = str(
+            await get_system_settings_repository().get_value(VISUAL_MODEL_SETTING)
+        )
+        try:
+            cfg = await config_for_catalog_model(name.strip())
+        except SpaceCatalogError as e:
+            raise VisualSpaceError("visual_space_unavailable", f"{e.code}: {e}") from e
+    caps = capabilities_for(cfg)
+    if "image" not in caps.modalities:
+        raise VisualSpaceError(
+            "provider_no_image",
+            f"{cfg.model} declares {sorted(caps.modalities)}; the visual layer "
+            "needs image input",
+        )
+    embedder = EmbeddingService(cfg=cfg)
+    spec = await embedder.space_spec()
+    if spec is None:
+        raise VisualSpaceError(
+            "embedder_unconfigured", "no client for the visual embedder"
+        )
+    try:
+        space = await get_embedding_space_repository().get_or_create(spec)
+    except EmbeddingStoreMissing as e:
+        raise VisualSpaceError("store_missing", str(e)) from e
+    return space, embedder
+
+
 __all__ = [
     "ActiveSpaceUnknown",
+    "VISUAL_MODEL_SETTING",
+    "VISUAL_SPACE_CODES",
+    "VisualSpaceError",
+    "resolve_visual_space_and_embedder",
+    "visual_actual_model",
+    "visual_catalog_name",
+    "visual_follows_active",
     "EMBEDDING_MODEL_SETTING",
     "active_actual_model",
     "platform_embedding_models",

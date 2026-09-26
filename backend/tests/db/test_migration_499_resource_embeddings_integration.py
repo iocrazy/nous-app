@@ -396,6 +396,20 @@ async def test_space_get_or_create_is_idempotent(orm_dsn, pg, fx):
         spec.actual_model,
     )
     assert count == 1
+    # The capability table changed for this model (more modalities, another
+    # protocol): same space, refreshed description, instruction untouched.
+    grown = SpaceSpec(
+        actual_model=spec.actual_model,
+        dims=2048,
+        protocol="openai-embeddings-chat",
+        modalities=("image", "text", "video"),
+        instruction_version="zz_never_written_v9",
+    )
+    third = await repo.get_or_create(grown)
+    assert third["id"] == first["id"]
+    assert third["modalities"] == ["image", "text", "video"]
+    assert third["protocol"] == "openai-embeddings-chat"
+    assert third["instruction_version"] == first["instruction_version"]
 
 
 @_skip

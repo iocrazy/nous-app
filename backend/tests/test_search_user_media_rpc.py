@@ -885,9 +885,17 @@ def _hybrid_svc_with(
         # space-aware store has its own file (test_search_vector_leg_store).
         return None
 
+    async def _no_shots(**kwargs):
+        return []
+
     monkeypatch.setattr(svc.embedding_service, "try_embed", _fake_try_embed)
     monkeypatch.setattr(svc.embedding_service, "space_spec", _no_space)
     monkeypatch.setattr(svc.analysis_repo, "search_by_embedding", _fake_vec)
+    # The visual leg has its own embedder + space (spec 2026-09-26 §2.2);
+    # preset so these tests never resolve the visual governance key.
+    svc.visual_embedding_service = svc.embedding_service
+    svc.visual_space_id = 1
+    monkeypatch.setattr(svc.shot_embeddings_repo, "search", _no_shots)
     return svc
 
 

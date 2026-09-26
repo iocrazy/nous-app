@@ -44,18 +44,30 @@ def _space_dict(row: Any) -> dict:
 class EmbeddingSpaceRepository:
     async def get_or_create(self, spec: SpaceSpec) -> dict:
         """Return the space row for ``(spec.actual_model, spec.dims)``,
-        inserting it first if absent. An existing row is returned as stored:
-        the unique key is the identity, the other fields describe it."""
-        stmt = (
-            pg_insert(EmbeddingSpaces)
-            .values(
-                actual_model=spec.actual_model,
-                dims=spec.dims,
-                protocol=spec.protocol,
-                modalities=list(spec.modalities),
-                instruction_version=spec.instruction_version,
-            )
-            .on_conflict_do_nothing(constraint="embedding_spaces_model_dims_key")
+        inserting it first if absent. The unique key is the identity;
+        ``protocol`` / ``modalities`` merely describe the embedder and follow
+        the capability table (refreshed in place when the table changed for
+        that model — e.g. WeMM rows gaining ``image``); ``instruction_version``
+        is what the vectors were written under and is never rewritten here."""
+        insert = pg_insert(EmbeddingSpaces).values(
+            actual_model=spec.actual_model,
+            dims=spec.dims,
+            protocol=spec.protocol,
+            modalities=list(spec.modalities),
+            instruction_version=spec.instruction_version,
+        )
+        stmt = insert.on_conflict_do_update(
+            constraint="embedding_spaces_model_dims_key",
+            set_={
+                "protocol": insert.excluded.protocol,
+                "modalities": insert.excluded.modalities,
+            },
+            where=(
+                EmbeddingSpaces.protocol.is_distinct_from(insert.excluded.protocol)
+                | EmbeddingSpaces.modalities.is_distinct_from(
+                    insert.excluded.modalities
+                )
+            ),
         )
         lookup = select(EmbeddingSpaces).where(
             EmbeddingSpaces.actual_model == spec.actual_model,
@@ -70,7 +82,7 @@ class EmbeddingSpaceRepository:
                 raise EmbeddingStoreMissing(_MISSING) from exc
             raise
         if row is None:
-            # ON CONFLICT DO NOTHING + SELECT in one transaction always sees
+            # INSERT ... ON CONFLICT + SELECT in one transaction always sees
             # a row; reaching here means the key predicate and the unique
             # constraint disagree — a defect, not "no space".
             raise RuntimeError(

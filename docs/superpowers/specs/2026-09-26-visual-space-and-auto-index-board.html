@@ -1,0 +1,118 @@
+<title>Visual Space Board</title>
+<style>
+  :root{
+    --bg:#f6f4ef; --ink:#1f1d1a; --ink-2:#5c5750; --ink-3:#8f8980; --line:#e4dfd6; --island:#fffdf9; --island-2:#f0ece4;
+    --accent:#2f5d8a; --accent-soft:#e6eef7; --ok:#2e7d4f; --warn:#b26a00; --danger:#b23a3a; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+    --bg:#15140f; --ink:#ece7dc; --ink-2:#b6afa2; --ink-3:#7f7a70; --line:#2c2a24; --island:#1d1b16; --island-2:#26241e;
+    --accent:#8fb4dc; --accent-soft:#1f2b38; --ok:#6fc08f; --warn:#e0a24a; --danger:#e07070; color-scheme:dark; } }
+  :root[data-theme="dark"]{
+    --bg:#15140f; --ink:#ece7dc; --ink-2:#b6afa2; --ink-3:#7f7a70; --line:#2c2a24; --island:#1d1b16; --island-2:#26241e;
+    --accent:#8fb4dc; --accent-soft:#1f2b38; --ok:#6fc08f; --warn:#e0a24a; --danger:#e07070; color-scheme:dark; }
+  body{background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,"Segoe UI",Roboto,"PingFang SC","Noto Sans CJK SC",sans-serif;padding-block:24px;padding-inline:16px;max-width:1100px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px;text-wrap:balance} .sub{color:var(--ink-2);margin:0 0 20px}
+  h2{font-size:15px;margin:28px 0 8px} h3{font-size:13px;margin:0;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em}
+  .screen{border:1px solid var(--line);border-radius:12px;background:var(--island);padding:16px;display:grid;gap:14px}
+  .card{border:1px solid var(--line);border-radius:10px;background:var(--island-2);padding:12px;display:grid;gap:8px}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .btn{border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:12px;background:var(--island);color:var(--ink)}
+  .btn[disabled]{opacity:.5} .btn.primary{border-color:var(--accent);color:var(--accent)}
+  .badge{font-size:11px;padding:1px 6px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2)}
+  .badge.ok{color:var(--ok);border-color:var(--ok)} .badge.accent{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+  .mono{font-family:var(--mono);font-size:12px} .muted{color:var(--ink-3)} .warn{color:var(--warn)}
+  table{border-collapse:collapse;width:100%;font-size:13px} th{text-align:left;color:var(--ink-3);font-weight:500;font-size:12px;padding:6px 8px} td{padding:8px;border-top:1px solid var(--line);vertical-align:top}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px} .dot.off{background:var(--line)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden} .seg button{border:0;background:transparent;padding:4px 10px;font-size:12px;color:var(--ink-2)} .seg button[aria-checked="true"]{background:var(--accent-soft);color:var(--accent)}
+  dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0;align-items:center} dt{color:var(--ink-3);font-size:12px} dd{margin:0}
+  .notes{border-left:3px solid var(--accent);padding:6px 12px;color:var(--ink-2);font-size:13px;background:var(--accent-soft);border-radius:0 8px 8px 0}
+  .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;width:180px;display:inline-block;vertical-align:middle} .bar i{display:block;height:100%;background:var(--ok)}
+  .overflow{overflow-x:auto}
+  @media (max-width:640px){ dl{grid-template-columns:1fr} }
+</style>
+
+<h1>画面层专属空间 · 索引自动化</h1>
+<p class="sub">Settings → AI → Vectors 的两处增量。语义层留 doubao，画面层走 WeMM-2B（免费）；索引由策略自己跑。文案是英文（UI 规范），注释是中文。</p>
+
+<h2>屏 1 · Vector Spaces（管理员视角）</h2>
+<div class="screen">
+  <div class="row" style="justify-content:space-between"><h3>Vector Spaces</h3><button class="btn">Add Space</button></div>
+
+  <div class="card">
+    <div class="row"><span class="badge accent">Current Space</span><span class="mono">doubao-embedding-vision-251215</span><span class="badge">ark-multimodal</span><span class="badge">2048 · halfvec · HNSW</span></div>
+    <dl>
+      <dt>Capabilities</dt><dd><span class="badge ok">text</span> <span class="badge ok">image</span> <span class="badge ok">video</span></dd>
+      <dt>Instruction</dt><dd class="mono">en_keyword_v1</dd>
+      <dt>Visual layer</dt><dd><span class="mono">wemm-embedding-2b</span> <span class="muted">· separate space</span></dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <div class="row"><span class="badge">Candidate Space</span><span class="mono">wemm-embedding-2b</span><span class="badge">openai-embeddings-chat</span><span class="badge accent">Visual layer</span></div>
+    <dl>
+      <dt>Catalog Model</dt><dd class="mono">nous-wemm-embedding-2b <span class="muted">· nous-engine · free</span></dd>
+      <dt>Semantic</dt><dd><span class="mono">0 / 1,409</span> <span class="bar"><i style="width:0%"></i></span></dd>
+      <dt>Visual · frame</dt><dd><span class="mono">38 / 1,118</span> <span class="bar"><i style="width:3.4%"></i></span></dd>
+    </dl>
+    <div class="row">
+      <button class="btn">Backfill 200</button>
+      <button class="btn" disabled title="Backfill to 100% before switching">Switch To This Space</button>
+      <button class="btn primary">Follow Current</button>
+      <button class="btn" disabled title="This space serves the Visual layer — point it elsewhere first">Delete</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row"><span class="badge">Candidate Space</span><span class="mono">wemm-embedding-4b</span><span class="badge">2560 dims</span></div>
+    <div class="row">
+      <button class="btn">Backfill 200</button>
+      <button class="btn" disabled>Switch To This Space</button>
+      <button class="btn">Use For Visual</button>
+      <button class="btn">Delete</button>
+    </div>
+  </div>
+
+  <div class="notes">
+    候选卡多一个动作：<b>Use For Visual</b>（写 <span class="mono">ai_module.embedding.visual_model</span>）。已是画面空间的卡显示 <b>Visual layer</b> 徽标、动作变成 <b>Follow Current</b>（清键，跟随当前空间），Delete 禁用并说明原因。当前空间卡多一行 <b>Visual layer</b> 指向哪；跟随时写 <span class="mono">follows current space</span>。Switch 当前空间不动画面键。非管理员只看不点（与 Add Space 同款 title 提示）。
+  </div>
+</div>
+
+<h2>屏 2 · Retrieval Layers + Indexing Policy</h2>
+<div class="screen">
+  <h3>Retrieval Layers</h3>
+  <div class="overflow"><table>
+    <tr><th>Layer</th><th>Status</th><th>Coverage</th><th>Source</th><th>Backfill</th></tr>
+    <tr><td>Semantic</td><td><span class="dot"></span>OK</td><td class="mono">1,445 / 1,445</td><td class="muted">title + description + tags + summary + transcript</td><td><button class="btn">Dry Run</button> <button class="btn">Run 200</button></td></tr>
+    <tr><td>Visual · Frame</td><td><span class="dot"></span>OK</td><td class="mono">38 / 1,118 <span class="warn">· 1 stale</span></td><td class="muted">one keyframe per shot · <span class="mono">space wemm-embedding-2b</span></td><td><button class="btn">Dry Run</button> <button class="btn">Run 20</button></td></tr>
+    <tr><td>Camera · Clip</td><td><span class="dot off"></span>Arrives with PR 4</td><td class="mono muted">— / 1,118</td><td></td><td></td></tr>
+    <tr><td>Transcript</td><td><span class="dot off"></span>Not built · Phase 2</td><td class="mono muted">0 / 1,445</td><td></td><td></td></tr>
+  </table></div>
+
+  <h3>Indexing Policy</h3>
+  <div class="card">
+    <dl>
+      <dt>Auto-index new videos</dt>
+      <dd><span class="seg" role="radiogroup"><button role="radio" aria-checked="false">Off</button><button role="radio" aria-checked="true">Local provider only</button><button role="radio" aria-checked="false">Always</button></span>
+        <span class="muted"> · visual provider is nous-engine (local) — new downloads are indexed for free</span></dd>
+      <dt>Background backfill</dt>
+      <dd><span class="seg" role="radiogroup"><button role="radio" aria-checked="false">Off</button><button role="radio" aria-checked="true">Local provider only</button><button role="radio" aria-checked="false">Always</button></span></dd>
+      <dt>Batch per tick</dt><dd><span class="mono">5</span> <span class="muted">videos every 10 min, only while fewer than 5 are running</span></dd>
+      <dt>Daily cap (network provider)</dt><dd><span class="mono">200</span> <span class="muted">videos · not applied while the provider is local</span></dd>
+      <dt>Today</dt><dd><span class="mono">37 dispatched · 3 running · 1,081 remaining</span> <span class="muted">· last tick 10:20 · </span><span class="warn">last error: none</span></dd>
+    </dl>
+    <div class="row"><button class="btn primary">Save Policy</button><span class="muted">admin only · takes effect on the next tick</span></div>
+  </div>
+
+  <div class="card">
+    <dl>
+      <dt>Auto-index new videos</dt>
+      <dd><span class="seg" role="radiogroup"><button role="radio" aria-checked="false">Off</button><button role="radio" aria-checked="true">Local provider only</button><button role="radio" aria-checked="false">Always</button></span>
+        <span class="warn"> · current visual provider is doubao (network) — this equals Off</span></dd>
+    </dl>
+  </div>
+
+  <div class="notes">
+    Visual 行的 Source 列写清它的空间。Indexing Policy 四个键都是 admin 治理设置；进度行读 <span class="mono">shots_policy</span>（<span class="mono">/search/vectors/status</span> 新字段），非管理员只读。第二张卡是 provider 是网络时的样子：<b>Local provider only</b> 等于 Off，灰字明说，不静默。「Today」的 remaining 就是 Visual 行的 total − covered。
+  </div>
+</div>

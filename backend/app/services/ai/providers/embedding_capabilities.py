@@ -65,12 +65,20 @@ def _engine_text(native_dims: int) -> EmbeddingCapabilities:
     )
 
 
+# WeMM through the chat ``messages`` shape: text parts and ``image_url``
+# parts (data URIs) in one user message. Cross-modal verified through the
+# engine gateway on 2026-09-23 (red-square image vs its caption 0.36, vs an
+# unrelated caption 0.12). No ``video_frames`` part in this shape: frame
+# lists are sent as images (``max_video_frames=0``).
+_TEXT_IMAGE = frozenset({"text", "image"})
+
+
 def _engine_chat(native_dims: int) -> EmbeddingCapabilities:
-    """WeMM on nous-engine today: text only, over the chat ``messages`` shape
-    (see :data:`PROTOCOL_OPENAI_CHAT`), no ``dimensions`` field."""
+    """WeMM on nous-engine today: text and images, over the chat ``messages``
+    shape (see :data:`PROTOCOL_OPENAI_CHAT`), no ``dimensions`` field."""
     return EmbeddingCapabilities(
         protocol=PROTOCOL_OPENAI_CHAT,
-        modalities=_TEXT,
+        modalities=_TEXT_IMAGE,
         native_dims=native_dims,
         matryoshka_dims=(),
         max_video_frames=0,
@@ -109,9 +117,10 @@ _DOUBAO_VISION = EmbeddingCapabilities(
 )
 
 # (lowercase model-id prefix, capabilities); longest prefix wins.
-# Engine rows are text-only until the multimodal endpoint ships — see
-# engine_multimodal_capabilities. WeMM rows carry text in chat ``messages``
-# (PROTOCOL_OPENAI_CHAT); qwen3-vl rows keep the plain ``input`` shape.
+# WeMM rows carry text and images in chat ``messages`` (PROTOCOL_OPENAI_CHAT);
+# video (frame lists, matryoshka widths) waits for the grouped endpoint — see
+# engine_multimodal_capabilities. qwen3-vl rows keep the plain ``input`` shape
+# and are text-only.
 _TABLE: tuple[tuple[str, EmbeddingCapabilities], ...] = (
     ("doubao-embedding-vision", _DOUBAO_VISION),
     ("wemm-embedding-2b", _engine_chat(2048)),

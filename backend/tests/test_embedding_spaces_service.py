@@ -302,3 +302,202 @@ async def test_active_model_unknown_is_raised_not_read_as_none(gov, error):
     a, b = _active(gov, error=error)
     with a, b, pytest.raises(mod.ActiveSpaceUnknown):
         await mod.active_actual_model()
+
+
+# ------------------------------------------------------- visual layer space ----
+_VISUAL_CFG = mod.EmbeddingConfig(
+    base_url="http://nous-engine:8000/v1",
+    api_key="sk",
+    model="wemm-embedding-2b",
+    dimensions=0,
+    source="platform",
+)
+_VISUAL_SPEC = SpaceSpec(
+    actual_model="wemm-embedding-2b",
+    dims=2048,
+    protocol="openai-embeddings-chat",
+    modalities=("image", "text"),
+)
+
+
+class _VisualSpaceRepo:
+    def __init__(self, fail=None):
+        self.fail, self.specs = fail, []
+
+    async def get_or_create(self, spec):
+        self.specs.append(spec)
+        if self.fail is not None:
+            raise self.fail
+        return {"id": 77, "actual_model": spec.actual_model}
+
+
+class _VisualEmbedder:
+    def __init__(self, cfg=None, spec=_VISUAL_SPEC):
+        self.cfg, self._spec = cfg, spec
+
+    async def space_spec(self):
+        return self._spec
+
+
+def _visual(
+    gov,
+    *,
+    active_cfg=None,
+    catalog_cfg=_VISUAL_CFG,
+    catalog_error=None,
+    spec=_VISUAL_SPEC,
+    space_repo=None,
+):
+    made = []
+
+    def _make(cfg=None):
+        e = _VisualEmbedder(cfg, spec)
+        made.append(e)
+        return e
+
+    async def _cfg_for(name):
+        if catalog_error is not None:
+            raise catalog_error
+        return catalog_cfg
+
+    return made, (
+        patch.object(mod, "get_system_settings_repository", lambda: gov),
+        patch.object(mod, "EmbeddingService", _make),
+        patch.object(mod, "config_for_catalog_model", _cfg_for),
+        patch(
+            "app.services.ai.providers.embedding_config.resolve_embedding_config",
+            AsyncMock(return_value=active_cfg),
+        ),
+        patch(
+            "app.repositories.embedding_space_repository.get_embedding_space_repository",
+            lambda: space_repo or _VisualSpaceRepo(),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_visual_catalog_name_prefers_the_visual_key_then_the_active_one():
+    a, b = _active(_Gov({mod.VISUAL_MODEL_SETTING: "nous-wemm-2b"}))
+    with a, b:
+        assert await mod.visual_catalog_name() == "nous-wemm-2b"
+    a, b = _active(
+        _Gov(
+            {mod.VISUAL_MODEL_SETTING: " ", mod.EMBEDDING_MODEL_SETTING: "nous-doubao"}
+        )
+    )
+    with a, b:
+        assert await mod.visual_catalog_name() == "nous-doubao"
+        assert await mod.visual_follows_active() is True
+    a, b = _active(_Gov({}))
+    with a, b:
+        assert await mod.visual_catalog_name() is None
+
+
+@pytest.mark.asyncio
+async def test_visual_actual_model_is_none_when_following_and_raises_when_unknown():
+    a, b = _active(_Gov({mod.EMBEDDING_MODEL_SETTING: "nous-wemm"}), _PLATFORM)
+    with a, b:
+        assert await mod.visual_actual_model() is None
+    a, b = _active(_Gov({mod.VISUAL_MODEL_SETTING: "nous-wemm"}), _PLATFORM)
+    with a, b:
+        assert await mod.visual_actual_model() == "wemm-embedding-2b"
+    a, b = _active(_Gov(fail=RuntimeError("db down")))
+    with a, b, pytest.raises(mod.ActiveSpaceUnknown):
+        await mod.visual_actual_model()
+    with a, b, pytest.raises(mod.ActiveSpaceUnknown):
+        await mod.visual_follows_active()
+
+
+@pytest.mark.asyncio
+async def test_resolve_visual_follows_the_active_embedder_when_the_key_is_blank():
+    doubao = mod.EmbeddingConfig(
+        base_url="https://ark",
+        api_key="k",
+        model="doubao-embedding-vision-251215",
+        dimensions=2048,
+        source="platform",
+    )
+    spec = SpaceSpec(
+        actual_model=doubao.model,
+        dims=2048,
+        protocol="ark-multimodal",
+        modalities=("image", "text", "video"),
+    )
+    repo = _VisualSpaceRepo()
+    made, patches = _visual(_Gov({}), active_cfg=doubao, spec=spec, space_repo=repo)
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        space, embedder = await mod.resolve_visual_space_and_embedder()
+    assert space["id"] == 77 and embedder is made[0]
+    assert made[0].cfg is doubao  # built from the ACTIVE config, no catalog read
+    assert repo.specs == [spec]
+
+
+@pytest.mark.asyncio
+async def test_resolve_visual_uses_the_named_catalog_row_only():
+    repo = _VisualSpaceRepo()
+    made, patches = _visual(
+        _Gov({mod.VISUAL_MODEL_SETTING: "nous-wemm-embedding-2b"}),
+        active_cfg=None,  # the active embedder is irrelevant (and here absent)
+        space_repo=repo,
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        space, embedder = await mod.resolve_visual_space_and_embedder()
+    assert made[0].cfg is _VISUAL_CFG and space["actual_model"] == "wemm-embedding-2b"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "gov,kw,code",
+    [
+        (_Gov({}), {"active_cfg": None}, "embedder_unconfigured"),
+        (_Gov(fail=RuntimeError("db down")), {}, "embedder_unconfigured"),
+        (
+            _Gov({mod.VISUAL_MODEL_SETTING: "gone"}),
+            {"catalog_error": SpaceCatalogError("catalog_model_disabled", "off")},
+            "visual_space_unavailable",
+        ),
+        (
+            _Gov({mod.VISUAL_MODEL_SETTING: "nous-qwen"}),
+            {
+                "catalog_cfg": mod.EmbeddingConfig(
+                    base_url="http://e/v1",
+                    api_key="k",
+                    model="qwen3-vl-embedding-2b",
+                    dimensions=0,
+                    source="platform",
+                )
+            },
+            "provider_no_image",
+        ),
+        (
+            _Gov({mod.VISUAL_MODEL_SETTING: "nous-wemm-embedding-2b"}),
+            {"spec": None},
+            "embedder_unconfigured",
+        ),
+    ],
+)
+async def test_resolve_visual_is_typed(gov, kw, code):
+    _made, patches = _visual(gov, **kw)
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with pytest.raises(mod.VisualSpaceError) as exc:
+            await mod.resolve_visual_space_and_embedder()
+    assert exc.value.code == code
+
+
+@pytest.mark.asyncio
+async def test_resolve_visual_store_missing_is_typed():
+    from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
+
+    _made, patches = _visual(
+        _Gov({mod.VISUAL_MODEL_SETTING: "nous-wemm-embedding-2b"}),
+        space_repo=_VisualSpaceRepo(fail=EmbeddingStoreMissing("mig 499")),
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with pytest.raises(mod.VisualSpaceError) as exc:
+            await mod.resolve_visual_space_and_embedder()
+    assert exc.value.code == "store_missing"
+
+
+def test_visual_space_error_rejects_unknown_codes():
+    with pytest.raises(ValueError):
+        mod.VisualSpaceError("nope")
