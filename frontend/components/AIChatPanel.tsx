@@ -70,6 +70,7 @@ import { useComposerDropzone } from '../hooks/useComposerDropzone';
 import { useComposerPaste } from '../hooks/useComposerPaste';
 import { useResourceSearch } from '../hooks/useResourceSearch';
 import { useGlobalChatStore } from '../stores/globalChatStore';
+import { useFabActivityPublisher } from './chatFab/useFabActivityPublisher';
 import { useComposerResourceAttach } from '../hooks/useComposerResourceAttach';
 import { useComposerAssetAttach } from '../hooks/useComposerAssetAttach';
 import { useMentionAssetsTab } from './chat/useMentionAssetsTab';
@@ -1105,14 +1106,24 @@ export function AIChatPanel({
   // Phase 2a chat answer surface: the newest assistant message is the only
   // answerable one, and issue-context sessions answer on the issue thread
   // (the chat endpoint 409s `use_issue_thread`).
-  const lastAssistantMessageId = useMemo(
-    () => [...messages].reverse().find((m) => m.role === 'assistant')?.id ?? null,
+  const lastAssistantMessage = useMemo(
+    () => [...messages].reverse().find((m) => m.role === 'assistant') ?? null,
     [messages],
   );
+  const lastAssistantMessageId = lastAssistantMessage?.id ?? null;
   const issueContextSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId)?.context_type === 'issue',
     [sessions, activeSessionId],
   );
+  // Floating mascot mirrors the panel: streaming → running, an unanswered
+  // question on the newest assistant turn → waiting. Issue-context sessions
+  // never show the answer card, so the mascot must not ask for one either.
+  const lastAssistantAwaitingInput = useMemo(() => {
+    if (!lastAssistantMessage || issueContextSession) return false;
+    const q = extractAwaitingInput(lastAssistantMessage);
+    return !!q && !q.answered;
+  }, [lastAssistantMessage, issueContextSession]);
+  useFabActivityPublisher(sending, lastAssistantAwaitingInput);
 
   const handleSuggest = useCallback(
     (suggestion: string) => {

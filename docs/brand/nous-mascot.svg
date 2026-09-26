@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 1024 1024" fill="none" role="img" aria-labelledby="nous-title nous-desc">
+<title id="nous-title">nous / 無我</title><desc id="nous-desc">Editable vector interpretation of the approved mascot. No embedded raster images.</desc>
+<defs>
+  <linearGradient id="ear-left" x1="76" y1="477" x2="320" y2="258" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#78d2ec"/><stop offset=".4" stop-color="#9eb9f5"/>
+    <stop offset=".72" stop-color="#d0baf5"/><stop offset="1" stop-color="#f8e7f4"/>
+  </linearGradient>
+  <linearGradient id="ear-right" x1="704" y1="214" x2="913" y2="505" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#e8e6f7"/><stop offset=".45" stop-color="#f0bcd8"/>
+    <stop offset=".76" stop-color="#ffbe9c"/><stop offset="1" stop-color="#ffe0a5"/>
+  </linearGradient>
+  <radialGradient id="shell" cx=".31" cy=".14" r=".94">
+    <stop stop-color="#ffffff"/><stop offset=".5" stop-color="#f8f6f6"/>
+    <stop offset=".83" stop-color="#e6e2ed"/><stop offset="1" stop-color="#e2d3d4"/>
+  </radialGradient>
+  <radialGradient id="body" cx=".3" cy=".22" r=".88">
+    <stop stop-color="#ffffff"/><stop offset=".6" stop-color="#f6f2f2"/><stop offset="1" stop-color="#d7cddc"/>
+  </radialGradient>
+  <linearGradient id="rim" x1=".1" y1="0" x2=".9" y2="1">
+    <stop stop-color="#e8e1e5"/><stop offset=".55" stop-color="#fdf8f6"/><stop offset="1" stop-color="#d8d1df"/>
+  </linearGradient>
+  <radialGradient id="visor" cx=".35" cy=".17" r=".91">
+    <stop stop-color="#403747"/><stop offset=".3" stop-color="#201d2a"/>
+    <stop offset=".75" stop-color="#121320"/><stop offset="1" stop-color="#252031"/>
+  </radialGradient>
+  <linearGradient id="hand" x1="0" y1="0" x2=".7" y2="1">
+    <stop stop-color="#b8a9b2"/><stop offset=".5" stop-color="#82778b"/><stop offset="1" stop-color="#514858"/>
+  </linearGradient>
+  <linearGradient id="core" x1="414" y1="512" x2="525" y2="540" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#df8de9"/><stop offset=".45" stop-color="#bc8eef"/><stop offset="1" stop-color="#78cbed"/>
+  </linearGradient>
+  <linearGradient id="reflection" x1="0" y1="0" x2="1" y2="1">
+    <stop stop-color="#ffffff" stop-opacity=".25"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+  </linearGradient>
+</defs><g id="mascot" transform="translate(0 98)">
+  <!-- One continuous, open-minded curl. -->
+  <path id="curl" d="M471 102 C451 70 476 44 500 48 C521 49 540 70 536 84"
+    fill="none" stroke="url(#body)" stroke-width="28" stroke-linecap="round"/>
+  <!-- Gradient canvas ribbons, behind the shell. -->
+  <path id="ribbon-left" d="M317 194 C274 203 244 265 207 302 C156 353 90 361 62 400
+    C30 447 64 497 109 507 C181 527 234 482 271 426 C313 364 334 258 317 194Z"
+    fill="url(#ear-left)"/>
+  <path d="M78 399 C129 371 166 372 211 322 C167 393 142 417 87 420Z" fill="#fff" opacity=".17"/>
+  <path id="ribbon-right" d="M650 190 C708 180 748 244 790 292 C845 355 898 361 926 402
+    C956 447 926 504 875 513 C801 531 749 486 718 426 C686 363 657 274 650 190Z"
+    fill="url(#ear-right)"/>
+  <!-- Small body and open hands; head overlaps neck, not the reverse. -->
+  <path id="torso" d="M390 440 C367 471 351 524 355 573 C355 624 402 671 472 681
+    C541 673 596 630 595 574 C594 522 573 474 553 443Z"
+    fill="url(#body)" stroke="#d9d1df" stroke-opacity=".32" stroke-width="2"/>
+  <path id="arm-left" d="M391 457 C365 469 340 487 319 505 C300 500 280 504 269 523
+    C258 549 274 572 300 575 C330 578 351 552 369 535Z" fill="url(#body)"/>
+  <path id="hand-left" d="M286 520 C274 514 259 508 254 502 C247 496 242 502 247 509
+    L256 520 C242 521 234 517 228 517 C223 514 219 519 223 527
+    C228 541 247 551 265 551 C278 551 286 538 286 520Z" fill="url(#hand)"/>
+  <path d="M228 525 Q251 537 278 528" fill="none" stroke="#fff4df" stroke-opacity=".25" stroke-width="4" stroke-linecap="round"/>
+  <path id="arm-right" d="M552 457 C579 470 603 487 625 505 C644 500 664 504 675 523
+    C686 549 670 572 644 575 C614 578 593 552 575 535Z" fill="url(#body)"/>
+  <path id="hand-right" d="M658 520 C670 514 685 508 690 502 C697 496 702 502 697 509
+    L688 520 C702 521 710 517 716 517 C721 514 725 519 721 527
+    C716 541 697 551 679 551 C666 551 658 538 658 520Z" fill="url(#hand)"/>
+  <path d="M716 525 Q693 537 666 528" fill="none" stroke="#fff4df" stroke-opacity=".25" stroke-width="4" stroke-linecap="round"/>
+  <!-- Seated, floating pose. -->
+  <path id="leg-left" d="M393 600 C359 571 325 570 307 593 C282 623 295 664 323 681
+    C349 697 390 701 422 690 L446 662 C433 638 414 618 393 600Z"
+    fill="url(#body)" stroke="#ddd4e0" stroke-opacity=".4" stroke-width="2"/>
+  <path id="leg-right" d="M551 600 C585 571 619 570 637 593 C662 623 649 664 621 681
+    C595 697 554 701 522 690 L498 662 C511 638 530 618 551 600Z"
+    fill="url(#body)" stroke="#ddd4e0" stroke-opacity=".4" stroke-width="2"/>
+  <path id="foot-left" d="M415 656 C433 645 454 653 466 671 C480 689 468 705 449 705
+    C430 704 413 696 410 682 C408 673 410 663 415 656Z" fill="url(#hand)"/>
+  <path id="foot-right" d="M529 656 C511 645 490 653 478 671 C464 689 476 705 495 705
+    C514 704 531 696 534 682 C536 673 534 663 529 656Z" fill="url(#hand)"/>
+  <!-- Infinity: a genuine crossing curve, not a heart-shaped outline. -->
+  <path id="core-glow" d="M468 526 C451 505 445 503 435 503 C406 503 406 549 435 549
+    C456 549 479 503 499 503 C529 503 529 549 499 549 C488 549 481 542 468 526"
+    fill="none" stroke="#dec4f3" stroke-opacity=".35" stroke-width="21" stroke-linecap="round"/>
+  <path id="infinity" d="M468 526 C451 505 445 503 435 503 C406 503 406 549 435 549
+    C456 549 479 503 499 503 C529 503 529 549 499 549 C488 549 481 542 468 526"
+    fill="none" stroke="url(#core)" stroke-width="13" stroke-linecap="round"/>
+  <path d="M481 511 L456 541" stroke="#fdf2ff" stroke-width="4" opacity=".42"/>
+  <!-- The shell and its visor form the recognizable silhouette. -->
+  <path id="head" d="M474 99 C380 96 309 130 272 197 C247 242 249 289 255 347
+    C259 413 280 447 326 459 C375 472 579 474 629 460 C676 448 702 421 707 372
+    C713 317 703 239 677 193 C640 128 567 97 474 99Z"
+    fill="url(#shell)" stroke="#e9e2ef" stroke-width="2"/>
+  <path d="M302 228 C334 155 412 125 497 128" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="8" stroke-linecap="round"/>
+  <path id="visor-rim" d="M473 154 C389 155 325 194 305 260 C285 326 299 375 330 395
+    C374 423 564 424 603 396 C638 372 651 335 637 274 C622 205 563 153 473 154Z"
+    fill="url(#rim)"/>
+  <path id="face" d="M473 163 C393 164 335 201 314 264 C296 322 307 367 336 386
+    C376 411 559 413 597 387 C628 366 640 332 627 277 C613 212 558 162 473 163Z"
+    fill="url(#visor)" stroke="#1f1b27" stroke-width="3"/>
+  <path d="M333 267 C350 212 402 183 454 180 C411 197 371 232 353 282Z"
+    fill="url(#reflection)"/>
+  <path d="M573 191 C604 216 619 246 623 275 C605 254 592 247 578 241Z" fill="#989bff" opacity=".075"/>
+  <!-- A calm expression. Layered strokes imply glow without raster filters. -->
+  <g id="eyes" fill="none" stroke-linecap="round">
+    <path d="M365 298 C379 323 410 323 426 300 M493 300 C508 324 539 324 553 299"
+      stroke="#a681ef" stroke-width="25" opacity=".12"/>
+    <path d="M365 298 C379 323 410 323 426 300 M493 300 C508 324 539 324 553 299"
+      stroke="#ba9aff" stroke-width="15" opacity=".34"/>
+    <path d="M365 298 C379 323 410 323 426 300 M493 300 C508 324 539 324 553 299"
+      stroke="#eee0ff" stroke-width="8"/>
+  </g>
+</g>
+</svg>

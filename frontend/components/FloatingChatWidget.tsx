@@ -20,9 +20,11 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { GripVertical, History, MessageSquare, Minus } from 'lucide-react';
+import { GripVertical, History, Minus } from 'lucide-react';
 
 import { AIChatPanel } from './AIChatPanel';
+import { ChatFab } from './chatFab/ChatFab';
+import { TOP_CHROME_PX } from './chatFab/fabGeometry';
 import {
   CHAT_MAX_W,
   CHAT_MIN_H,
@@ -34,8 +36,8 @@ import {
 // If the title bar slides under it, every pointerdown lands on the TopBar
 // and the window can never be grabbed again (reported twice as "the chat
 // window can't be moved"). Keep the top edge out of that band everywhere
-// the rect is computed: fit(), drag, and north-edge resize.
-const TOP_CHROME_PX = 56; // 48px TopBar + 8px breathing room
+// the rect is computed: fit(), drag, and north-edge resize. TOP_CHROME_PX
+// is shared with the collapsed FAB's clamp (chatFab/fabGeometry).
 
 type ResizeMode = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
@@ -235,19 +237,11 @@ export function FloatingChatWidget(): React.ReactElement | null {
 
   if (onChatPage) return null;
 
+  // Collapsed: the draggable 無我 mascot (components/chatFab). It keeps
+  // data-testid="sb-toggle-chat" and the ⌘I toggle above; position lives in
+  // the same store as the window rect.
   if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={toggle}
-        title="AI Chat (⌘I)"
-        aria-label="Open AI Chat"
-        data-testid="sb-toggle-chat"
-        className="fixed bottom-20 right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg transition-all hover:bg-indigo-500 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-      >
-        <MessageSquare size={20} />
-      </button>
-    );
+    return <ChatFab />;
   }
 
   return (
