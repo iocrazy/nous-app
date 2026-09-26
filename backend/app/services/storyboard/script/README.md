@@ -25,7 +25,7 @@ Task: generate story outline.
 Return a JSON array of chapter objects. Each object must have:
 - "title": string (chapter title)
 - "summary": string (2-3 sentence plot summary)
-Generate exactly 5 chapters.
+Generate exactly {chapter_count} chapters.
 Return ONLY a JSON array, no other text.
 ```
 
@@ -87,7 +87,7 @@ Additional requirements:
 
 ```text
 Task: create branching story alternatives.
-Create exactly 2 alternative story branches from the given chapter. Branch type: choice.
+Create exactly {branch_count} alternative story branches from the given chapter. Branch type: {branch_type}.
 For 'choice' type: each branch represents a different decision the protagonist could make.
 For 'condition' type: each branch represents a different circumstance that could unfold.
 Return a JSON array of branch objects, each with:

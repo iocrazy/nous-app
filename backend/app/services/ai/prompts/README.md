@@ -719,4 +719,4 @@ schema 约 200 token（不含 `options` 子 schema），指令约 110 token，�
 - **`[link-summary]` 是方括号框**。`OWNED_FRAMES` 里登记了 `link-summary`，但 `escape_frame_body` 只认 `</name>`，方括号闭合 `[/link-summary]` 由 `link_injection._defuse_link_close` 自己负责；新增往块里写外部文本的地方必须同样过它。#2472 之前标题与描述未转义、无上限，记录在此供对照。非 HTML 页面只有响应头信息。
 - **强制声明的 `tool_choice` 从不穿过 `LLMFallbackChain`**（链的 `call` 不收这个参数），所以生产上那次强制请求实际是「不强制」。已记票（fh4 计划留票 E）。
 - **`{assistant_text}` 进强制声明请求时没有上限**。
-- **`Delegate` 的工具 schema 没有自己的三问块**。它由 `PromptComposer._build_tools` 追加，本 README 只在系统消息块里提到 `<available_workers>`；fh4 守卫按模块登记，`prompt_composer.py` 已被其他块覆盖，所以守卫不会指出这一处。留票。
+- **两份工具 schema 没有自己的三问块**：`Delegate`（`prompt_composer.py` 内联构造）与 1:1 聊天的 `ResourceFetch`（`ai_library_chat_service.py` 内联构造，描述与团队频道那份不同，团队频道那份见 `app/services/chat/README.md`）。fh4 守卫按模块登记，这两个模块已被其他块覆盖，所以守卫看不见它们。留票：把守卫改成按 `(模块, 工具名)` 登记，每个 `{"type": "function"}` 字面量各自要一个块，再补这两块。

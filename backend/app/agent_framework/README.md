@@ -32,6 +32,8 @@
 
 yellow 档不产生摘要，只改写工具结果正文（见「工具结果去重与老化」）。
 
+⚠️ **走 `claude` 协议时模型看不到这条摘要**：`adapters/claude.py::_convert_messages` 只转换 `user` / `assistant` / `tool`，消息列表里的 `role=system` 一律丢弃（系统消息另走 `system` 参数，只有 `composed.system_message`）。所以在那条路上压缩等于**直接删掉头部**。OpenAI 兼容 adapter 保留它，codex daemon adapter 把它展平进文本。
+
 #### Token effect
 
 档位按 `(count_tokens(system) + count_messages_tokens(messages)) / window` 判定（`context_compactor.py` 的 `CompactionThresholds`）：
@@ -144,6 +146,8 @@ user 消息是 `Summarize the following conversation, preserving the rules in th
 [tool_call replaced — arguments exceeded {cap} tokens (was {actual} tokens). Original tool_call_id: {tcid}]
 ```
 
+走 `claude` 协议时这行字到不了模型：`adapters/claude.py::_convert_messages` 对 arguments 做 `json.loads`，失败就发 `input: {}`，模型看到的是一次参数为空的调用。
+
 #### Token effect
 
 `DEFAULT_PER_MESSAGE_TOKEN_CAP = 50_000`，截断时给标记留 50 token 余量。两个调用方：聊天路径每轮对**每条**历史消息调一次，`model=""`（用默认 tokenizer，`services/ai/chat/ai_library_chat_service.py`）；压缩器的应急截断用小得多的每条上限（见第一块）。
@@ -162,13 +166,15 @@ user 消息是 `Summarize the following conversation, preserving the rules in th
 [loop_guard] You have called '{tool}' with the same arguments 3+ times in the last {n} tool calls. Stop repeating it — try a different approach (different args, different tool, or answer the user directly). The next turn must NOT call '{tool}' with these arguments again.
 ```
 
+⚠️ **走 `claude` 协议时这条警告不会到达模型**：`adapters/claude.py::_convert_messages` 丢弃消息列表里所有 `role=system` 消息。不是被挪位置，是没了。
+
 #### Token effect
 
 约 70 token 一条。`run_turn` 路一轮最多注入一次（`loop_warning_already_injected`）；流式路每次触发都注入。
 
 #### KV Cache effect
 
-**append-only**：追加在对话中段的一条 `role=system` 消息，不改前面的 token。会把 system 消息提到顶部的 adapter 可能改变它的位置，结论以各 adapter 的实现为准。
+**append-only**：追加在对话中段的一条 `role=system` 消息，不改前面的 token。OpenAI 兼容 adapter 原样保留它；`claude` 协议上它被丢弃（见上），对该路的请求没有任何影响。
 
 ### 计划模式提示词
 
@@ -283,6 +289,7 @@ Rules:
 
 ## Known Limitations and Deferred Work
 
+- **`claude` 协议丢弃消息列表里所有 `role=system` 消息**（`adapters/claude.py::_convert_messages`）。受影响的有压缩摘要、循环守卫警告、分叉会话持久化的摘要三处；单条上限的 tool_call 占位在那条路变成 `input: {}`。压缩在那条路上等于静默删头。这是运行时缺陷，不在本文档 PR 里修，留票（生产上是否有行走 `claude` 协议未核实）。
 - **聊天会话越过 orange 后每一轮都重新摘要头部**。压缩摘要不写回聊天历史，历史每轮从库重建，所以每轮一次摘要请求、每轮一份新摘要，没有稳定前缀。第 1 批把「摘要持久化」推迟了；fh4 计划裁定 8 建议第 5 批翻案，本批只记。
 - **`tool_result_pruner` 在今天的生产路径上实际不生效**。预检压缩跑在历史上，而聊天历史不带 `role=tool` 行（只重建 user / assistant / system），replay 也丢掉 tool_call 行；去重、老化与工具配对切分只对一轮之内的列表起作用，而一轮之内不压缩。
 - **去重键用的是原始 arguments 字符串**。`_hash_tool_call` 旁的注释说会按键排序，实际没有：参数顺序不同的同一调用逃过去重。
