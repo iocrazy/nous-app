@@ -4590,8 +4590,37 @@ export interface paths {
          *     Returns models available for users to select. If none are configured,
          *     returns an empty list. Requires auth (added with owner scoping, migration
          *     431): the list is scoped to the caller so owner-private rows never leak.
+         *
+         *     Row for row the ``models`` of the platform provider view that
+         *     ``GET /ai/settings`` carries (spec 2026-09-25 §3.1 — same function);
+         *     ``last_test_status`` is the computed status. Kept until the frontend
+         *     reads the settings view (P3 deletes it).
          */
         get: operations["list_nous_models_api_v1_ai_nous_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/platform-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Platform Status
+         * @description Runtime state of the platform models (spec 2026-09-25 §3.3).
+         *
+         *     The list itself comes with ``GET /ai/settings``; this light endpoint only
+         *     answers what changes fast — engine ``ok``/``idle``, engine reachability,
+         *     and whether the user's own daemon can run each local row right now.
+         */
+        get: operations["get_platform_status_api_v1_ai_platform_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -16323,6 +16352,15 @@ export interface components {
              * @default gpt-4o-mini
              */
             default_summary_model: string;
+            /** @description nous-engine reachability behind the platform list; null when no listed row is served by nous-engine or the view is unknown. */
+            platform_engine?: components["schemas"]["AiPlatformEngineState"] | null;
+            /**
+             * Platform Models
+             * @description Platform catalog name → mapping for every name in ai_providers.nous.models (spec 2026-09-25 §3.1). null = the platform view could not be computed (unknown, not empty).
+             */
+            platform_models?: {
+                [key: string]: components["schemas"]["AiPlatformModelEntry"];
+            } | null;
             /**
              * Preferred Language
              * @default auto
@@ -19585,6 +19623,85 @@ export interface components {
         AiNousModelsResponse: {
             /** Models */
             models: components["schemas"]["AiNousModelPublic"][];
+        };
+        /**
+         * AiPlatformEngineState
+         * @description nous-engine reachability behind the platform list.
+         *
+         *     ``reachable=False`` means the list could not be read (it is NOT "no
+         *     models" — rows stay listed as ``not_probed``); ``stale=True`` means the
+         *     list is a carried-over snapshot at most 10 minutes old.
+         */
+        AiPlatformEngineState: {
+            /** Checked At */
+            checked_at: string | null;
+            /** Reachable */
+            reachable: boolean;
+            /** Stale */
+            stale: boolean;
+        };
+        /**
+         * AiPlatformModelEntry
+         * @description ``platform_models[<name>]`` in ``GET/PUT /ai/settings``.
+         *
+         *     The mapping from a platform row name to what a picker shows. No
+         *     ``base_url`` / key / upstream provider (the 2026-08-14 leak tripwire);
+         *     ``status`` never carries ``fail`` — failed rows are not in the list.
+         */
+        AiPlatformModelEntry: {
+            /** Actual Model */
+            actual_model: string;
+            /** Context Window Tokens */
+            context_window_tokens: number | null;
+            /** Is Local */
+            is_local: boolean;
+            /**
+             * Pricing Type
+             * @enum {string}
+             */
+            pricing_type: "per_hour" | "per_request" | "per_token";
+            /** Pricing Value */
+            pricing_value: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "idle" | "not_probed";
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "llm" | "embedding" | "tts" | "asr" | "image" | "video";
+        };
+        /**
+         * AiPlatformModelRuntime
+         * @description One row of ``GET /ai/platform-status``.
+         *
+         *     ``local_ready`` is ``None`` for rows that do not run on the user's own
+         *     machine; ``superseded`` marks a server twin hidden because its local twin
+         *     can run (the picker rule ``apply_readiness`` applies today).
+         */
+        AiPlatformModelRuntime: {
+            /** Local Ready */
+            local_ready: boolean | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "idle" | "not_probed";
+            /** Superseded */
+            superseded: boolean;
+        };
+        /**
+         * AiPlatformStatusResponse
+         * @description ``GET /ai/platform-status``.
+         */
+        AiPlatformStatusResponse: {
+            engine: components["schemas"]["AiPlatformEngineState"] | null;
+            /** Models */
+            models: {
+                [key: string]: components["schemas"]["AiPlatformModelRuntime"];
+            };
         };
         /**
          * AiProviderHealthReportResponse
@@ -30457,6 +30574,10 @@ export interface components {
             description?: string | null;
             /** Display Name */
             display_name: string;
+            /** Engine Ready */
+            engine_ready?: boolean | null;
+            /** Engine Status */
+            engine_status?: ("listed" | "missing" | "unreachable") | null;
             /** Id */
             id: string;
             /** Is Enabled */
@@ -48273,6 +48394,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiNousModelsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_platform_status_api_v1_ai_platform_status_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiPlatformStatusResponse"];
                 };
             };
             /** @description Validation Error */
