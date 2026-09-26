@@ -15,7 +15,7 @@ import type {
   CapabilityHealth,
   LegacySummarizeTriggerResponse,
   LegacyTranscribeTriggerResponse,
-  NousModelPublic,
+  PlatformStatusResponse,
   SummarizeTriggerResponse,
   TranscribeTriggerResponse,
 } from '../types/api';
@@ -330,21 +330,11 @@ export const getAIHealth = async (): Promise<CapabilityHealth[]> => {
 
 // --- Settings ---
 
-export const getAISettings = async (): Promise<AISettings> => {
-  const apiUrl = getApiUrl();
-
-  const response = await fetch(`${apiUrl}/api/v1/ai/settings`, {
-    method: 'GET',
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  const data = await response.json();
-
+/** The one place a `GET /ai/settings` (or `PUT` echo) body becomes the
+ *  frontend AISettings shape. Both calls return the same response model, so
+ *  a save hands back exactly what a fresh load would (spec 2026-09-25 §3.1:
+ *  the platform card and `platform_models` ride along on both). */
+const parseAISettings = (data: Record<string, any>): AISettings => {
   // Auto-seed enabled_models from selected_model for accounts that
   // predate the curated-whitelist feature. Without this, the agent
   // model picker would be empty until the user re-enters the settings
@@ -378,7 +368,28 @@ export const getAISettings = async (): Promise<AISettings> => {
     // Persisted per-provider connection-test results (restores the Test
     // Connection status/detail across reloads).
     provider_health: data.provider_health ?? {},
+    // Platform list mapping + engine reachability, passed through as sent:
+    // `null` means "the server could not compute it" and must stay distinct
+    // from an empty map.
+    platform_models: data.platform_models ?? null,
+    platform_engine: data.platform_engine ?? null,
   } as AISettings;
+};
+
+export const getAISettings = async (): Promise<AISettings> => {
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/ai/settings`, {
+    method: 'GET',
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return parseAISettings(await response.json());
 };
 
 // GET-only masking metadata (secret-at-rest Phase 2) — never meaningful on
@@ -387,6 +398,12 @@ export const getAISettings = async (): Promise<AISettings> => {
 // derives these from the real key on every GET/PUT response anyway).
 const _READ_ONLY_PROVIDER_FIELDS = ['api_key_set', 'api_key_hint', 'api_key_count'] as const;
 
+// The platform card is computed server-side; the user owns only these two
+// keys of it. The backend strips the rest too (_strip_computed_platform_fields)
+// — this is the client half of the same contract, so a computed list never
+// travels back as if the user had typed it.
+const _PLATFORM_USER_FIELDS = ['enabled', 'disabled_models'] as const;
+
 const stripReadOnlyProviderFields = (
   providers: AISettings['providers']
 ): AISettings['providers'] => {
@@ -394,6 +411,14 @@ const stripReadOnlyProviderFields = (
   for (const [key, config] of Object.entries(providers)) {
     if (!config) {
       out[key] = config;
+      continue;
+    }
+    if (key === 'nous') {
+      const own: Partial<AIProviderConfig> = {};
+      for (const field of _PLATFORM_USER_FIELDS) {
+        if (config[field] !== undefined) Object.assign(own, { [field]: config[field] });
+      }
+      out[key] = own as AIProviderConfig;
       continue;
     }
     const clean = { ...config };
@@ -405,9 +430,12 @@ const stripReadOnlyProviderFields = (
   return out;
 };
 
+/** PUT the settings and return the server's echo — the same shape GET
+ *  returns, recomputed platform card included — so the caller can adopt it
+ *  without a second request. */
 export const saveAISettings = async (
   settings: AISettings
-): Promise<void> => {
+): Promise<AISettings> => {
   const apiUrl = getApiUrl();
 
   // Map frontend AISettings shape to backend AISettingsUpdate schema
@@ -441,19 +469,32 @@ export const saveAISettings = async (
     const error = await response.json().catch(() => ({ detail: 'Request failed' }));
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
+  return parseAISettings(await response.json());
 };
 
-// --- Nous Models ---
+// --- Platform models ---
 
-export const getNousModels = async (type?: string): Promise<NousModelPublic[]> => {
+/** `GET /ai/platform-status`: the fast-changing runtime state (engine
+ *  ok/idle, engine reachability, the user's own daemon) layered over the
+ *  platform list that `GET /ai/settings` already carries. Read ONLY through
+ *  hooks/usePlatformStatus — it is the single request point (spec §3.3). */
+export const getPlatformStatus = async (): Promise<PlatformStatusResponse> => {
   const apiUrl = getApiUrl();
-  const params = type ? `?type=${type}` : '';
-  const response = await fetch(`${apiUrl}/api/v1/ai/nous-models${params}`, {
+  const response = await fetch(`${apiUrl}/api/v1/ai/platform-status`, {
     headers: await getAuthHeaders(),
   });
-  if (!response.ok) return [];
-  const data: { models?: NousModelPublic[] } = await response.json();
-  return data.models ?? [];
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as Partial<PlatformStatusResponse> | null;
+  // Validate at the boundary: a body without a `models` map is not a status
+  // answer, and must fail (the hook keeps the last good one) rather than be
+  // cached as one.
+  if (!body || typeof body.models !== 'object' || body.models === null) {
+    throw new Error('platform-status response missing models');
+  }
+  return { models: body.models, engine: body.engine ?? null };
 };
 
 export const testAIConnection = async (

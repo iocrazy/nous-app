@@ -372,3 +372,11 @@ export function useAuth(): AuthContextValue {
 export function useOptionalAuth(): AuthContextValue | null {
   return useContext(AuthContext);
 }
+
+/** The AI settings loaded once after login, or `null` outside the provider
+ *  (isolated component tests). The platform model list rides on these
+ *  settings (spec 2026-09-25 §3.1), so every picker reads it from here —
+ *  never a request of its own. */
+export function useOptionalAISettings(): AISettingsType | null {
+  return useContext(AuthContext)?.aiSettings ?? null;
+}

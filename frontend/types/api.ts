@@ -177,8 +177,6 @@ export type TeamTrashedCanvas = Schemas['TeamTrashedCanvas'];
 export type CanvasAssetRef = Schemas['CanvasAssetRef'];
 /** A live canvas that references a resource (`GET /resources/{id}/canvas-refs`). */
 export type ResourceCanvasRef = Schemas['ResourceCanvasRef'];
-/** A catalog model a canvas picker may offer (generation-models / text-models). */
-export type CanvasModelOption = Schemas['CanvasModelOption'];
 export type CanvasGenerationCapability = Schemas['CanvasGenerationCapability'];
 /** `episodes` row — bigint ids are JSON numbers on this surface. */
 export type EpisodeRow = Schemas['EpisodeRow'];
@@ -361,6 +359,19 @@ export type AIGovernanceFlags = Schemas['AiGovernanceResponse'];
 /** `GET /ai/nous-models` row. `id` is a BIGINT sent as a JSON number. No
  * key, host or upstream provider — `is_local` is the one derived bit. */
 export type NousModelPublic = Schemas['AiNousModelPublic'];
+/** `platform_models[<name>]` in `GET/PUT /ai/settings` (spec 2026-09-25
+ * §3.1): what a picker shows for one platform row. No key / host / upstream
+ * provider; `status` never carries `fail` — failed rows are not listed. */
+export type PlatformModelEntry = Schemas['AiPlatformModelEntry'];
+export type PlatformModelStatus = PlatformModelEntry['status'];
+export type PlatformModelType = PlatformModelEntry['type'];
+/** nous-engine reachability behind the platform list. `reachable=false` is
+ * "could not read", never "no models". */
+export type PlatformEngineState = Schemas['AiPlatformEngineState'];
+/** One row of `GET /ai/platform-status`. */
+export type PlatformModelRuntime = Schemas['AiPlatformModelRuntime'];
+/** `GET /ai/platform-status`: runtime state layered over the settings list. */
+export type PlatformStatusResponse = Schemas['AiPlatformStatusResponse'];
 export type MemoryPrefsResult = Schemas['AiMemoryPrefsResponse'];
 export type MemoryCardResult = Schemas['AiMemoryCardResponse'];
 export type MemoryForgetResult = Schemas['AiMemoryForgetResponse'];
