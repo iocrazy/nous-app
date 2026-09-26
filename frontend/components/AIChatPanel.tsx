@@ -71,6 +71,7 @@ import { useComposerPaste } from '../hooks/useComposerPaste';
 import { useResourceSearch } from '../hooks/useResourceSearch';
 import { useGlobalChatStore } from '../stores/globalChatStore';
 import { useFabActivityPublisher } from './chatFab/useFabActivityPublisher';
+import { endsWithAssistantReply } from './chatFab/fabActivity';
 import { useComposerResourceAttach } from '../hooks/useComposerResourceAttach';
 import { useComposerAssetAttach } from '../hooks/useComposerAssetAttach';
 import { useMentionAssetsTab } from './chat/useMentionAssetsTab';
@@ -96,6 +97,12 @@ export interface AIChatPanelProps {
    *  Callers that omit it (ChatPage) keep the inline list, unaffected. */
   sessionsOverlayOpen?: boolean;
   onSessionsOverlayClose?: () => void;
+  /** Floating host only (FloatingChatWidget): the window is minimized but
+   *  the panel stays mounted so an in-flight turn keeps streaming. Defined
+   *  (true or false) marks the panel as the floating one — a reply that
+   *  lands while that window is closed counts as unread on the mascot.
+   *  Callers that omit it (ChatPage) never touch the unread count. */
+  collapsed?: boolean;
 }
 
 function formatTimestamp(isoString?: string | null): string {
@@ -256,6 +263,7 @@ export function AIChatPanel({
   agentSlug,
   sessionsOverlayOpen,
   onSessionsOverlayClose,
+  collapsed,
 }: AIChatPanelProps): React.ReactElement {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -646,11 +654,16 @@ export function AIChatPanel({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // While the floating window is minimized the panel is display:none, so
+  // there is nothing to scroll; `collapsed` in the deps re-runs this on
+  // reveal, which brings replies that landed while hidden into view.
   useEffect(() => {
+    if (collapsed) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, sending]);
+  }, [messages, sending, collapsed]);
 
   const numericProjectId = useMemo(() => parseProjectId(projectId), [projectId]);
+  const floatingHost = collapsed !== undefined;
 
   // Load the agent list for the selector. Sessions are loaded lazily per
   // agent selection so switching agents doesn't drag in noise from others.
@@ -1043,7 +1056,18 @@ export function AIChatPanel({
         }
         // Refetch full history so IDs + timestamps + tokens are
         // server-authoritative (also swaps out both temp bubbles).
-        await loadSessionMessages(activeSessionId);
+        const settled = await loadSessionMessages(activeSessionId);
+        // A reply that landed while the floating window was minimized is
+        // unread on the mascot. Read `open` now, not at send time: the user
+        // usually collapses AFTER sending. Failed turns never reach here.
+        if (
+          floatingHost &&
+          !useGlobalChatStore.getState().open &&
+          endsWithAssistantReply(settled)
+        ) {
+          const store = useGlobalChatStore.getState();
+          store.setFabUnread(store.fabUnread + 1);
+        }
       } catch (err) {
         console.error('[AIChatPanel] chat stream failed:', err);
         const msg = err instanceof Error ? err.message : String(err);
@@ -1100,7 +1124,7 @@ export function AIChatPanel({
     // adds/removes attachments between renders.
     [activeSessionId, sending, effectiveAgentSlug, lockedAgent, numericProjectId,
      addToast, planMode, stagedAttachments, stagedResources, stagedAssets,
-     contextCapsule, t],
+     contextCapsule, t, floatingHost],
   );
 
   // Phase 2a chat answer surface: the newest assistant message is the only

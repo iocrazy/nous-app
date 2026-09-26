@@ -144,11 +144,14 @@ interface GlobalChatState {
    *  default height. Re-clamped against the live viewport by ChatFab. */
   fabSide: FabSide;
   fabTop: number | null;
-  /** What the mascot is doing; published by AIChatPanel while mounted,
-   *  `waiting` is sticky across a minimize (the question is still parked
-   *  server-side), `running` is not. Not persisted. */
+  /** What the mascot is doing; published by AIChatPanel while mounted.
+   *  The floating panel stays mounted (hidden) across a minimize, so both
+   *  `running` and `waiting` survive it; a real unmount (the Chat page)
+   *  drops `running` to idle and keeps `waiting` (the question is still
+   *  parked server-side). Not persisted. */
   fabActivity: FabActivity;
-  /** Assistant replies that arrived while collapsed; cleared on open. */
+  /** Assistant replies that arrived while collapsed (written by the
+   *  floating AIChatPanel when a turn settles); cleared on open. */
   fabUnread: number;
 
   setOpen: (open: boolean) => void;

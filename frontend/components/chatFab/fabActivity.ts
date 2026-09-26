@@ -19,3 +19,15 @@ export function deriveFabActivity(input: {
   if (input.lastAssistantAwaitingInput) return 'waiting';
   return 'idle';
 }
+
+/**
+ * Did the turn that just settled leave a reply? True when the reloaded
+ * history ends on an assistant message — a turn that produced nothing ends
+ * on the user's own message. `null` (the reload failed) is not a reply.
+ */
+export function endsWithAssistantReply(
+  messages: ReadonlyArray<{ role: string }> | null,
+): boolean {
+  if (!messages || messages.length === 0) return false;
+  return messages[messages.length - 1].role === 'assistant';
+}

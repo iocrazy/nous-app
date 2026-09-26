@@ -59,6 +59,7 @@ vi.mock('./chat/ChatInput', () => ({
 import { AIChatPanel } from './AIChatPanel';
 import { ToastProvider } from './Toast';
 import { useGlobalChatStore } from '../stores/globalChatStore';
+import { aiLibraryService } from '../services/aiLibraryService';
 
 // Wire shape: session ids are strings, `awaiting_input` carries `question_id`.
 const QUESTION_TURN = {
@@ -134,5 +135,106 @@ describe('AIChatPanel → mascot activity', () => {
     expect(activity()).toBe('idle');
     view.unmount();
     expect(activity()).toBe('idle');
+  });
+});
+
+describe('AIChatPanel → mascot unread', () => {
+  const USER_TURN = { id: 'u9', session_id: '3107', role: 'user', content: 'hello', created_at: '2026-09-26T00:00:02Z' };
+  const REPLY_TURN = { id: 'a9', session_id: '3107', role: 'assistant', content: 'Done.', created_at: '2026-09-26T00:00:03Z' };
+  const unread = () => useGlobalChatStore.getState().fabUnread;
+
+  /** A turn that parks until released, then lands a reply in the history. */
+  function hangingTurn(): () => void {
+    let release: () => void = () => undefined;
+    streamChatMessage.mockImplementation(async function* () {
+      yield { type: 'delta', data: { text: 'drafting…' } };
+      await new Promise<void>((resolve) => { release = resolve; });
+      historyMessages = [USER_TURN, REPLY_TURN];
+      yield { type: 'done', data: {} };
+    });
+    return () => release();
+  }
+
+  function renderFloating(collapsed: boolean | undefined) {
+    const ui = (c: boolean | undefined) => (
+      <ToastProvider>
+        <AIChatPanel projectId="1" agentSlug="analyze" collapsed={c} />
+      </ToastProvider>
+    );
+    const view = render(ui(collapsed));
+    return { view, setCollapsed: (c: boolean) => view.rerender(ui(c)) };
+  }
+
+  beforeEach(() => {
+    useGlobalChatStore.setState({ open: true, fabUnread: 0 });
+  });
+
+  it('counts a reply that lands after the window was collapsed mid-turn', async () => {
+    const release = hangingTurn();
+    const { setCollapsed } = renderFloating(false);
+    await waitFor(() => expect(composerProps?.disabled).toBe(false));
+    composerProps!.onSend('hello', []);
+    await waitFor(() => expect(activity()).toBe('running'));
+
+    useGlobalChatStore.setState({ open: false });
+    setCollapsed(true);
+    expect(activity()).toBe('running');
+
+    release();
+    await waitFor(() => expect(activity()).toBe('idle'));
+    expect(unread()).toBe(1);
+  });
+
+  it('does not count a reply read in the open window', async () => {
+    const release = hangingTurn();
+    renderFloating(false);
+    await waitFor(() => expect(composerProps?.disabled).toBe(false));
+    composerProps!.onSend('hello', []);
+    await waitFor(() => expect(activity()).toBe('running'));
+    release();
+    await waitFor(() => expect(activity()).toBe('idle'));
+    expect(unread()).toBe(0);
+  });
+
+  it('does not count a failed turn', async () => {
+    streamChatMessage.mockImplementation(async function* () {
+      historyMessages = [USER_TURN, REPLY_TURN];
+      yield { type: 'error', data: { error: 'boom' } };
+    });
+    useGlobalChatStore.setState({ open: false });
+    renderFloating(true);
+    await waitFor(() => expect(composerProps?.disabled).toBe(false));
+    composerProps!.onSend('hello', []);
+    // The turn is over once the post-turn history reload has run.
+    await waitFor(() => expect(vi.mocked(aiLibraryService.getChatSession).mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(composerProps?.disabled).toBe(false));
+    expect(unread()).toBe(0);
+  });
+
+  it('does not count a turn that produced no assistant message', async () => {
+    streamChatMessage.mockImplementation(async function* () {
+      historyMessages = [USER_TURN];
+      yield { type: 'done', data: {} };
+    });
+    useGlobalChatStore.setState({ open: false });
+    renderFloating(true);
+    await waitFor(() => expect(composerProps?.disabled).toBe(false));
+    composerProps!.onSend('hello', []);
+    // The turn is over once the post-turn history reload has run.
+    await waitFor(() => expect(vi.mocked(aiLibraryService.getChatSession).mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(composerProps?.disabled).toBe(false));
+    expect(unread()).toBe(0);
+  });
+
+  it('never counts for a panel the floating window does not host (Chat page)', async () => {
+    const release = hangingTurn();
+    useGlobalChatStore.setState({ open: false });
+    renderFloating(undefined);
+    await waitFor(() => expect(composerProps?.disabled).toBe(false));
+    composerProps!.onSend('hello', []);
+    await waitFor(() => expect(activity()).toBe('running'));
+    release();
+    await waitFor(() => expect(activity()).toBe('idle'));
+    expect(unread()).toBe(0);
   });
 });

@@ -1,7 +1,8 @@
 /**
  * FloatingChatWidget — the global AI chat shell (replaces AIChatDrawer).
  *
- * Collapsed: a bottom-right FAB on every page. Expanded: a floating window
+ * Collapsed: the mascot FAB on every page, with the window still mounted
+ * but hidden (so an in-flight turn keeps streaming). Expanded: a floating window
  * that can be dragged by its title bar and resized from every edge and
  * corner (anchored bottom-right: east/south drags adjust width/height AND
  * right/bottom together so the grabbed edge tracks the pointer). Rect +
@@ -240,107 +241,117 @@ export function FloatingChatWidget(): React.ReactElement | null {
   // Collapsed: the draggable 無我 mascot (components/chatFab). It keeps
   // data-testid="sb-toggle-chat" and the ⌘I toggle above; position lives in
   // the same store as the window rect.
-  if (!open) {
-    return <ChatFab />;
-  }
-
+  //
+  // Collapsing HIDES the window instead of unmounting it: AIChatPanel owns
+  // the SSE stream of an in-flight turn, so unmounting it cut the stream
+  // and dropped the mascot back to idle mid-turn, and nothing was left to
+  // notice a reply landing while collapsed. The `hidden` attribute is
+  // display:none !important in Tailwind's preflight, so the `flex` class
+  // below cannot override it. The Chat page still unmounts (return null
+  // above) — that is a real route change, not a minimize.
   return (
-    <div
-      role="dialog"
-      aria-label="AI Chat"
-      data-testid="sb-panel-chat"
-      style={{ right, bottom, width, height }}
-      className="fixed z-40 flex flex-col overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-2xl"
-    >
-      {/* Title bar — drag handle + module chip + minimize */}
+    <>
+      {!open && <ChatFab />}
       <div
-        onPointerDown={onDragStart}
-        className="flex h-10 flex-shrink-0 cursor-grab select-none items-center gap-2 border-b border-ink-800 bg-ink-900/95 px-2 active:cursor-grabbing"
+        role="dialog"
+        aria-label="AI Chat"
+        data-testid="sb-panel-chat"
+        hidden={!open}
+        aria-hidden={!open}
+        style={{ right, bottom, width, height }}
+        className="fixed z-40 flex flex-col overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-2xl"
       >
-        {/* Grab affordance. A <span>, not a <button> — onDragStart skips
-            anything inside a button, so a button here would never drag. */}
-        <span
-          data-testid="chat-drag-handle"
-          aria-hidden="true"
-          className="flex cursor-grab items-center text-ink-500 active:cursor-grabbing"
+        {/* Title bar — drag handle + module chip + minimize */}
+        <div
+          onPointerDown={onDragStart}
+          className="flex h-10 flex-shrink-0 cursor-grab select-none items-center gap-2 border-b border-ink-800 bg-ink-900/95 px-2 active:cursor-grabbing"
         >
-          <GripVertical size={14} />
-        </span>
-        <button
-          type="button"
-          onClick={() => setSessionsOpen((v) => !v)}
-          title="Chat History"
-          aria-label="Toggle session history"
-          className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
-        >
-          <History size={14} />
-        </button>
-        {pageContext?.moduleLabel && (
-          <span className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--accent-text)]">
-            {pageContext.moduleLabel}
+          {/* Grab affordance. A <span>, not a <button> — onDragStart skips
+              anything inside a button, so a button here would never drag. */}
+          <span
+            data-testid="chat-drag-handle"
+            aria-hidden="true"
+            className="flex cursor-grab items-center text-ink-500 active:cursor-grabbing"
+          >
+            <GripVertical size={14} />
           </span>
-        )}
-        <div className="flex-1" />
-        <button
-          type="button"
-          onClick={minimize}
-          title="Minimize (Esc)"
-          aria-label="Minimize AI Chat"
-          className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
-        >
-          <Minus size={14} />
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => setSessionsOpen((v) => !v)}
+            title="Chat History"
+            aria-label="Toggle session history"
+            className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
+          >
+            <History size={14} />
+          </button>
+          {pageContext?.moduleLabel && (
+            <span className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--accent-text)]">
+              {pageContext.moduleLabel}
+            </span>
+          )}
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={minimize}
+            title="Minimize (Esc)"
+            aria-label="Minimize AI Chat"
+            className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
+          >
+            <Minus size={14} />
+          </button>
+        </div>
 
-      {/* Chat core — the shared AIChatPanel, with the live page context.
-          New sessions stamp the current module; ongoing sessions are
-          never interrupted by navigation (B-mode). */}
-      <div className="min-h-0 flex-1">
-        <AIChatPanel
-          projectId={pageContext?.projectId}
-          contextType={pageContext?.contextType}
-          contextId={pageContext?.contextId}
-          onApplyContent={pageContext?.onApplyContent}
-          onClose={minimize}
-          sessionsOverlayOpen={sessionsOpen}
-          onSessionsOverlayClose={() => setSessionsOpen(false)}
+        {/* Chat core — the shared AIChatPanel, with the live page context.
+            New sessions stamp the current module; ongoing sessions are
+            never interrupted by navigation (B-mode). */}
+        <div className="min-h-0 flex-1">
+          <AIChatPanel
+            projectId={pageContext?.projectId}
+            contextType={pageContext?.contextType}
+            contextId={pageContext?.contextId}
+            onApplyContent={pageContext?.onApplyContent}
+            onClose={minimize}
+            collapsed={!open}
+            sessionsOverlayOpen={sessionsOpen}
+            onSessionsOverlayClose={() => setSessionsOpen(false)}
+          />
+        </div>
+
+        {/* Resize handles — all four edges + four corners */}
+        <div
+          onPointerDown={onResizeStart('n')}
+          className="absolute left-3 right-3 top-0 h-1.5 cursor-ns-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('s')}
+          className="absolute bottom-0 left-3 right-3 h-1.5 cursor-ns-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('w')}
+          className="absolute bottom-3 left-0 top-3 w-1.5 cursor-ew-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('e')}
+          className="absolute bottom-3 right-0 top-3 w-1.5 cursor-ew-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('nw')}
+          className="absolute left-0 top-0 h-3 w-3 cursor-nwse-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('ne')}
+          className="absolute right-0 top-0 h-3 w-3 cursor-nesw-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('sw')}
+          className="absolute bottom-0 left-0 h-3 w-3 cursor-nesw-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('se')}
+          className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
         />
       </div>
-
-      {/* Resize handles — all four edges + four corners */}
-      <div
-        onPointerDown={onResizeStart('n')}
-        className="absolute left-3 right-3 top-0 h-1.5 cursor-ns-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('s')}
-        className="absolute bottom-0 left-3 right-3 h-1.5 cursor-ns-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('w')}
-        className="absolute bottom-3 left-0 top-3 w-1.5 cursor-ew-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('e')}
-        className="absolute bottom-3 right-0 top-3 w-1.5 cursor-ew-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('nw')}
-        className="absolute left-0 top-0 h-3 w-3 cursor-nwse-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('ne')}
-        className="absolute right-0 top-0 h-3 w-3 cursor-nesw-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('sw')}
-        className="absolute bottom-0 left-0 h-3 w-3 cursor-nesw-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('se')}
-        className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
-      />
-    </div>
+    </>
   );
 }
 
