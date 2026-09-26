@@ -16,7 +16,7 @@
 
 - 只保留 `user` / `assistant` / `system` 三种角色，每条只有 `role` + `content`。**工具调用与工具结果从不重放**——上一轮 runner 产生的 tool_call 存根不进历史，持久化的 assistant 消息只有最终文本。
 - assistant 文本是 runner 去掉 `<think>` 之后的版本（`runner/reasoning.strip_reasoning`），所以历史里只有答案。
-- 分叉出来的会话会带一条持久化的 system 消息，内容是源会话的压缩摘要（`append_system_message`，形状见 `app/agent_framework/README.md` 的摘要框）。⚠️ 走 `claude` 协议时这条消息被 `adapters/claude.py::_convert_messages` 丢弃，模型看不到分叉前的摘要（留票，见 `app/agent_framework/README.md` 限制节）。
+- 分叉出来的会话会带一条持久化的 system 消息，内容是源会话的压缩摘要（`append_system_message`，形状见 `app/agent_framework/README.md` 的摘要框）。走 `claude` 协议时这条消息被 `adapters/claude.py::_convert_messages` 原位转成一条 `<system_note>` user 轮（形状见 `app/agent_framework/README.md` 的摘要块与 `app/boundary/README.md` 的 `<system_note>` 块）。
 - 模型支持视觉时，**最新 `REPLAY_MAX_MESSAGES = 2` 条带图片附件的 user 消息**被重建成多段内容（图片字节重新从对象存储取、经调用者的 team 成员关系校验），全局最多 `REPLAY_MAX_IMAGES = 4` 张；更早的图片消息、取不到的、以及不支持视觉的模型，都保持纯文本。多段形状见 `app/agent_framework/README.md` 的「附件占位与多段内容」。
 - 然后本轮新的 user 消息接在最后。每条消息再过一遍单条上限（`cap_messages_tokens`，50k token，标记文字见 `app/agent_framework/README.md`）。
 

@@ -32,7 +32,18 @@
 
 yellow 档不产生摘要，只改写工具结果正文（见「工具结果去重与老化」）。
 
-⚠️ **走 `claude` 协议时模型看不到这条摘要**：`adapters/claude.py::_convert_messages` 只转换 `user` / `assistant` / `tool`，消息列表里的 `role=system` 一律丢弃（系统消息另走 `system` 参数，只有 `composed.system_message`）。所以在那条路上压缩等于**直接删掉头部**。OpenAI 兼容 adapter 保留它，codex daemon adapter 把它展平进文本。
+走 `claude` 协议时，Anthropic 没有中段 system 角色，`adapters/claude.py::_convert_messages` 把这条消息**原位**转成一条 user 轮，文本由 `boundary/system_note.py::render_system_note` 渲染（它只单框转义 `</system_note>`，摘要自己的 `</conversation_summary>` 保持完整），逐字如下：
+
+```text
+<system_note>
+[Earlier conversation summary]
+<conversation_summary>
+{summary}
+</conversation_summary>
+</system_note>
+```
+
+如果它后面紧跟的保留尾部以 user 开头，adapter 的相邻同角色合并会把两者并成**一个** user 轮（note 在前，是一个 text 块）。OpenAI 兼容 adapter 原样保留 `role=system`，codex daemon adapter 把它展平进文本。
 
 #### Token effect
 
@@ -140,13 +151,13 @@ user 消息是 `Summarize the following conversation, preserving the rules in th
 [... truncated for length: {dropped} tokens removed by boundary ...]
 ```
 
-（标记前有两个换行。）多段内容先截最大的那个 text 段，直到落进上限。工具调用的 arguments 从不截断，超限时整个 `function.arguments` 被换成下面这行——也就是说模型会在自己的历史里看到一段**不是合法 JSON 的 arguments**：
+（标记前有两个换行。）多段内容先截最大的那个 text 段，直到落进上限。工具调用的 arguments 从不截断，超限时整个 `function.arguments` 被换成下面这个 JSON 对象（`json.dumps(..., ensure_ascii=False)`，所以它是合法的 arguments）：
 
 ```text
-[tool_call replaced — arguments exceeded {cap} tokens (was {actual} tokens). Original tool_call_id: {tcid}]
+{"_truncated": "[tool_call replaced — arguments exceeded {cap} tokens (was {actual} tokens). Original tool_call_id: {tcid}]"}
 ```
 
-走 `claude` 协议时这行字到不了模型：`adapters/claude.py::_convert_messages` 对 arguments 做 `json.loads`，失败就发 `input: {}`，模型看到的是一次参数为空的调用。
+走 `claude` 协议时 `adapters/claude.py::_convert_messages` 对 arguments 做 `json.loads`，所以模型看到的是 `tool_use.input = {"_truncated": "[tool_call replaced — …]"}`（fh5 之前这里是不合法的 JSON，那条路发出的是 `input: {}`）。
 
 #### Token effect
 
@@ -166,7 +177,17 @@ user 消息是 `Summarize the following conversation, preserving the rules in th
 [loop_guard] You have called '{tool}' with the same arguments 3+ times in the last {n} tool calls. Stop repeating it — try a different approach (different args, different tool, or answer the user directly). The next turn must NOT call '{tool}' with these arguments again.
 ```
 
-⚠️ **走 `claude` 协议时这条警告不会到达模型**：`adapters/claude.py::_convert_messages` 丢弃消息列表里所有 `role=system` 消息。不是被挪位置，是没了。
+`{tool}` 是模型自己发出的工具名，经 `escape_frame_body` 转义后才插进来，所以它关不掉任何自有框。
+
+走 `claude` 协议时这条警告被原位转成 `<system_note>` user 轮（形状见上面的压缩摘要块）：
+
+```text
+<system_note>
+[loop_guard] You have called '{tool}' with the same arguments 3+ times in the last {n} tool calls. …
+</system_note>
+```
+
+`run_turn` 路（生产路径）在逐个调用的循环**里面**注入，所以触发的调用不是最后一个时，警告夹在同一个 assistant 轮的两个工具结果之间。adapter 的相邻同角色合并把它们并成一个 user 轮，并把 `tool_result` 块提到最前：Claude 看到的是 `[tool_result A, tool_result B, text(<system_note>…)]`，也就是警告被挪到了这一轮所有工具结果**之后**。OpenAI 兼容 adapter 上它仍然夹在两条 `tool` 回复之间（见限制节）。
 
 #### Token effect
 
@@ -174,7 +195,7 @@ user 消息是 `Summarize the following conversation, preserving the rules in th
 
 #### KV Cache effect
 
-**append-only**：追加在对话中段的一条 `role=system` 消息，不改前面的 token。OpenAI 兼容 adapter 原样保留它；`claude` 协议上它被丢弃（见上），对该路的请求没有任何影响。
+**append-only**：追加在对话中段的一条 `role=system` 消息，不改前面的 token。OpenAI 兼容 adapter 原样保留它；`claude` 协议上它是最后一个 user 轮末尾的一个 text 块。合并只把本轮的工具结果与它并进同一个 user 轮，而下一次请求时这个轮已经完整，之后追加的是新的 assistant 轮，所以更早的前缀不受影响。
 
 ### 计划模式提示词
 
@@ -289,13 +310,12 @@ Rules:
 
 ## Known Limitations and Deferred Work
 
-- **`claude` 协议丢弃消息列表里所有 `role=system` 消息**（`adapters/claude.py::_convert_messages`）。受影响的有压缩摘要、循环守卫警告、分叉会话持久化的摘要三处；单条上限的 tool_call 占位在那条路变成 `input: {}`。压缩在那条路上等于静默删头。这是运行时缺陷，不在本文档 PR 里修，留票（生产上是否有行走 `claude` 协议未核实）。
+- **循环守卫警告的注入位置与工具结果交错**（fh5 T1 留票）。`run_turn` 缓冲路在逐个调用的循环里注入，触发的调用不是最后一个时，警告夹在同一个 assistant 轮的两条工具结果之间：`claude` 协议靠 adapter 的合并与 `tool_result` 提前兜住，OpenAI 兼容 provider 可能拒绝 `tool` 回复之间的非 tool 消息。流式路注入后 `break`，同一轮剩下的调用**没有**工具结果，两种 API 都会拒绝。修法是把缓冲路的注入挪到循环之后、流式路给跳过的调用补结果。
 - **聊天会话越过 orange 后每一轮都重新摘要头部**。压缩摘要不写回聊天历史，历史每轮从库重建，所以每轮一次摘要请求、每轮一份新摘要，没有稳定前缀。第 1 批把「摘要持久化」推迟了；fh4 计划裁定 8 建议第 5 批翻案，本批只记。
 - **`tool_result_pruner` 在今天的生产路径上实际不生效**。预检压缩跑在历史上，而聊天历史不带 `role=tool` 行（只重建 user / assistant / system），replay 也丢掉 tool_call 行；去重、老化与工具配对切分只对一轮之内的列表起作用，而一轮之内不压缩。
 - **去重键用的是原始 arguments 字符串**。`_hash_tool_call` 旁的注释说会按键排序，实际没有：参数顺序不同的同一调用逃过去重。
 - **`aging_after_turns` 数的是消息不是轮**，名字会误导。
 - **维护模型路的展平头部没有长度上限**，可以超过维护模型自己的窗口。
-- **单条上限的工具调用占位让模型看到非法 JSON 的 arguments**。
 - **一轮之内的增长不受压缩约束**，只受 `MAX_TOOL_ITERATIONS = 10` 约束。
 - **`summarizer.py` 模块 docstring 仍写默认 `claude-haiku-4-5`**，`context_compactor.py` 里「Phase 2 will swap this for an LLM summarizer」也是过时注释；真实顺序见上文。
 - **流式路的循环守卫触发后 `break` 跳出本批工具**：同一条 assistant 消息里排在后面的 tool_call 既不执行、也不补合成结果（AskUser 停靠路径会补 `skipped` 结果，这里不会）。流式路今天不是生产路径（生产 adapter 是没有 `stream` 的 `LLMFallbackChain`），但它一旦启用，这些孤立的 tool_call 会让 Anthropic 形状的 provider 回 400。

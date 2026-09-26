@@ -121,6 +121,12 @@ MODEL_SURFACES: tuple[Surface, ...] = (
     # ── fh4 T4: new agent_framework README ────────────────────────────
     Surface("agent_framework/context_compactor.py", _FRAMEWORK, _H_COMPACTION),
     Surface("boundary/summary_frame.py", _FRAMEWORK, _H_COMPACTION),
+    # ── fh5 T1: claude adapter's mid-list system messages ──────────────
+    Surface(
+        "boundary/system_note.py",
+        _BOUNDARY,
+        "### `<system_note>`：中段 system 消息在 `claude` 协议上的形状",
+    ),
     Surface(
         "agent_framework/summarizer.py",
         _FRAMEWORK,
@@ -196,7 +202,10 @@ _TRANSPORT = (
 
 NOT_MODEL_VISIBLE: dict[str, str] = {
     # transport / plumbing
-    "services/ai/adapters/claude.py": _TRANSPORT,
+    "services/ai/adapters/claude.py": (
+        _TRANSPORT + "; the <system_note> wrapper it puts around mid-list system "
+        "messages is authored in boundary/system_note.py (fh5 T1)"
+    ),
     "services/ai/adapters/codex_daemon.py": _TRANSPORT,
     "services/ai/adapters/openai_compat.py": _TRANSPORT,
     "services/ai/providers/ai_provider.py": _TRANSPORT,

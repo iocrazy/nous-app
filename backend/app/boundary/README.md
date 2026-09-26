@@ -6,6 +6,7 @@
 |------|--------|
 | `external_text.py` | 提示词注入 —— 整份外部文档，随机 id 包裹 |
 | `frame_markers.py` | 提示词注入 —— 属性值/框内散文的闭合标记，以及逐行框里的伪造行 |
+| `system_note.py` | 提示词注入 —— `claude` 协议上中段 system 消息的 `<system_note>` 外框，只单框转义自己的闭合标记 |
 | `url_guard.py` / `ssrf_proxy.py` / `pinned_dns.py` | SSRF |
 | `path_guard.py` | 路径穿越 |
 | `max_bytes.py` | 超大响应体 |
@@ -54,6 +55,8 @@
 
 **选哪一个的判据是「这段文本落进的框是不是按行读的」**，不是「它有多长」。
 
+`escape_frame_close(text, frame, *, bracket=False)` 是单框版本：只把**那一个**自有框的闭合标记改写成 `<\/frame>`（`bracket=True` 时方括号拼写 `[/frame]` 也改写成 `[\/frame]`），其余一概不动。它给**外框**用——外框的内容里合法地带着别的自有框（`<system_note>` 包着摘要自己的 `</conversation_summary>`），那些内框由各自的渲染方转义，外框只需保证里面没有东西能关掉它自己。传一个不在 `OWNED_FRAMES` 里的名字会 raise。
+
 #### Token effect
 
 可忽略。转义只在命中时增加个位数字符，普通文本零变化——这是它与 `neutralize_external_text` 分工的原因：属性值和单行散文不值得为它付随机包裹那几十个 token。
@@ -61,6 +64,32 @@
 #### KV Cache effect
 
 **确定性**：同一输入永远得到同一输出，没有随机成分（三个函数都是）。所以转义后的文本可以安全地放进稳定前缀（`<available_skills>` 的 slug 就在前缀里）。这是它与 `neutralize_external_text` 的关键差别。⚠️ `escape_frame_prose` 今天的调用方在缓存边界**之后**，那是它的调用方的性质，不是本函数的限制。
+
+### `<system_note>`：中段 system 消息在 `claude` 协议上的形状
+
+#### What the model sees
+
+Anthropic Messages API 只有顶层 `system` 参数，没有中段 system 角色。消息列表里的 `role=system` 消息（压缩摘要、循环守卫警告、分叉会话持久化的摘要行）由 `services/ai/adapters/claude.py` 原位转成一条 user 轮，文本是 `system_note.py::render_system_note(content)` 的输出：
+
+```text
+<system_note>
+{content}
+</system_note>
+```
+
+`{content}` 里只有 `</system_note>` 被改写成 `<\/system_note>`（`escape_frame_close`）。内容里别的不可信片段在各自的生产方转义过：摘要正文走 `summary_frame.py` 的 `escape_frame_body`，循环守卫的工具名走 `loop_guard.render_warning` 里的 `escape_frame_body`。多段内容只保留文本段，按换行拼起来。
+
+adapter 随后把相邻同角色的轮合并成一个轮：`str` 内容变成 text 块，合并出的 user 轮里 `tool_result` 块提到最前、其余按原顺序跟在后面。所以一条夹在两个工具结果之间的 note，在 Claude 看来落在这一轮所有工具结果之后。
+
+OpenAI 兼容 adapter 不经过这里，原样发 `role=system`。
+
+#### Token effect
+
+外框固定多约 10 个 token，加上 `{content}` 本身。转义只在命中时多一个字符。消息条数不变或变少（合并只会减少轮数）。
+
+#### KV Cache effect
+
+**确定性**：同一条 system 消息每次渲染成同一段文本，合并规则也是确定的，所以这一层不引入任何逐轮变化。note 所在的位置就是原消息的位置：压缩摘要在列表开头（压缩一发生，它之后的一切都换了，那是压缩本身的代价），循环守卫警告在尾部（append-only）。改外框文字或合并规则会让走 `claude` 协议、带中段 system 消息的会话一次性失效。
 
 ## Known Limitations and Deferred Work
 

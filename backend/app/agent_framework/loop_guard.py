@@ -34,6 +34,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Optional
 
+from app.boundary.frame_markers import escape_frame_body
+
 
 def _hash_call(tool_name: str, args: object) -> str:
     """Stable short hash of (tool_name, args). Args may be string,
@@ -109,7 +111,9 @@ class ToolCallLoopGuard:
         sig = self.looping_signature()
         if sig is None:
             return ""
-        tool_name, _ = sig
+        # tool_name is model-emitted: it must not close an owned frame. On
+        # Claude this text travels inside <system_note> (fh5 T1).
+        tool_name = escape_frame_body(sig[0])
         return (
             f"[loop_guard] You have called '{tool_name}' with the same "
             f"arguments {self._threshold}+ times in the last "

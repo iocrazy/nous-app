@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from anthropic import AsyncAnthropic
 from loguru import logger
 
+from app.boundary.system_note import render_system_note
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.adapters._model_routing import resolve_wire_model
 from app.services.ai.provider_contract import normalize_envelope
@@ -68,6 +69,91 @@ def _usage(usage: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+def _tool_use_block(tc: Dict[str, Any]) -> Dict[str, Any]:
+    fn = tc["function"]
+    try:
+        args = json.loads(fn["arguments"])
+    except (json.JSONDecodeError, TypeError):
+        args = {}
+    return {"type": "tool_use", "id": tc["id"], "name": fn["name"], "input": args}
+
+
+def _system_text(content: Any) -> str:
+    """A system message's text. List content keeps only its text parts."""
+    if isinstance(content, list):
+        parts = [
+            p if isinstance(p, str) else str(p.get("text") or "")
+            for p in content
+            if isinstance(p, str) or (isinstance(p, dict) and p.get("type") == "text")
+        ]
+        return "\n".join(p for p in parts if p)
+    return str(content or "")
+
+
+def _convert_one(m: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    role = m.get("role")
+    if role == "user":
+        return {"role": "user", "content": m["content"]}
+    if role == "system":
+        note = render_system_note(_system_text(m.get("content")))
+        return {"role": "user", "content": [{"type": "text", "text": note}]}
+    if role == "assistant":
+        blocks: List[Dict[str, Any]] = []
+        if m.get("content"):
+            blocks.append({"type": "text", "text": m["content"]})
+        blocks.extend(_tool_use_block(tc) for tc in m.get("tool_calls") or [])
+        return {"role": "assistant", "content": blocks}
+    if role == "tool":
+        block = {
+            "type": "tool_result",
+            "tool_use_id": m["tool_call_id"],
+            "content": m["content"],
+        }
+        return {"role": "user", "content": [block]}
+    logger.warning(f"[ClaudeAdapter] dropping message with unknown role={role!r}")
+    return None
+
+
+def _as_blocks(content: Any) -> List[Any]:
+    if isinstance(content, list):
+        return list(content)
+    text = str(content or "")
+    return [{"type": "text", "text": text}] if text else []
+
+
+def _is_tool_result(block: Any) -> bool:
+    return isinstance(block, dict) and block.get("type") == "tool_result"
+
+
+def _merge_adjacent(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Fold each run of same-role turns into one turn with a block list.
+
+    The runner can place a user-role message between two tool results of one
+    assistant turn (a loop-guard note, a promoted ResourceFetch image). The
+    API wants the ``tool_result`` blocks to lead the user turn that answers a
+    ``tool_use`` turn, so in a merged user turn every ``tool_result`` block is
+    hoisted to the front (relative order kept) and the rest follow in order.
+    A turn that has no same-role neighbour is passed through untouched.
+    """
+    runs: List[List[Dict[str, Any]]] = []
+    for m in messages:
+        if runs and runs[-1][0]["role"] == m["role"]:
+            runs[-1].append(m)
+        else:
+            runs.append([m])
+    return [run[0] if len(run) == 1 else _merge_run(run) for run in runs]
+
+
+def _merge_run(run: List[Dict[str, Any]]) -> Dict[str, Any]:
+    role = run[0]["role"]
+    blocks = [b for m in run for b in _as_blocks(m["content"])]
+    if role == "user":
+        blocks = [b for b in blocks if _is_tool_result(b)] + [
+            b for b in blocks if not _is_tool_result(b)
+        ]
+    return {"role": role, "content": blocks}
+
+
 class ClaudeAdapter:
     """Anthropic Messages API adapter with OpenAI-shape output."""
 
@@ -110,46 +196,14 @@ class ClaudeAdapter:
           content = [{type:text,...}, {type:tool_use, id, name, input}]
         - OpenAI role=tool → Anthropic role=user with
           content = [{type:tool_result, tool_use_id, content}]
-        - System message is passed separately (not a message role).
+        - Mid-list role=system (compaction summary, loop-guard warning, a
+          fork's summary row) → a user turn at the SAME index whose text is
+          ``render_system_note(...)``. Anthropic has no mid-list system role;
+          the top-level system prompt is passed separately by ``call()``.
+        - Adjacent same-role turns are then merged (see ``_merge_adjacent``).
         """
-        anthropic_msgs: List[Dict[str, Any]] = []
-        for m in openai_messages:
-            role = m.get("role")
-            if role == "user":
-                anthropic_msgs.append({"role": "user", "content": m["content"]})
-            elif role == "assistant":
-                blocks: List[Dict[str, Any]] = []
-                if m.get("content"):
-                    blocks.append({"type": "text", "text": m["content"]})
-                for tc in m.get("tool_calls") or []:
-                    fn = tc["function"]
-                    try:
-                        args = json.loads(fn["arguments"])
-                    except (json.JSONDecodeError, TypeError):
-                        args = {}
-                    blocks.append(
-                        {
-                            "type": "tool_use",
-                            "id": tc["id"],
-                            "name": fn["name"],
-                            "input": args,
-                        }
-                    )
-                anthropic_msgs.append({"role": "assistant", "content": blocks})
-            elif role == "tool":
-                anthropic_msgs.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": m["tool_call_id"],
-                                "content": m["content"],
-                            }
-                        ],
-                    }
-                )
-        return anthropic_msgs
+        converted = [_convert_one(m) for m in openai_messages]
+        return _merge_adjacent([m for m in converted if m is not None])
 
     # ── Response normalization (Anthropic → OpenAI) ───────────────────
 

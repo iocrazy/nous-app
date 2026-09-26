@@ -26,6 +26,7 @@ Truncation strategy:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from app.agent_framework.tokenizer import count_tokens
@@ -43,7 +44,8 @@ TRUNCATION_MARKER = (
 )
 
 # Placeholder for tool_calls whose arguments overran the cap — we can't
-# truncate JSON args without breaking the call shape.
+# truncate JSON args without breaking the call shape. It is sent as the value
+# of ``{"_truncated": …}`` so the replaced ``arguments`` stay valid JSON.
 TOOL_CALL_PLACEHOLDER = (
     "[tool_call replaced — arguments exceeded {cap} tokens "
     "(was {actual} tokens). Original tool_call_id: {tcid}]"
@@ -100,8 +102,16 @@ def cap_message_tokens(
             arg_tokens = count_tokens(args, model)
             if arg_tokens > cap:
                 tcid = call.get("id") or "?"
-                placeholder = TOOL_CALL_PLACEHOLDER.format(
-                    cap=cap, actual=arg_tokens, tcid=tcid
+                # Valid JSON so every adapter sees real args: Claude gets
+                # input {"_truncated": …} instead of {}, and OpenAI-compatible
+                # providers never receive non-JSON ``arguments`` (fh5 T1).
+                placeholder = json.dumps(
+                    {
+                        "_truncated": TOOL_CALL_PLACEHOLDER.format(
+                            cap=cap, actual=arg_tokens, tcid=tcid
+                        )
+                    },
+                    ensure_ascii=False,
                 )
                 new_calls.append(
                     {
