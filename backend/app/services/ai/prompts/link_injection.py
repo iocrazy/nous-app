@@ -37,7 +37,7 @@ from typing import Iterable, Optional
 
 from loguru import logger
 
-from app.boundary.frame_markers import escape_frame_prose
+from app.boundary.frame_markers import escape_frame_body, escape_frame_prose
 from app.services.ai.prompts.link_understanding import (
     LinkSummary,
     LinkUnderstandingError,
@@ -146,32 +146,22 @@ The agent should not invent its contents.
 LINK_TITLE_MAX = 200
 LINK_DESC_MAX = 500
 
-# ``[/link-summary]`` is the block's own close marker. It is square-bracketed,
-# so ``escape_frame_body`` (which only knows ``</name>``) cannot defuse it —
-# this module owns that job. Whitespace inside the brackets is tolerated for
-# the same reason ``frame_markers._CLOSE_RE`` tolerates it: a model reads
-# ``[ /link-summary ]`` as the same marker.
-_LINK_CLOSE_RE = re.compile(r"\[\s*/\s*link-summary\s*\]", re.IGNORECASE)
-
-
-def _defuse_link_close(text: str) -> str:
-    """Rewrite a forged ``[/link-summary]`` to ``[\\/link-summary]``.
-
-    Same move as ``escape_frame_body``'s ``<\\/name>``: the words stay
-    readable, the marker loses its authority.
-    """
-    return _LINK_CLOSE_RE.sub(r"[\\/link-summary]", text)
+# ``[/link-summary]`` is the block's own close marker. ``link-summary`` is in
+# ``frame_markers.BRACKET_FRAMES``, so ``escape_frame_body`` (and
+# ``escape_frame_prose``, which runs it first) defuses that bracket spelling —
+# this module no longer carries a private defuser (fh5 C1).
 
 
 def _meta_line(value: Optional[str], limit: int, fallback: str) -> str:
     """One untrusted metadata value, made safe for its single ``key: value``
     line: capped (raw, before escaping, so an entity is never cut in half),
-    flattened + entity-escaped by ``escape_frame_prose`` (one line; no forged
-    ``<system-reminder>``), then the bracket close defused."""
+    then flattened + entity-escaped + owned-closer-defused by
+    ``escape_frame_prose`` (one line; no forged ``<system-reminder>``, no
+    ``[/link-summary]``)."""
     if not value:
         return fallback
     clipped = value if len(value) <= limit else value[:limit] + "…"
-    return _defuse_link_close(escape_frame_prose(clipped))
+    return escape_frame_prose(clipped)
 
 
 def render_block(summary: LinkSummary) -> str:
@@ -188,11 +178,12 @@ def render_block(summary: LinkSummary) -> str:
     (``LINK_TITLE_MAX`` / ``LINK_DESC_MAX``) and escaped onto its one line;
     a title carrying ``[/link-summary]`` or a newline cannot end the block or
     start a line that reads as harness-authored. The body's random-id wrapper
-    does not stop a literal ``[/link-summary]`` either, so the same defusal
-    runs over the content.
+    does not stop a literal ``[/link-summary]`` either, so ``escape_frame_body``
+    runs over the content too (it also defuses owned angle closers such as
+    ``</system-reminder>``; the wrapper's own random-id closer is not owned).
     """
     content = (
-        _defuse_link_close(summary.neutralized.wrapped)
+        escape_frame_body(summary.neutralized.wrapped)
         if summary.neutralized
         else "(no body extracted)"
     )
@@ -212,9 +203,7 @@ def render_failure_block(url: str, reason: str) -> str:
     # blow up the prompt; first line + 200 chars is plenty.
     line = reason.splitlines()[0] if reason else "unknown"
     # The reason can quote server-supplied text; it must not close the block.
-    return _ERR_TEMPLATE.format(
-        url=url, reason=_defuse_link_close(escape_frame_prose(line[:200]))
-    )
+    return _ERR_TEMPLATE.format(url=url, reason=escape_frame_prose(line[:200]))
 
 
 # ─── Aggregator ───────────────────────────────────────────────────────

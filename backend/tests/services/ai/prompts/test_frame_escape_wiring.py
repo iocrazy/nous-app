@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from app.boundary import frame_markers
 from app.boundary.frame_markers import OWNED_FRAMES
 from app.services.ai.prompts.prompt_composer import (
     PromptComposer,
@@ -136,6 +137,8 @@ _KNOWN_FRAME_RENDERERS = {
     "services/storyboard/script/script_prompt_frames.py",
     # fh5 T1：claude adapter 中段 system 消息的 <system_note> 框
     "boundary/system_note.py",
+    # fh5 C1：方括号框 ``[link-summary]…[/link-summary]`` —— 方括号扫描的正向对照
+    "services/ai/prompts/link_injection.py",
 }
 
 _OPENING_RE = re.compile(r"<\s*([a-z][a-z0-9_-]*)[\s>/]")
@@ -184,8 +187,13 @@ _NOT_FRAMES = {
 _UNRESOLVED = "\x00"
 
 _CLOSING_RE = re.compile(r"</\s*([a-z][a-z0-9_-]*)\s*>")
+#: 方括号框（fh5 C1）：``[name …]`` 开、``[/name]`` 闭。``[loop_guard]`` 这类
+#: 只有开没有闭的标签不算框 —— 与尖括号同一口径，开闭都出现才算。
+_BRACKET_OPENING_RE = re.compile(r"\[\s*([a-z][a-z0-9_-]*)[\s\]]")
+_BRACKET_CLOSING_RE = re.compile(r"\[\s*/\s*([a-z][a-z0-9_-]*)\s*\]")
 #: 名字整段算不出来的闭合/开启标记 —— 见 test_no_frame_marker_is_built_from_…
-_DYNAMIC_RE = re.compile(r"<\s*/?\s*" + _UNRESOLVED)
+#: 方括号的闭合 ``[/{x}]`` 同样算（开启 ``[{x}`` 与普通散文分不开，不算）。
+_DYNAMIC_RE = re.compile(r"<\s*/?\s*" + _UNRESOLVED + r"|\[\s*/\s*" + _UNRESOLVED)
 #: `"…{x}…".format(...)` / `"…%s…" % x` 里的替换位。
 _FORMAT_SLOT_RE = re.compile(r"\{[^{}]*\}")
 _PERCENT_SLOT_RE = re.compile(r"%[-#0 +]*[\d*]*(?:\.[\d*]+)?[hlL]?[diouxXeEfFgGcrsa%]")
@@ -266,11 +274,20 @@ def _templates_in(src: Path) -> list[str]:
     return out
 
 
-def _rendered_frames(templates: list[str]) -> set[str]:
-    """名字同时以开、闭两种标记出现在模板里的框。"""
-    opened = {m.group(1) for t in templates for m in _OPENING_RE.finditer(t)}
-    closed = {m.group(1) for t in templates for m in _CLOSING_RE.finditer(t)}
+def _paired(templates: list[str], opening: re.Pattern, closing: re.Pattern) -> set[str]:
+    opened = {m.group(1) for t in templates for m in opening.finditer(t)}
+    closed = {m.group(1) for t in templates for m in closing.finditer(t)}
     return opened & closed
+
+
+def _bracket_frames(templates: list[str]) -> set[str]:
+    """名字同时以 ``[name`` 开、``[/name]`` 闭出现在模板里的方括号框。"""
+    return _paired(templates, _BRACKET_OPENING_RE, _BRACKET_CLOSING_RE)
+
+
+def _rendered_frames(templates: list[str]) -> set[str]:
+    """名字同时以开、闭两种标记出现在模板里的框（尖括号或方括号）。"""
+    return _paired(templates, _OPENING_RE, _CLOSING_RE) | _bracket_frames(templates)
 
 
 def _frame_renderers() -> dict[str, set[str]]:
@@ -330,6 +347,88 @@ def test_every_frame_rendered_in_prompt_code_is_registered():
         f"frames rendered but not in OWNED_FRAMES: {undeclared} — "
         "register them so escape_frame_body defuses them"
     )
+
+
+def _bracket_frame_renderers() -> dict[str, set[str]]:
+    """``app/`` 下每个渲染方括号框的文件 → 框名。"""
+    out: dict[str, set[str]] = {}
+    for src in sorted(_APP_ROOT.rglob("*.py")):
+        frames = _bracket_frames(_templates_in(src))
+        if frames:
+            out[src.relative_to(_APP_ROOT).as_posix()] = frames
+    return out
+
+
+def _unregistered_bracket_frames(bracket_frames: frozenset[str]) -> list[str]:
+    return sorted(
+        f"{rel}: [{name}]"
+        for rel, frames in _bracket_frame_renderers().items()
+        for name in frames
+        if name not in bracket_frames
+    )
+
+
+@pytest.mark.unit
+def test_every_bracket_frame_is_registered_as_a_bracket_frame():
+    """方括号框必须登记在 ``BRACKET_FRAMES``，光在 OWNED_FRAMES 不够。
+
+    OWNED_FRAMES 只让 ``</name>`` 被转义；``[/name]`` 这个拼写只有在
+    BRACKET_FRAMES 里才会被 ``escape_frame_body`` 认出来。fh5 之前
+    ``link-summary`` 就是这样：登记了，但闭合靠 link_injection 私有的一个
+    defuser，新加的方括号框根本不在守卫视野里。
+    """
+    problems = _unregistered_bracket_frames(frame_markers.BRACKET_FRAMES)
+    assert not problems, (
+        f"bracket frames rendered but not in BRACKET_FRAMES: {problems} — "
+        "register them so escape_frame_body defuses the [/name] spelling"
+    )
+
+
+@pytest.mark.unit
+def test_bracket_scan_really_sees_link_summary():
+    """正向对照：方括号扫描扫得到 link-summary，且清空登记表时上一条会转红。"""
+    assert "link-summary" in _bracket_frame_renderers().get(
+        "services/ai/prompts/link_injection.py", set()
+    ), "方括号扫描没扫到 link_injection.py 的 [link-summary] —— 守卫瞎了"
+    assert _unregistered_bracket_frames(frozenset()) != []
+
+
+#: 方括号闭合的**正则**长什么样：源码字面量里的 ``\[``，可选 ``\s*``，再 ``/``。
+_BRACKET_CLOSE_REGEX_SRC = re.compile(r"\\\[(?:\\s[*+?])?/")
+
+#: 按 (文件, 正则原文) 排除的**非 defuser**：检测模式，不是在转义我们的框。
+_BRACKET_REGEX_NOT_DEFUSERS = {
+    # Llama 2 / Mistral 的 ``[/INST]`` chat-template token —— neutralize 用它
+    # 识别并剥掉外部文本里伪造的模板 token，与 ``_NOT_FRAME_SITES`` 里 ``s`` 同类。
+    ("boundary/external_text.py", r"\[\s*/\s*INST\s*\]"),
+}
+
+
+@pytest.mark.unit
+def test_no_module_grows_a_private_bracket_close_defuser():
+    """方括号闭合的转义只在 ``frame_markers.py``。
+
+    fh5 之前 ``link_injection`` 自带 ``_LINK_CLOSE_RE`` / ``_defuse_link_close``：
+    它能用，但它让「这个框怎么转义」住在渲染方自己家里，下一个方括号框就会再
+    长一个、或者忘了长。集中在 frame_markers 里，登记表才是唯一的真相。
+    """
+    hits = {
+        (src.relative_to(_APP_ROOT).as_posix(), node.value, node.lineno)
+        for src in _APP_ROOT.rglob("*.py")
+        if src.name != "frame_markers.py"
+        for node in ast.walk(ast.parse(src.read_text(), filename=str(src)))
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and _BRACKET_CLOSE_REGEX_SRC.search(node.value)
+    }
+    offenders = sorted(
+        f"{rel}:{line}"
+        for rel, value, line in hits
+        if (rel, value) not in _BRACKET_REGEX_NOT_DEFUSERS
+    )
+    assert not offenders, f"bracket-close regex outside frame_markers.py: {offenders}"
+    stale = _BRACKET_REGEX_NOT_DEFUSERS - {(rel, value) for rel, value, _ in hits}
+    assert not stale, f"排除名单里这些正则已不再出现，删掉它们：{sorted(stale)}"
 
 
 @pytest.mark.unit

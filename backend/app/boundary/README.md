@@ -49,6 +49,8 @@
 
 `escape_frame_body` 只把**我们自己拥有的**框的闭合标记（`OWNED_FRAMES`）改写成 `<\/frame>`；不属于我们的标签（`</div>`、`</think>`）原样保留，因为剧本正文可能合法地谈到它们，而只有我们自己的框才赋予权威。
 
+方括号框（`BRACKET_FRAMES`，今天只有 `link-summary`）的闭合 `[/name]`（容许括号内空白、不分大小写）同样被改写，统一成小写的 `[\/name]`；尖括号拼写 `</link-summary>` 照旧也被改写。`[loop_guard]`、`[Earlier conversation summary]` 这类只有开没有闭的标签不是框，原样保留。`BRACKET_FRAMES` 在导入时断言是 `OWNED_FRAMES` 的子集。
+
 `escape_frame_prose` 用于**逐行框里的一段散文**（今天唯一的调用方是 `<available_resources>` 里 `<asset>` 的一致性提示词）。它先压平 `\r\n\t`，再走一遍 `escape_frame_body`，最后把 `&<>` 转成实体——引号**不**转义，因为这是元素正文不是属性值。
 
 为什么需要第三个：`escape_frame_body` 保留换行与 `<` 是**刻意的契约**，对自由排版的框正确；但 `<available_resources>` 是模型**按行读**的目录，一行一条 `<resource … />`。一段允许换行且不转义 `<` 的用户文本因此可以排出一条与真行**字节级无法区分**的兄弟目录行（终审 I1 在真渲染器上复现过）。它关不掉框、伪造 id 也进不了 ResourceFetch 白名单，所以不是提权——它伪造的是「这些条目是系统列出来的」这层权威。压平杀掉伪造的行，实体转义杀掉留在同一行里的伪造元素，两条都需要。

@@ -117,6 +117,73 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 
 `tools` 在多数 provider 侧位于系统消息之前的前缀里，所以**改这份 schema 的任何一个字都会让全部 agent 的前缀一次性失效**——这是一次性的，之后逐轮不变。本模块不为它计指纹（`_prefix_fingerprint()` 不吃 tools），因为它对所有 agent 恒等，没有跨 agent 串味的问题。
 
+### 工具 schema：`Delegate`（仅当 `FEATURE_WORKFORCE_DELEGATE` 开启）
+
+#### What the model sees
+
+`_delegate_tool_spec()` 产出，`FEATURE_WORKFORCE_DELEGATE` 开启时由 `_build_tools` 追加在 `Skill` 之后（与 agent 是否绑定了 skill 无关），随每次请求以 `tools` 参数发出。整份原样：
+
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "Delegate",
+    "description": "Hand off a sub-task to another persistent agent. The target picks the task from its inbox on the next dispatch tick. Fire-and-forget by default; use status_query to check progress later. Use this for parallel work, specialised expertise, or when you need a different agent's persona/skills.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "agent_slug": {
+          "type": "string",
+          "description": "Slug of the target persistent agent (see <available_workers>). Target must have ai_agents.persistent=true."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The task description / instruction for the target agent. Be specific."
+        },
+        "title": {
+          "type": "string",
+          "description": "Optional short title for the task (shown in worker UI)."
+        },
+        "priority": {
+          "type": "integer",
+          "description": "Inbox priority 1-10 (higher = sooner). Default 5."
+        },
+        "dedup_key": {
+          "type": "string",
+          "description": "Optional dedup key — repeated calls with the same key are folded while the message is unread."
+        },
+        "await": {
+          "type": "boolean",
+          "description": "If true, block this turn until the target finishes and embed the result content in the response. Default false (fire-and-forget). Use sparingly: holds the caller's agent for up to await_timeout_seconds."
+        },
+        "await_timeout_seconds": {
+          "type": "number",
+          "description": "Max seconds to block when await=true. Default 60, capped at 180. Ignored when await=false."
+        }
+      },
+      "required": [
+        "agent_slug",
+        "prompt"
+      ]
+    }
+  }
+}
+```
+
+调度在 `AgentRunner`（工具名在 `SUPPORTED_TOOLS` 里），执行体是 `services/workforce/delegate_tool.py`。模型拿回的结果形状：
+
+- 默认（`await` 省略或 `false`）：`{"delegated_to", "agent_id", "inbox_message_id", "outbox_message_id", "depth", "await": false, "status": "queued", "note": "Task is queued. …"}`。
+- `await=true`：同一组基础键再加终态 `{"status": "done" | "failed" | "cancelled", "waited_seconds", "result", "task_id", "run_id"}`（失败/取消另带 `error_code` / `error_message`），或等满 `await_timeout_seconds` 仍未终态时的 `{"status": "timeout", "waited_seconds", "last_lifecycle", "note"}`。
+- 拒绝：`{"error": "<一句话>", …}`，部分带 `limit` / `depth` / `retry_after_seconds` 等附加键（缺 `agent_slug` / `prompt`、未知 slug、委派给自己、每个调用方 agent 60 秒 30 次的速率上限、深度上限 3、A→B→A 环路、入队失败等）；树容量上限的形状见上面 `Skill` 块。
+
+#### Token effect
+
+schema 固定约 350 token（紧凑 JSON 1487 字符），开关开着就每次请求都带，不随 worker 数增长——worker 名单在系统消息的 `<available_workers>` 里，不在这里。结果是一次几十 token 的 JSON，`await=true` 时 `result` 是目标 agent 的回答原文，长度由对方决定、本工具不截断（进上下文后受 runner 的单条消息上限约束）。
+
+#### KV Cache effect
+
+与 `Skill` 同理：`tools` 在多数 provider 侧位于系统消息之前的前缀里，改这份 schema 的任何一个字、或翻 `FEATURE_WORKFORCE_DELEGATE`，都会让全部 agent 的前缀一次性失效（翻开关还同时改动 `<available_workers>`，见上面系统消息块）。结果是 append-only 的工具消息。
+
 ### 工具结果：内建 todo 的 `<todo_list>`（`Skill(skill="todo")` 的返回值）
 
 #### What the model sees
@@ -511,9 +578,9 @@ content: {content}
 [/link-summary]
 ```
 
-`{content}` 是 `neutralize_external_text` 包裹后的正文摘录（随机 id 包裹，形状见 `../../../boundary/README.md`），抓不到正文时是 `(no body extracted)`；没有标题写 `(no title)`，没有描述写 `(none)`。`{title}` / `{description}` 取自页面的 `<title>` 与 meta，**在包裹之外**。#2472 起它们各自先截断（`LINK_TITLE_MAX = 200` / `LINK_DESC_MAX = 500` 字符，超出补 `…`），再经 `escape_frame_prose` 压成一行并实体转义，最后把伪造的 `[/link-summary]`（容许括号内空白）改写成 `[\/link-summary]`。同样的方括号闭合改写也作用于 `{content}`。
+`{content}` 是 `neutralize_external_text` 包裹后的正文摘录（随机 id 包裹，形状见 `../../../boundary/README.md`），抓不到正文时是 `(no body extracted)`；没有标题写 `(no title)`，没有描述写 `(none)`。`{title}` / `{description}` 取自页面的 `<title>` 与 meta，**在包裹之外**。#2472 起它们各自先截断（`LINK_TITLE_MAX = 200` / `LINK_DESC_MAX = 500` 字符，超出补 `…`），再经 `escape_frame_prose` 压成一行并实体转义，伪造的 `[/link-summary]`（容许括号内空白）也在这一步改写成 `[\/link-summary]`（`link-summary` 登记在 `frame_markers.BRACKET_FRAMES`，方括号闭合由 `escape_frame_body` 负责，fh5 起本模块不再自带私有 defuser，输出逐字节不变）。`{content}` 过 `escape_frame_body`：方括号闭合与我们拥有的尖括号闭合（如 `</system-reminder>`）都被改写；fh5 之前正文只改写方括号闭合。
 
-失败时（`render_failure_block`，`{reason}` 是 `异常类名: 消息` 的第一行、截到 200 字符，再经 `escape_frame_prose` 与方括号闭合改写）：
+失败时（`render_failure_block`，`{reason}` 是 `异常类名: 消息` 的第一行、截到 200 字符，再经 `escape_frame_prose`，方括号闭合在其中一并改写）：
 
 ```text
 [link-summary url={url} error=true]
@@ -726,7 +793,7 @@ schema 约 200 token（不含 `options` 子 schema），指令约 110 token，�
 - **legacy 路径（issue 没有 assignee agent）根本不转发附件**，所以那条路上的引用既不被校验也不到达任何人。这对所有附件 kind 都成立，不是 `output_ref` 引进的；在那里加校验只会给出「引用有效」的假保证，因为它随后照样被丢掉。
 - **`script_chapter` 今天没有生产者**，所以引用它必然是 `output_ref_unresolvable`。没有特判——登记表说没有就是没有。
 - **`link_injection` 失败会落显式占位块**，不是静默跳过——但占位块的文案目前只有英文，与 UI 的 i18n 口径不一致。
-- **`[link-summary]` 是方括号框**。`OWNED_FRAMES` 里登记了 `link-summary`，但 `escape_frame_body` 只认 `</name>`，方括号闭合 `[/link-summary]` 由 `link_injection._defuse_link_close` 自己负责；新增往块里写外部文本的地方必须同样过它。#2472 之前标题与描述未转义、无上限，记录在此供对照。非 HTML 页面只有响应头信息。
+- **`[link-summary]` 是方括号框**。它同时登记在 `OWNED_FRAMES` 与 `BRACKET_FRAMES`，所以 `escape_frame_body` / `escape_frame_prose` 两种闭合拼写都改写；新增往块里写外部文本的地方过这两个函数之一即可。新加方括号框必须登记进 `BRACKET_FRAMES`（`test_frame_escape_wiring.py` 会扫出未登记的），且不许在别的模块再写私有的方括号闭合正则（同一文件里的源码扫描会拒绝）。块头的 `url=` 仍未转义，来源是本轮用户消息里的 URL 正则匹配（不含空白与 `]`）。#2472 之前标题与描述未转义、无上限，记录在此供对照。非 HTML 页面只有响应头信息。
+- **`Delegate` 让模型「use status_query」，但模型没有能发 `status_query` 的工具**。`status_query` 是收件箱消息类型（`inbox_processor` 有处理器），而模型手里只有 `Delegate` / `Skill`；描述与 `queued` / `timeout` 结果里的 `note` 都这么说。改描述会让全站前缀失效一次，所以记在这里而不是顺手改（fh5 T4 发现，留票）。
 - **强制声明的 `tool_choice` 从不穿过 `LLMFallbackChain`**（链的 `call` 不收这个参数），所以生产上那次强制请求实际是「不强制」。已记票（fh4 计划留票 E）。
 - **`{assistant_text}` 进强制声明请求时没有上限**。
-- **两份工具 schema 没有自己的三问块**：`Delegate`（`prompt_composer.py` 内联构造）与 1:1 聊天的 `ResourceFetch`（`ai_library_chat_service.py` 内联构造，描述与团队频道那份不同，团队频道那份见 `app/services/chat/README.md`）。fh4 守卫按模块登记，这两个模块已被其他块覆盖，所以守卫看不见它们。留票：把守卫改成按 `(模块, 工具名)` 登记，每个 `{"type": "function"}` 字面量各自要一个块，再补这两块。
