@@ -56,6 +56,29 @@ def messages_from_events(events: list[dict[str, Any]]) -> list[dict[str, str]]:
     return out
 
 
+def summary_watermark_from_events(events: list[dict[str, Any]]) -> int | None:
+    """``covers_up_to_seq`` of the summary ``messages_from_events`` keeps.
+
+    fh5 A2: the summary that opens a rebuilt history covers every
+    conversation message with ``seq <= covers_up_to_seq``; the messages after
+    it were sent verbatim. Fork needs that number to put them back
+    (``issue_fork.seed_messages``). The LAST summary with text wins, matching
+    ``messages_from_events``; metrics-only rows (emergency cap) are skipped.
+    ``None`` when there is no such summary, or when it predates A2 and carries
+    no watermark — callers then keep the pre-A2 behaviour.
+    """
+    covers: int | None = None
+    for ev in events:
+        p = ev.get("payload") or {}
+        if ev.get("event_type") != "compaction_summary":
+            continue
+        if not str(p.get("summary") or "").strip():
+            continue
+        raw = p.get("covers_up_to_seq")
+        covers = int(raw) if raw is not None else None
+    return covers
+
+
 def is_step_boundary(events: list[dict[str, Any]], at_seq: int) -> bool:
     """A fork point must be a step boundary so the last message is whole."""
     for ev in events:
@@ -70,4 +93,5 @@ __all__ = [
     "events_upto",
     "is_step_boundary",
     "messages_from_events",
+    "summary_watermark_from_events",
 ]

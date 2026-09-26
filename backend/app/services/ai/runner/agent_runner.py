@@ -50,6 +50,10 @@ from app.services.ai.runner.step_hooks import (
     StepHookChain,
     default_step_hooks,
 )
+from app.services.ai.runner.stored_summary import (
+    expose_compaction,
+    report_carried_summary,
+)
 from app.services.ai.runner.tool_events import emit_tool_call, tool_error_code
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.ai.tools.ask_user_tool import (
@@ -337,6 +341,14 @@ class AgentRunner:
         # only for issue-context turns; None on regular chat turns so a stray
         # FinishIssue call returns a clear "not available" result.
         self.finish_issue_handler: Optional[Any] = None
+        # fh5 A2: per-turn history state, set by the chat service right before
+        # the turn and cleared in its finally (same lifecycle as
+        # ``finish_issue_handler``). ``carried_summary`` is the stored summary
+        # the turn starts from (``CarriedSummary``); ``turn_message_seqs`` is
+        # aligned 1:1 with the turn's messages so the compactor can name the
+        # seq a fresh summary covers. None = a turn without persisted history.
+        self.carried_summary: Optional[Any] = None
+        self.turn_message_seqs: Optional[list] = None
         # genmedia: per-request media generation handlers. Injected by the
         # media generation service when the agent turn is allowed to generate
         # images or video. None means generation is not configured for this
@@ -1702,6 +1714,7 @@ class AgentRunner:
                 # context (codex-local runs on the user's own machine). The
                 # caller's ``user_id`` covers recorder-less turns.
                 user_id=_compaction_user_id(recorder, user_id),
+                message_seqs=self.turn_message_seqs,
             )
         except Exception as exc:  # noqa: BLE001 — contain, log, degrade
             # The compactor already degrades a failed SUMMARY to the emergency
@@ -1723,6 +1736,17 @@ class AgentRunner:
 
             inc_metric("compaction_failed")
             compaction_stats = None
+        # fh5 A2: the chat service persists an accepted summary from these
+        # stats, and a turn that starts from a stored summary says so in its
+        # transcript — before the ``user`` event, which the caller emits next.
+        expose_compaction(recorder, compaction_stats)
+        await report_carried_summary(
+            recorder,
+            self.carried_summary,
+            user_messages,
+            compaction_stats,
+            composed.model,
+        )
         if (
             recorder is not None
             and compaction_stats is not None

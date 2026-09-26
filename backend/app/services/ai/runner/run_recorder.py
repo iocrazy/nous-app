@@ -206,6 +206,11 @@ class RunRecorder:
     # A tuple (rebound, never mutated) so the default is a class attribute and
     # the ``RunRecorder.__new__`` stubs still read ``()``.
     _inbox_claimed_ids: tuple[int, ...] = field(default=(), init=False)
+    # fh5 A2: this turn's ``CompactionStats`` from the runner preflight
+    # (``stored_summary.expose_compaction``), set whether or not anything was
+    # saved. The chat service reads it after the turn to persist an accepted
+    # summary. A simple default so ``RunRecorder.__new__`` stubs read None.
+    last_compaction: Any = field(default=None, init=False)
 
     HEARTBEAT_RATE_LIMIT_S: float = 15.0  # local, DB-write throttle
     EVENT_VALUE_MAX_CHARS: int = 4000  # per-field payload truncation

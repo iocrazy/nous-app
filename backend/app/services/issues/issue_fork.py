@@ -26,6 +26,7 @@ from app.services.ai.runner.replay import (
     events_upto,
     is_step_boundary,
     messages_from_events,
+    summary_watermark_from_events,
 )
 from app.services.issues.issue_dispatch import is_dispatching
 
@@ -99,26 +100,62 @@ def _clean_steer(steer: Optional[str]) -> Optional[str]:
     return text or None
 
 
+def _plain(origin: list[dict]) -> list[dict]:
+    """Replayable origin rows as ``{role, content}`` (no seq, no blanks)."""
+    return [
+        {"role": m["role"], "content": m["content"]}
+        for m in origin
+        if m.get("role") in ROLES and str(m.get("content") or "").strip()
+    ]
+
+
+def _opens_with_summary(run_messages: list[dict]) -> bool:
+    return bool(
+        run_messages
+        and run_messages[0].get("role") == "system"
+        and str(run_messages[0].get("content", "")).startswith(SUMMARY_PREFIX)
+    )
+
+
 def _seed(origin: list[dict], run_messages: list[dict]) -> list[dict]:
     """Origin turns + this run's rebuilt messages; the seam collapses one
     identical (role, content) pair — the run's first ``user`` event is the
     text the conversation appended just before the run started. A run
     window that opens with a compaction summary already REPLACED everything
     before it — the origin is not prepended in front of its own summary."""
-    if (
-        run_messages
-        and run_messages[0].get("role") == "system"
-        and str(run_messages[0].get("content", "")).startswith(SUMMARY_PREFIX)
-    ):
+    if _opens_with_summary(run_messages):
         return list(run_messages)
-    seed = [
-        {"role": m["role"], "content": m["content"]}
-        for m in origin
-        if m.get("role") in ROLES and str(m.get("content") or "").strip()
-    ]
+    seed = _plain(origin)
     if seed and run_messages and seed[-1] == run_messages[0]:
         run_messages = run_messages[1:]
     return seed + run_messages
+
+
+def seed_messages(origin: list[dict], events: list[dict]) -> list[dict]:
+    """The forked session's history: what the model saw in the run up to the
+    fork point (I4).
+
+    fh5 A2 (recon-a §1.6): a run that opens with a summary saw
+    ``[summary] + origin rows after the summary's watermark + this run``.
+    Those middle rows — the verbatim tail after a live compaction, or every
+    row since a stored summary — used to be dropped. With the watermark on the
+    ``compaction_summary`` event they are put back, and the seam (the run's
+    ``user`` event is the origin's last row) collapses once as before.
+    Summaries recorded before A2 carry no watermark and seed as they always
+    did. ``origin`` rows carry ``seq`` (``list_origin_messages``) and already
+    stop at the run's start.
+    """
+    run_messages = messages_from_events(events)
+    watermark = summary_watermark_from_events(events)
+    if not _opens_with_summary(run_messages) or watermark is None:
+        return _seed(origin, run_messages)
+    between = _plain(
+        [m for m in origin if m.get("seq") is not None and int(m["seq"]) > watermark]
+    )
+    rest = run_messages[1:]
+    if between and rest and between[-1] == rest[0]:
+        rest = rest[1:]
+    return [run_messages[0]] + between + rest
 
 
 async def fork_run(
@@ -184,7 +221,7 @@ async def fork_run(
             "not_a_step_boundary", 400, "at_seq must be a step_start or turn_end seq"
         )
 
-    run_messages = messages_from_events(events_upto(events, at_seq))
+    window = events_upto(events, at_seq)
     # The run's own conversation first (a run forked earlier lives in a
     # session the issue no longer points at); the issue pointer is the
     # fallback for rows recorded before conversation_id was stamped.
@@ -194,7 +231,7 @@ async def fork_run(
         origin = await deps.list_origin_messages(
             int(history_session), run.get("started_at")
         )
-    messages = _seed(origin, run_messages)
+    messages = seed_messages(origin, window)
 
     steer_text = _clean_steer(steer)
     forked_from = {
@@ -334,7 +371,15 @@ class _RealDeps:
             created = _ts(r.get("created_at"))
             if cutoff is not None and created is not None and created >= cutoff:
                 break  # seq ASC — everything after belongs to the run or later
-            out.append({"role": r.get("role"), "content": r.get("content") or ""})
+            out.append(
+                {
+                    "role": r.get("role"),
+                    "content": r.get("content") or "",
+                    # fh5 A2: seed_messages keeps the rows past a summary's
+                    # watermark; the seq is how it tells them apart.
+                    "seq": r.get("seq"),
+                }
+            )
         return out
 
     async def create_session(self, **kw: Any) -> dict:
@@ -478,4 +523,4 @@ def default_deps() -> ForkDeps:
     return _RealDeps()
 
 
-__all__ = ["ForkDeps", "ForkRejected", "default_deps", "fork_run"]
+__all__ = ["ForkDeps", "ForkRejected", "default_deps", "fork_run", "seed_messages"]

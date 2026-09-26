@@ -60,6 +60,11 @@ from app.services.ai.chat.step_replay import (
     user_message_metadata,
 )
 from app.services.ai.chat.turn_agent import resolve_turn_agent
+from app.services.ai.chat.turn_history import (
+    assemble_turn_messages,
+    load_turn_history,
+    persist_compaction_summary,
+)
 from app.services.ai.permissions.high_risk_caps import (
     high_risk_caps,
     media_kill_switch_engaged,
@@ -771,9 +776,13 @@ class AILibraryChatService:
             agent_repo, session=session, agent_slug=agent_slug, user_id=user_id
         )
 
-        # Newest window: a conversation past 200 messages must feed the model
-        # its most recent context, not its first 200 messages.
-        history = await self.get_messages(session_id, user_id=user_id, newest=True)
+        # fh5 A2: a stored summary + the rows after its watermark when this
+        # direct_agent conversation has one; the newest-200 window otherwise
+        # (a conversation past 200 messages must feed the model its most
+        # recent context, not its first 200 messages). Ownership was checked
+        # by get_session above.
+        turn_history = await load_turn_history(self._store, session_id)
+        history = turn_history.rows
         # fh2 T3: a recovery re-execution finds its own user message already
         # written; reuse it and cut history before it (step_replay docstring).
         replayed_user_msg, history = split_replayed_turn(history, dbos_step_key)
@@ -1458,7 +1467,16 @@ class AILibraryChatService:
                 new_user_msg = {"role": "user", "content": effective_content}
         else:
             new_user_msg = {"role": "user", "content": effective_content}
-        user_messages.append(new_user_msg)
+        # fh5 A2: [stored summary frame] + history + new user message, with a
+        # parallel seq list the compactor uses to name what a fresh summary
+        # covers. The per-message cap below is 1:1, so the seqs stay aligned.
+        assembled = assemble_turn_messages(
+            carried=turn_history.carried,
+            rows=history,
+            history_messages=user_messages,
+            new_user_message=new_user_msg,
+        )
+        user_messages = assembled.messages
 
         # Wave G (G5): per-message size cap. Defends against the
         # "user pasted 200k log line" case that bypasses compaction
@@ -1620,6 +1638,10 @@ class AILibraryChatService:
                             "steer": bool(fork_steer),
                         },
                     )
+                # fh5 A2: per-turn history state for the preflight (cleared
+                # in the finally below, like the per-turn handlers).
+                runner.carried_summary = turn_history.carried
+                runner.turn_message_seqs = assembled.message_seqs
                 try:
                     if chunk_callback is None:
                         # Buffered path — unchanged
@@ -1720,6 +1742,18 @@ class AILibraryChatService:
                     runner.finish_issue_handler = None
                     # PR 5: the search handler is bound to this caller.
                     runner.library_search_handler = None
+                    runner.carried_summary = None
+                    runner.turn_message_seqs = None
+
+                # fh5 A2: an accepted summary becomes this conversation's
+                # stored head. Best-effort (never fails the turn); a recovery
+                # re-execution with the same watermark is a no-op upsert.
+                await persist_compaction_summary(
+                    getattr(recorder, "last_compaction", None),
+                    conversation_id=session_id,
+                    memory_eligible=turn_history.memory_eligible,
+                    model=composed.model,
+                )
 
                 run_id = recorder.run_id
                 # Pull usage off the recorder — that's the single source

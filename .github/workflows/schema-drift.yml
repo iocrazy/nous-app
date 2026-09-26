@@ -267,16 +267,32 @@ on:
       - 'backend/app/services/canvas/canvas_service.py'
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
+      # fh5 A1 long-session bench: the compaction / history-load / fork chain
+      # against a real conversation. The runner, recorder, compactor, store and
+      # sidecar repository it drives only meet Postgres here.
+      - 'backend/tests/benchmarks/test_long_session_continuation.py'
+      - 'backend/app/agent_framework/context_compactor.py'
+      - 'backend/app/services/ai/runner/agent_runner.py'
+      - 'backend/app/services/ai/chat/conversations_ai_store.py'
+      - 'backend/app/repositories/conversation_memory_repository.py'
+      - 'backend/app/services/issues/issue_fork.py'
+      - 'backend/app/services/ai/chat/turn_history.py'
+      # fh5 review L: the benchmark replicates this service's history assembly
+      # order; if the service changes the order, the benchmark must re-run.
+      - 'backend/app/services/ai/chat/ai_library_chat_service.py'
+      - 'backend/app/services/ai/runner/stored_summary.py'
+      - 'backend/app/services/ai/runner/replay.py'
+      - 'backend/tests/db/test_turn_history_store_integration.py'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all forty-three, so it has to
+      # to it changes what "green" means for all forty-five, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the forty-three above was counted with this command, not derived
-      # from the forty-two it replaced):
+      # (the forty-five above was counted with this command, not derived
+      # from the forty-four it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -1107,3 +1123,26 @@ jobs:
           # 钉住：只设 claim.sub / 只设 claims / 两者都设（claim.sub 赢）/ 全空 → NULL /
           # 非 JSON 的 claims 与非 uuid 的 sub 照上游一样报错（桩不许比生产宽）。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_ci_bootstrap_auth_stubs_integration.py -v
+
+      - name: Assert the turn-history store and sidecar statements on a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # fh5 A2：加载「摘要 + 水位后的行」靠三条语句——seq > 水位的最新窗口
+          # （升序、软删行不回来）、会话类型读取、conversation_memory 删除（编辑/
+          # 删除水位下的消息时让摘要失效）。单测里它们都是桩的。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_turn_history_store_integration.py -v
+
+      - name: Run the long-session continuation benchmark on a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # fh5 A1：生产从没压缩过，所以「压缩之后会话怎么继续」只有这里跑得到。
+          # 400 行种子 + 窗口压到 24k + 20 个真轮次（缓冲分支、真 RunRecorder、
+          # 真 compactor、真 store 追加）。断言前缀稳定、摘要次数有上限、fork
+          # 重建等于模型所见、conversation_memory 一行且水位单调；每轮耗时表只打印。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/benchmarks/test_long_session_continuation.py -v

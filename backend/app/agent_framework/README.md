@@ -28,6 +28,8 @@
 
 `[Earlier conversation summary]` 必须保持在第一行：`runner/replay.py` 与 `services/issues/issue_fork.py` 都用 `startswith(SUMMARY_PREFIX)` 认这条消息。live 路径与 replay 路径产出的这条消息逐字节相同（持久化的是**原始**摘要文本，加框只在这一处发生一次）。
 
+**被接受的摘要会被存下来，之后的轮次从同一个框起跑**（fh5 A2，聊天路径的 `direct_agent` 会话）：原始摘要文本与它覆盖到的最大 `messages.seq`（水位）写进 `conversation_memory`，下一轮的历史是「这条框 + `seq` 大于水位的行」（加载规则见 `../services/ai/chat/README.md`）。这样起跑的轮次在 transcript 里记一条 `compaction_summary{path:"stored", summary, covers_up_to_seq, summary_tokens}`，排在 `user` 事件之前、没有 start/end 括号，replay 与分叉据此重建出同一个框。尾部再次越过 orange 时，旧框作为头部的第 0 条一起交给摘要器：新摘要**取代**旧摘要（合并而非拼接），模型看到的仍然只有一条框。
+
 摘要两次都没成功（见下一块）或找不到安全切分点时，模型看到的是另一种样子：**没有**摘要消息，头部每条消息被截到单条上限，尾部带 `message_truncation` 的截断标记（见「单条消息上限标记」）。
 
 yellow 档不产生摘要，只改写工具结果正文（见「工具结果去重与老化」）。
@@ -60,15 +62,16 @@ yellow 档不产生摘要，只改写工具结果正文（见「工具结果去�
 - 切分点由 `_safe_split_index` 往前退，保证 tool_call 与它的 tool 回复不被拆开，所以尾部可能多于 keep-N 条；退到 0 抛 `NoSafeSplitError`，走应急截断。
 - **窗口分母**（`context_window.resolve_model_window`）：先查 provider 目录（`catalog_windows`，`nous_models.context_window_tokens`，缓存 `CATALOG_WINDOW_TTL_S = 300` 秒；同一个键撞上两个窗口时取小的，早压缩是分歧里安全的一侧），再查内置表 `_MODEL_WINDOWS`，都没有就用 `LLM_MAX_CONTEXT_TOKENS` 并在 stats 的 notes 里写明「window is a fallback」。窗口 ≤ 0 直接跳过。
 - 开关：`AGENT_AUTO_COMPACT=false` 整体关闭。
+- **水位**：调用方可以传一份与消息 1:1 的 `message_seqs`（聊天路径由 `turn_history.assemble_turn_messages` 给出）；摘要被接受时 `covers_up_to_seq = max(头部里的 seq)`，进 `CompactionStats` 与 `compaction_summary` 事件。长度对不上就不报水位（记 warning），此时不持久化。应急截断什么都不写，下一轮照旧看原始行。
 - **每轮只跑一次**，在 runner 起跑前的预检里（`agent_runner._preflight_compact_and_budget`，两条路都调）。同一轮内工具迭代之间**不**压缩，一轮内的增长只受 `MAX_TOOL_ITERATIONS = 10` 约束。压缩后仍 ≥ 0.90 的请求由 `check_context_budget` 拒绝，`ContextWindowError` 抛给调用方，不进模型。
 
 #### KV Cache effect
 
 **替换更早的 token**。系统消息从不被改；消息列表从下标 0 起被重写。所以任何一次压缩都**必然**打断消息列表的前缀，这是设计，不是副作用。
 
-在聊天路径上还更糟一层：聊天历史每轮从库里重建（见 `../services/ai/chat/README.md`），而压缩摘要**不写回聊天历史**（`compaction_summary` 事件只有 `runner/replay.py` 与 `issue_fork` 读）。所以一个会话一旦越过 orange，**之后每一轮都从头重新摘要头部**：每轮一次摘要请求，每轮一份新的摘要文本，第一次压缩之后就不再有稳定的消息前缀。本模块不承诺任何 provider 缓存命中。
+聊天路径上压缩之后的轮次是**稳定前缀**（fh5 A2）：摘要存进 `conversation_memory`，之后每轮以同一个框开头、后面按 seq 追加，直到尾部再越过 orange 才产生新摘要、换一次前缀。A2 之前摘要不写回，越过 orange 的会话每轮都重新摘要头部（每轮一次摘要请求、每轮一个新前缀）；长会话基准（`tests/benchmarks/test_long_session_continuation.py`，24k 窗口、400 行种子、20 轮）把这个数字从 20 次压到 2 次。本模块不承诺任何 provider 缓存命中。
 
-会让复用失效的改动：`SUMMARY_PREFIX` 或框的文字、四档阈值（改变压缩在哪一轮发生）、keep-N 条数、`escape_frame_body` 的转义规则（改变同一份摘要渲染出的字节）。
+会让复用失效的改动：`SUMMARY_PREFIX` 或框的文字、四档阈值（改变压缩在哪一轮发生）、keep-N 条数、`escape_frame_body` 的转义规则（改变同一份摘要渲染出的字节——存储的是原始文本，所以改转义规则会让**所有**已存储摘要的下一轮换前缀）。编辑 / 删除一条被摘要覆盖的消息会删掉存储摘要，那个会话下一轮回到原始行。
 
 ### 摘要请求：暖前缀与维护模型两条路
 
@@ -333,7 +336,8 @@ Rules:
 ## Known Limitations and Deferred Work
 
 - **循环守卫警告的注入位置与工具结果交错**（fh5 T1 留票）。`run_turn` 缓冲路在逐个调用的循环里注入，触发的调用不是最后一个时，警告夹在同一个 assistant 轮的两条工具结果之间：`claude` 协议靠 adapter 的合并与 `tool_result` 提前兜住，OpenAI 兼容 provider 可能拒绝 `tool` 回复之间的非 tool 消息。流式路注入后 `break`，同一轮剩下的调用**没有**工具结果，两种 API 都会拒绝。修法是把缓冲路的注入挪到循环之后、流式路给跳过的调用补结果。
-- **聊天会话越过 orange 后每一轮都重新摘要头部**。压缩摘要不写回聊天历史，历史每轮从库重建，所以每轮一次摘要请求、每轮一份新摘要，没有稳定前缀。第 1 批把「摘要持久化」推迟了；fh4 计划裁定 8 建议第 5 批翻案，本批只记。
+- **transcript 每个字符串字段截到 4000 字符**（`RunRecorder.EVENT_VALUE_MAX_CHARS`）。超过 4000 字符的摘要、user 文本或最终回答在 `compaction_summary` / `user` / `assistant` 事件里是截断的，replay 与分叉据此重建出的内容与模型看到的不同（摘要框变短、分叉种子里的回答被切）。A2 之前就存在；长会话基准把回答控制在上限以下以免把它算进 A5。留票。
+- **只有聊天路径的 `direct_agent` 会话持久化摘要**。议题轮次走同一个 `_run_session_turn_inner`，所以也覆盖；群聊频道的滚动摘要是另一套（`services/chat/conversation_memory_service.py`），与这里共用 `conversation_memory` 表但互不读写对方的行。生产截至 2026-09-26 从未压缩过（0 条 compaction 事件），真栈验收要靠临时调小目录窗口。
 - **`tool_result_pruner` 在今天的生产路径上实际不生效**。预检压缩跑在历史上，而聊天历史不带 `role=tool` 行（只重建 user / assistant / system），replay 也丢掉 tool_call 行；去重、老化与工具配对切分只对一轮之内的列表起作用，而一轮之内不压缩。
 - **去重键用的是原始 arguments 字符串**。`_hash_tool_call` 旁的注释说会按键排序，实际没有：参数顺序不同的同一调用逃过去重。
 - **`aging_after_turns` 数的是消息不是轮**，名字会误导。

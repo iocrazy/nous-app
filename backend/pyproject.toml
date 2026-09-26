@@ -93,6 +93,9 @@ markers = [
     # unless DOUYIN_ACCEPTANCE_COOKIE_FILE points at a live cookie, so a
     # default `pytest` run — and CI — never touches douyin.
     "live_douyin: real-request acceptance against douyin (opt-in, needs a cookie)",
+    # Real-stack benchmark against the drift database. Self-skips without
+    # INTEGRATION_DATABASE_URL; schema-drift.yml runs it.
+    "benchmark: long-session continuation bench (drift DB; opt-in)",
 ]
 
 [project.urls]
