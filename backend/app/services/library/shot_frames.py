@@ -26,7 +26,7 @@ from typing import AsyncIterator, Sequence
 from loguru import logger
 from PIL import Image
 
-from app.agent_framework.process_lifecycle import safe_popen_kwargs
+from app.agent_framework.process_runner import current_workflow_id, run_process
 from app.services.library.shot_cut import (
     DEFAULT_PARAMS,
     CutParams,
@@ -58,7 +58,8 @@ _SCRATCH_PREFIX = "shots_"
 
 class ShotFramesError(RuntimeError):
     """Sampling failed: ``reason`` is a stable code (``ffmpeg_missing`` /
-    ``video_missing`` / ``probe_failed`` / ``ffmpeg_failed`` / ``timeout``)."""
+    ``video_missing`` / ``probe_failed`` / ``ffmpeg_failed`` / ``timeout`` /
+    ``cancelled``)."""
 
     def __init__(self, reason: str, detail: str = "") -> None:
         super().__init__(f"{reason}: {detail}" if detail else reason)
@@ -130,24 +131,17 @@ async def sample_frames(
         raise ShotFramesError("ffmpeg_missing")
     pattern = str(out_dir / "f%06d.jpg")
     cmd = _sample_cmd(video_path, pattern, fps)
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-            **safe_popen_kwargs(),
-        )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
-    except asyncio.TimeoutError as exc:
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-            await proc.wait()
+    res = await run_process(
+        cmd, timeout_s=timeout_seconds, workflow_id=current_workflow_id()
+    )
+    if res.cancelled:
+        raise ShotFramesError("cancelled", "ffmpeg sampling: workflow cancelled")
+    if res.timed_out:
+        raise ShotFramesError("timeout", f"ffmpeg sampling > {timeout_seconds}s")
+    if res.exit_code != 0:
         raise ShotFramesError(
-            "timeout", f"ffmpeg sampling > {timeout_seconds}s"
-        ) from exc
-    if proc.returncode != 0:
-        raise ShotFramesError(
-            "ffmpeg_failed", stderr.decode(errors="replace")[:300].strip()
+            "ffmpeg_failed",
+            f"{res.describe()}: {res.stderr_text()[:300].strip()}",
         )
     frames = sorted(out_dir.glob("f*.jpg"))
     out: list[SampledFrame] = []

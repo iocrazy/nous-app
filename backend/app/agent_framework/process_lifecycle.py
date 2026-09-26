@@ -127,31 +127,31 @@ def _cleanup_all_children() -> None:
 
 
 def _cleanup_subprocess_registry() -> None:
-    """Reach into subprocess_registry's internal dict + kill_process_tree
-    everything still registered."""
-    from app.agent_framework import subprocess_registry as sr
+    """Last-resort kill of every child still in ``subprocess_registry``.
 
-    # Internal dict access — the public API is async (cancel_workflow_subprocesses);
-    # at exit time we can't reliably await. Direct walk is safe-enough here.
-    workflow_pids: dict = getattr(sr, "_workflow_pids", {})
-    if not workflow_pids:
-        return
-    all_pids: set[int] = set()
-    for pids in workflow_pids.values():
-        if isinstance(pids, set):
-            all_pids.update(pids)
-        elif isinstance(pids, (list, tuple)):
-            all_pids.update(pids)
+    Which path actually runs: in the server, uvicorn installs its own
+    SIGINT/SIGTERM handlers after ours, so a normal ``docker stop`` goes
+    through the lifespan shutdown — ``startup/teardown.shutdown_all`` awaits
+    ``cancel_all_subprocesses`` there, and that is the PRIMARY path. This
+    function is the fallback for exits that never run the lifespan (pytest,
+    scripts, a crash through ``sys.exit``); PR_SET_PDEATHSIG covers a
+    SIGKILLed parent. It cannot await, so it uses the blocking kill with the
+    same escalation and a bounded wait.
+
+    (It used to read ``sr._workflow_pids`` — an attribute that never existed —
+    so it was a no-op; fh4 recon H3.)
+    """
+    from app.agent_framework import subprocess_registry as sr
+    from app.agent_framework.kill_tree import kill_process_tree_sync
+
+    snapshot = sr.snapshot_all_pids()
+    sr.clear_registry()  # detach first: late unregisters become no-ops
+    all_pids = sorted({pid for pids in snapshot.values() for pid in pids})
     for pid in all_pids:
         try:
-            # Sync kill (we can't async at exit) — kill_process_tree
-            # expects async normally; fall back to direct os.kill.
-            try:
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                pass
-        except Exception:
-            pass
+            kill_process_tree_sync(pid, grace_seconds=0.5)
+        except Exception as exc:  # noqa: BLE001 — one bad pid never stops the rest
+            logger.warning(f"[process_lifecycle] atexit kill pid={pid} failed: {exc}")
 
 
 def _cleanup_multiprocessing_children() -> None:

@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from dbos import DBOS
 from loguru import logger
 
-from app.agent_framework.process_lifecycle import safe_popen_kwargs
+from app.agent_framework.process_runner import current_workflow_id, run_process
 from app.services.generation.local_dispatch import raise_if_failed
 from app.services.library.generated_media_service import (
     GenerationOrigin,
@@ -55,22 +55,29 @@ _MAX_SEGMENTS = 12
 _MAX_SEGMENT_SECONDS = 10
 
 
-async def _run_ffmpeg(args: List[str]) -> None:
-    """Run ffmpeg, raising with its stderr tail on failure.
+#: Wall-clock cap per ffmpeg call (concat / tail-frame grab of <=12 x 10 s
+#: segments). It had no timeout at all: a hung ffmpeg held the workflow — and
+#: its scratch dir — until the worker restarted.
+FFMPEG_TIMEOUT_S = 600.0
 
-    Spawned through ``safe_popen_kwargs()`` like every other child: ffmpeg
-    needs nothing from our environment, so it gets the scrubbed copy.
+
+async def _run_ffmpeg(args: List[str]) -> None:
+    """Run ffmpeg through ``run_process``, raising with its stderr tail on
+    failure, timeout or workflow cancel (every flag in the message).
+
+    ffmpeg needs nothing from our environment, so it gets the scrubbed copy.
     """
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        **safe_popen_kwargs(),
+    res = await run_process(
+        args, timeout_s=FFMPEG_TIMEOUT_S, workflow_id=current_workflow_id()
     )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        tail = (stderr or b"")[-800:].decode(errors="replace")
-        raise RuntimeError(f"ffmpeg failed (rc={proc.returncode}): {tail}")
+    if res.ok:
+        return
+    tail = res.stderr[-800:].decode(errors="replace")
+    if res.timed_out:
+        raise RuntimeError(
+            f"ffmpeg timed out after {FFMPEG_TIMEOUT_S:.0f}s ({res.describe()}): {tail}"
+        )
+    raise RuntimeError(f"ffmpeg failed ({res.describe()}): {tail}")
 
 
 def _segment_seconds(seconds: int) -> int:

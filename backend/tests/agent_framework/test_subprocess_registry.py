@@ -8,6 +8,7 @@ import sys
 
 import pytest
 
+from app.agent_framework.kill_tree import KillOutcome
 from app.agent_framework.subprocess_registry import (
     cancel_workflow_subprocesses,
     clear_registry,
@@ -75,8 +76,8 @@ async def test_cancel_workflow_subprocesses_kills_real_subprocess():
         await asyncio.sleep(0.1)  # let it start
         assert proc.returncode is None
 
-        count = await cancel_workflow_subprocesses("wf-real", grace_seconds=1.0)
-        assert count == 1
+        outcomes = await cancel_workflow_subprocesses("wf-real", grace_seconds=1.0)
+        assert len(outcomes) == 1 and outcomes[0].quiesced
 
         # Subprocess should now exit
         await asyncio.wait_for(proc.wait(), timeout=2.0)
@@ -92,8 +93,8 @@ async def test_cancel_workflow_subprocesses_kills_real_subprocess():
 
 @pytest.mark.unit
 async def test_cancel_no_pids_returns_zero():
-    count = await cancel_workflow_subprocesses("never-registered")
-    assert count == 0
+    outcomes = await cancel_workflow_subprocesses("never-registered")
+    assert outcomes == []
 
 
 @pytest.mark.unit
@@ -110,11 +111,12 @@ async def test_cancel_multiple_pids_continues_on_individual_failure(monkeypatch)
         killed.append(pid)
         if pid == 12345:
             raise RuntimeError("simulated kill failure for 12345")
+        return KillOutcome(False, True, False, True)
 
     monkeypatch.setattr(sr, "kill_process_tree", fake_kill)
-    count = await cancel_workflow_subprocesses("wf-mixed")
-    # Both attempted; one raised; count = 1 (successful)
+    outcomes = await cancel_workflow_subprocesses("wf-mixed")
+    # Both attempted; one raised; one outcome (successful)
     assert sorted(killed) == [12345, 67890]
-    assert count == 1
+    assert len(outcomes) == 1
     # Registry still cleared
     assert registered_pids("wf-mixed") == []

@@ -22,6 +22,7 @@ import os
 
 from loguru import logger
 
+from app.agent_framework.process_result import ProcessCancelled
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
 from app.services.media.downloader.downloader import DownloaderService
@@ -303,6 +304,16 @@ def _do_douyin_download(
                             logger.warning(
                                 f"[Download/Exec] video: yt-dlp fallback also failed for {platform_id}"
                             )
+                    except ProcessCancelled as cancel_err:
+                        # The task was cancelled and yt-dlp killed. Kept
+                        # inside the step on purpose: DBOS has no
+                        # non-retryable exception, so letting it escape
+                        # would retry the step (max_attempts=3) and
+                        # relaunch the download the user just cancelled.
+                        logger.info(
+                            f"[Download/Exec] video: yt-dlp stopped — task "
+                            f"cancelled ({platform_id}): {cancel_err}"
+                        )
                     except Exception as ytdlp_err:
                         logger.warning(
                             f"[Download/Exec] video: yt-dlp fallback error for {platform_id}: "

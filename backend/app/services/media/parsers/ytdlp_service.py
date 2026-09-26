@@ -13,14 +13,23 @@ import json
 import os
 import tempfile
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 from loguru import logger
 
-from app.agent_framework.process_lifecycle import safe_popen_kwargs
+from app.agent_framework.process_result import ProcessCancelled, ProcessResult
+from app.agent_framework.process_runner import current_workflow_id, run_process
 from app.boundary import ValidatedURL, safe_async_client
 from app.core.utils import Utils
 from app.services.media.parsers.url_router import URLRouter
+
+# Hard wall-clock caps per yt-dlp invocation. On expiry run_process kills the
+# whole process group (yt-dlp AND its ffmpeg) and reaps it; a cancel of the
+# owning workflow does the same within CANCEL_POLL_S.
+YTDLP_METADATA_TIMEOUT_S = 90.0
+YTDLP_DOWNLOAD_TIMEOUT_S = 600.0
+YTDLP_AUDIO_TIMEOUT_S = 600.0
+YTDLP_KILL_GRACE_S = 3.0
 
 # ---------------------------------------------------------------------------
 # Cookie format helpers
@@ -85,6 +94,60 @@ def _browser_cookie_to_netscape(cookie_str: str, platform: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _raise_if_stopped(res: ProcessResult, what: str, timeout_s: float) -> None:
+    """Map a stopped run onto the RuntimeError callers already handle. The
+    message keeps "timed out" for the timeout case (the task manager's error
+    classifier keys on that phrase); every flag is logged, never just one."""
+    if res.cancelled:
+        logger.warning(
+            f"[yt-dlp] {what} cancelled with its workflow ({res.describe()})"
+        )
+        raise ProcessCancelled(f"yt-dlp {what} cancelled (workflow cancelled)")
+    if res.timed_out:
+        stderr_snippet = res.stderr_text()[:500]
+        logger.error(
+            f"[yt-dlp] {what} timed out after {timeout_s:.0f}s ({res.describe()})\n"
+            f"--- stderr ---\n{stderr_snippet}"
+        )
+        raise RuntimeError(
+            f"yt-dlp {what} timed out ({timeout_s:.0f}s). Likely network "
+            f"unreachable. stderr: {stderr_snippet[:200]}"
+        )
+
+
+def _progress_line_handler(
+    progress_callback: Optional[Callable],
+) -> Optional[Callable[[str], Awaitable[None]]]:
+    """Parse ``download:<pct> <done> <total> <speed>`` lines into the
+    callback's (downloaded, total, speed) shape; None when nobody listens."""
+    if progress_callback is None:
+        return None
+
+    async def on_line(decoded: str) -> None:
+        decoded = decoded.strip()
+        if not decoded.startswith("download:"):
+            return
+        parts = decoded[len("download:") :].split()
+        if not parts:
+            return
+        speed = parts[3] if len(parts) > 3 else "0 B/s"
+        try:
+            # Byte-level progress first (parts[1]=downloaded, parts[2]=total)
+            args = (int(float(parts[1])), int(float(parts[2])), speed)
+        except (ValueError, IndexError):
+            # Fallback: percent string (e.g. "45.2%") — DASH streams report
+            # byte totals as N/A.
+            try:
+                args = (int(float(parts[0].rstrip("%")) * 100), 10000, speed)
+            except (ValueError, IndexError):
+                return
+        result = progress_callback(*args)
+        if asyncio.iscoroutine(result):
+            await result
+
+    return on_line
+
+
 class YtdlpService:
     """Universal video download via yt-dlp"""
 
@@ -138,38 +201,21 @@ class YtdlpService:
             url,
         ]
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **safe_popen_kwargs(),
-            )
-            # Keep timeout < Celery's soft_time_limit (120s) so we surface the
-            # real stderr instead of getting killed with SoftTimeLimitExceeded.
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=90)
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-                # Try to read whatever stderr yt-dlp has written so far
-                _out, _err = await asyncio.wait_for(proc.communicate(), timeout=2)
-                stderr_snippet = (
-                    _err.decode("utf-8", errors="replace")[:500] if _err else ""
-                )
-            except Exception:
-                stderr_snippet = ""
-            logger.error(
-                f"[yt-dlp] Metadata fetch timed out after 90s: {url}\n--- stderr ---\n{stderr_snippet}"
-            )
-            raise RuntimeError(
-                f"yt-dlp timed out (90s). Likely network unreachable. stderr: {stderr_snippet[:200]}"
-            )
+        # Keep timeout < the workflow step budget so we surface the real
+        # stderr instead of getting killed from outside.
+        res = await run_process(
+            cmd,
+            timeout_s=YTDLP_METADATA_TIMEOUT_S,
+            grace_s=YTDLP_KILL_GRACE_S,
+            workflow_id=current_workflow_id(),
+        )
+        _raise_if_stopped(res, f"Metadata fetch for {url}", YTDLP_METADATA_TIMEOUT_S)
 
-        if proc.returncode != 0:
-            error_msg = stderr.decode("utf-8", errors="replace").strip()
+        if res.exit_code != 0:
+            error_msg = res.stderr_text().strip()
             parsed_error = YtdlpService._parse_error(error_msg)
             logger.error(
-                f"[yt-dlp] Metadata fetch failed: {parsed_error}\n"
+                f"[yt-dlp] Metadata fetch failed: {parsed_error} ({res.describe()})\n"
                 f"--- raw stderr (first 2000 chars) ---\n"
                 f"{error_msg[:2000]}\n"
                 f"--- cmd argv ---\n"
@@ -178,7 +224,7 @@ class YtdlpService:
             raise RuntimeError(f"yt-dlp failed: {parsed_error}")
 
         try:
-            info = json.loads(stdout.decode("utf-8", errors="replace"))
+            info = json.loads(res.stdout_text())
         except json.JSONDecodeError as e:
             logger.error(f"[yt-dlp] Failed to parse JSON output: {e}")
             raise RuntimeError(f"yt-dlp returned invalid JSON: {e}")
@@ -280,66 +326,17 @@ class YtdlpService:
 
         logger.info(f"[yt-dlp] Downloading video to {output_dir}")
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **safe_popen_kwargs(),
-            )
+        res = await run_process(
+            cmd,
+            timeout_s=YTDLP_DOWNLOAD_TIMEOUT_S,
+            grace_s=YTDLP_KILL_GRACE_S,
+            workflow_id=current_workflow_id(),
+            on_stdout_line=_progress_line_handler(progress_callback),
+        )
+        _raise_if_stopped(res, f"Download of {platform_id}", YTDLP_DOWNLOAD_TIMEOUT_S)
 
-            stderr_lines = []
-
-            async def read_stdout():
-                while True:
-                    line = await proc.stdout.readline()
-                    if not line:
-                        break
-                    decoded = line.decode("utf-8", errors="replace").strip()
-                    if decoded.startswith("download:") and progress_callback:
-                        # Format: "download:<percent_str> <downloaded_bytes> <total_bytes> <speed_str>"
-                        parts = decoded[len("download:") :].split()
-                        if parts:
-                            try:
-                                # Try byte-level progress first (parts[1]=downloaded, parts[2]=total)
-                                downloaded = int(float(parts[1]))
-                                total = int(float(parts[2]))
-                                speed = parts[3] if len(parts) > 3 else "0 B/s"
-                                # Support both sync and async callbacks
-                                result = progress_callback(downloaded, total, speed)
-                                if asyncio.iscoroutine(result):
-                                    await result
-                            except (ValueError, IndexError):
-                                # Fallback: parse percent string (e.g. "45.2%")
-                                # Needed for DASH streams where byte totals are N/A
-                                try:
-                                    pct = float(parts[0].rstrip("%"))
-                                    speed = parts[3] if len(parts) > 3 else "0 B/s"
-                                    result = progress_callback(
-                                        int(pct * 100), 10000, speed
-                                    )
-                                    if asyncio.iscoroutine(result):
-                                        await result
-                                except (ValueError, IndexError):
-                                    pass
-
-            async def read_stderr():
-                while True:
-                    line = await proc.stderr.readline()
-                    if not line:
-                        break
-                    stderr_lines.append(line.decode("utf-8", errors="replace"))
-
-            await asyncio.gather(read_stdout(), read_stderr())
-            await asyncio.wait_for(proc.wait(), timeout=600)
-
-        except asyncio.TimeoutError:
-            proc.kill()
-            logger.error(f"[yt-dlp] Download timed out: {platform_id}")
-            raise RuntimeError(f"yt-dlp download timed out for {platform_id}")
-
-        if proc.returncode != 0:
-            error_msg = "".join(stderr_lines).strip()
+        if res.exit_code != 0:
+            error_msg = res.stderr_text().strip()
             parsed_error = YtdlpService._parse_error(error_msg)
             # 2026-05-13: log raw stderr alongside the parsed-down message
             # so we can tell *which* downstream API actually returned the
@@ -348,7 +345,7 @@ class YtdlpService:
             # or stream m4s — a critical distinction when debugging
             # cookie / format / quality / risk-control issues.
             logger.error(
-                f"[yt-dlp] Download failed: {parsed_error}\n"
+                f"[yt-dlp] Download failed: {parsed_error} ({res.describe()})\n"
                 f"--- raw stderr (first 2000 chars) ---\n"
                 f"{error_msg[:2000]}\n"
                 f"--- cmd argv ---\n"
@@ -418,22 +415,22 @@ class YtdlpService:
 
         logger.info(f"[yt-dlp] Extracting audio to {output_dir}")
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **safe_popen_kwargs(),
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
-        except asyncio.TimeoutError:
-            logger.error(f"[yt-dlp] Audio extraction timed out: {platform_id}")
-            raise RuntimeError(f"yt-dlp audio extraction timed out for {platform_id}")
+        res = await run_process(
+            cmd,
+            timeout_s=YTDLP_AUDIO_TIMEOUT_S,
+            grace_s=YTDLP_KILL_GRACE_S,
+            workflow_id=current_workflow_id(),
+        )
+        _raise_if_stopped(
+            res, f"Audio extraction of {platform_id}", YTDLP_AUDIO_TIMEOUT_S
+        )
 
-        if proc.returncode != 0:
-            error_msg = stderr.decode("utf-8", errors="replace").strip()
+        if res.exit_code != 0:
+            error_msg = res.stderr_text().strip()
             parsed_error = YtdlpService._parse_error(error_msg)
-            logger.error(f"[yt-dlp] Audio extraction failed: {parsed_error}")
+            logger.error(
+                f"[yt-dlp] Audio extraction failed: {parsed_error} ({res.describe()})"
+            )
             raise RuntimeError(f"yt-dlp audio extraction failed: {parsed_error}")
 
         # Find the downloaded audio file

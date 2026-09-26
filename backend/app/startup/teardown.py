@@ -8,6 +8,7 @@ DrissionPage) → close transport pools (Redis, asyncpg).
 from fastapi import FastAPI
 from loguru import logger
 
+from app.agent_framework.subprocess_registry import cancel_all_subprocesses
 from app.core.redis import close_async_redis
 from app.services.ai.runner.live_runs import interrupt_inflight_runs
 from app.services.media.parsers.douyin_parse.drissionpage_parser import (
@@ -39,6 +40,15 @@ async def shutdown_all(app: FastAPI) -> None:
     # ``RunRecorder._finish`` and the rows would sit ``running`` until the
     # sweeper (2 min). Bounded and never raises (fh2 T3, see live_runs).
     await interrupt_inflight_runs()
+
+    # Kill (and wait out) every child this process still has — yt-dlp,
+    # ffmpeg, dreamina — BEFORE DBOS goes: once the workflows are abandoned
+    # nothing else will ever reap them. Bounded (2 s grace + reap bound) and
+    # never raises. This is the primary path; atexit is only the fallback.
+    try:
+        await cancel_all_subprocesses(grace_s=2.0)
+    except Exception as e:  # noqa: BLE001 — teardown must reach the rest
+        logger.error(f"Subprocess teardown failed: {e}")
 
     # Drain DBOS workers first so in-flight workflows checkpoint cleanly.
     await shutdown_dbos()

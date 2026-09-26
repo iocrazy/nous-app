@@ -7,8 +7,8 @@ api_key. The session file is mounted read-write — the CLI refreshes tokens in
 place.
 
 Subprocess discipline (backend event-loop freeze blood-lesson, same as
-``jimeng_cli``): ``create_subprocess_exec`` + ``asyncio.wait_for`` off-loop,
-hard timeout with kill+reap, ``safe_popen_kwargs()`` for PR_SET_PDEATHSIG.
+``jimeng_cli``): ``run_process`` — off-loop, hard timeout, process-group kill
++ reap on timeout or workflow cancel, scrubbed env + PR_SET_PDEATHSIG.
 
 Unlike dreamina, ``--json`` mode prints a single pure-JSON object on stdout
 (captured 2026-08-17, v0.7.3): success is ``{"ok": true, "output": {"path":
@@ -21,7 +21,6 @@ raised as :class:`CodexCliError` — never a bare 500.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import tempfile
@@ -30,7 +29,7 @@ from typing import List, Literal, Optional, Tuple
 
 from loguru import logger
 
-from app.agent_framework.process_lifecycle import safe_popen_kwargs
+from app.agent_framework.process_runner import current_workflow_id, run_process
 from app.services.generation.aspect import ASPECT_RATIOS as _ASPECT_TO_RATIO
 from app.services.generation.aspect import ASPECT_TOLERANCE as _ASPECT_TOLERANCE
 from app.services.generation.aspect import CODEX_DEFAULT_SIZE as _DEFAULT_SIZE
@@ -260,20 +259,19 @@ class CodexCliProvider:
         # table is world-readable, so a flag would publish it to every user on
         # the box and into any crash dump of the command line. The CLI reads
         # OPENAI_API_KEY (doctor reports auth_source=env, verified 0.7.4).
-        # The splat stays inline in the spawn call: the "every spawn splats
-        # safe_popen_kwargs" guard (tests/agent_framework/test_scrubbed_env.py)
-        # checks the call node itself and cannot follow a local variable.
+        # run_process hands env_extra to safe_popen_kwargs inside its own
+        # spawn call, so the scrubbed env still carries only this one key.
         env_extra = (
             {"OPENAI_API_KEY": self._api_key}
             if self._provider_kind == "openai"
             else None
         )
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **safe_popen_kwargs(env_extra=env_extra),
+            res = await run_process(
+                cmd,
+                timeout_s=timeout,
+                env_extra=env_extra,
+                workflow_id=current_workflow_id(),
             )
         except FileNotFoundError as exc:
             raise CodexCliError(
@@ -281,33 +279,40 @@ class CodexCliProvider:
                 f"gpt-image-2-skill binary not found ({self._bin!r})",
             ) from exc
 
-        try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
+        if res.cancelled:
+            raise CodexCliError(
+                "cancelled", f"gpt-image-2-skill {args[0]} killed: workflow cancelled"
             )
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-                await asyncio.wait_for(proc.communicate(), timeout=2)
-            except Exception:  # noqa: BLE001 — best-effort reap, never re-raise
-                pass
+        if res.timed_out:
             logger.error(
-                "[codex-cli] '{}' timed out after {}s (killed)", args[0], timeout
+                "[codex-cli] '{}' timed out after {}s (group killed; {})",
+                args[0],
+                timeout,
+                res.describe(),
             )
             raise CodexCliError(
                 "timeout",
                 f"gpt-image-2-skill {args[0]} timed out after {timeout:.0f}s",
             )
 
-        stdout = stdout_b.decode("utf-8", errors="replace") if stdout_b else ""
-        raw_stderr = stderr_b.decode("utf-8", errors="replace") if stderr_b else ""
+        stdout = res.stdout_text()
+        raw_stderr = res.stderr_text()
         # The event stream is separated here, once, so no caller can
         # accidentally log or classify on it: it is tens of KB of NDJSON per
         # run, and every word of it is the model's.
         self._last_model_text, stderr = split_skill_events(raw_stderr)
         if stderr.strip():
             logger.info("[codex-cli] {} stderr: {}", args[0], stderr[:2000])
-        return proc.returncode, stdout, stderr
+        if res.exit_code is None and res.signal is None:
+            # Never reaped: no exit status to classify — never read as rc 0.
+            raise CodexCliError(
+                "no_exit_status",
+                f"gpt-image-2-skill {args[0]} ended without an exit status "
+                f"({res.describe()})",
+                stderr=stderr[:500],
+            )
+        rc = res.exit_code if res.exit_code is not None else -res.signal
+        return rc, stdout, stderr
 
     @staticmethod
     def _detail_text(detail: object) -> str:

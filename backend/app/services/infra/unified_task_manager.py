@@ -973,10 +973,14 @@ class UnifiedTaskManager:
         try:
             from app.agent_framework import cancel_workflow_subprocesses
 
+            # Same-process only (the registry is per-process). The worker —
+            # where the children actually run — sees this cancel through
+            # run_process polling task_tracking (fh4 ruling 1).
             killed = await cancel_workflow_subprocesses(task_id, grace_seconds=3.0)
-            if killed > 0:
+            if killed:
                 logger.info(
-                    f"[TaskManager] Cancel killed {killed} subprocess(es) for {task_id}"
+                    f"[TaskManager] Cancel killed {len(killed)} subprocess(es) "
+                    f"for {task_id}"
                 )
         except Exception as e:
             # Best-effort — task is already marked cancelled in DB.
