@@ -176,7 +176,7 @@ Fix these and call FinishIssue again.
 
 - **[修订]** verifier 自开 root run（与 forced declare 同形）：issue 根 run 在 verifier 起跑前已结账，子 run 挂树永远拿到 already 而不扣费；血缘用 metadata.issue_run_id。它是自己的 root，按 root 单独结账扣分；BYOK 来源继承（BYOK 免扣）。~~原稿：verifier 子 run 挂当前 run 树，不新开 root，不单独扣分~~
 - 每次 completed 声明最多一次 LLM 判定；`VERIFY_MAX_ATTEMPTS=2` → 每 issue 最多 3 次判定、2 次续跑（续跑本身受 `ISSUE_MAX_CONTINUATIONS=2` 上限，verifier 驳回消耗的是同一个上限）。
-- 预算 hook（80% 警告 / 100% 停机）对 verifier 子 run 同样生效；预算停机的 completed（`budget_wrap_up`）不送审，直接按今天路由。
+- **[修订]** 预算 hook 管不到 verifier：它是一次裸 `adapter.call`，不经 AgentRunner，没有 step hook 可挂；其花费（≤400 token 输出、每 issue ≤3 次）由 `issue_verification_enabled` 与次数上限兜住，纳入预算闸门留票。预算停机的 completed（`budget_wrap_up`）不送审，直接按今天路由。
 
 ## 9. 安全与隔离
 
