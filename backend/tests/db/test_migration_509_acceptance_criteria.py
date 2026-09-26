@@ -103,6 +103,12 @@ async def test_source_check_rejects_unknown(conn):
 async def test_create_atomic_persists_the_new_columns(conn):
     """173's INSERT is an explicit column list; 509 must extend it or POST
     /issues silently drops the criteria."""
+    # The drift DB carries no seed rows: the proc's counter row is created
+    # here, inside the test transaction (prod has it since mig 173).
+    await conn.execute(
+        "INSERT INTO public.issue_sequence (scope, prefix, counter) "
+        "VALUES ('global', 'MH', 0) ON CONFLICT (scope) DO NOTHING"
+    )
     payload = json.dumps(
         {
             "title": "probe",
