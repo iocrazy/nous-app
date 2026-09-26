@@ -12,7 +12,7 @@
 // as "this model supports nothing" and hide every knob on the day the backend
 // hiccups.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   listGenerationCapabilities,
@@ -68,4 +68,47 @@ export function useModelCapabilities(model: string | null | undefined): ModelCap
 
   if (!model) return null;
   return caps?.[model] ?? null;
+}
+
+/**
+ * TRANSITIONAL (spec 2026-09-25 P2 → P3): names of the rows the generation
+ * capability table lists, or null while unknown (loading / failed).
+ *
+ * The platform list on the AI settings does not yet say whether a row can
+ * generate from a prompt; the server's generation-row predicate drops
+ * upscale-only image services (`text_to_image=False`, e.g. studio-upscale),
+ * and this table is keyed by exactly that predicate. useGenerationModels
+ * intersects with it until P3 adds `AiPlatformModelEntry.generatable` —
+ * then this hook and the intersection go.
+ *
+ * Shares the module cache and the one in-flight request with
+ * useModelCapabilities: at most one `generation-capabilities` call per page.
+ */
+export function useGeneratableModelNames(): ReadonlySet<string> | null {
+  const [caps, setCaps] = useState<Record<string, ModelCapabilities> | null>(cache);
+
+  useEffect(() => {
+    if (settled) {
+      setCaps(cache);
+      return undefined;
+    }
+    let live = true;
+    inflight = inflight ?? listGenerationCapabilities();
+    inflight
+      .then((m) => {
+        cache = m;
+        settled = true;
+        if (live) setCaps(m);
+      })
+      .catch((err: unknown) => {
+        cache = null;
+        settled = true;
+        console.error('[useGeneratableModelNames] capabilities fetch failed:', err);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  return useMemo(() => (caps ? new Set(Object.keys(caps)) : null), [caps]);
 }
