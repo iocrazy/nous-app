@@ -9268,7 +9268,7 @@
         "type": "object"
       },
       "AiNousModelsResponse": {
-        "description": "``GET /ai/nous-models``.",
+        "description": "``GET /search/vectors/catalog``: platform embedding rows.",
         "properties": {
           "models": {
             "items": {
@@ -123439,7 +123439,7 @@
     },
     "/api/v1/search/vectors/catalog": {
       "get": {
-        "description": "Catalog models Add Space may pick: enabled PLATFORM embedding rows\nonly (public fields). ``/ai/nous-models`` also lists the caller's own\nBYOK rows, which must never back a shared space.",
+        "description": "Catalog models Add Space may pick: enabled PLATFORM embedding rows\nonly (public fields) — never the caller's own owner-scoped rows, which\nmust never back a shared space.",
         "operationId": "vector_space_catalog_api_v1_search_vectors_catalog_get",
         "parameters": [
           {

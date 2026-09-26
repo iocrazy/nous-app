@@ -14252,8 +14252,8 @@ export interface paths {
         /**
          * Vector Space Catalog
          * @description Catalog models Add Space may pick: enabled PLATFORM embedding rows
-         *     only (public fields). ``/ai/nous-models`` also lists the caller's own
-         *     BYOK rows, which must never back a shared space.
+         *     only (public fields) — never the caller's own owner-scoped rows, which
+         *     must never back a shared space.
          */
         get: operations["vector_space_catalog_api_v1_search_vectors_catalog_get"];
         put?: never;
@@ -19542,7 +19542,7 @@ export interface components {
         };
         /**
          * AiNousModelsResponse
-         * @description ``GET /ai/nous-models``.
+         * @description ``GET /search/vectors/catalog``: platform embedding rows.
          */
         AiNousModelsResponse: {
             /** Models */

@@ -642,8 +642,8 @@ def _client_ip(request: Request) -> Optional[str]:
 @router.get("/vectors/catalog", response_model=AiNousModelsResponse)
 async def vector_space_catalog(auth: AuthDep):
     """Catalog models Add Space may pick: enabled PLATFORM embedding rows
-    only (public fields). ``/ai/nous-models`` also lists the caller's own
-    BYOK rows, which must never back a shared space."""
+    only (public fields) — never the caller's own owner-scoped rows, which
+    must never back a shared space."""
     return {"models": await platform_embedding_models()}
 
 

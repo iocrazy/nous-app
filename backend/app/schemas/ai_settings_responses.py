@@ -116,7 +116,7 @@ class AiNousModelPublic(BaseModel):
 
 
 class AiNousModelsResponse(BaseModel):
-    """``GET /ai/nous-models``."""
+    """``GET /search/vectors/catalog``: platform embedding rows."""
 
     models: List[AiNousModelPublic]
 
