@@ -50,6 +50,7 @@ from app.services.issues.turn_recovery import (
     current_dbos_step_key,
     enforce_recovery_limit,
 )
+from app.services.issues.verification import apply_completion_verification
 
 # Task 7a defect 2: extra turns a dispatch may run purely to drain items that
 # landed on the inbox after its last step boundary. Bounded on purpose — a
@@ -517,6 +518,25 @@ async def run_issue_reply_step(
     content = assistant.get("content") or ""
     # fh2 T4: same precedence as the dispatch turn (see turn_outcome).
     outcome, reason, question, awaiting_input = resolve_turn_outcome(result)
+    # Completion loop: same hook as the dispatch turn. The reply road has no
+    # attribution, so the verifier child run takes RunRecorder's default.
+    verification: Optional[dict[str, Any]] = None
+    try:
+        outcome, reason, verification = await apply_completion_verification(
+            issue_id=issue_id,
+            outcome=outcome,
+            reason=reason,
+            result=result,
+            content=content,
+            session_id=session_id,
+            user_id=user_id,
+            trigger="issue_reply",
+            attribution=None,
+        )
+    except Exception as exc:  # noqa: BLE001 — decoration, never break the turn
+        logger.warning(
+            f"[issue_reply] issue {issue_id}: verification hook raised: {exc!r}"
+        )
     return {
         "content": content,
         "outcome": outcome,
@@ -527,6 +547,8 @@ async def run_issue_reply_step(
         "options": extract_issue_options(result.get("tool_calls")),
         "stop_reason": result.get("stop_reason"),
         "pending_dispatches": pending_dispatches,
+        # Completion loop: the verdict route_finish_outcome reads (Task 7).
+        "verification": verification,
     }
 
 

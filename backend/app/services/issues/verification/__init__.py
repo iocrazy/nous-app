@@ -16,8 +16,6 @@ from loguru import logger
 from app.services.issues.execution_state import merge_execution_state
 from app.services.issues.verification.feedback import render_verifier_feedback
 
-VERIFY_MAX_ATTEMPTS = 2
-
 
 async def _load_issue_row(issue_id: int) -> Optional[dict[str, Any]]:
     from app.repositories.issue_repository import issue_repository
@@ -61,4 +59,15 @@ async def pending_verifier_feedback(issue_id: int) -> Optional[str]:
         return None
 
 
-__all__ = ["VERIFY_MAX_ATTEMPTS", "pending_verifier_feedback"]
+# Last, on purpose: service.py imports only this package's SUBMODULES (never
+# the package itself), so importing it after everything above is cycle-free.
+from app.services.issues.verification.service import (  # noqa: E402
+    VERIFY_MAX_ATTEMPTS,
+    apply_completion_verification,
+)
+
+__all__ = [
+    "VERIFY_MAX_ATTEMPTS",
+    "apply_completion_verification",
+    "pending_verifier_feedback",
+]

@@ -39,7 +39,10 @@ from app.services.issues.turn_recovery import (
     current_dbos_step_key,
     enforce_recovery_limit,
 )
-from app.services.issues.verification import pending_verifier_feedback
+from app.services.issues.verification import (
+    apply_completion_verification,
+    pending_verifier_feedback,
+)
 
 
 def _build_user_message(
@@ -383,6 +386,26 @@ async def run_issue_agent(
                 )
                 outcome, reason = None, None
 
+        # Completion loop: a declared (or forced) ``completed`` is reviewed
+        # before it is routed. Fail-open to "not reviewed" — never to pass.
+        verification: Optional[dict[str, Any]] = None
+        try:
+            outcome, reason, verification = await apply_completion_verification(
+                issue_id=iid,
+                outcome=outcome,
+                reason=reason,
+                result=result,
+                content=content,
+                session_id=session_id,
+                user_id=user_id,
+                trigger=trigger,
+                attribution=attribution,
+            )
+        except Exception as exc:  # noqa: BLE001 — decoration, never break the turn
+            logger.warning(
+                f"[issue_agent] issue={iid} verification hook raised: {exc!r}"
+            )
+
         logger.info(
             f"[issue_agent] issue={iid} session={session_id} "
             f"produced {len(content)} chars; outcome={outcome}"
@@ -404,6 +427,8 @@ async def run_issue_agent(
             # Phase 2a Task 5: a hook stop ("paused" / "cancelled") — the
             # workflow reads it BEFORE FinishIssue routing.
             "stop_reason": result.get("stop_reason"),
+            # Completion loop: the verdict route_finish_outcome reads (Task 7).
+            "verification": verification,
         }
     finally:
         # 这一行在 ``finally`` 里：这里抛出的任何东西都会盖掉正在传播的真异常。

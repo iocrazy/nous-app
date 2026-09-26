@@ -100,6 +100,8 @@ async def test_run_issue_reply_step_passes_chunk_callback_and_publishes(monkeypa
         # a turn that dispatched nothing still reports the empty list, so the
         # workflow body never has to tell "none" apart from "old shape".
         "pending_dispatches": [],
+        # completion loop: no completed declaration → no verdict
+        "verification": None,
     }
     assert captured["has_cb"] is True
     assert chunks == ["hel", "lo"]
@@ -145,6 +147,8 @@ async def test_run_issue_reply_step_calls_run_session_turn(monkeypatch):
         "question": None,
         "options": None,
         "pending_dispatches": [],  # harness 3a Task 2
+        # completion loop: no completed declaration → no verdict
+        "verification": None,
     }
     kwargs = fake_chat.run_session_turn.call_args.kwargs
     assert kwargs["content"] == "please continue"

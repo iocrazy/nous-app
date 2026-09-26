@@ -64,6 +64,9 @@ def empty_views() -> Views:
             "last_answer": None,
             # phase 2b-1: {of_run_id, at_seq} on a forked run, else None
             "fork": None,
+            # issue completion loop: {verdict, attempt, reason, retry} — the
+            # verifier's last word on this run (folds/verification.py).
+            "verification": None,
             # phase 2b-2 §3: one-shot wake-ups this run armed (history, not
             # what is still pending — see folds/schedule.py).
             "wakeups": [],
@@ -240,6 +243,7 @@ from app.services.ai.runner.folds import (  # noqa: E402,F401
     todo,
     tools,
     turn_end,
+    verification,
 )
 
 __all__ = [
