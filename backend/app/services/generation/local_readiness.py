@@ -106,25 +106,12 @@ class LocalVerdict:
 def local_verdict(
     actual_provider: Optional[str], ready: LocalReadiness
 ) -> LocalVerdict:
-    """The daemon rule for one row, shared by :func:`apply_readiness` and the
-    platform status endpoint (``services/ai/platform_provider``). Pure."""
+    """The daemon rule for one row. ``GET /ai/platform-status``
+    (``services/ai/platform_provider``) publishes it per row and every
+    generation picker applies it client side. Pure."""
     provider = str(actual_provider or "").lower()
     twin = SERVER_TWIN_OF.get(provider)
     return LocalVerdict(
         local_ready=ready.for_engine(provider),
         superseded=bool(twin and ready.for_engine(twin)),
     )
-
-
-def apply_readiness(
-    rows: list[dict[str, Any]], ready: LocalReadiness
-) -> list[dict[str, Any]]:
-    """Filter catalog rows to what can generate now. Pure; see module doc."""
-    out: list[dict[str, Any]] = []
-    for r in rows:
-        if str(r.get("last_test_status") or "") in ("fail", "failed", "error"):
-            continue
-        if not local_verdict(r.get("actual_provider"), ready).offered:
-            continue
-        out.append(r)
-    return out

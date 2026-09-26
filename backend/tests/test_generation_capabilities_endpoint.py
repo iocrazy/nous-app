@@ -3,30 +3,36 @@
 Server-side projection keyed by catalog row NAME, so the frontend never
 learns ``actual_provider`` and never re-implements the registry lookup —
 one predicate, one place (the same rule as the owner-scope fix in P1).
-Visibility must match ``generation-models`` exactly: a model the picker
-shows must have a caps entry, and a hidden model must not leak its caps.
+Visibility must match the generation pickers exactly: since spec 2026-09-25
+§3.8 the pickers map from ``GET /ai/settings`` (``enabled_models`` ×
+``platform_models[name].generatable``), and this endpoint keys its answer by
+``platform_provider.generation_picker_models`` over the SAME view. A model a
+picker shows must have a caps entry, and a hidden model must not leak its caps.
 
-Hermetic: auth overridden, catalog repository stubbed, and the Settings
-platform gate stubbed at its own seam so the REAL
-``filter_platform_models_for_user`` runs — the visibility test would be
-worthless if it mocked away the very call it is meant to pin.
+Hermetic: auth overridden, catalog repository, admin governance and the
+user's stored ``ai_providers.nous`` stubbed at their own seams, so the REAL
+``platform_provider_view`` runs — the visibility tests would be worthless if
+they mocked away the very computation they pin.
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+import app.services.ai.engine_catalog as ec
 from app.core.deps import AuthContext, get_auth
 from app.main import app
-from tests.api.catalog_wire_rows import list_enabled_row
+from app.models import NousModels
+from app.repositories.nous_model_repository import _row as repo_row
+from tests.api.wire_parity import sample_orm
 
 FAKE_USER_ID = str(uuid4())
+_ENGINE = "http://engine.test/v1"
 
 _ROWS = [
     {"name": "codex-local-image", "type": "image", "actual_provider": "codex-local"},
@@ -44,25 +50,17 @@ async def _fake_auth() -> AuthContext:
 
 
 @pytest.fixture(autouse=True)
-def _no_readiness_filter(monkeypatch):
-    """The picker offers only what can generate right now (2026-09-05,
-    local_readiness) — a rule with its own suite
-    (test_generation_picker_readiness). These tests are about the caps
-    projection, so the filter is the identity here; without this the fixture
-    catalog's local rows vanish because no daemon is online in a unit test."""
-    from app.services.generation import local_readiness as lr
-
-    monkeypatch.setattr(lr, "apply_readiness", lambda rows, _ready: rows)
-    monkeypatch.setattr(
-        lr, "local_engine_readiness", AsyncMock(return_value=lr.LocalReadiness())
-    )
-
-
-@pytest.fixture(autouse=True)
 def _override_auth():
     app.dependency_overrides[get_auth] = _fake_auth
     yield
     app.dependency_overrides.pop(get_auth, None)
+
+
+@pytest.fixture(autouse=True)
+def _engine_cache():
+    ec.reset_engine_cache()
+    yield
+    ec.reset_engine_cache()
 
 
 @pytest_asyncio.fixture
@@ -72,44 +70,46 @@ async def client() -> AsyncClient:
         yield ac
 
 
+def _catalog_row(values: dict) -> dict:
+    """A row as ``list_enabled_private`` returns it in production (the real
+    repository conversion over an ORM object carrying every column), so
+    ``actual_provider`` is present exactly as the view reads it."""
+    full = {
+        "display_name": values["name"],
+        "actual_model": f"{values['name']}-upstream",
+        "api_key": "sk-platform",
+        "base_url": "https://provider.example/v1",
+        "pricing_type": "per_call",
+        "is_enabled": True,
+        "owner_user_id": None,
+        "last_test_status": "ok",
+        "last_test_code": None,
+        **values,
+    }
+    return repo_row(sample_orm(NousModels, **full))
+
+
 def _catalog(monkeypatch, rows: list[dict]) -> None:
-    """Stub the catalog repository, honouring its REAL projection.
-
-    ``list_enabled`` pops ``actual_provider`` and leaves only the derived
-    ``is_local`` bit (the 2026-08-14 leak tripwire) unless the caller opts in
-    with ``include_actual_provider=True``. The first version of this stub just
-    handed back whatever rows the test wrote — so every test carried a field
-    production never returns, and the endpoint shipped reading a key that was
-    always ``None``. A boundary stub that does not model the boundary is not
-    a test; this one reproduces both settings of the flag.
-    """
-    from app.repositories import nous_model_repository as repo_mod
-
-    async def _list_enabled(
-        type_filter=None, viewer_user_id=None, include_actual_provider=False
-    ):
-        out = []
-        for r in rows:
-            row = list_enabled_row(**r)
-            provider = row.pop("actual_provider", None)
-            row["is_local"] = provider in ("codex-local", "jimeng-local")
-            if include_actual_provider:
-                row["actual_provider"] = provider
-            out.append(row)
-        return out
-
-    repo = SimpleNamespace(list_enabled=_list_enabled)
-    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
+    repo = MagicMock()
+    repo.list_enabled_private = AsyncMock(
+        side_effect=lambda _viewer=None: [_catalog_row(r) for r in rows]
+    )
+    monkeypatch.setattr(
+        "app.repositories.nous_model_repository.get_nous_model_repository",
+        lambda: repo,
+    )
+    monkeypatch.setattr(
+        "app.services.ai.governance.ai_governance.is_nous_globally_enabled",
+        AsyncMock(return_value=True),
+    )
 
 
 def _gate(monkeypatch, *, allowed: bool = True, disabled: frozenset[str] = frozenset()):
-    """Stub the user's Settings platform-model gate (the filter's own seam)."""
-
-    async def _fake_gate(user_id):
-        return allowed, disabled
-
+    """Stub the user's stored platform card (``ai_providers.nous``)."""
+    stored = {"enabled": allowed, "disabled_models": sorted(disabled)}
     monkeypatch.setattr(
-        "app.services.ai.platform_model_visibility.platform_model_gate", _fake_gate
+        "app.services.ai.platform_model_visibility.stored_nous_settings",
+        AsyncMock(return_value=stored),
     )
 
 
@@ -229,22 +229,54 @@ async def test_honours_ratio_is_not_exposed(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_capability_keys_match_the_picker_row_for_row(client, monkeypatch):
-    """The binding constraint, asserted against the other endpoint itself.
+    """The binding constraint, asserted against what the pickers map from.
 
-    Both endpoints read ``_visible_generation_rows``, so today this cannot
-    drift — but this test is what goes red if someone re-inlines one side and
-    adds a condition to only one of them. The silent failure it guards is a
-    picker entry with no caps entry: the UI then shows a knob it was told to
-    hide, and nothing else in the stack says a word.
+    The generation pickers list ``enabled_models`` rows whose
+    ``platform_models[name]`` is ``generatable`` (frontend
+    ``useGenerationModels``); both come from the same view object this
+    endpoint reads. The silent failure it guards is a picker entry with no
+    caps entry: the UI then shows a knob it was told to hide.
+
+    The upscale-only nous-engine row is listed by the engine and enabled, but
+    not generatable — it must be absent from BOTH sides.
     """
-    _catalog(monkeypatch, _ROWS)
+    import app.services.ai.platform_provider as pp
+
+    async def _listed(base_url, api_key):
+        return ec._Read(
+            services={
+                "studio-upscale": ec.EngineService(
+                    id="studio-upscale",
+                    type="image",
+                    ready=True,
+                    context_window=None,
+                    capabilities=None,
+                )
+            }
+        )
+
+    monkeypatch.setattr(ec, "_fetch", _listed)
+    rows = [
+        *_ROWS,
+        {
+            "name": "nous-studio-upscale",
+            "type": "image",
+            "actual_provider": "nous",
+            "actual_model": "studio-upscale",
+            "base_url": _ENGINE,
+        },
+    ]
+    _catalog(monkeypatch, rows)
     _gate(monkeypatch, disabled=frozenset({"mediahub-doubao-seedream-t2i"}))
 
     caps = await client.get("/api/v1/canvases/generation-capabilities")
-    models = await client.get("/api/v1/canvases/generation-models")
+    assert caps.status_code == 200
 
-    assert caps.status_code == 200 and models.status_code == 200
-    picker = {row["name"] for row in models.json()["data"]}
+    view = await pp.platform_provider_view(FAKE_USER_ID)
+    card, mapping = view.provider_entry(), view.platform_models()
+    assert "nous-studio-upscale" in card["enabled_models"]  # listed and on
+    assert mapping["nous-studio-upscale"]["generatable"] is False
+    picker = {n for n in card["enabled_models"] if mapping[n]["generatable"]}
     assert picker == {"codex-local-image"}  # the fixture really did filter
     assert set(caps.json()["data"]) == picker
 

@@ -26,7 +26,6 @@ from app.models import NousModels
 from app.schemas.ai_settings_responses import (
     AiCapabilityHealthRow,
     AiGovernanceResponse,
-    AiNousModelPublic,
 )
 from app.services.ai.governance.ai_governance import ALL_MODULES, AIModuleGovernance
 from tests.api.wire_parity import assert_wire_unchanged, sample_orm
@@ -534,32 +533,11 @@ async def test_put_without_enabled_keeps_the_stored_switch(
 
 
 @pytest.mark.asyncio
-async def test_nous_models_is_row_for_row_the_settings_view(
-    client, platform, settings_repo
-) -> None:
-    raw = await ai_settings_router.list_nous_models(_ctx())
-    response = await client.get("/api/v1/ai/nous-models")
-    assert_wire_unchanged(response, raw)
-    models = response.json()["models"]
-    assert set(models[0]) == set(AiNousModelPublic.model_fields)
-    # Native BIGINT, as it always was on this route; upstream identity stays
-    # private, only the derived bit leaves.
-    assert isinstance(models[0]["id"], int)
-    assert "actual_provider" not in models[0]
-    settings = (await client.get("/api/v1/ai/settings")).json()
-    assert [m["name"] for m in models] == settings["ai_providers"]["nous"]["models"]
-    assert {m["name"]: m["last_test_status"] for m in models} == {
-        name: entry["status"] for name, entry in settings["platform_models"].items()
-    }
-    llm = (await client.get("/api/v1/ai/nous-models?type=llm")).json()["models"]
-    assert [m["name"] for m in llm] == ["nous-doubao", "nous-qwen3-8b"]
-
-
-@pytest.mark.asyncio
 async def test_engine_is_read_once_per_ttl(client, platform, settings_repo) -> None:
     await client.get("/api/v1/ai/settings")
-    await client.get("/api/v1/ai/nous-models")
     await client.get("/api/v1/ai/platform-status")
+    caps = await client.get("/api/v1/canvases/generation-capabilities")
+    assert caps.status_code == 200, caps.text
     assert platform.engine_calls == 1
 
 

@@ -1,7 +1,6 @@
 """HTTP tests for the canvas generation endpoints (G4-B1).
 
 POST /api/v1/canvases/{canvas_id}/generations — dispatch count× DBOS tasks
-GET  /api/v1/canvases/generation-models      — image/video rows for the composer
 GET  /api/v1/canvases/generations/{task_id}  — poll one task (task_tracking row)
 
 Hermetic: auth overridden, canvas→project gating stubbed, task manager and
@@ -21,7 +20,6 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.deps import AuthContext, get_auth
 from app.main import app
-from tests.api.catalog_wire_rows import list_enabled_row
 
 canvases_router = sys.modules["app.api.canvases_router"]
 
@@ -38,20 +36,6 @@ def _override_auth():
     app.dependency_overrides[get_auth] = _fake_auth
     yield
     app.dependency_overrides.pop(get_auth, None)
-
-
-@pytest.fixture(autouse=True)
-def _no_readiness_filter(monkeypatch):
-    """The picker now offers only what can generate right now (2026-09-05,
-    local_readiness). These tests are about the endpoints' projection, not
-    that rule, so make the filter the identity here;
-    test_generation_picker_readiness covers the rule itself."""
-    from app.services.generation import local_readiness as lr
-
-    monkeypatch.setattr(lr, "apply_readiness", lambda rows, _ready: rows)
-    monkeypatch.setattr(
-        lr, "local_engine_readiness", AsyncMock(return_value=lr.LocalReadiness())
-    )
 
 
 @pytest.fixture(autouse=True)
@@ -159,136 +143,6 @@ class TestPostGenerations:
         assert dispatch.started.await_count == 0
 
 
-class TestGenerationModels:
-    @pytest.mark.asyncio
-    async def test_lists_only_image_and_video_public_fields(self, client, monkeypatch):
-        # This test is about the type/field projection; the Settings platform
-        # gate has its own tests — let everything through here.
-        async def _allow_all(user_id):
-            return True, frozenset()
-
-        monkeypatch.setattr(
-            "app.services.ai.platform_model_visibility.platform_model_gate", _allow_all
-        )
-        rows = [
-            {
-                "name": "jimeng-cli-image",
-                "display_name": "Jimeng",
-                "type": "image",
-                "actual_provider": "jimeng-cli",
-                "is_enabled": True,
-                "sort_order": 10,
-            },
-            {
-                "name": "jimeng-cli-seedance",
-                "display_name": "Seedance",
-                "type": "video",
-                "actual_provider": "jimeng-cli",
-                "is_enabled": True,
-                "sort_order": 10,
-            },
-            {
-                "name": "qwen-plus",
-                "display_name": "Qwen",
-                "type": "llm",
-                "actual_provider": "qwen",
-                "is_enabled": True,
-                "sort_order": 1,
-            },
-        ]
-        repo = SimpleNamespace(
-            list_enabled=AsyncMock(
-                return_value=[list_enabled_row(**row) for row in rows]
-            )
-        )
-        import app.repositories.nous_model_repository as repo_mod
-
-        monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
-
-        resp = await client.get("/api/v1/canvases/generation-models")
-        assert resp.status_code == 200
-        data = resp.json()["data"]
-        names = [m["name"] for m in data]
-        assert names == ["jimeng-cli-image", "jimeng-cli-seedance"]
-        assert all("api_key" not in m for m in data)
-        assert data[0]["type"] == "image"
-
-
-class TestTextModels:
-    @pytest.mark.asyncio
-    async def test_lists_enabled_llm_public_fields_only(self, client, monkeypatch):
-        # The repo does the type filter (list_enabled("llm")); the endpoint
-        # only strips to public columns. Mirror that: the mock returns llm rows
-        # and we assert no secret columns leak and the type-filter arg is used.
-        llm_rows = [
-            {
-                "name": "mediahub-doubao-llm",
-                "display_name": "Doubao LLM",
-                "type": "llm",
-                "actual_provider": "doubao",
-                "is_enabled": True,
-                "sort_order": 1,
-                "api_key": "platform-secret",
-                "base_url": "https://ark.example.com/v1",
-            },
-        ]
-        list_enabled = AsyncMock(
-            return_value=[list_enabled_row(**row) for row in llm_rows]
-        )
-        repo = SimpleNamespace(list_enabled=list_enabled)
-        import app.repositories.nous_model_repository as repo_mod
-
-        monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
-
-        resp = await client.get("/api/v1/canvases/text-models")
-        assert resp.status_code == 200
-        data = resp.json()["data"]
-        assert [m["name"] for m in data] == ["mediahub-doubao-llm"]
-        assert data[0]["type"] == "llm"
-        # Public columns only — credentials must never reach the browser.
-        assert all("api_key" not in m and "base_url" not in m for m in data)
-        assert all("actual_provider" not in m for m in data)
-        assert list_enabled.await_args.args == ("llm",)
-        assert list_enabled.await_args.kwargs["viewer_user_id"]
-
-    @pytest.mark.asyncio
-    async def test_carries_admin_label_and_probe_status(self, client, monkeypatch):
-        # Production-shaped list_enabled row (2026-09-24): actual_model is what
-        # the admin card prints, last_test_status lets the picker hide a
-        # failed row. The probe's failure text must not ride along.
-        rows = [
-            {
-                "id": 7300000000001,
-                "name": "nous-deepseek-v4-pro",
-                "display_name": "DeepSeek V4 Pro",
-                "actual_model": "deepseek-v4-pro",
-                "type": "llm",
-                "pricing_type": "per_token",
-                "pricing_value": 0,
-                "sort_order": 10,
-                "last_test_status": "ok",
-                "last_tested_at": "2026-09-24T01:00:00+00:00",
-                "last_test_code": None,
-                "is_local": False,
-            },
-        ]
-        repo = SimpleNamespace(
-            list_enabled=AsyncMock(
-                return_value=[list_enabled_row(**row) for row in rows]
-            )
-        )
-        import app.repositories.nous_model_repository as repo_mod
-
-        monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
-
-        resp = await client.get("/api/v1/canvases/text-models")
-        assert resp.status_code == 200
-        (row,) = resp.json()["data"]
-        assert row["actual_model"] == "deepseek-v4-pro"
-        assert row["last_test_status"] == "ok"
-        assert "last_test_detail" not in row
-
-
 def _read_scope_returning(row, *, forbid_writes: bool = False):
     """A read_scope() stand-in whose session returns ``row``; the endpoints
     run their real ORM statement construction against it. With
@@ -391,39 +245,6 @@ class TestCancelGeneration:
         resp = await client.delete("/api/v1/canvases/generations/nope")
         assert resp.status_code == 404
         cancel.assert_not_awaited()
-
-
-class TestGenerationModelsFollowSettings:
-    """The picker must show what Settings → platform-model card shows."""
-
-    @pytest.mark.asyncio
-    async def test_models_the_user_switched_off_in_settings_are_not_listed(
-        self, client, monkeypatch
-    ):
-        from app.repositories import nous_model_repository as repo_mod
-
-        rows = [
-            {"name": "codex-image", "display_name": "GPT Image", "type": "image"},
-            {"name": "jimeng-cli-image", "display_name": "Dreamina", "type": "image"},
-        ]
-        repo = SimpleNamespace(
-            list_enabled=AsyncMock(
-                return_value=[list_enabled_row(**row) for row in rows]
-            )
-        )
-        monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
-
-        async def _gate(user_id):
-            return True, frozenset({"codex-image"})
-
-        monkeypatch.setattr(
-            "app.services.ai.platform_model_visibility.platform_model_gate", _gate
-        )
-
-        resp = await client.get("/api/v1/canvases/generation-models")
-
-        assert resp.status_code == 200
-        assert [m["name"] for m in resp.json()["data"]] == ["jimeng-cli-image"]
 
 
 class TestGenerationsAreOneFlow:

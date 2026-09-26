@@ -25,7 +25,6 @@ from app.models import Canvases
 from app.schemas.canvas_responses import (
     CanvasAssetRef,
     CanvasGenerationCapability,
-    CanvasModelOption,
     CanvasRow,
     CanvasSummary,
     ProjectTrashedCanvas,
@@ -33,7 +32,6 @@ from app.schemas.canvas_responses import (
     TeamTrashedCanvas,
 )
 from tests.api.canvas_wire_rows import repo_canvas_row
-from tests.api.catalog_wire_rows import list_enabled_row
 from tests.api.wire_parity import SAMPLE_TS, assert_wire_unchanged, column_names
 
 r = sys.modules["app.api.canvases_router"]
@@ -408,58 +406,28 @@ async def test_asset_refs_model_matches_the_repository_select(monkeypatch) -> No
 # --------------------------------------------------------------------------- #
 
 
-def test_model_option_declares_exactly_the_public_projection() -> None:
-    assert set(CanvasModelOption.model_fields) == set(r._GENERATION_MODEL_PUBLIC_FIELDS)
+def _platform_model(name: str, provider: str, **over: Any):
+    from app.services.ai.platform_provider import PlatformModel
 
-
-def test_probe_status_literal_matches_the_probe_statuses() -> None:
-    from typing import get_args
-
-    from app.schemas.canvas_responses import ProbeStatus
-    from app.services.ai.nous_model_health import PROBE_STATUSES
-
-    assert get_args(ProbeStatus) == PROBE_STATUSES
-
-
-def _public(row: Dict[str, Any]) -> Dict[str, Any]:
-    return {k: row.get(k) for k in r._GENERATION_MODEL_PUBLIC_FIELDS}
-
-
-@pytest.mark.asyncio
-async def test_generation_models_wire_unchanged(client, monkeypatch) -> None:
-    rows = [
-        list_enabled_row(actual_provider="doubao"),
-        list_enabled_row(
-            name="nous-local", type="video", is_local=True, last_test_status=None
-        ),
-    ]
-
-    async def _visible(user_id, *, include_actual_provider=False):
-        return rows
-
-    monkeypatch.setattr(r, "_visible_generation_rows", _visible)
-    resp = await client.get("/api/v1/canvases/generation-models")
-    assert_wire_unchanged(
-        resp, {"success": True, "data": [_public(row) for row in rows]}
-    )
-    assert all("actual_provider" not in m for m in resp.json()["data"])
-
-
-@pytest.mark.asyncio
-async def test_text_models_wire_unchanged(client, monkeypatch) -> None:
-    import app.repositories.nous_model_repository as nm
-
-    rows = [list_enabled_row(type="llm"), list_enabled_row(type="llm", sort_order=0)]
-
-    class _Repo:
-        async def list_enabled(self, type_filter=None, viewer_user_id=None):
-            return rows
-
-    monkeypatch.setattr(nm, "get_nous_model_repository", lambda: _Repo())
-    resp = await client.get("/api/v1/canvases/text-models")
-    assert_wire_unchanged(
-        resp, {"success": True, "data": [_public(row) for row in rows]}
-    )
+    fields: Dict[str, Any] = {
+        "id": 1900000000000000001,
+        "name": name,
+        "display_name": name,
+        "actual_model": name,
+        "type": "image",
+        "status": "ok",
+        "is_local": False,
+        "actual_provider": provider,
+        "pricing_type": "per_call",
+        "pricing_value": 0.0,
+        "context_window_tokens": None,
+        "generatable": True,
+        "sort_order": 0,
+        "last_tested_at": None,
+        "last_test_code": None,
+    }
+    fields.update(over)
+    return PlatformModel(**fields)
 
 
 @pytest.mark.asyncio
@@ -479,18 +447,26 @@ async def test_generation_capabilities_wire_unchanged(client, monkeypatch) -> No
         video_modes=frozenset({"t2v", "i2v"}),
         honours_ratio="native",
     )
-    rows = [
-        list_enabled_row(name="capable", actual_provider="capable"),
-        list_enabled_row(name="unknown", actual_provider="nobody"),
-    ]
+    import app.services.ai.platform_provider as pp
 
-    async def _visible(user_id, *, include_actual_provider=False):
-        return rows
+    view = pp.PlatformProviderView(
+        enabled=True,
+        models=(
+            _platform_model("capable", "capable"),
+            _platform_model("unknown", "nobody"),
+        ),
+        enabled_models=("capable", "unknown"),
+        disabled_models=(),
+        engine=None,
+    )
 
     def _resolve(provider):
         return SimpleNamespace(capabilities=caps) if provider == "capable" else None
 
-    monkeypatch.setattr(r, "_visible_generation_rows", _visible)
+    async def _view(user_id, **_):
+        return view
+
+    monkeypatch.setattr(pp, "platform_provider_view", _view)
     monkeypatch.setattr(protocols, "resolve_generation_protocol", _resolve)
     resp = await client.get("/api/v1/canvases/generation-capabilities")
     expected = {

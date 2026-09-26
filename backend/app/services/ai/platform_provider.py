@@ -63,8 +63,9 @@ class PlatformModel:
     last_test_code: Optional[str]
 
     def public_row(self) -> dict[str, Any]:
-        """``AiNousModelPublic`` shape (the legacy ``/ai/nous-models`` row);
-        ``last_test_status`` carries the computed status."""
+        """Public row shape (``AiNousModelPublic`` fields) for
+        ``platform_rows_with_status``; ``last_test_status`` carries the
+        computed status."""
         return {
             "id": self.id,
             "name": self.name,
@@ -195,6 +196,21 @@ def _engine_state(snapshots: Iterable[EngineSnapshot]) -> Optional[PlatformEngin
     )
 
 
+def generation_picker_models(view: PlatformProviderView) -> tuple[PlatformModel, ...]:
+    """The rows a generation picker may list, server side (spec §3.8).
+
+    Twin of the frontend mapping (``platformModelRows`` over
+    ``enabled_models`` + ``useGenerationModels``' ``generatable`` gate), minus
+    the per-moment daemon overlay the client applies from
+    ``GET /ai/platform-status``. ``generation-capabilities`` keys its answer by
+    exactly these rows, so every model a picker offers has a capability entry.
+    """
+    if not view.enabled:
+        return ()
+    enabled = set(view.enabled_models)
+    return tuple(m for m in view.models if m.generatable and m.name in enabled)
+
+
 async def overlay_live_status(
     rows: Sequence[Mapping[str, Any]],
 ) -> tuple[list[PlatformModel], Optional[PlatformEngine]]:
@@ -321,6 +337,7 @@ __all__ = [
     "PlatformEngine",
     "PlatformModel",
     "PlatformProviderView",
+    "generation_picker_models",
     "live_platform_rows",
     "overlay_live_status",
     "platform_provider_view",

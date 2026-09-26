@@ -1,5 +1,6 @@
 # backend/tests/test_nous_public_endpoint.py
-"""Public nous-models endpoint honors ?type=; governance exposes nous gates."""
+"""Public catalog projection guards; the platform view is owner-scoped; governance
+exposes nous gates."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -32,46 +33,6 @@ def _patched_view(repo):
         )
     )
     return stack
-
-
-def _full_row(name: str, type_: str) -> dict:
-    return {
-        "id": 7300000000000000123,
-        "name": name,
-        "display_name": name,
-        "actual_model": name,
-        "actual_provider": "ark",
-        "type": type_,
-        "pricing_type": "per_token",
-        "pricing_value": 0,
-        "sort_order": 0,
-        "last_test_status": "ok",
-        "last_tested_at": None,
-        "last_test_code": None,
-        "context_window_tokens": None,
-        "api_key": "sk-secret",
-        "base_url": "https://ark.example",
-    }
-
-
-@pytest.mark.asyncio
-async def test_list_nous_models_passes_type_filter():
-    from types import SimpleNamespace
-
-    from app.api.ai_settings_router import list_nous_models
-
-    repo = MagicMock()
-    repo.list_enabled_private = AsyncMock(
-        return_value=[_full_row("nous-llm", "llm"), _full_row("nous-pic", "image")]
-    )
-    with _patched_view(repo):
-        result = await list_nous_models(
-            auth=SimpleNamespace(user_id="viewer-1"), type="llm"
-        )
-    repo.list_enabled_private.assert_awaited_once_with("viewer-1")
-    assert [m["name"] for m in result["models"]] == ["nous-llm"]
-    assert "api_key" not in result["models"][0]
-    assert "base_url" not in result["models"][0]
 
 
 def test_public_projection_excludes_admin_description():
@@ -176,17 +137,15 @@ async def test_governance_includes_nous_enabled_and_modules():
 
 
 @pytest.mark.asyncio
-async def test_list_nous_models_passes_viewer_from_auth():
-    """The catalog endpoint must scope the list to the calling user so
+async def test_platform_view_passes_the_viewer():
+    """The platform view must scope the list to the calling user so
     owner-private rows (codex/jimeng, migration 431) never leak to others."""
-    from types import SimpleNamespace
-
-    from app.api.ai_settings_router import list_nous_models
+    from app.services.ai.platform_provider import platform_provider_view
 
     repo = MagicMock()
     repo.list_enabled_private = AsyncMock(return_value=[])
     with _patched_view(repo):
-        await list_nous_models(auth=SimpleNamespace(user_id="viewer-1"), type="image")
+        await platform_provider_view("viewer-1")
     repo.list_enabled_private.assert_awaited_once_with("viewer-1")
 
 
