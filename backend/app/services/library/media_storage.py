@@ -152,28 +152,32 @@ def discard_local_source(local_path, stored_path: str) -> None:
     cleanup"同一取向)。
     """
     import os
-    import shutil
     from pathlib import Path as _Path
 
     from loguru import logger
 
     from app.core.config import settings
+    from app.core.fs_remove import remove_local_path
 
     if not stored_path or not str(stored_path).startswith("sb://"):
         return
     try:
         base = os.path.realpath(settings.DOWNLOAD_PATH)
-        real = os.path.realpath(str(local_path))
+        raw = os.path.abspath(str(local_path))
+        # 只解析**父目录**,不解析最后一段:最后一段可能本身就是链接,把它
+        # realpath 掉等于把删除对准链接目标(CLAUDE.md「形似链接的路径要用
+        # unlink 删」)。父目录照旧解析,containment 才比得对。
+        real = os.path.join(
+            os.path.realpath(os.path.dirname(raw)), os.path.basename(raw)
+        )
         # Containment:只回收 DOWNLOAD_PATH 之内的东西。上游传进来的路径来自
         # DB/磁盘拼接,不预设它一定规矩(与 materialize / 迁移模块同款守卫)。
         if not real.startswith(base + os.sep):
             logger.warning(f"[discard] refusing path outside DOWNLOAD_PATH: {real}")
             return
         p = _Path(real)
-        if p.is_dir():
-            shutil.rmtree(real, ignore_errors=True)
-        else:
-            p.unlink(missing_ok=True)
+        # 链接只摘链接;真目录才递归删。
+        remove_local_path(real, ignore_errors=True)
         # 顺带收掉因此变空的父目录(如 global/resources/web/{platform}/{id}/),
         # 否则删完文件会留一地空壳。逐级向上,遇到非空或到 DOWNLOAD_PATH 即停。
         parent = p.parent

@@ -31,6 +31,7 @@ regression guard for the opposite case.
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -383,3 +384,34 @@ async def test_audio_object_kept_when_still_referenced():
     remove.assert_not_awaited()
     repo.delete.assert_awaited_once_with(PLATFORM_ID)
     assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_local_symlink_dir_is_unlinked_not_followed(tmp_path):
+    """真文件系统：download_path 是指向另一个目录的 symlink 时，删除只摘
+    链接、目标目录内容完好（CLAUDE.md「形似链接的路径要用 unlink 删」）。
+    旧代码 ``is_dir()`` 顺着链接判成目录再 ``rmtree``，后者对链接根抛错，
+    于是整个删除端点 500。"""
+    target = tmp_path / "global" / "shared"
+    target.mkdir(parents=True)
+    (target / "keep.mp4").write_bytes(b"precious")
+    link = tmp_path / "global" / "123"
+    link.symlink_to(target, target_is_directory=True)
+    video = _video(download_path="global/123")
+    repo_patch, repo = _patch_repo(video)
+
+    with (
+        repo_patch,
+        patch(
+            "app.api.media_router.Utils.get_download_base_path",
+            return_value=str(tmp_path),
+        ),
+    ):
+        result = await delete_video(
+            PLATFORM_ID, BackgroundTasks(), _auth(), delete_files=True
+        )
+
+    assert not os.path.lexists(link)
+    assert (target / "keep.mp4").read_bytes() == b"precious"
+    assert result["files_deleted"] == ["file: 123"]
+    repo.delete.assert_awaited_once_with(PLATFORM_ID)

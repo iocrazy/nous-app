@@ -31,6 +31,7 @@ from app.api.media_soda_router import router as soda_router
 from app.api.row_guard import NOT_FOUND_OR_OUT_OF_SCOPE
 from app.core.deps import AuthDep
 from app.core.enums import DownloadStatus
+from app.core.fs_remove import remove_local_path
 from app.core.scope_dep import ScopedRequestDep
 from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
@@ -361,7 +362,6 @@ async def delete_video(
         files_deleted = []
 
         if delete_files:
-            import shutil
 
             async def _delete_stored_file(raw_path: str, label: str) -> None:
                 """删除单个存储对象/文件，感知 sb:// 对象存储 vs 本地文件系统。
@@ -421,13 +421,13 @@ async def delete_video(
                     return
 
                 full = Path(base_path) / (loc.rel_path or raw_path)
-                if full.exists():
-                    if full.is_dir():
-                        shutil.rmtree(full)
-                        files_deleted.append(f"directory: {full.name}")
-                    else:
-                        full.unlink()
-                        files_deleted.append(f"{label}: {full.name}")
+                # 形似链接的路径只摘链接、绝不顺着删到目标;真目录才递归删
+                # (CLAUDE.md「形似链接的路径要用 unlink 删」)。
+                removed = remove_local_path(full)
+                if removed == "directory":
+                    files_deleted.append(f"directory: {full.name}")
+                elif removed != "missing":
+                    files_deleted.append(f"{label}: {full.name}")
 
             download_path = video.get("download_path")
             if download_path:
