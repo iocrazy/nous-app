@@ -19,6 +19,12 @@ from loguru import logger
 CRITERIA_PROPOSED_META_KIND = "criteria_proposed"
 
 
+class CriteriaLockedError(RuntimeError):
+    """The UPDATE matched no row: a person's criteria landed between the
+    tool's read and its write (or the issue is gone). The tool answers
+    ``criteria_locked``."""
+
+
 async def load_acceptance_criteria(
     issue_id: int,
 ) -> tuple[Optional[str], Optional[str]]:
@@ -56,10 +62,17 @@ async def write_agent_criteria(
     from app.models import IssueMessages, Issues
 
     async with write_scope() as session:
-        await session.execute(
+        result = await session.execute(
             update(Issues)
             .where(Issues.id == int(issue_id))
+            # A PATCH landing between the tool's read and this write must not
+            # be overwritten: a user-owned row is never matched.
+            .where(Issues.acceptance_criteria_source.is_distinct_from("user"))
             .values(acceptance_criteria=criteria, acceptance_criteria_source="agent")
+        )
+    if not (getattr(result, "rowcount", 0) or 0):
+        raise CriteriaLockedError(
+            f"issue {issue_id}: criteria are user-owned or the issue is gone"
         )
     # kind='comment' needs an author (issue_messages_author_chk); the tool's
     # factory has no user id, so without an agent id the row is skipped.
@@ -99,6 +112,7 @@ def criteria_section(criteria: Optional[str], source: Optional[str]) -> Optional
 
 __all__: list[str] = [
     "CRITERIA_PROPOSED_META_KIND",
+    "CriteriaLockedError",
     "criteria_section",
     "load_acceptance_criteria",
     "write_agent_criteria",

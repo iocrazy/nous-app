@@ -16,6 +16,7 @@ from loguru import logger
 
 from app.schemas.issue import ACCEPTANCE_CRITERIA_MAX_CHARS
 from app.services.issues.acceptance_criteria import (
+    CriteriaLockedError,
     load_acceptance_criteria,
     write_agent_criteria,
 )
@@ -83,8 +84,20 @@ def make_set_acceptance_criteria_handler(
             return {"error": "criteria_write_failed"}
         if current and source == "user":
             return {"error": "criteria_locked", "criteria": current}
+        # Lazy import: agent_runner imports this module at load time, and the
+        # verification package pulls in the judge → forced-declare chain.
+        from app.services.issues.verification import verification_started
+
+        if await verification_started(issue_id):
+            return {
+                "error": "criteria_locked",
+                "reason": "verification_started",
+                "criteria": current,
+            }
         try:
             await write_agent_criteria(issue_id, criteria, agent_id=agent_id)
+        except CriteriaLockedError:
+            return {"error": "criteria_locked", "reason": "set_by_user"}
         except Exception as exc:  # noqa: BLE001
             logger.opt(exception=True).warning(
                 f"[SetAcceptanceCriteria] issue {issue_id}: write failed: {exc}"

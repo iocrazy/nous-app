@@ -117,6 +117,13 @@ async def verify_completion(
     trigger_text = criteria or final_text
     results = run_predicates(trigger_text, bundle)
     preds = _pred_dicts(results)
+    if not criteria:
+        # No criteria: the predicates ran on the worker's own prose, and a
+        # mention in prose is not a claim — they are recorded as facts only,
+        # and the verdict is never "fail" (review fix; spec §7 "只跑通用谓词").
+        return Verdict(
+            "unverified", "criteria_missing", (), preds, preds, None, "none", None, None
+        )
     violated = [r for r in results if r.status == "violated"]
     if violated:
         unmet = tuple({"criterion": r.name, "why": _why(r)} for r in violated)
@@ -130,10 +137,6 @@ async def verify_completion(
             "predicate",
             criteria_source,
             None,
-        )
-    if not criteria:
-        return Verdict(
-            "unverified", "criteria_missing", (), preds, preds, None, "none", None, None
         )
     try:
         out = await judge(
@@ -189,7 +192,8 @@ async def _load_issue_row(issue_id: int) -> Optional[dict[str, Any]]:
     return await issue_repository.get_by_id(int(issue_id))
 
 
-def _attempts_of(row: Optional[dict[str, Any]]) -> int:
+def _state_of(row: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """``execution_state`` as a dict (the engine may hand back a JSON string)."""
     import json
 
     state = (row or {}).get("execution_state")
@@ -197,13 +201,13 @@ def _attempts_of(row: Optional[dict[str, Any]]) -> int:
         try:
             state = json.loads(state)
         except (TypeError, ValueError):
-            return 0
+            return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _attempts_of(row: Optional[dict[str, Any]]) -> int:
     try:
-        return (
-            int((state or {}).get("verify_attempts") or 0)
-            if isinstance(state, dict)
-            else 0
-        )
+        return int(_state_of(row).get("verify_attempts") or 0)
     except (TypeError, ValueError):
         return 0
 
@@ -357,11 +361,27 @@ async def apply_completion_verification(
 
 
 async def reset_verify_attempts(issue_id: int) -> None:
-    """Start a dispatch's attempt budget at zero. Best-effort: a failed write
-    only means this dispatch inherits the old count (fewer retries), never a
-    broken turn."""
+    """Start a dispatch's attempt budget at zero, and defuse a stale
+    rejection: a ``fail`` with ``retry`` that no continuation consumed would
+    otherwise be injected as feedback into this NEW dispatch. It is kept
+    visible, marked ``retry: False`` + ``consumed_at``. Best-effort: a failed
+    read still resets the counter; a failed write only means this dispatch
+    inherits the old count (fewer retries), never a broken turn."""
+    patch: dict[str, Any] = {"verify_attempts": 0}
     try:
-        await merge_execution_state(int(issue_id), {"verify_attempts": 0})
+        stale = _state_of(await _load_issue_row(issue_id)).get("verification")
+        if (
+            isinstance(stale, dict)
+            and stale.get("retry")
+            and not stale.get("consumed_at")
+        ):
+            patch["verification"] = {**stale, "retry": False, "consumed_at": _now()}
+    except Exception as exc:  # noqa: BLE001 — the counter reset still happens
+        logger.warning(
+            f"[verification] issue {issue_id}: stale-verdict read failed: {exc!r}"
+        )
+    try:
+        await merge_execution_state(int(issue_id), patch)
     except Exception as exc:  # noqa: BLE001 — logged, never breaks the turn
         logger.warning(
             f"[verification] issue {issue_id}: verify_attempts reset failed: {exc!r}"

@@ -150,3 +150,23 @@ def test_a_predicate_exception_is_not_applicable_with_error_fact(monkeypatch):
     r = _by_name(run_predicates("shots", _bundle()))
     assert r["shots_exist"].status == "not_applicable"
     assert r["shots_exist"].facts["error"] == "RuntimeError"
+
+
+# ── review fix: ASCII trigger words match whole words only ──
+
+
+@pytest.mark.parametrize(
+    "text,name,fires",
+    [
+        ("attach a screenshot of the result", "shots_exist", False),
+        ("imagine a better ending", "image_dispatched", False),
+        ("surrender the scene", "image_dispatched", False),
+        ("two shots per scene", "shots_exist", True),
+        ("Shot 3 needs a close-up", "shots_exist", True),
+        ("分镜两个", "shots_exist", True),
+        ("每场一张配图", "image_dispatched", True),
+    ],
+)
+def test_ascii_triggers_are_word_bounded_cjk_are_substrings(text, name, fires):
+    status = _by_name(run_predicates(text, _bundle()))[name].status
+    assert (status != "not_applicable") is fires

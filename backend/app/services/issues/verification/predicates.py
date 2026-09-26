@@ -6,6 +6,7 @@ verdict on its own.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
@@ -57,9 +58,18 @@ class PredicateResult:
     facts: dict[str, Any] = field(default_factory=dict)
 
 
+def _matches(low: str, word: str) -> bool:
+    """ASCII words match whole words only ("screenshot" is not a "shot",
+    "surrender" is not a "render"); CJK has no word boundaries, so it stays
+    a substring match."""
+    if word.isascii():
+        return re.search(rf"\b{re.escape(word)}\b", low) is not None
+    return word in low
+
+
 def mentions(text: str, words: tuple[str, ...]) -> bool:
     low = (text or "").lower()
-    return any(w in low for w in words)
+    return any(_matches(low, w) for w in words)
 
 
 def shots_exist(trigger: str, bundle: EvidenceBundle) -> PredicateResult:

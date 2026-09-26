@@ -40,6 +40,10 @@ def db(monkeypatch):
     write = AsyncMock()
     monkeypatch.setattr(m, "load_acceptance_criteria", load)
     monkeypatch.setattr(m, "write_agent_criteria", write)
+    # Review fix: agent criteria lock once verification started this dispatch.
+    from app.services.issues import verification as v
+
+    monkeypatch.setattr(v, "verification_started", AsyncMock(return_value=False))
     return load, write
 
 
@@ -144,3 +148,83 @@ def test_the_chat_service_advertises_it_only_on_the_issue_road():
     assert len(sac_line) - len(sac_line.lstrip()) == len(sw_line) - len(
         sw_line.lstrip()
     )
+
+
+# ── review fixes: lock once verified; the UPDATE refuses a user-owned row ──
+
+
+async def test_agent_criteria_lock_once_verification_started(db, monkeypatch):
+    from app.services.issues import verification as v
+
+    load, write = db
+    load.return_value = ("old proposal", "agent")
+    monkeypatch.setattr(v, "verification_started", AsyncMock(return_value=True))
+    h = make_set_acceptance_criteria_handler(issue_id=ISSUE, agent_id=AGENT)
+    out = await h({"criteria": "moved goalposts"}, None)
+    assert out == {
+        "error": "criteria_locked",
+        "reason": "verification_started",
+        "criteria": "old proposal",
+    }
+    write.assert_not_awaited()
+
+
+async def test_agent_criteria_write_when_verification_not_started(db):
+    load, write = db
+    load.return_value = ("old proposal", "agent")
+    h = make_set_acceptance_criteria_handler(issue_id=ISSUE, agent_id=AGENT)
+    assert (await h({"criteria": "new"}, None))["ok"] is True
+    write.assert_awaited_once()
+
+
+async def test_a_user_patch_racing_the_write_is_criteria_locked(db):
+    from app.services.issues.acceptance_criteria import CriteriaLockedError
+
+    load, write = db
+    write.side_effect = CriteriaLockedError("user owns the criteria")
+    h = make_set_acceptance_criteria_handler(issue_id=ISSUE, agent_id=AGENT)
+    out = await h({"criteria": "a"}, None)
+    assert out == {"error": "criteria_locked", "reason": "set_by_user"}
+
+
+def _capturing_write_scope(monkeypatch, rowcount):
+    from contextlib import asynccontextmanager
+
+    from sqlalchemy.dialects import postgresql
+
+    compiled: list[str] = []
+
+    class _Res:
+        def __init__(self):
+            self.rowcount = rowcount
+
+    class _Session:
+        async def execute(self, stmt):
+            compiled.append(str(stmt.compile(dialect=postgresql.dialect())))
+            return _Res()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _Session()
+
+    import app.db.session as db_session
+
+    monkeypatch.setattr(db_session, "write_scope", _scope)
+    return compiled
+
+
+async def test_write_agent_criteria_update_skips_user_owned_rows(monkeypatch):
+    from app.services.issues import acceptance_criteria as ac
+
+    compiled = _capturing_write_scope(monkeypatch, rowcount=1)
+    await ac.write_agent_criteria(ISSUE, "c", agent_id=None)
+    assert "UPDATE public.issues" in compiled[0]
+    assert "acceptance_criteria_source IS DISTINCT FROM" in compiled[0]
+
+
+async def test_write_agent_criteria_raises_typed_when_nothing_updated(monkeypatch):
+    from app.services.issues import acceptance_criteria as ac
+
+    _capturing_write_scope(monkeypatch, rowcount=0)
+    with pytest.raises(ac.CriteriaLockedError):
+        await ac.write_agent_criteria(ISSUE, "c", agent_id=AGENT)

@@ -67,9 +67,34 @@ from app.services.issues.verification.service import (  # noqa: E402
     reset_verify_attempts,
 )
 
+
+async def verification_started(issue_id: int) -> bool:
+    """Has this dispatch already verified a declaration (``verify_attempts``
+    > 0)? Agent-written criteria lock from then on — moving the goalposts
+    after a rejection is exactly what the loop exists to prevent. Best-effort:
+    an unreadable row is "not started" (logged), so the tool degrades to its
+    pre-lock behaviour rather than refusing every write."""
+    import json
+
+    try:
+        state = (await _load_issue_row(issue_id) or {}).get("execution_state")
+        if isinstance(state, str):
+            state = json.loads(state)
+        attempts = (
+            (state or {}).get("verify_attempts") if isinstance(state, dict) else 0
+        )
+        return int(attempts or 0) > 0
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"[verification] issue {issue_id}: verify_attempts read failed: {exc!r}"
+        )
+        return False
+
+
 __all__ = [
     "VERIFY_MAX_ATTEMPTS",
     "apply_completion_verification",
     "pending_verifier_feedback",
     "reset_verify_attempts",
+    "verification_started",
 ]

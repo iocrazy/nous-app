@@ -400,7 +400,7 @@ Attached to this message (listed for reference; the files are not loaded into th
 }
 ```
 
-工具结果是 `{"ok": true, "criteria": "...", "source": "agent"}`，或类型化拒绝 `{"error": "criteria_required" | "criteria_too_long" | "criteria_locked" | "criteria_already_set" | "criteria_write_failed"}`（`criteria_locked` / `criteria_already_set` 附带当前 `criteria`，`criteria_too_long` 附带 `max_chars`）。人写的标准（`source='user'`）锁定；agent 自己先前的提议可以被它替换；每回合最多一次成功调用。指令句是 `ACCEPTANCE_CRITERIA_INSTRUCTION`，逐字贴在 `FinishIssue` 块里；它和本工具在同一个注入块，只跟着本工具出现。
+工具结果是 `{"ok": true, "criteria": "...", "source": "agent"}`，或类型化拒绝 `{"error": "criteria_required" | "criteria_too_long" | "criteria_locked" | "criteria_already_set" | "criteria_write_failed"}`（`criteria_locked` / `criteria_already_set` 附带当前 `criteria`，`criteria_too_long` 附带 `max_chars`）。人写的标准（`source='user'`）锁定；agent 自己先前的提议可以被它替换，但本次 dispatch 一旦开始核验（`verify_attempts > 0`）就锁定（`criteria_locked` + `reason: "verification_started"`）；读写之间人刚 PATCH 了标准时写入不覆盖（`criteria_locked` + `reason: "set_by_user"`）；每回合最多一次成功调用。指令句是 `ACCEPTANCE_CRITERIA_INSTRUCTION`，逐字贴在 `FinishIssue` 块里；它和本工具在同一个注入块，只跟着本工具出现。
 
 #### Token effect
 
