@@ -21,6 +21,7 @@ from loguru import logger
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.adapters._model_routing import resolve_wire_model
 from app.services.ai.adapters.base import StreamChunk
+from app.services.ai.provider_contract import normalize_envelope
 from app.services.ai.runner.reasoning import (
     MIN_REASONING_MAX_TOKENS,
     model_uses_reasoning,
@@ -60,6 +61,15 @@ def ensure_v1_base(url: str) -> str:
     if trimmed.endswith("/chat/completions") or trimmed.endswith("/v1"):
         return trimmed
     return f"{trimmed}/v1"
+
+
+def _has_tool_calls(data: Any) -> bool:
+    """For the debug line only — must not raise on a malformed body (the
+    contract check right after it is what reports that)."""
+    try:
+        return bool(data["choices"][0]["message"].get("tool_calls"))
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return False
 
 
 class OpenAICompatibleAdapter:
@@ -136,9 +146,11 @@ class OpenAICompatibleAdapter:
             data = resp.json()
         logger.debug(
             f"[{type(self).__name__}] model={body['model']} "
-            f"tool_calls={bool(data.get('choices', [{}])[0].get('message', {}).get('tool_calls'))}"
+            f"tool_calls={_has_tool_calls(data)}"
         )
-        return data
+        # Contract (provider_contract docstring): success returns ``data``
+        # itself; a 200 error body / content filter / unbilled empty raises.
+        return normalize_envelope(data, model=body["model"])
 
     async def stream(
         self,

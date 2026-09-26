@@ -89,6 +89,16 @@ WARNING_MARKERS: dict[str, TurnEndReason] = {
     "timeout_sec_exceeded": TurnEndReason.ERROR,
     "max_stream_iterations_exceeded": TurnEndReason.MAX_ITERATIONS,
 }
+# ``finish_reason`` words (the provider contract's closed vocabulary) that do
+# NOT mean a normal end. Belt-and-braces: a normalised adapter raises for
+# content_filter / error before a result ever exists, but an adapter that
+# skipped ``normalize_envelope`` must not get its refusal filed COMPLETED.
+# stop / tool_calls / empty / unknown fall through to COMPLETED.
+FINISH_REASON_MARKERS: dict[str, TurnEndReason] = {
+    "length": TurnEndReason.PROVIDER_LENGTH,
+    "content_filter": TurnEndReason.ERROR,
+    "error": TurnEndReason.ERROR,
+}
 
 
 def result_was_cancelled(result: Optional[dict[str, Any]]) -> bool:
@@ -136,9 +146,7 @@ def classify_run_result(result: dict[str, Any]) -> tuple[TurnEndReason, dict[str
     calls = result.get("tool_calls")
     if isinstance(calls, list):
         extra["tool_calls"] = len(calls)
-    if finish == "length":
-        return TurnEndReason.PROVIDER_LENGTH, extra
-    return TurnEndReason.COMPLETED, extra
+    return _by_finish(finish, extra)
 
 
 def classify_stream_end(last_terminal: Any) -> tuple[TurnEndReason, dict[str, Any]]:
@@ -172,15 +180,41 @@ def classify_stream_end(last_terminal: Any) -> tuple[TurnEndReason, dict[str, An
         return WARNING_MARKERS[warning], {**extra, "error_code": warning}
     if code:
         return TurnEndReason.ERROR, {**extra, "error_code": code}
-    if finish == "length":
-        return TurnEndReason.PROVIDER_LENGTH, extra
-    return TurnEndReason.COMPLETED, extra
+    return _by_finish(finish, extra)
+
+
+def _by_finish(
+    finish: Optional[str], extra: dict[str, Any]
+) -> tuple[TurnEndReason, dict[str, Any]]:
+    reason = FINISH_REASON_MARKERS.get(finish or "", TurnEndReason.COMPLETED)
+    if reason is TurnEndReason.ERROR:
+        from app.services.ai.error_catalog import (
+            PROVIDER_BAD_RESPONSE,
+            PROVIDER_CONTENT_FILTER,
+        )
+
+        code = (
+            PROVIDER_CONTENT_FILTER
+            if finish == "content_filter"
+            else PROVIDER_BAD_RESPONSE
+        )
+        return reason, {**extra, "error_code": code}
+    return reason, extra
 
 
 def classify_exception(exc: BaseException) -> tuple[TurnEndReason, dict[str, Any]]:
     if isinstance(exc, asyncio.CancelledError):
         return TurnEndReason.CANCELLED, {"error_code": "cancelled_error"}
-    return TurnEndReason.ERROR, {"error": f"{type(exc).__name__}: {exc!s:.200}"}
+    from app.services.ai.error_catalog import error_code_for
+
+    # ``error_code`` is the same value RunRecorder writes to
+    # ``agent_runs.error_code`` (catalog code, else the class name) — the two
+    # surfaces must never disagree about one failure. ``error`` keeps the
+    # free text for a human reading the transcript.
+    return TurnEndReason.ERROR, {
+        "error_code": error_code_for(exc),
+        "error": f"{type(exc).__name__}: {exc!s:.200}",
+    }
 
 
 async def emit_turn_end(
@@ -191,6 +225,7 @@ async def emit_turn_end(
 
 
 __all__ = [
+    "FINISH_REASON_MARKERS",
     "STOP_REASON_TO_TURN_END",
     "TURN_END_EVENT_TYPE",
     "TurnEndReason",

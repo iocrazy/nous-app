@@ -16,6 +16,7 @@ from loguru import logger
 
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.adapters._model_routing import resolve_wire_model
+from app.services.ai.provider_contract import normalize_envelope
 
 
 class ClaudeAdapter:
@@ -164,4 +165,4 @@ class ClaudeAdapter:
             f"[ClaudeAdapter] model={model} "
             f"stop_reason={getattr(resp, 'stop_reason', 'unknown')}"
         )
-        return self._normalize_response(resp)
+        return normalize_envelope(self._normalize_response(resp), model=model)

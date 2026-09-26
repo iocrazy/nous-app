@@ -333,7 +333,17 @@ class RunRecorder:
                 await self._finish(status="completed")
             else:
                 final_status = "failed"
-                error_code = exc_type.__name__ if exc_type else "unknown"
+                # Catalog code (PROVIDER_QUOTA_CAP, …) when the failure has
+                # one, else the class name — the same value the turn_end event
+                # carries (fh4 T5). Used to be the class name only, so every
+                # provider failure read "AllModelsFailed" / "HTTPStatusError".
+                from app.services.ai.error_catalog import error_code_for
+
+                error_code = (
+                    error_code_for(exc)
+                    if exc is not None
+                    else (exc_type.__name__ if exc_type else "unknown")
+                )
                 final_error = str(exc) if exc else None
                 await self._finish(
                     status="failed", error_code=error_code, error_message=final_error

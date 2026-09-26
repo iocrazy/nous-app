@@ -263,10 +263,21 @@ async def test_call_omits_authorization_when_api_key_empty() -> None:
         "app.services.ai.adapters.openai_compat.httpx.AsyncClient"
     ) as mock_client_cls:
         mock_instance = AsyncMock()
+        # A real envelope: ``{}`` is not a shape any provider returns, and
+        # the provider contract (fh4 T5) now raises on it.
+        envelope = {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
         fake_resp = type(
             "_Resp",
             (),
-            {"json": lambda self: {}, "raise_for_status": lambda self: None},
+            {"json": lambda self: envelope, "raise_for_status": lambda self: None},
         )()
         mock_instance.post = AsyncMock(return_value=fake_resp)
         mock_client_cls.return_value.__aenter__.return_value = mock_instance
