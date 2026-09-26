@@ -1955,3 +1955,241 @@ body {
   background: linear-gradient(180deg, #7c80f1, #5850ea);
   box-shadow: 0 3px 18px rgba(79, 70, 229, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
+
+/* ============================================================
+   Chat FAB — the collapsed entry of the global AI chat (無我 mascot).
+   Behaviour: components/chatFab/ChatFab.tsx (+ useMascotBrain). Artwork and
+   the class hooks used below: components/chatFab/NousPup.tsx.
+   Layers: .chat-fab (position, snap, peek) > .chat-fab-body (hover scale /
+   tilt, levitation) > .chat-fab-orb (one-off WAAPI beats) > .chat-fab-pup.
+   Continuous states are classes set by the component:
+     is-docked is-left/is-right is-dragging is-snapping is-peeking
+     mood-attentive mood-happy mood-excited mood-working mood-thinking mood-love mood-asleep
+     data-face="serene|open|happy|excited|working|thinking|asleep|love"
+     data-motion="on|off"  (prefers-reduced-motion: every animation off)
+   ============================================================ */
+.chat-fab {
+  position: fixed;
+  z-index: 30;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: grab;
+  touch-action: none;
+  display: grid;
+  place-items: center;
+  outline: none;
+  --pup-eye: #eee0ff;
+  --pup-glow: rgba(186, 154, 255, 0.8);
+  transition: translate 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.chat-fab.is-snapping {
+  transition:
+    left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1),
+    top 0.32s cubic-bezier(0.2, 0.8, 0.2, 1),
+    translate 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.chat-fab.is-peeking.is-right { translate: 24px 0; }
+.chat-fab.is-peeking.is-left { translate: -24px 0; }
+.chat-fab.is-peeking:hover { translate: 0 0; }
+.chat-fab.is-dragging { cursor: grabbing; }
+.chat-fab:focus-visible .chat-fab-orb {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 4px;
+  border-radius: 999px;
+}
+
+.chat-fab-body {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: chat-fab-levitate 3.4s ease-in-out infinite;
+}
+.chat-fab.mood-asleep .chat-fab-body { animation-duration: 5.5s; }
+.chat-fab:hover .chat-fab-body { transform: scale(1.08) rotate(-5deg); }
+.chat-fab.is-left:hover .chat-fab-body { transform: scale(1.08) rotate(5deg); }
+.chat-fab.is-dragging .chat-fab-body { transform: scale(1.12); animation: none; }
+@keyframes chat-fab-levitate {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -5px; }
+}
+
+.chat-fab-orb {
+  position: relative;
+  width: 56px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  transform-origin: 50% 100%;
+  transition: opacity 0.2s;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45));
+}
+[data-theme="light"] .chat-fab-orb { filter: drop-shadow(0 6px 10px rgba(28, 27, 24, 0.22)); }
+.chat-fab.is-docked .chat-fab-orb { opacity: 0.88; }
+.chat-fab:hover .chat-fab-orb,
+.chat-fab.is-dragging .chat-fab-orb,
+.chat-fab.mood-excited .chat-fab-orb,
+.chat-fab.mood-working .chat-fab-orb,
+.chat-fab.mood-thinking .chat-fab-orb { opacity: 1; }
+
+/* Agent ring (core element #2) spins while a run is in flight. */
+.chat-fab-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 64px;
+  height: 64px;
+  translate: -50% -50%;
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 0.3s;
+  background: conic-gradient(from 0deg, #8fb0ff, #c08cff, #ff9bdc, #ffbb7a, #8fb0ff);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+}
+.chat-fab.mood-working .chat-fab-ring { opacity: 0.9; animation: chat-fab-spin 2.4s linear infinite; }
+@keyframes chat-fab-spin { to { rotate: 360deg; } }
+
+.chat-fab-badge {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  border: 2px solid var(--app-bg);
+  font: 700 10px/14px ui-monospace, "SF Mono", Menlo, monospace;
+  display: grid;
+  place-items: center;
+  z-index: 2;
+}
+[data-theme="light"] .chat-fab-badge { color: #fff; }
+
+/* ---- the pup ---- */
+.chat-fab-pup {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.chat-fab-pup svg {
+  position: absolute;
+  /* the ears are wider than the hit area on purpose; the art overflows 10px each side */
+  left: -10px;
+  top: 4px;
+  width: 76px;
+  height: 58px;
+  overflow: visible;
+}
+.chat-fab-pup .pup-ear {
+  transform-box: fill-box;
+  transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.chat-fab-pup .pup-ear-l { transform-origin: 100% 8%; animation: chat-fab-ear-l 3.4s ease-in-out infinite; }
+.chat-fab-pup .pup-ear-r { transform-origin: 0% 8%; animation: chat-fab-ear-r 3.4s ease-in-out infinite; }
+@keyframes chat-fab-ear-l { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-6deg); } 75% { transform: rotate(6deg); } }
+@keyframes chat-fab-ear-r { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(6deg); } 75% { transform: rotate(-6deg); } }
+/* attentive / hover: perk up to listen */
+.chat-fab.mood-attentive .pup-ear-l { transform: rotate(12deg); animation: none; }
+.chat-fab.mood-attentive .pup-ear-r { transform: rotate(-12deg); animation: none; }
+.chat-fab:hover .pup-ear-l, .chat-fab.mood-happy .pup-ear-l { transform: rotate(18deg); animation: none; }
+.chat-fab:hover .pup-ear-r, .chat-fab.mood-happy .pup-ear-r { transform: rotate(-18deg); animation: none; }
+/* excited: wag six times, then stay perked */
+.chat-fab.mood-excited .pup-ear-l { animation: chat-fab-wag-l 0.38s ease-in-out 6 forwards; }
+.chat-fab.mood-excited .pup-ear-r { animation: chat-fab-wag-r 0.38s ease-in-out 6 forwards; }
+@keyframes chat-fab-wag-l { 0%, 100% { transform: rotate(12deg); } 50% { transform: rotate(32deg); } }
+@keyframes chat-fab-wag-r { 0%, 100% { transform: rotate(-12deg); } 50% { transform: rotate(-32deg); } }
+.chat-fab.mood-love .pup-ear-l { transform: rotate(24deg); animation: none; }
+.chat-fab.mood-love .pup-ear-r { transform: rotate(-24deg); animation: none; }
+/* working: pinned back, focused */
+.chat-fab.mood-working .pup-ear-l { transform: rotate(-7deg); animation: none; }
+.chat-fab.mood-working .pup-ear-r { transform: rotate(7deg); animation: none; }
+/* thinking: one ear twitches now and then */
+.chat-fab.mood-thinking .pup-ear-l { transform: rotate(0); animation: none; }
+.chat-fab.mood-thinking .pup-ear-r { animation: chat-fab-twitch-r 2.2s ease-in-out infinite; }
+@keyframes chat-fab-twitch-r { 0%, 68%, 100% { transform: rotate(0); } 76% { transform: rotate(-18deg); } 84% { transform: rotate(-4deg); } 92% { transform: rotate(-10deg); } }
+/* asleep: droop, with a dream twitch */
+.chat-fab.mood-asleep .pup-ear-l { animation: chat-fab-dream-l 6s ease-in-out infinite; }
+.chat-fab.mood-asleep .pup-ear-r { animation: chat-fab-dream-r 6s ease-in-out infinite; }
+@keyframes chat-fab-dream-l { 0%, 80%, 88%, 100% { transform: rotate(-9deg); } 84% { transform: rotate(-3deg); } }
+@keyframes chat-fab-dream-r { 0%, 40%, 48%, 100% { transform: rotate(9deg); } 44% { transform: rotate(3deg); } }
+/* dragging / snapping: JS streams the ears behind the motion; CSS only sets how fast they follow */
+.chat-fab.is-dragging .pup-ear { animation: none !important; transition: transform 0.09s linear; }
+.chat-fab.is-snapping .pup-ear { animation: none !important; transition: transform 0.14s ease-out; }
+
+.chat-fab-pup .pup-curl { transform-box: fill-box; transform-origin: 20% 100%; transition: transform 0.3s; }
+.chat-fab:hover .pup-curl, .chat-fab.mood-excited .pup-curl { transform: rotate(-14deg); }
+.chat-fab.mood-thinking .pup-curl { animation: chat-fab-curl-tap 1.4s ease-in-out infinite; }
+@keyframes chat-fab-curl-tap { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-18deg); } }
+
+.chat-fab-pup .pup-arm { transform-box: fill-box; transition: transform 0.3s; }
+.chat-fab-pup .pup-arm-l { transform-origin: 100% 0%; }
+.chat-fab-pup .pup-arm-r { transform-origin: 0% 0%; }
+.chat-fab:hover .pup-arm-l, .chat-fab.mood-excited .pup-arm-l { transform: rotate(-35deg); }
+.chat-fab:hover .pup-arm-r, .chat-fab.mood-excited .pup-arm-r { transform: rotate(35deg); }
+.chat-fab.is-dragging .pup-arm-l { transform: rotate(-60deg); }
+.chat-fab.is-dragging .pup-arm-r { transform: rotate(60deg); }
+
+.chat-fab-pup .pup-glow { transform-box: fill-box; transform-origin: 50% 50%; animation: chat-fab-glow 3.4s ease-in-out infinite; }
+@keyframes chat-fab-glow { 0%, 100% { transform: scale(1); opacity: 0.6; } 50% { transform: scale(0.72); opacity: 0.3; } }
+.chat-fab.is-dragging .pup-glow { opacity: 0; }
+
+/* faces: exactly one group shows, chosen by the component */
+.chat-fab-pup .pup-face { display: none; }
+.chat-fab[data-face="serene"] .pup-face-serene,
+.chat-fab[data-face="open"] .pup-face-open,
+.chat-fab[data-face="happy"] .pup-face-happy,
+.chat-fab[data-face="excited"] .pup-face-excited,
+.chat-fab[data-face="working"] .pup-face-working,
+.chat-fab[data-face="thinking"] .pup-face-thinking,
+.chat-fab[data-face="asleep"] .pup-face-asleep,
+.chat-fab[data-face="love"] .pup-face-love { display: block; }
+.chat-fab-pup .pup-face-open { transition: translate 0.12s; }
+.chat-fab-pup .pup-pupil { transform-box: fill-box; transform-origin: 50% 60%; animation: chat-fab-blink 4.6s infinite; }
+.chat-fab-pup .pup-pupil:last-child { animation-delay: 0.06s; }
+.chat-fab.is-dragging .pup-pupil { animation: none; transform: scaleY(1.2); }
+@keyframes chat-fab-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.08); } }
+
+/* floaters: ✦ for 灵感, ? for 思考, z for sleep */
+.chat-fab-pup .pup-float {
+  position: absolute;
+  opacity: 0;
+  font: 700 11px ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--content);
+}
+.chat-fab-pup .pup-spark { left: 46px; top: -2px; color: var(--pup-eye); text-shadow: 0 0 6px var(--pup-glow); font-size: 13px; }
+.chat-fab.mood-excited .pup-spark { animation: chat-fab-sparkle 1.2s ease-out infinite; }
+@keyframes chat-fab-sparkle {
+  0% { opacity: 0; transform: scale(0.4) rotate(0); }
+  30% { opacity: 1; transform: scale(1.1) rotate(20deg); }
+  100% { opacity: 0; transform: scale(0.6) rotate(45deg) translateY(-6px); }
+}
+.chat-fab-pup .pup-q { left: 47px; top: 0; font-size: 12px; }
+.chat-fab.mood-thinking .pup-q { animation: chat-fab-qbob 1.4s ease-in-out infinite; }
+@keyframes chat-fab-qbob { 0%, 100% { opacity: 0.9; translate: 0 0; } 50% { opacity: 1; translate: 0 -3px; } }
+.chat-fab-pup .pup-zz { left: 47px; top: -2px; }
+.chat-fab.mood-asleep .pup-zz { animation: chat-fab-zfloat 2.4s ease-out infinite; }
+.chat-fab.mood-asleep .pup-zz-2 { animation-delay: 1.2s; font-size: 9px; left: 53px; }
+.chat-fab.is-left .pup-float { left: auto; right: 46px; }
+.chat-fab.is-left .pup-zz-2 { right: 52px; }
+@keyframes chat-fab-zfloat { 0% { opacity: 0; translate: 0 0; } 20% { opacity: 0.9; } 100% { opacity: 0; translate: 6px -22px; } }
+
+/* reduced motion: the component also stops every JS beat (data-motion="off") */
+@media (prefers-reduced-motion: reduce) {
+  .chat-fab, .chat-fab.is-snapping { transition: none; }
+  .chat-fab .chat-fab-body, .chat-fab .chat-fab-ring, .chat-fab .pup-ear, .chat-fab .pup-curl, .chat-fab .pup-glow,
+  .chat-fab .pup-pupil, .chat-fab .pup-float { animation: none !important; }
+  .chat-fab:hover .chat-fab-body { transform: scale(1.04) rotate(0); }
+}
+.chat-fab[data-motion="off"], .chat-fab[data-motion="off"].is-snapping { transition: none; }
+.chat-fab[data-motion="off"] .chat-fab-body, .chat-fab[data-motion="off"] .chat-fab-ring, .chat-fab[data-motion="off"] .pup-ear,
+.chat-fab[data-motion="off"] .pup-curl, .chat-fab[data-motion="off"] .pup-glow, .chat-fab[data-motion="off"] .pup-pupil,
+.chat-fab[data-motion="off"] .pup-float { animation: none !important; }
+.chat-fab[data-motion="off"]:hover .chat-fab-body { transform: scale(1.04) rotate(0); }
