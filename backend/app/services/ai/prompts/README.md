@@ -400,7 +400,7 @@ Attached to this message (listed for reference; the files are not loaded into th
 }
 ```
 
-工具结果是 `{"ok": true, "criteria": "...", "source": "agent"}`，或类型化拒绝 `{"error": "criteria_required" | "criteria_too_long" | "criteria_locked" | "criteria_already_set" | "criteria_write_failed"}`（`criteria_locked` / `criteria_already_set` 附带当前 `criteria`，`criteria_too_long` 附带 `max_chars`）。人写的标准（`source='user'`）锁定；agent 自己先前的提议可以被它替换；每回合最多一次成功调用。指令句在 `FinishIssue` 块里（同一段 `FINISH_ISSUE_INSTRUCTION`）。
+工具结果是 `{"ok": true, "criteria": "...", "source": "agent"}`，或类型化拒绝 `{"error": "criteria_required" | "criteria_too_long" | "criteria_locked" | "criteria_already_set" | "criteria_write_failed"}`（`criteria_locked` / `criteria_already_set` 附带当前 `criteria`，`criteria_too_long` 附带 `max_chars`）。人写的标准（`source='user'`）锁定；agent 自己先前的提议可以被它替换；每回合最多一次成功调用。指令句是 `ACCEPTANCE_CRITERIA_INSTRUCTION`，逐字贴在 `FinishIssue` 块里；它和本工具在同一个注入块，只跟着本工具出现。
 
 #### Token effect
 
@@ -683,12 +683,15 @@ You are working an assigned issue. Before you end this turn you MUST call the Fi
 - 'needs_input' — you are blocked and need a human decision or information; state precisely what you need in 'reason'.
 - 'continue' — you made real progress but need another turn to finish.
 Always include a one-sentence 'reason'. Do not end the turn without calling FinishIssue.
+```
+
+已知 `issue_id` 的 issue 轮次（两个生产调用方都传；与 `SetAcceptanceCriteria` 工具同一个注入块，见上文该工具的块）再追加一个换行加 `ACCEPTANCE_CRITERIA_INSTRUCTION`，逐字如下，所以系统消息以 `FINISH_ISSUE_INSTRUCTION + "\n" + ACCEPTANCE_CRITERIA_INSTRUCTION` 结尾：
+
+```text
 If the issue has no acceptance criteria yet, call SetAcceptanceCriteria once before you start working, stating checkable outcomes (scenes, shots, images, word count). A person's criteria are locked; work to them.
 ```
 
-最后一行（2026-09-26，issue「做完」闭环）指向同一 issue 轮次注入的 `SetAcceptanceCriteria`（见上文该工具的块）。强制声明请求复用整段指令，所以那次请求的系统消息里也有这一行，而它的 tools 只有 `FinishIssue`：句子限定在「开始工作之前」，强制请求里模型若误调它，那次调用按非 `FinishIssue` 忽略，落到既有的「没声明 → in_review」兜底。
-
-轮次结束时模型若没有声明结果，`forced_finish_declaration` 另发**一次独立请求**：系统消息是 `You just worked on an assigned issue but your turn ended without declaring an outcome.` 加两个换行加上面那段指令，tools 只有 `FinishIssue`，消息只有一条 user：
+轮次结束时模型若没有声明结果，`forced_finish_declaration` 另发**一次独立请求**：系统消息是 `You just worked on an assigned issue but your turn ended without declaring an outcome.` 加两个换行加上面第一段指令（只用 `FINISH_ISSUE_INSTRUCTION` 这个核心，不带 `ACCEPTANCE_CRITERIA_INSTRUCTION`——那次请求的 tools 只有 `FinishIssue`），tools 只有 `FinishIssue`，消息只有一条 user：
 
 ```text
 Your last message on this issue was:
@@ -702,7 +705,7 @@ adapter 接受 `tool_choice` 时强制 `{"type": "function", "function": {"name"
 
 #### Token effect
 
-schema 约 200 token（不含 `options` 子 schema），指令约 150 token（2026-09-26 加 `SetAcceptanceCriteria` 一句后），都固定。强制声明请求 `max_tokens = 300`、温度 0.2；`{assistant_text}` 是上一轮完整的最终文本，**没有上限**。
+schema 约 200 token（不含 `options` 子 schema），核心指令约 110 token，`ACCEPTANCE_CRITERIA_INSTRUCTION` 约 45 token（仅已知 `issue_id` 的轮次），都固定。强制声明请求 `max_tokens = 300`、温度 0.2；`{assistant_text}` 是上一轮完整的最终文本，**没有上限**。
 
 #### KV Cache effect
 

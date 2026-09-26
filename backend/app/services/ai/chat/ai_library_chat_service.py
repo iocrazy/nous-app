@@ -1371,15 +1371,25 @@ class AILibraryChatService:
                 # issue completion loop §5.1: SetAcceptanceCriteria rides the
                 # same root-run-with-issue_id gate — the criteria are a column
                 # on THIS issue, so there must be one to write to.
+                from app.services.ai.tools.finish_issue_tool import (
+                    ACCEPTANCE_CRITERIA_INSTRUCTION,
+                )
                 from app.services.ai.tools.set_acceptance_criteria_tool import (
                     make_set_acceptance_criteria_handler,
                     set_acceptance_criteria_spec,
                 )
 
+                # The sentence rides with the tool it names: the system
+                # message now ends FINISH_ISSUE_INSTRUCTION + "\n" + this.
                 composed = composed.model_copy(
                     update={
                         "tools": list(composed.tools or [])
-                        + [set_acceptance_criteria_spec()]
+                        + [set_acceptance_criteria_spec()],
+                        "system_message": (
+                            composed.system_message
+                            + "\n"
+                            + ACCEPTANCE_CRITERIA_INSTRUCTION
+                        ),
                     }
                 )
                 runner.set_acceptance_criteria_handler = (

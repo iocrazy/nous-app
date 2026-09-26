@@ -388,6 +388,48 @@ async def test_forced_declare_turn_uses_legacy_session_id_when_not_conversations
     assert recorded_kwargs["conversation_id"] is None
 
 
+async def test_forced_declare_system_message_uses_only_the_core_instruction(
+    monkeypatch,
+):
+    """The forced request offers only FinishIssue, so its system message must
+    not name SetAcceptanceCriteria (that sentence is appended on issue turns
+    only, next to the tool it names)."""
+    from app.services.ai.tools import forced_finish_declaration as fd
+    from app.services.ai.tools.finish_issue_tool import FINISH_ISSUE_INSTRUCTION
+
+    seen: dict[str, Any] = {}
+
+    class _CapturingAdapter(_FakeAdapter):
+        async def call(self, composed, messages, *, tool_choice=None):
+            seen["composed"] = composed
+            return await super().call(composed, messages, tool_choice=tool_choice)
+
+    agent_record = {"id": str(uuid4()), "slug": "issue_agent", "model": "qwen-max"}
+    session = {"agent_slug": "issue_agent", "team_id": None, "project_id": None}
+    monkeypatch.setattr(
+        fd,
+        "_resolve_agent_and_adapter",
+        AsyncMock(
+            return_value=(agent_record, _CapturingAdapter(), session, "platform")
+        ),
+    )
+    monkeypatch.setattr(fd, "RunRecorder", lambda **kw: _RecorderCM(**kw))
+
+    outcome, _ = await fd.attempt_forced_finish_declaration(
+        session_id="sess-core",
+        user_id=str(uuid4()),
+        assistant_text="draft ready",
+        issue_id=103,
+        trigger="issue_dispatch",
+    )
+
+    assert outcome == "needs_input"  # the call really went through
+    system_message = seen["composed"].system_message
+    assert system_message.endswith(FINISH_ISSUE_INSTRUCTION)
+    assert "SetAcceptanceCriteria" not in system_message
+    assert [t["function"]["name"] for t in seen["composed"].tools] == ["FinishIssue"]
+
+
 async def test_forced_declare_turn_passes_the_forcing_tool_choice(monkeypatch):
     from app.services.ai.tools import forced_finish_declaration as fd
 

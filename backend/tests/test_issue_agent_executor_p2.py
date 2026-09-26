@@ -256,8 +256,12 @@ def _default_tool_calls() -> List[Dict[str, Any]]:
     ]
 
 
+@pytest.mark.parametrize(
+    "pass_issue_id", [False, True], ids=["no_issue_id", "issue_id"]
+)
 async def test_issue_session_and_turn_link_via_conversation_id(
     monkeypatch: pytest.MonkeyPatch,
+    pass_issue_id: bool,
 ) -> None:
     """Real get_or_create_issue_session -> real create_session on a fake
     ConversationsAiStore-shaped store -> real run_session_turn
@@ -414,6 +418,7 @@ async def test_issue_session_and_turn_link_via_conversation_id(
             user_id=user_id,
             content="Task: Ship the thing",
             trigger="issue_dispatch",
+            **({"issue_id": issue_id} if pass_issue_id else {}),
         )
 
     # trigger reaches RunRecorder kwargs unchanged, and store_kind=
@@ -430,6 +435,25 @@ async def test_issue_session_and_turn_link_via_conversation_id(
     assert "FinishIssue" in tool_names
     assert captured_turn["finish_issue_handler"] is finish_issue_handler
     assert "FinishIssue" in captured_turn["system_message"]
+
+    # Issue completion loop: the SetAcceptanceCriteria sentence rides with
+    # the tool it names — both only when the turn knows its issue (both
+    # production callers pass issue_id). The core instruction is always last
+    # otherwise.
+    from app.services.ai.tools.finish_issue_tool import (
+        ACCEPTANCE_CRITERIA_INSTRUCTION,
+        FINISH_ISSUE_INSTRUCTION,
+    )
+
+    if pass_issue_id:
+        assert "SetAcceptanceCriteria" in tool_names
+        assert captured_turn["system_message"].endswith(
+            FINISH_ISSUE_INSTRUCTION + "\n" + ACCEPTANCE_CRITERIA_INSTRUCTION
+        )
+    else:
+        assert "SetAcceptanceCriteria" not in tool_names
+        assert captured_turn["system_message"].endswith(FINISH_ISSUE_INSTRUCTION)
+        assert "SetAcceptanceCriteria" not in captured_turn["system_message"]
 
     # Outcome extraction from the returned tool_calls still works.
     outcome, reason = extract_issue_outcome(result.get("tool_calls"))

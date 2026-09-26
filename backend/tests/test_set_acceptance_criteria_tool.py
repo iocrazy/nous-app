@@ -104,10 +104,17 @@ async def test_runner_dispatches_by_name_without_a_handler_is_typed():
     assert "error" in out and "SetAcceptanceCriteria" in out["error"]
 
 
-async def test_instruction_tells_the_agent_to_set_criteria_first():
-    from app.services.ai.tools.finish_issue_tool import FINISH_ISSUE_INSTRUCTION
+def test_the_criteria_sentence_is_its_own_constant_not_in_the_core():
+    """The core FinishIssue instruction is also the forced-declaration
+    request's system message, whose tools hold only FinishIssue — so the
+    sentence naming SetAcceptanceCriteria must live outside it."""
+    from app.services.ai.tools.finish_issue_tool import (
+        ACCEPTANCE_CRITERIA_INSTRUCTION,
+        FINISH_ISSUE_INSTRUCTION,
+    )
 
-    assert "SetAcceptanceCriteria" in FINISH_ISSUE_INSTRUCTION
+    assert "SetAcceptanceCriteria" in ACCEPTANCE_CRITERIA_INSTRUCTION
+    assert "SetAcceptanceCriteria" not in FINISH_ISSUE_INSTRUCTION
 
 
 # ── wiring (same shape as tests/runner/test_schedule_wakeup_wiring.py) ──
