@@ -227,3 +227,26 @@ async def test_no_base_url_is_unknown_without_a_request(monkeypatch):
     snap = await ec.engine_snapshot("", "k")
     assert s.calls == 0
     assert snap.services is None and snap.reachable is False
+
+
+@pytest.mark.asyncio
+async def test_list_read_times_out_after_five_seconds(monkeypatch):
+    """A hung engine must not hold the settings load for long: the client is
+    built with a 5 s timeout, and a timeout reads as unreachable (not revoked)."""
+    seen: dict = {}
+
+    def handler(request):
+        seen["timeout"] = request.extensions.get("timeout")
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        ec.httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+    )
+    assert ec.LIST_TIMEOUT_S == 5.0
+    snap = await ec.engine_snapshot(BASE, "k")
+    assert seen["timeout"] == {"connect": 5.0, "read": 5.0, "write": 5.0, "pool": 5.0}
+    assert snap.reachable is False and snap.services is None
+    assert "ReadTimeout" in snap.error

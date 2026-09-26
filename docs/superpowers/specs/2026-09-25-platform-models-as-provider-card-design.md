@@ -82,7 +82,8 @@ class EngineSnapshot:
 async def engine_snapshot(base_url, api_key) -> EngineSnapshot
 ```
 
-- `GET {base}/models?include_unready=1`，15 秒超时；`app/core/cache.TTLCache` 30 秒，key = base_url；**keep-last-good**：读失败时若上次成功快照 ≤ 10 分钟，返回它并标 `stale=True`；否则 `services=None, reachable=False`。`TTLCache.get_or_load` 的 load 失败不缓存，所以失败路径每次都会重试，符合预期。
+- `GET {base}/models?include_unready=1`，5 秒超时；`app/core/cache.TTLCache` 30 秒，key = base_url；**keep-last-good**：读失败时若上次成功快照 ≤ 10 分钟，返回它并标 `stale=True`；否则 `services=None, reachable=False`。`TTLCache.get_or_load` 的 load 失败不缓存，所以失败路径每次都会重试，符合预期。
+  - 实施注记（P1 #2468，2026-09-25 裁定）：① **失败结果同样缓存 30 秒**（快照本身带 `reachable=false` / `stale`，不是抛异常）。否则引擎假死时每次 `GET /ai/settings` 都要等满超时，且 `TTLCache` 跨 key 共用一把锁会把请求串行化。② 超时 15 秒 → **5 秒**：它挂在登录后的设置加载路径上，引擎同内网，正常几十毫秒。③ 缓存键是 `base_url + key 指纹`，快照按行自己的 key 读（派发用的就是它）；key 相同时一个引擎仍只读一次。
 - 401 → `unauthorized=True, services=None`。**不做任何写入**。
 - `context_window` / `capabilities` 为 null 原样带出（§3.4 的手动同步与窗口缓存各自决定怎么用；null 永不覆盖已填值）。
 - 调用方：§3.1 视图、§3.3 状态端点、§3.5 admin 叠加、§3.6 派发守卫、§3.4 手动同步。

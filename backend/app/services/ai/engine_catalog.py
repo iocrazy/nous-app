@@ -49,7 +49,9 @@ from app.core.exceptions import AppError
 
 ENGINE_TTL_S = 30.0
 KEEP_LAST_GOOD_S = 600.0
-LIST_TIMEOUT_S = 15.0
+# On the GET /ai/settings path: the engine is on the same LAN and answers in
+# tens of ms, so a hung engine must fall to keep-last-good quickly.
+LIST_TIMEOUT_S = 5.0
 _ERROR_TEXT_MAX = 200
 UNAUTHORIZED_ERROR = "HTTP 401: platform key rejected by nous-engine"
 EMPTY_LIST_ERROR = "engine listed no services (empty list not trusted)"
