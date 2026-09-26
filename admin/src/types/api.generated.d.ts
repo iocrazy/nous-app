@@ -19653,6 +19653,11 @@ export interface components {
             actual_model: string;
             /** Context Window Tokens */
             context_window_tokens: number | null;
+            /**
+             * Generatable
+             * @description Whether the row can generate an image/clip from a prompt — the same predicate the generation pickers use (services/generation/model_capabilities.generates_from_prompt). False for every non-image/video row and for upscale-only services.
+             */
+            generatable: boolean;
             /** Is Local */
             is_local: boolean;
             /**

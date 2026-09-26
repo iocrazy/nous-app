@@ -9334,6 +9334,11 @@
             ],
             "title": "Context Window Tokens"
           },
+          "generatable": {
+            "description": "Whether the row can generate an image/clip from a prompt — the same predicate the generation pickers use (services/generation/model_capabilities.generates_from_prompt). False for every non-image/video row and for upscale-only services.",
+            "title": "Generatable",
+            "type": "boolean"
+          },
           "is_local": {
             "title": "Is Local",
             "type": "boolean"
@@ -9380,7 +9385,8 @@
           "is_local",
           "pricing_type",
           "pricing_value",
-          "context_window_tokens"
+          "context_window_tokens",
+          "generatable"
         ],
         "title": "AiPlatformModelEntry",
         "type": "object"

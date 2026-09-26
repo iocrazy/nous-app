@@ -247,6 +247,7 @@ async def test_mapping_entry_carries_no_credentials(env):
         "pricing_type": "per_token",
         "pricing_value": entry["pricing_value"],
         "context_window_tokens": 32768,
+        "generatable": False,
     }
     assert isinstance(entry["pricing_value"], float)
     public = view.models[0].public_row()
