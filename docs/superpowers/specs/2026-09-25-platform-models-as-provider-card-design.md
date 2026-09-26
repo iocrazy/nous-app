@@ -53,7 +53,7 @@ ai_providers.nous = {
 }
 platform_models = {              # 顶层，name → 映射（BYOK 不需要，因为 BYOK 的 id 就是模型名）
   "<name>": { "actual_model", "type", "status", "is_local", "pricing_type", "pricing_value",
-              "context_window_tokens", "base_url_fingerprint"?: 不要 },
+              "context_window_tokens" },      # 不带 base_url / key（2026-08-14 泄露绊线）
   ...
 }
 platform_engine = { "reachable": bool, "stale": bool, "checked_at": WireDatetime | null } | null
