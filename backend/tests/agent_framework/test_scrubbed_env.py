@@ -22,6 +22,7 @@ purpose and does not use this chokepoint.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -217,3 +218,123 @@ def test_our_own_python_child_keeps_the_full_env_on_purpose():
     ).read_text()
     assert "safe_popen_kwargs" not in src
     assert "os.environ.copy()" in src
+
+
+# ── the coverage guard: every spawn site rides the chokepoint ─────────────
+#
+# The collision guard above only looks at sites that ALREADY splat
+# safe_popen_kwargs(). A site that never splats it is invisible to it — which
+# is how `workflows/canvas_timeline.py::_run_ffmpeg` (#2389) shipped handing
+# ffmpeg the whole key ring. This scan inverts the question: every spawn call
+# must carry `**safe_popen_kwargs(...)` in the SAME call node. AST, not regex,
+# so comments, docstrings and `asyncio.run(` cannot confuse it.
+
+#: module → the attributes of it that start a child process.
+_SPAWN_FUNCS = {
+    "subprocess": {
+        "Popen",
+        "run",
+        "call",
+        "check_call",
+        "check_output",
+        "getoutput",
+        "getstatusoutput",
+    },
+    "asyncio": {"create_subprocess_exec", "create_subprocess_shell"},
+}
+
+#: The ONE documented exception (see module docstring and
+#: test_our_own_python_child_keeps_the_full_env_on_purpose): it runs OUR
+#: Python and needs the database, so it keeps the full environment.
+_SPAWN_ALLOWLIST = {"services/workforce/isolated_runner.py"}
+
+
+def _spawn_name(call: ast.Call, aliases: dict[str, str]) -> str | None:
+    """`subprocess.run(` / `asyncio.create_subprocess_exec(` / a name
+    imported via `from subprocess import run` → the dotted spawn name."""
+    func = call.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        module, attr = func.value.id, func.attr
+        if attr in _SPAWN_FUNCS.get(module, ()):
+            return f"{module}.{attr}"
+    if isinstance(func, ast.Name) and func.id in aliases:
+        return aliases[func.id]
+    return None
+
+
+def _splats_safe_popen_kwargs(call: ast.Call) -> bool:
+    for kw in call.keywords:
+        if kw.arg is not None or not isinstance(kw.value, ast.Call):
+            continue
+        inner = kw.value.func
+        name = (
+            inner.attr
+            if isinstance(inner, ast.Attribute)
+            else getattr(inner, "id", None)
+        )
+        if name == "safe_popen_kwargs":
+            return True
+    return False
+
+
+def _unscrubbed_spawn_sites(root: Path) -> list[str]:
+    hits = []
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        if rel in _SPAWN_ALLOWLIST:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        aliases = {
+            (a.asname or a.name): f"{node.module}.{a.name}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module in _SPAWN_FUNCS
+            for a in node.names
+            if a.name in _SPAWN_FUNCS[node.module]
+        }
+        calls = sorted(
+            (n for n in ast.walk(tree) if isinstance(n, ast.Call)),
+            key=lambda n: (n.lineno, n.col_offset),
+        )
+        for node in calls:
+            name = _spawn_name(node, aliases)
+            if name and not _splats_safe_popen_kwargs(node):
+                hits.append(f"{rel}:{node.lineno} {name}(...)")
+    return hits
+
+
+@pytest.mark.unit
+def test_every_spawn_site_splats_safe_popen_kwargs():
+    root = Path(__file__).resolve().parents[2] / "app"
+    hits = _unscrubbed_spawn_sites(root)
+    assert not hits, (
+        "these spawn a child process WITHOUT **safe_popen_kwargs() — the child "
+        "inherits every secret in our environment. Splat it (env_keep= / "
+        "env_extra= for what the child really needs):\n  " + "\n  ".join(hits)
+    )
+
+
+@pytest.mark.unit
+def test_the_coverage_scanner_can_see_the_defect(tmp_path):
+    """The guard passes by finding nothing — prove it CAN find each shape,
+    and that it does not flag a scrubbed site or `asyncio.run(`."""
+    app = tmp_path / "app"
+    (app / "services" / "workforce").mkdir(parents=True)
+    (app / "bad.py").write_text(
+        "import asyncio, subprocess\n"
+        "from subprocess import check_output as co\n"
+        "async def f():\n"
+        "    await asyncio.create_subprocess_exec('ffmpeg', stdout=None)\n"
+        "    subprocess.run(['x'])\n"
+        "    co(['y'])\n"
+        "    asyncio.run(g())\n"
+        "    subprocess.Popen(['z'], **safe_popen_kwargs())\n"
+    )
+    (app / "services" / "workforce" / "isolated_runner.py").write_text(
+        "import subprocess\nsubprocess.Popen(['python'], env=os.environ.copy())\n"
+    )
+    hits = _unscrubbed_spawn_sites(app)
+    assert hits == [
+        "bad.py:4 asyncio.create_subprocess_exec(...)",
+        "bad.py:5 subprocess.run(...)",
+        "bad.py:6 subprocess.check_output(...)",
+    ]

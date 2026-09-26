@@ -260,17 +260,20 @@ class CodexCliProvider:
         # table is world-readable, so a flag would publish it to every user on
         # the box and into any crash dump of the command line. The CLI reads
         # OPENAI_API_KEY (doctor reports auth_source=env, verified 0.7.4).
-        popen = (
-            safe_popen_kwargs(env_extra={"OPENAI_API_KEY": self._api_key})
+        # The splat stays inline in the spawn call: the "every spawn splats
+        # safe_popen_kwargs" guard (tests/agent_framework/test_scrubbed_env.py)
+        # checks the call node itself and cannot follow a local variable.
+        env_extra = (
+            {"OPENAI_API_KEY": self._api_key}
             if self._provider_kind == "openai"
-            else safe_popen_kwargs()
+            else None
         )
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                **popen,
+                **safe_popen_kwargs(env_extra=env_extra),
             )
         except FileNotFoundError as exc:
             raise CodexCliError(
