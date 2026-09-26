@@ -16,6 +16,7 @@ from typing import Any, Optional, Sequence
 from loguru import logger
 from sqlalchemy import (
     TIMESTAMP,
+    Text,
     and_,
     case,
     cast,
@@ -27,6 +28,7 @@ from sqlalchemy import (
     tuple_,
     update,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 
 from app.db.session import in_unit_of_work, read_scope, write_scope
@@ -304,6 +306,40 @@ def dedupe_lookup_stmt(target_kind: str, target_id: int, dedupe_key: str):
     )
 
 
+#: ``content`` key the unclaimed-result alert stamps, so each item is alerted
+#: once. A jsonb key rather than a column: no migration (fh4 ruling 4), and the
+#: renderers read named keys only, so the model never sees it.
+UNCLAIMED_ALERT_MARKER = "unclaimed_alerted_at"
+
+
+def unclaimed_results_alert_stmt(*, older_than: dt.datetime, now: dt.datetime):
+    """fh4 E2e: stamp every ``subagent_result`` that has sat unclaimed and
+    unexpired since before ``older_than`` and was not stamped yet; RETURNING
+    the stamped rows. One statement, so "select, then mark" cannot alert the
+    same item twice across two overlapping ticks.
+
+    A settled child whose result nobody consumed within the window is the
+    signal the reaper's delivery and the drain backstop exist to prevent, so
+    each one is worth an ERROR — once."""
+    stamp = func.jsonb_build_object(
+        cast(UNCLAIMED_ALERT_MARKER, Text), cast(now.isoformat(), Text)
+    )
+    return (
+        update(AgentRunInbox)
+        .where(AgentRunInbox.kind == "subagent_result")
+        .where(*_pending())
+        .where(AgentRunInbox.created_at < older_than)
+        .where(not_(AgentRunInbox.content.has_key(UNCLAIMED_ALERT_MARKER)))
+        .values(content=AgentRunInbox.content.op("||", return_type=JSONB)(stamp))
+        .returning(
+            AgentRunInbox.id,
+            AgentRunInbox.target_kind,
+            AgentRunInbox.target_id,
+            AgentRunInbox.created_at,
+        )
+    )
+
+
 def claim_stmt(
     targets: Sequence[Target], run_id: int, turn: int, step: int, now: dt.datetime
 ):
@@ -564,6 +600,22 @@ class AgentRunInboxRepository:
                 "— they were delivered to the inbox and nobody ever consumed them"
             )
         return len(rows)
+
+    async def mark_unclaimed_results_alerted(
+        self, *, older_than: dt.datetime
+    ) -> list[dict[str, Any]]:
+        """Stamp and return the ``subagent_result`` items that have waited
+        unclaimed since before ``older_than`` (``unclaimed_results_alert_stmt``).
+        Raises on a database error; the sweeper logs it and carries on."""
+        async with write_scope() as session:
+            rows = (
+                await session.execute(
+                    unclaimed_results_alert_stmt(
+                        older_than=older_than, now=dt.datetime.now(dt.timezone.utc)
+                    )
+                )
+            ).all()
+        return [dict(r._mapping) for r in rows]
 
     async def expire_agent_items_for_target(
         self, *, target_kind: str, target_id: int, reason: str

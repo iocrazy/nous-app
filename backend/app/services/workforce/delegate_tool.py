@@ -273,6 +273,18 @@ class DelegateToolService:
                 "cycle_run_id": str(cycle),
             }
 
+        # fh4 E3: the delegated run will be a child of this tree. Checked at
+        # call time only — its slot exists once its run starts (soft cap, see
+        # ``tree_capacity``). A full tree is a typed refusal, like the others.
+        from app.services.workforce import tree_capacity
+
+        try:
+            await tree_capacity.check_tree_capacity(
+                await tree_capacity.resolve_tree_root(self.active_parent_run_id), 1
+            )
+        except tree_capacity.TreeCapacityExceeded as refused:
+            return {**refused.as_fields(), "agent_slug": slug}
+
         # Forwarded options
         title = args.get("title")
         priority = int(args.get("priority") or 5)

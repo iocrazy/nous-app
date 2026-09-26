@@ -402,7 +402,6 @@ async def test_a_delegated_agent_that_delegates_again_still_carries_the_issue():
             "app.services.workforce.agent_worker._lookup_inbox_message",
             AsyncMock(return_value=None),
         ),
-        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
     ):
         composer = MagicMock()
         composer.compose = AsyncMock(
@@ -492,7 +491,6 @@ async def test_a_payload_without_an_issue_builds_the_stack_with_none():
             "app.services.workforce.agent_worker._lookup_inbox_message",
             AsyncMock(return_value=None),
         ),
-        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
     ):
         composer = MagicMock()
         composer.compose = AsyncMock(

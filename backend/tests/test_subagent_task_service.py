@@ -294,7 +294,6 @@ def _wire_sync_spawn(monkeypatch, *, content="found it"):
         "resolve_dispatch_scope",
         AsyncMock(return_value=SimpleNamespace(as_recorder_kwargs=lambda: {})),
     )
-    monkeypatch.setattr(worker_mod, "_attach_to_parent_run", AsyncMock())
 
     made: list = []
 

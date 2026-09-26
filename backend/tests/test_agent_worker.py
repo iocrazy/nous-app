@@ -163,7 +163,6 @@ async def test_cancelled_turn_marks_the_task_cancelled():
             "app.services.workforce.agent_worker._lookup_inbox_message",
             AsyncMock(return_value=None),
         ),
-        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
     ):
         composer = MagicMock()
         composer.compose = AsyncMock(
@@ -229,7 +228,6 @@ async def test_happy_path_queued_to_done_with_outbox():
             "app.services.workforce.agent_worker._lookup_inbox_message",
             AsyncMock(return_value=None),
         ),
-        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
     ):
         composer = MagicMock()
         composer.compose = AsyncMock(
@@ -440,7 +438,6 @@ async def test_run_turn_exception_marks_failed():
         ),
         patch("app.services.workforce.agent_worker.PromptComposer") as PC,
         patch("app.services.workforce.agent_worker.RunRecorder", return_value=cm),
-        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
     ):
         composer = MagicMock()
         composer.compose = AsyncMock(
@@ -525,7 +522,6 @@ async def test_outbox_routes_to_agent_when_sender_kind_agent():
         patch(
             "app.services.workforce.agent_worker._lookup_inbox_message", inbox_lookup
         ),
-        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
     ):
         composer = MagicMock()
         composer.compose = AsyncMock(

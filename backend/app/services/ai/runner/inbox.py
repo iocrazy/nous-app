@@ -261,10 +261,20 @@ def render_inbox_message(item: InboxItem) -> str:
         # Which child this is, so the parent can name it in the next turn or
         # continue it with ``child_run_id``. The slug came from the model's own
         # Task call, so it is escaped like any other attacker-reachable value.
+        #
+        # fh4 E2: ``status`` says what the result is and ``reason`` who ended
+        # it (``settle.SettleReason``: producer / kill / teardown / lost), so
+        # a lost child no longer reads like a bad answer. Both are ours, and
+        # escaped anyway. A row filed before fh4 has no reason: ``reason=""``.
         c = item.content
-        extra = (
-            f' child_run_id="{escape_frame_attr(str(c.get("child_run_id") or ""))}"'
-            f' subagent_type="{escape_frame_attr(str(c.get("subagent_type") or ""))}"'
+        extra = "".join(
+            f' {attr}="{escape_frame_attr(str(c.get(key) or ""))}"'
+            for attr, key in (
+                ("child_run_id", "child_run_id"),
+                ("subagent_type", "subagent_type"),
+                ("status", "status"),
+                ("reason", "settle_reason"),
+            )
         )
     elif item.kind == MEDIA_RESULT_KIND:
         # Which job this is and how it ended, so the model can cite the

@@ -40,28 +40,53 @@ def fold_spawned(views, payload):
     return views
 
 
+def _settle_key(payload) -> str:
+    """Which child a ``done`` settles. A background child is its TASK — a
+    replayed worker step re-runs it under a new run id, and that second run is
+    the same child. A synchronous child has no task; its run id is the key."""
+    task_id = payload.get("task_id")
+    if task_id:
+        return f"task:{task_id}"
+    return f"run:{payload.get('child_run_id')}"
+
+
 @register("subagent_done")
 def fold_done(views, payload):
+    """Idempotent per child (fh4 E2d). A second ``done`` for a settled child —
+    a replayed step, the reaper racing the worker, a re-fold — leaves the
+    counters and ``last`` alone; before fh4 it counted the child twice. The
+    cost below is SET per run id and was always safe to repeat.
+
+    ``children.settled`` holds the keys. It only appears once a child has
+    settled, so the empty-views shape the UI pins is unchanged."""
     child_run_id, mode = payload.get("child_run_id"), payload.get("mode")
     if not child_run_id or mode not in ("sync", "async"):
         return None
     children = _children(views)
-    bucket = "running" if mode == "sync" else "async_pending"
-    if children[bucket] > 0:
-        children[bucket] -= 1
-    else:
-        children["total"] += 1
-    children["done"] += 1
-    children["last"] = {
-        "child_run_id": str(child_run_id),
-        "subagent_type": str(
-            payload.get("subagent_type")
-            or (children.get("last") or {}).get("subagent_type")
-            or ""
-        ),
-        "status": str(payload.get("status") or "success"),
-    }
-    views["view"]["children"] = children
+    key = _settle_key(payload)
+    settled = list(children.get("settled") or [])
+    if key not in settled:
+        bucket = "running" if mode == "sync" else "async_pending"
+        children = {
+            **children,
+            **(
+                {bucket: children[bucket] - 1}
+                if children[bucket] > 0
+                else {"total": children["total"] + 1}
+            ),
+            "done": children["done"] + 1,
+            "settled": [*settled, key],
+            "last": {
+                "child_run_id": str(child_run_id),
+                "subagent_type": str(
+                    payload.get("subagent_type")
+                    or (children.get("last") or {}).get("subagent_type")
+                    or ""
+                ),
+                "status": str(payload.get("status") or "success"),
+            },
+        }
+        views["view"]["children"] = children
 
     cents = payload.get("cost_cents")
     if isinstance(cents, (int, float)) and not isinstance(cents, bool):

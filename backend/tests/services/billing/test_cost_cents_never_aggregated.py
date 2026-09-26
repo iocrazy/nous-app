@@ -200,6 +200,11 @@ BARE_PROJECTION_ALLOWLIST: dict[str, str] = {
         "+ list_live_runs 一处 —— 四处都是逐行展示；同一批响应里的 costs_14d 合计"
         "读的是 own_cost_cents"
     ),
+    "repositories/agent_workforce_repository.py": (
+        "latest_run_for_task 按 task 取一行（fh4 E2）：重放守卫与 reaper 据此重建 "
+        "subagent_result / subagent_done 的展示 cost —— 单行展示列，与 "
+        "agent_worker._child_row_cost_cents 同口径，不进扣费、不求和"
+    ),
 }
 
 

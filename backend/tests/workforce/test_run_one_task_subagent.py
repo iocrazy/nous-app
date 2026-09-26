@@ -55,6 +55,8 @@ def _wire(envelope=None, *, agent_repo_raises=False):
         return task_holder["task"]
 
     workforce.claim_task = AsyncMock(side_effect=_claim)
+    # fh4 E2c replay guard: no earlier run for this task.
+    workforce.latest_run_for_task = AsyncMock(return_value=None)
 
     inbox_repo = SimpleNamespace(enqueue=AsyncMock(return_value={"id": 1}))
     writer = SimpleNamespace(append=AsyncMock())

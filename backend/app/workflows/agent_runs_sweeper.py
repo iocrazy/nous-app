@@ -165,7 +165,7 @@ async def reap_preempted_input_waits_step() -> int:
 
 
 @DBOS.step()
-async def reap_stale_workforce_tasks_step() -> dict[str, int]:
+async def reap_stale_workforce_tasks_step() -> dict[str, Any]:
     """Close workforce tasks whose worker died and whose DBOS workflow will
     not come back (framework-hardening T5). Task-centric, 10 minutes, at most
     20 per tick — see ``services/workforce/stale_tasks.py`` for the three
@@ -173,7 +173,11 @@ async def reap_stale_workforce_tasks_step() -> dict[str, int]:
 
     ⚠️ Steps are only ever APPENDED to the tick: a step inserted mid-sequence
     shifts the step ids of in-flight scheduled workflows across a deploy. This
-    one was last until FH3 T6 appended ``reap_zombie_locks_step`` after it."""
+    one was last until FH3 T6 appended ``reap_zombie_locks_step`` after it.
+
+    fh4 E2b: the result carries ``wake_orders`` for lost async children whose
+    result the reaper filed on an issue. This step NEVER dispatches them —
+    DBOS refuses ``start_workflow`` inside a step; the workflow body does."""
     from app.services.workforce.stale_tasks import reap_stale_workforce_tasks
 
     return await reap_stale_workforce_tasks()
@@ -206,6 +210,14 @@ async def expire_orphan_inbox_step() -> int:
         get_agent_run_inbox_repository,
     )
 
+    # fh4 E2e: say so when a sub-agent result has sat unclaimed for 30 min —
+    # inside this existing step (no new step: in-flight ticks replay by step
+    # id). Guarded: the alert must never cost the expiry below its run.
+    try:
+        await alert_unclaimed_subagent_results()
+    except Exception as err:  # noqa: BLE001
+        logger.error(f"[sweeper] unclaimed sub-agent result alert failed: {err}")
+
     now = datetime.now(timezone.utc)
     older_than = now - timedelta(seconds=INBOX_ORPHAN_SECONDS)
     # FH3 T1: an issue parked on the needs_input gate keeps its items until the
@@ -221,6 +233,39 @@ async def expire_orphan_inbox_step() -> int:
         skip_parked_issues=True,
         parked_floor=parked_floor,
     )
+
+
+#: fh4 E2e: a ``subagent_result`` unclaimed this long is worth an ERROR.
+UNCLAIMED_RESULT_ALERT_MINUTES = 30
+
+
+async def alert_unclaimed_subagent_results() -> int:
+    """One ERROR per ``subagent_result`` that has waited unclaimed and
+    unexpired for ``UNCLAIMED_RESULT_ALERT_MINUTES`` — once per item (the
+    repository stamps it in the same statement). Returns how many.
+
+    Not a step and not a dispatch: it runs inside ``expire_orphan_inbox_step``.
+    The drain (``scan_idle_inbox_step``) already retries issue targets every
+    minute, so a result still unclaimed after half an hour means the wake-up
+    path is broken, or the target is a conversation nobody is in."""
+    from app.repositories.agent_run_inbox_repository import (
+        get_agent_run_inbox_repository,
+    )
+
+    older_than = datetime.now(timezone.utc) - timedelta(
+        minutes=UNCLAIMED_RESULT_ALERT_MINUTES
+    )
+    rows = await get_agent_run_inbox_repository().mark_unclaimed_results_alerted(
+        older_than=older_than
+    )
+    for row in rows:
+        logger.error(
+            f"[sweeper] sub-agent result {row.get('id')} on "
+            f"{row.get('target_kind')} {row.get('target_id')} has been unclaimed "
+            f"since {row.get('created_at')} (>{UNCLAIMED_RESULT_ALERT_MINUTES} min): "
+            "the child settled but the parent never read it"
+        )
+    return len(rows)
 
 
 #: Issues drained per tick. The sweep runs every minute, so what does not fit
@@ -343,6 +388,16 @@ async def _expire_agent_items_if_inactive(repo: Any, issue_id: int) -> int:
             target_kind="issue", target_id=issue_id, reason=ISSUE_NOT_ACTIVE
         )
     )
+
+
+async def _wake_for_reaped_child(order: dict[str, Any]) -> None:
+    """Carry out one reaper wake order in the workflow BODY. The same helper
+    the workforce workflow uses for a normal result, so the dedupe key
+    (``subagent-wake-<task>``) collapses the reaper's wake-up with any the
+    worker already started; it never raises."""
+    from app.workflows import agent_workforce
+
+    await agent_workforce._dispatch_idle_wake(order)
 
 
 async def _drain_one_issue(order: dict[str, Any], counters: dict[str, int]) -> None:
@@ -644,6 +699,11 @@ async def agent_runs_sweeper_workflow(
     stale_tasks = await reap_stale_workforce_tasks_step()
     # LAST, always — new steps go below this line, never above it.
     zombie_locks = await reap_zombie_locks_step()
+    # fh4 E2b: the reaper's wake orders, dispatched HERE in the body (after
+    # the last step, so no step id moves). ``.get``: a tick recovered across
+    # the deploy replays a pre-fh4 output with no such key.
+    for order in stale_tasks.get("wake_orders") or []:
+        await _wake_for_reaped_child(order)
     # Only outcomes that CHANGED something (or failed) make the tick worth a
     # line; a long healthy run is ``skipped_pending`` every minute and must not
     # turn a quiet tick into an INFO line forever.

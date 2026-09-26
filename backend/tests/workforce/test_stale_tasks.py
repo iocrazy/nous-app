@@ -94,6 +94,9 @@ def wire(monkeypatch):
         monkeypatch.setattr(st, "emit_async_subagent_done", emit)
         monkeypatch.setattr(st, "_move_worker_back_to_idle", idle)
         monkeypatch.setattr(st, "_child_row_cost_cents", self_cost)
+        # fh4 E2b: a lost async child is also filed on the parent's inbox.
+        inbox = type("Inbox", (), {"enqueue": AsyncMock(return_value=None)})()
+        monkeypatch.setattr(st, "get_agent_run_inbox_repository", lambda: inbox)
         return owns, emit, idle
 
     return _wire

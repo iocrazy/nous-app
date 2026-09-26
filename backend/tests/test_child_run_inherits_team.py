@@ -226,7 +226,6 @@ async def _drive_workforce_task(*, parent_run_id, team_of_run_result, issue_id=N
             "app.services.workforce.agent_worker.resolve_dispatch_scope",
             AsyncMock(return_value=SimpleNamespace(as_recorder_kwargs=lambda: {})),
         ),
-        patch.object(worker_mod, "_attach_to_parent_run", AsyncMock()),
         patch.object(
             worker_mod, "team_of_run", AsyncMock(return_value=team_of_run_result)
         ),

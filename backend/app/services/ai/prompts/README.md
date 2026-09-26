@@ -99,6 +99,14 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 
 `await` / `child_run_id`（2026-09-10，harness 二期 2b-2）也只对 `skill="task"` 有意义。省略 `await` 等于 `true` —— 没听说过这个参数的模型拿到的仍是原来的同步行为。`await=false` 的返回值是 `{"status": "queued", "task_id": …}`，**`sub_run_id` 是 `null`**：那一刻还没有子 run。三条拒绝也从这里回给模型：`no_reply_target`（结果没有可投递的目标）、`async_not_allowed_for_subagent`（子 agent 不能再派后台子 agent）、`continue_not_allowed_in_fanout`（`tasks` 与 `child_run_id` 同时出现）。
 
+2026-09-26 fh4 E3 加第四条：整棵根树的活跃子 agent 已到上限（`MAX_ACTIVE_SUBAGENTS_PER_TREE`，默认 8，env 可覆盖）时，`Skill(task)`（同步、后台、`tasks` 扇出一样）回的是标准失败信封再多三个键，扇出装不下就**整体拒绝**、一个都不启动：
+
+```
+{"status": "failed", "error": "tree_capacity_exceeded", "limit": 8, "active": 8, "requested": 1, "summary": "", "sub_run_id": null, …}
+```
+
+`Delegate` 在同样情形回 `{"error": "tree_capacity_exceeded", "limit": …, "active": …, "requested": 1, "agent_slug": …}`。拒绝不写 `subagent_spawned`、不建子 run 行，模型据 `active` / `limit` 决定是等已派出的孩子回来还是自己做。Token effect 与 KV Cache effect 同其余工具结果（一次几十 token，append-only）。
+
 `op` / `items` / `id` 只对 `skill="todo"` 有意义，2026-09-06 起才声明——此前模型只看得到 `skill` 与 `file`，内建 todo 的参数全靠猜：doubao lite 把 `"?op=replace&items=…"` 塞进 `file` 连错四次，整轮没有一个 todo 快照，任务卡的 n/m 也就从未出现。模型用不了它没被展示的参数，这不是提示词问题。
 
 #### Token effect
@@ -145,15 +153,17 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 </inbox_message>
 ```
 
-`kind="subagent_result"`（2026-09-10，harness 二期 2b-2）多带两个属性，正文只有子 agent 的 summary：
+`kind="subagent_result"`（2026-09-10，harness 二期 2b-2；2026-09-26 fh4 E2 加 `status` / `reason`）多带四个属性，正文只有子 agent 的 summary：
 
 ```
-<inbox_message kind="subagent_result" at="…" child_run_id="52" subagent_type="librarian">
+<inbox_message kind="subagent_result" at="…" child_run_id="52" subagent_type="librarian" status="success" reason="producer">
 found three docs
 </inbox_message>
 ```
 
-`child_run_id` 是给父 agent 下一轮 `Skill(skill="task", child_run_id=…)` 续聊用的。信封里其余字段（`status` / `cost_cents` / `tokens_used` / `description`）**刻意不进框** —— 模型无法据它们行动，进框只是白烧 token。
+`child_run_id` 是给父 agent 下一轮 `Skill(skill="task", child_run_id=…)` 续聊用的。`status` 是结果本身（`success` / `failed` / `cancelled`），`reason` 是谁结束了它（`app/services/workforce/settle.py::SettleReason`）：`producer` 子 agent 自己跑到头（含它自己崩溃）、`kill` 被外部取消、`teardown` 所在 worker 被有意停机、`lost` 所在 worker 死了。两者正交 —— `status="failed" reason="lost"` 说的是「没有答案」，`status="failed" reason="producer"` 说的是「答案是失败」，模型据此决定重派还是换思路。fh4 之前框里没有 `status`，失败的子 agent 只能从正文猜；worker 死掉的子 agent 根本不进收件箱。崩溃的子 agent 正文是错误文本（以前是空框）。fh4 之前入库的行没有 `settle_reason`，渲染为 `reason=""`。信封里其余字段（`cost_cents` / `tokens_used` / `description`）**刻意不进框** —— 模型无法据它们行动，进框只是白烧 token。
+
+同一个后台任务的结果只进收件箱一次（`dedupe_key=subagent-result-<task_id>`，mig 462 唯一索引）：worker 正常完成、DBOS 重放的 step、reaper 关闭丢失的子 agent，三个写方收敛到第一个写入的那一行，所以模型不会看到同一个孩子的两个框、也不会看到互相矛盾的两个 status。
 
 正文取值顺序是 `content.text` → `content.body`（2026-09-23 FH2 T1，与 `claimed_event_content` 同序）。在此之前定时唤醒的 steer 是 `{"text", "source"}`、没有 `body`，正文会落到整行 JSON，模型读到的是 `{"text": "…", "source": {"kind": "schedule", …}}`。
 
@@ -172,7 +182,7 @@ Attached to this message (listed for reference; the files are not loaded into th
 
 #### Token effect
 
-每条一个框，长度就是那条消息的正文长度，外加每个附件一行（几十 token，不含文件内容）。`subagent_result` 只放 summary，所以一次后台子 agent 的回执通常是几十到几百 token，而不是整个信封的 JSON。领取本身有条数上限（见 `agent_run_inbox_repository.claim`），所以单个步骤边界注入的量是有界的。
+每条一个框，长度就是那条消息的正文长度，外加每个附件一行（几十 token，不含文件内容）。`subagent_result` 只放 summary（加 fh4 的两个短属性，约 10 token），所以一次后台子 agent 的回执通常是几十到几百 token，而不是整个信封的 JSON。领取本身有条数上限（见 `agent_run_inbox_repository.claim`），所以单个步骤边界注入的量是有界的。
 
 #### KV Cache effect
 
