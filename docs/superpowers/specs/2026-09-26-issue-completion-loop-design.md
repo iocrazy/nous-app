@@ -1,7 +1,7 @@
 # issue「做完」闭环设计（完成标准 · 证据核验 · 受闸的自动关单）
 
 - 日期：2026-09-26
-- 状态：待评审
+- 状态：已评审通过（2026-09-26）；实施计划 `docs/superpowers/plans/2026-09-26-issue-completion-loop.md`。写计划时核对代码发现四处偏离，已就地修订并标 **[修订]**。
 - 侦察：`.superpowers/sdd/2026-09-26-done-loop-recon.md`（锚点基于 origin/master d6737c8c3）、`.superpowers/sdd/2026-09-23-nous-issue-agent-recon.md`
 - 第一个场景：剧本链（`script_ai` agent：大纲 / 扩写 / 分镜 / 出图）。生产 108 个 issue 里 36 个指派给 `script_ai`，其余全是验收探针，这是唯一的真实业务。
 
@@ -63,13 +63,13 @@ execute_issue (workflow body — 不动)
 
 ### 5.1 完成标准
 
-**数据**：`issues.acceptance_criteria TEXT NULL`（CHECK `char_length <= 4000`）、`issues.acceptance_criteria_source TEXT NULL CHECK IN ('user','agent')`。两列进 mig 170 的列白名单 trigger（`CREATE OR REPLACE` 保留 ACL，但函数体必须改；同批测试钉住白名单包含新列）。
+**数据**：`issues.acceptance_criteria TEXT NULL`（CHECK `char_length <= 4000`）、`issues.acceptance_criteria_source TEXT NULL CHECK IN ('user','agent')`。**[修订]** mig 170 的 trigger 是「不可变列黑名单」而非白名单（逐列比对 `id / execution_state / origin_*` 等），新列不在其上，creator / assignee 默认可改，**不改 trigger**；真库集成测试钉住「非 service_role 更新新列不被拦」。
 
 **写入路径**
 1. 人：`POST /issues`、`PATCH /issues/{id}`（`IssueCreate` / `IssueUpdate` 加 `acceptance_criteria`；PATCH 写入时 `source='user'`；`clear_acceptance_criteria: bool` 仿 `clear_budget`）。
 2. agent：新工具 `SetAcceptanceCriteria(criteria: str)`，只在 `trigger ∈ {issue_dispatch, issue_dispatch_auto, issue_reply}` 注入（与 FinishIssue 同一注入点 `ai_library_chat_service.py:1324-1341`）。规则：
    - issue 已有 `source='user'` 的标准 → 工具返回 `{"error": "criteria_locked", "criteria": <现值>}`，不写。
-   - 无标准或 `source='agent'` → 写列、`source='agent'`，并写一条 `issue_messages(kind='system_status', meta={"kind":"criteria_proposed","source":"agent"})`，正文为标准原文，人可在详情页改（改后 source 变 user）。
+   - 无标准或 `source='agent'` → 写列、`source='agent'`，并写一条 `issue_messages(kind='comment', author_agent_id=<assignee>, meta={"kind":"criteria_proposed","source":"agent"})`，正文为标准原文，人可在详情页改（改后 source 变 user）。**[修订]** 用 `comment` 而非 `system_status`：后者的 CHECK 要求 `from_status` 或 `to_status` 非空，它是状态变更行。
    - 每个 run 最多成功调用一次；第二次返回 `{"error":"criteria_already_set"}`。
 3. `FINISH_ISSUE_INSTRUCTION` 追加一句：没有标准时，开始工作前必须先调 `SetAcceptanceCriteria` 把可核验的完成标准写下来；标准要具体到可以核对的产出（几个场景、几个 shot、是否出图、字数范围）。这一改动会进唯一全文 pin，刷新并读 diff。
 
@@ -88,7 +88,7 @@ execute_issue (workflow body — 不动)
 - `predicates.py`：每个谓词是纯函数 `(criteria_text, bundle) -> PredicateResult(name, status, facts)`，`status ∈ {satisfied, violated, not_applicable}`。第一版四条，触发词按标准文本粗匹配（中英文关键词表，不做 NLP）：
   1. `shots_exist`：标准提到分镜/shot/镜头 → 本 issue 登记的 `script_shot` ≥ 1，且每个 shot 的 `description`、`shot_type`、`camera_angle` 非空。
   2. `scenes_covered`：标准提到「每个场景/each scene」 → scope 内未 omit 的 scene 每个 ≥1 shot。
-  3. `scene_rewritten`：标准提到扩写/改写/rewrite/expand → 本 issue 有 `script_scene` 登记且 `content_version` 相比 issue 开始时增加。
+  3. `scene_rewritten`：标准提到扩写/改写/rewrite/expand → 本 issue 有 `script_scene` 登记（**[修订]** 写入咽喉点的登记即是改写事实，不再比 `content_version`）。
   4. `image_dispatched`：标准提到出图/image/生成图 → 本 issue 有 `generated_media` 登记（只核「已派发」，因为图异步落地；`image_url` 第二阶段）。
   - 没有任何谓词命中（纯文本任务）→ 全部 `not_applicable`，交给 LLM 判定。
   - 任一 `violated` → 直接 `fail`，不调 LLM（省钱、且这类错误是硬错误）。
@@ -96,7 +96,7 @@ execute_issue (workflow body — 不动)
 ### 5.3 独立 LLM 判定
 
 `verifier.py::judge(criteria, bundle, predicate_results) -> Verdict`：
-- 独立请求，走 `LLMFallbackChain`（与 forced declare 先例同形），模型取 `system_settings.verifier_model`，缺省为维护模型（与 legacy summarizer 同一解析顺序）。
+- 独立请求，**[修订]** 复用当前 issue session 绑定的模型与凭证（`forced_finish_declaration._resolve_agent_and_adapter`，单 adapter、无 fallback 链），不引入 `system_settings.verifier_model`：BYOK / 平台凭证与计费归因天然一致，少一个要维护的设置项。
 - **输入只有**：标准、谓词事实、`final_text` / `prior_texts`（已 neutralize）。**不给**：agent 的系统提示、推理、工具轨迹、FinishIssue 的 reason、对话历史。reason 只作为「agent 声称」显示给人，不进判定。
 - 系统提示词是固定字面量（进 prompts README 三问；独立请求、无共享前缀）。要求输出严格 JSON：`{"verdict":"pass"|"fail","unmet":[{"criterion":"…","why":"…"}],"confidence":0..1}`；解析失败一次重试；仍失败 → `unverified(verifier_bad_output)`。
 - 超时 30 s（`VERIFIER_TIMEOUT_S`），`max_tokens` 400，temperature 0。
@@ -116,9 +116,9 @@ if outcome == "completed" and stop_reason != "cancelled":
     # fail 且次数用尽 / unverified / pass：outcome 保持 completed
 ```
 
-`route_finish_outcome`（body，**不改**）的 completed 分支今天是 `done if auto_close else in_review`。为了让「只有 pass 才 done」不碰 body：`load_auto_close_flag`（step，`issue_lifecycle.py:334-356`）改为返回 `auto_close and execution_state.verification.verdict == "pass"`——它本来就是 step、在 completed 路由前被调用，所以判定结果在它读的时候已经落库。这是本设计唯一「语义放进既有 step」的技巧，写进 docstring。
+**[修订]** `load_auto_close_flag` 在派发时、回合之前就被调用并 checkpoint，不能承载「pass 才 done」。改为：两个 step 的结果字典多一个 `verification` 键；`route_finish_outcome`（普通 async 函数，不是 workflow 体也不是 step）新增可选关键字 `verification`，completed 分支变成 `"done" if auto_close and verification.verdict == "pass" else "in_review"`（仍是同一个 `set_status` 调用，step 顺序不变）。三个调用点透传：`_run_reply_turns`（在源码哈希守卫里，同 PR 更新哈希并说明）与 `_run_dispatch_with_continuation` 的两处。
 
-`agent_outcome` 不变（仍是 completed / continue…），新增 `execution_state.verification` 供 UI 与 SQL 读。`continue` 的续跑用户消息（`_build_user_message`，step 内）在 `verification.verdict == fail` 且 `verification.consumed_by_run` 为空时追加：
+`agent_outcome` 不变（仍是 completed / continue…），新增 `execution_state.verification` 供 UI 与 SQL 读。`continue` 的续跑用户消息（step 内，`CONTINUATION_NUDGE` 之后）在 `verification.verdict == fail`、`retry == true` 且 `consumed_at` 为空时追加：
 
 ```
 <verifier_feedback attempt="1" of="2">
@@ -128,18 +128,18 @@ Fix these and call FinishIssue again.
 </verifier_feedback>
 ```
 
-框登记进 `OWNED_FRAMES`，正文 `escape_frame_body`；消费后写 `consumed_by_run`，同一 verdict 不重复注入。
+框登记进 `OWNED_FRAMES`，正文 `escape_frame_body`；消费后写 `consumed_at`（**[修订]** 组消息时新 run 尚不存在，用时间戳而非 run id），同一 verdict 不重复注入。
 
 ### 5.5 数据模型变更
 
 | 变更 | 位置 |
 |---|---|
 | `issues.acceptance_criteria`、`acceptance_criteria_source` | mig 5xx（编号推 PR 前对）；两向 drift 门禁；ORM `models/issues.py` |
-| mig 170 列白名单加两列 | 同一迁移；测试钉住 |
+| mig 170 trigger 不改（黑名单不含新列，**[修订]**） | 真库测试钉住非 service_role 可写 |
 | `execution_state.verification`、`verify_attempts` | jsonb 键，经 `merge_execution_state`，无迁移 |
-| `issue_messages` verdict 消息 | 复用 `kind='system_status'`，`meta.kind='verdict'`；不改 CHECK |
+| `issue_messages` verdict 消息 | `kind='comment'` + `author_agent_id`，`meta.kind='verdict'`（**[修订]**，同 5.1）；不改 CHECK |
 | `agent_runs` verifier 子 run | 复用现有列：`parent_run_id`、`trigger='issue_dispatch_verify'` |
-| `system_settings.verifier_model` | 可选键，缺省维护模型 |
+| ~~`system_settings.verifier_model`~~ | **[修订]** 不引入；verifier 用 session 自己的模型 |
 
 ### 5.6 API 与前端
 
@@ -199,7 +199,7 @@ Fix these and call FinishIssue again.
 2. user 消息含 `Acceptance criteria (source=…)` 段；无标准时不含该段；标准里含 `</verifier_feedback>` 等闭合标记不可伪造。
 3. 四条谓词各自 satisfied / violated / not_applicable 三态 + 触发词表；`violated` 短路不调 LLM（spy 零调用）。
 4. LLM 判定：合法 JSON → pass/fail；非法 JSON 重试一次仍失败 → `unverified(verifier_bad_output)`；超时 → `unverified(verifier_timeout)`；模型不可用 → `unverified(verifier_unavailable)`；**输入里不含** agent reason / 工具轨迹（断言提示词文本）。
-5. 结局路由（用「adapter 无 `stream`」fixture 走缓冲分支）：fail 第 1 次 → outcome continue + `verify_attempts=1` + 下一轮 user 消息含反馈框；fail 第 3 次 → completed + in_review 且 `load_auto_close_flag` 返回 False；pass + auto_close on → True；pass + auto_close off → False；unverified + auto_close on → False；cancelled 不送审；budget_wrap_up 不送审。
+5. 结局路由（用「adapter 无 `stream`」fixture 走缓冲分支）：fail 第 1 次 → outcome continue + `verify_attempts=1` + 下一轮 user 消息含反馈框；fail 第 3 次 → completed + in_review；`route_finish_outcome(verification=)`：pass + auto_close on → done；pass + auto_close off → in_review；unverified / fail / 无 verdict + auto_close on → in_review；cancelled 不送审；budget_wrap_up 不送审。
 6. reply 路径（`run_issue_reply_step`）同 5 的 pass/fail 两例。
 7. verifier 子 run：`parent_run_id` = 当前 run、`root_run_id` 同树、`attribution`/`credential_origin` 继承（真库集成，drift DB）。
 8. 迁移：drift 两向零容忍；mig 170 白名单含新列（真库：UPDATE 新列不被 trigger 拦）。
@@ -211,7 +211,7 @@ Fix these and call FinishIssue again.
 **真栈验收**（部署后，debug 账号，一个真实剧本 issue）
 - A：标准写「为场景 1–2 各建 2 个 shot」，agent 只回文本就声明 completed → verdict fail（`shots_exist` violated）、issue 续跑一轮、反馈框出现在下一轮 user 消息（transcript 可见）。
 - B：agent 补建 shot 后再声明 → pass；`auto_close=false` → in_review + Verified；打开 `auto_close` 重跑一例 → done。
-- C：把 `verifier_model` 指到一个不存在的行 → `unverified(verifier_unavailable)`，in_review，`auto_close` 开也不 done。
+- C：把该 agent 的 model 改成一个不存在的目录行 → `unverified(verifier_unavailable)`，in_review，`auto_close` 开也不 done。
 - D：SQL 核对：verifier 子 run 的 `parent_run_id` 指向 issue run、root 花费包含它；`execution_state.verification.attempt` 单调。
 
 ## 12. 分期与留票
@@ -227,6 +227,6 @@ Fix these and call FinishIssue again.
 |---|---|
 | verifier 误拒导致多花 1–2 轮 | 上限 2；unmet 必须具体；`issue_verification_enabled` 一键关 |
 | verifier 误过（纯文本任务只能靠 LLM） | `auto_close` 仍默认关；in_review 保留人工路径；谓词优先 |
-| `load_auto_close_flag` 承担新语义不直观 | docstring 写明 + 单测四态钉住；不改 body 是硬约束 |
+| `route_finish_outcome` 多一个关键字，`_run_reply_turns` 哈希要更新 | 只加关键字、不加 step、不改顺序；PR 描述写明哈希更新原因 |
 | 迁移与部署无顺序保证 | 新列可空、代码读不到列时按无标准处理（`getattr` 兜底），迁移先行或后行都安全 |
 | 提示词字面量变化影响缓存 | INSTRUCTION 在 CACHE_BOUNDARY 之后，不影响稳定前缀 |
