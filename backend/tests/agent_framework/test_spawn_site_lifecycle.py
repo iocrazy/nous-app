@@ -347,3 +347,74 @@ def test_isolated_runner_still_keeps_full_env(tmp_path, monkeypatch):
     res = run_isolated({"id": "t1"}, timeout_s=10, python_exe=exe)
     assert res.run_id == "sb_secret_kept"
     assert res.status == "done"
+
+
+# ── M2: "never reaped" (no exit status at all) is a failure, never rc 0 ──
+
+
+def _unreaped_result():
+    from app.agent_framework.process_result import ProcessResult
+
+    return ProcessResult(
+        exit_code=None,
+        signal=None,
+        timed_out=False,
+        stdout=b'{"ok": true}',
+        stderr=b"",
+        duration_s=1.0,
+    )
+
+
+def _patch_run_process(monkeypatch, module) -> None:
+    async def fake_run_process(*a, **kw):
+        return _unreaped_result()
+
+    monkeypatch.setattr(module, "run_process", fake_run_process)
+
+
+async def test_jimeng_cli_no_exit_status_is_a_typed_failure(monkeypatch):
+    from app.services.media.parsers.video_providers import jimeng_cli as mod
+
+    _patch_run_process(monkeypatch, mod)
+    with pytest.raises(mod.JimengCliError) as exc:
+        await mod.JimengCliProvider(bin_path="dreamina")._run_cli(["x"], timeout=5)
+    assert exc.value.code == "no_exit_status"
+
+
+async def test_codex_cli_no_exit_status_is_a_typed_failure(monkeypatch):
+    from app.services.media.parsers.video_providers import codex_cli as mod
+
+    _patch_run_process(monkeypatch, mod)
+    with pytest.raises(mod.CodexCliError) as exc:
+        await mod.CodexCliProvider(bin_path="skill")._run_cli(["x"], timeout=5)
+    assert exc.value.code == "no_exit_status"
+
+
+async def test_jimeng_router_no_exit_status_is_not_logged_in(monkeypatch):
+    r = importlib.import_module("app.api.jimeng_cli_router")
+    _patch_run_process(monkeypatch, r)
+    with pytest.raises(r.DreaminaNoExitStatus):
+        await r._run_dreamina(["user_credit"])
+    body = await r.jimeng_status(auth=None)
+    assert body["data"]["logged_in"] is False
+    assert body["data"]["reason"] == "no_exit_status"
+
+
+async def test_ytdlp_cancel_raises_typed_process_cancelled(
+    monkeypatch, tmp_path, ytdlp
+):
+    """A cancel is not a network failure: typed, and still a RuntimeError so
+    every existing ``except RuntimeError`` keeps catching it."""
+    from app.agent_framework.process_result import ProcessCancelled, ProcessResult
+    from app.boundary import ValidatedURL
+
+    async def fake_run_process(*a, **kw):
+        return ProcessResult(None, 15, False, b"", b"", 0.1, cancelled=True)
+
+    monkeypatch.setattr(ytdlp, "run_process", fake_run_process)
+    with pytest.raises(ProcessCancelled) as exc:
+        await ytdlp.YtdlpService.download_video(
+            ValidatedURL("https://example.com/v"), str(tmp_path / "o"), "p1"
+        )
+    assert isinstance(exc.value, RuntimeError)
+    assert "timed out" not in str(exc.value)

@@ -283,7 +283,15 @@ class JimengCliProvider:
             )
         if stderr.strip():
             logger.info("[jimeng-cli] {} stderr: {}", args[0], stderr[:2000])
-        rc = res.exit_code if res.exit_code is not None else -(res.signal or 0)
+        if res.exit_code is None and res.signal is None:
+            # Never reaped: there is no exit status to classify. Reading it as
+            # rc 0 would turn an unknown ending into a success.
+            raise JimengCliError(
+                "no_exit_status",
+                f"dreamina {args[0]} ended without an exit status ({res.describe()})",
+                stderr=stderr[:500],
+            )
+        rc = res.exit_code if res.exit_code is not None else -res.signal
         return rc, res.stdout_text(), stderr
 
     @staticmethod

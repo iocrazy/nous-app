@@ -17,7 +17,7 @@ from typing import Awaitable, Callable, Optional
 
 from loguru import logger
 
-from app.agent_framework.process_result import ProcessResult
+from app.agent_framework.process_result import ProcessCancelled, ProcessResult
 from app.agent_framework.process_runner import current_workflow_id, run_process
 from app.boundary import ValidatedURL, safe_async_client
 from app.core.utils import Utils
@@ -102,7 +102,7 @@ def _raise_if_stopped(res: ProcessResult, what: str, timeout_s: float) -> None:
         logger.warning(
             f"[yt-dlp] {what} cancelled with its workflow ({res.describe()})"
         )
-        raise RuntimeError(f"yt-dlp {what} cancelled (workflow cancelled)")
+        raise ProcessCancelled(f"yt-dlp {what} cancelled (workflow cancelled)")
     if res.timed_out:
         stderr_snippet = res.stderr_text()[:500]
         logger.error(

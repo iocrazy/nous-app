@@ -357,3 +357,72 @@ async def test_is_workflow_cancelled_fails_open_and_logs(monkeypatch):
 
     monkeypatch.setattr(db_session, "read_scope", boom)
     assert await pr.is_workflow_cancelled("wf-x") is False
+
+
+# ── review fixes: leader reaped before the kill (H1), reader failure (M1) ──
+
+
+async def test_leader_already_reaped_still_kills_grandchild(tmp_path):
+    """H1: the leader exits at once and asyncio reaps it; ``getpgid(pid)``
+    then raises ESRCH. The group (pgid == pid, setsid) must still be killed —
+    it used to send no signal at all and wait out the reap bound."""
+    gfile = tmp_path / "gpid"
+    code = (
+        "import subprocess, sys\n"
+        "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        f"open({str(gfile)!r}, 'w').write(str(g.pid))\n"
+    )
+    t0 = time.monotonic()
+    res = await run_process([PY, "-c", code], timeout_s=1.5, grace_s=0.5)
+    elapsed = time.monotonic() - t0
+    gpid = int(gfile.read_text())
+    assert res.timed_out is True
+    assert res.exit_code == 0  # the leader itself exited cleanly
+    assert _pid_gone(gpid) or _is_zombie(gpid), "grandchild survived"
+    assert elapsed < 1.5 + 0.5 + 2.0 + 1.0
+
+
+async def test_reader_failure_kills_the_child_before_returning():
+    """M1: a >64 KiB line breaks ``readline``; the runner used to return at
+    once with the child still running and already unregistered."""
+    code = (
+        "import os, sys, time\n"
+        "print(os.getpid(), flush=True)\n"
+        "sys.stdout.write('x' * 200000); sys.stdout.flush()\n"
+        "time.sleep(60)\n"
+    )
+    seen: list[str] = []
+    res = await asyncio.wait_for(
+        run_process(
+            [PY, "-c", code],
+            timeout_s=30,
+            grace_s=0.5,
+            workflow_id="wf-m1",
+            on_stdout_line=lambda s: seen.append(s),
+        ),
+        timeout=10,
+    )
+    pid = int(seen[0])
+    assert _pid_gone(pid) or _is_zombie(pid), "child left running"
+    assert res.signal == signal.SIGTERM
+    assert res.exit_code is None
+    assert sr.registered_pids("wf-m1") == []
+
+
+async def test_already_cancelled_workflow_is_not_spawned(monkeypatch):
+    """M3: a retry of a cancelled workflow must not relaunch the child."""
+    from app.agent_framework import process_runner as pr
+
+    async def cancelled(wf: str) -> bool:
+        return True
+
+    async def must_not_spawn(*a, **kw):
+        raise AssertionError("spawned a child for a cancelled workflow")
+
+    monkeypatch.setattr(pr, "is_workflow_cancelled", cancelled)
+    monkeypatch.setattr(pr.asyncio, "create_subprocess_exec", must_not_spawn)
+    res = await run_process([PY, "-c", "pass"], timeout_s=5, workflow_id="wf-gone")
+    assert res.cancelled is True
+    assert res.timed_out is False
+    assert (res.exit_code, res.signal) == (None, None)
+    assert res.ok is False

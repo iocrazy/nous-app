@@ -11,8 +11,10 @@ into another:
 ``cancelled``
     The owning workflow was cancelled while the child ran — either the wait
     loop saw ``task_tracking`` flip to cancelled, or an in-process
-    ``cancel_workflow_subprocesses`` detached and killed it. Independent of
-    ``timed_out``: a cancel arriving after the deadline fired leaves both set.
+    ``cancel_workflow_subprocesses`` detached and killed it. Whichever of
+    deadline / cancel is observed FIRST is the reason we stopped the child,
+    so ``timed_out`` and ``cancelled`` are never both set — but each is
+    reported on its own field, independent of the exit status below.
 ``exit_code`` / ``signal``
     From the ACTUAL reaped status. ``returncode >= 0`` → ``exit_code``;
     ``returncode < 0`` → ``signal = -returncode`` and ``exit_code = None``.
@@ -64,6 +66,15 @@ class ProcessResult:
         )
 
 
+class ProcessCancelled(RuntimeError):
+    """A site's typed error for "the owning workflow was cancelled, so the
+    child was stopped" — distinct from a failure or timeout of the child.
+    A ``RuntimeError`` so existing ``except RuntimeError`` handlers keep
+    catching it. NB: DBOS has no non-retryable exception class; a step that
+    must not retry on cancel has to catch this rather than let it escape
+    (the download strategy already swallows child errors into a result)."""
+
+
 def split_returncode(returncode: int | None) -> tuple[int | None, int | None]:
     """``(exit_code, signal)`` from a POSIX ``returncode`` (negative = killed
     by that signal, the asyncio / subprocess convention)."""
@@ -74,4 +85,4 @@ def split_returncode(returncode: int | None) -> tuple[int | None, int | None]:
     return returncode, None
 
 
-__all__ = ["ProcessResult", "split_returncode"]
+__all__ = ["ProcessCancelled", "ProcessResult", "split_returncode"]

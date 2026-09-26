@@ -43,7 +43,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import Generator
+from typing import Any, Generator
 
 from loguru import logger
 
@@ -72,13 +72,23 @@ async def kill_process_tree(
     """Kill the process tree rooted at ``pid`` and wait until it is still.
 
     ``pid <= 0`` is a silent no-op (some callers store -1 as "no child").
+    Each step (signal + /proc scan or ``ps``) runs in a worker thread so the
+    event loop never blocks on the quiescence probes.
     """
     steps = _kill_steps(pid, grace_seconds, reap_timeout_s)
+    while True:
+        finished, value = await asyncio.to_thread(_advance, steps)
+        if finished:
+            return value
+        await asyncio.sleep(value)
+
+
+def _advance(steps: Generator[float, None, KillOutcome]) -> tuple[bool, Any]:
+    """One generator step; StopIteration cannot cross a thread future."""
     try:
-        while True:
-            await asyncio.sleep(next(steps))
+        return False, next(steps)
     except StopIteration as done:
-        return done.value
+        return True, done.value
 
 
 def kill_process_tree_sync(
@@ -138,14 +148,33 @@ def _kill_steps(
 
 def _capture_pgid(pid: int) -> int | None:
     """The group to signal, or ``None`` when only the pid may be signalled
-    (no group found, or it is OUR group)."""
+    (no group found, or it is OUR group).
+
+    If the leader is already gone (asyncio reaps it the instant it exits),
+    ``getpgid`` raises ESRCH — but its descendants may still be running in
+    the group. ``safe_popen_kwargs`` / ``start_new_session`` make the child a
+    session leader, so pgid == pid; while any member is alive the kernel will
+    not reuse that id, so ``killpg(pid, 0)`` succeeding identifies OUR group.
+    """
     try:
         pgid = os.getpgid(pid)
-    except (ProcessLookupError, PermissionError, OSError):
+    except ProcessLookupError:
+        pgid = pid if _group_exists(pid) else None
+    except OSError:
         return None
-    if pgid == os.getpgrp():
+    if pgid is None or pgid == os.getpgrp():
         return None
     return pgid
+
+
+def _group_exists(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def _send(pid: int, pgid: int | None, sig: int) -> None:

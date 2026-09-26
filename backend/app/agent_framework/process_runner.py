@@ -165,10 +165,17 @@ async def _communicate(
             pass  # child exited without reading; its status tells the story
         finally:
             proc.stdin.close()
-    await asyncio.gather(
-        _pump(proc.stdout, bufs.stdout, on_line),
-        _pump(proc.stderr, bufs.stderr, None),
-    )
+    pumps = [
+        asyncio.ensure_future(_pump(proc.stdout, bufs.stdout, on_line)),
+        asyncio.ensure_future(_pump(proc.stderr, bufs.stderr, None)),
+    ]
+    try:
+        await asyncio.gather(*pumps)
+    finally:
+        # A failed reader (e.g. a line over the 64 KiB StreamReader limit)
+        # must not leave its sibling pump reading a pipe nobody drains.
+        for t in pumps:
+            t.cancel()
     await proc.wait()
 
 
@@ -265,6 +272,12 @@ async def run_process(
     still collecting the raw bytes into the result.
     """
     t0 = time.monotonic()
+    argv0 = str(argv[0]) if argv else "?"
+    if workflow_id and await is_workflow_cancelled(workflow_id):
+        # A retry of an already-cancelled workflow must not relaunch the
+        # child for another poll interval. Nothing ran: no exit status.
+        logger.info(f"[run_process] {argv0} not started: wf={workflow_id} cancelled")
+        return ProcessResult(None, None, False, b"", b"", 0.0, cancelled=True)
     proc = await _spawn(argv, stdin, env_keep, env_extra)
     pid = getattr(proc, "pid", None)
     pid = pid if isinstance(pid, int) and pid > 0 else 0
@@ -272,19 +285,30 @@ async def run_process(
     register_subprocess(reg_key, pid)  # before any wait: cancel can find it
     bufs = _Buffers()
     io = asyncio.ensure_future(_communicate(proc, stdin, bufs, on_stdout_line))
-    argv0 = str(argv[0]) if argv else "?"
     try:
         stop = await _await_stop(io, t0 + timeout_s, workflow_id, cancel_poll_s)
         if stop != "done":
             await _stop(proc, grace_s)
             await _settle(io, argv0)
         elif io.exception() is not None:
+            # The reader broke while the child may still be running: dispose
+            # exactly as on timeout (kill the group, bounded reap) BEFORE the
+            # finally below unregisters it.
             logger.warning(f"[run_process] {argv0} io error: {io.exception()}")
+            if getattr(proc, "returncode", None) is None:
+                await _stop(proc, grace_s)
+                await _settle(io, argv0)
     except BaseException:
         # The awaiting task was cancelled (or something below us broke):
-        # reach quiescence first, then propagate — never orphan the child.
-        await _stop(proc, grace_s)
-        await _settle(io, argv0)
+        # reach quiescence first, then propagate the ORIGINAL exception —
+        # a failure during this cleanup is logged, never allowed to mask it.
+        try:
+            await _stop(proc, grace_s)
+            await _settle(io, argv0)
+        except BaseException as cleanup_exc:  # noqa: BLE001
+            logger.error(
+                f"[run_process] {argv0} cleanup after error failed: {cleanup_exc!r}"
+            )
         raise
     finally:
         still_mine = unregister_subprocess(reg_key, pid)

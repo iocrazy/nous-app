@@ -46,14 +46,22 @@ _USER_CODE_RE = re.compile(
 )
 
 
+class DreaminaNoExitStatus(RuntimeError):
+    """The child ended without an exit status (never reaped) — an unknown
+    ending, which must not be read as rc 0."""
+
+
 async def _run_dreamina(args: list[str], timeout_s: float = 30) -> Tuple[int, str, str]:
     """``(returncode, stdout, stderr)``; returncode is negative for a signal
     death. Raises ``TimeoutError`` on timeout — after the whole process group
-    has been killed and reaped (it used to kill the leader only, unreaped)."""
+    has been killed and reaped (it used to kill the leader only, unreaped) —
+    and ``DreaminaNoExitStatus`` when no exit status exists at all."""
     res = await run_process(["dreamina", *args], timeout_s=timeout_s)
     if res.timed_out:
         raise TimeoutError(f"dreamina {args[0]} timed out ({res.describe()})")
-    rc = res.exit_code if res.exit_code is not None else -(res.signal or 0)
+    if res.exit_code is None and res.signal is None:
+        raise DreaminaNoExitStatus(f"dreamina {args[0]}: {res.describe()}")
+    rc = res.exit_code if res.exit_code is not None else -res.signal
     return rc, res.stdout_text(), res.stderr_text()
 
 
@@ -102,6 +110,11 @@ async def jimeng_status(auth: AuthDep) -> dict:
         }
     except asyncio.TimeoutError:
         return {"data": {"available": True, "logged_in": False, "reason": "timeout"}}
+    except DreaminaNoExitStatus as exc:
+        logger.error(f"[jimeng-cli] status probe: {exc}")
+        return {
+            "data": {"available": True, "logged_in": False, "reason": "no_exit_status"}
+        }
     if code == 0:
         try:
             body = json.loads(out[out.index("{") :])
