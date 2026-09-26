@@ -32,9 +32,10 @@ import {
   deleteVectorSpace,
   getVectorSpaceCatalog,
   getVectorsStatus,
+  type VectorSpaceCatalog,
   type VectorsStatus,
 } from '../../services/searchService';
-import type { NousModelPublic } from '../../types/api';
+import type { NousModelPublic, PlatformEngineState } from '../../types/api';
 import { AddSpacePicker, CandidateCard, Capabilities, SpaceRow } from './VectorSpaceCards';
 
 // Same ceiling as the backend (BackfillEmbeddingsBody.limit le=200).
@@ -183,7 +184,7 @@ export function VectorsPanel() {
   const [spaceNotice, setSpaceNotice] = useState<string | null>(null);
   const [candidateResults, setCandidateResults] = useState<Record<string, BackfillResult>>({});
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerModels, setPickerModels] = useState<NousModelPublic[] | null>(null);
+  const [pickerCatalog, setPickerCatalog] = useState<VectorSpaceCatalog | null>(null);
   const [probing, setProbing] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -261,13 +262,13 @@ export function VectorsPanel() {
 
   const openPicker = async () => {
     setPickerOpen(true);
-    setPickerModels(null);
+    setPickerCatalog(null);
     setSpaceError(null);
     try {
-      setPickerModels(await getVectorSpaceCatalog());
+      setPickerCatalog(await getVectorSpaceCatalog());
     } catch (err) {
       console.error('VectorsPanel: failed to load embedding models', err);
-      setPickerModels([]);
+      setPickerCatalog({ models: [], engine: null });
     }
   };
 
@@ -327,7 +328,8 @@ export function VectorsPanel() {
         notice={spaceNotice}
         candidateResults={candidateResults}
         pickerOpen={pickerOpen}
-        pickerModels={pickerModels}
+        pickerModels={pickerCatalog?.models ?? null}
+        pickerEngine={pickerCatalog?.engine ?? null}
         probing={probing}
         onOpenPicker={() => void openPicker()}
         onClosePicker={() => setPickerOpen(false)}
@@ -363,6 +365,7 @@ interface SpaceSectionProps {
   candidateResults: Record<string, BackfillResult>;
   pickerOpen: boolean;
   pickerModels: NousModelPublic[] | null;
+  pickerEngine: PlatformEngineState | null;
   probing: string | null;
   onOpenPicker: () => void;
   onClosePicker: () => void;
@@ -382,6 +385,7 @@ function SpaceSection({
   candidateResults,
   pickerOpen,
   pickerModels,
+  pickerEngine,
   probing,
   onOpenPicker,
   onClosePicker,
@@ -445,6 +449,7 @@ function SpaceSection({
         <AddSpacePicker
           t={t}
           models={pickerModels}
+          engine={pickerEngine}
           taken={taken}
           probing={probing}
           onPick={onAdd}

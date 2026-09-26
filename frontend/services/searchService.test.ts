@@ -340,13 +340,27 @@ describe('vector space switching', () => {
     expect(out.deleted_vectors).toBe(187);
   });
 
-  it('getVectorSpaceCatalog GETs the platform embedding rows', async () => {
-    stubResponse({ models: [{ name: 'nous-wemm-embedding-2b', display_name: 'WeMM 2B', type: 'embedding' }] });
+  it('getVectorSpaceCatalog GETs the platform embedding rows with the engine state', async () => {
+    // Real wire (backend test_platform_embedding_models_*): rows carry the live
+    // status in last_test_status; `engine` is the nous-engine reachability.
+    const engine = { reachable: true, stale: true, checked_at: '2026-09-25T08:00:00Z' };
+    stubResponse({
+      models: [
+        { name: 'nous-wemm-embedding-2b', display_name: 'WeMM 2B', type: 'embedding', last_test_status: 'idle' },
+      ],
+      engine,
+    });
     const spy = vi.mocked(globalThis.fetch);
     const out = await getVectorSpaceCatalog();
     const [url, init] = spy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.test/api/v1/search/vectors/catalog');
     expect(init.method).toBe('GET');
-    expect(out.map((m) => m.name)).toEqual(['nous-wemm-embedding-2b']);
+    expect(out.models.map((m) => m.name)).toEqual(['nous-wemm-embedding-2b']);
+    expect(out.engine).toEqual(engine);
+  });
+
+  it('getVectorSpaceCatalog reads a missing engine as null', async () => {
+    stubResponse({ models: [] });
+    expect((await getVectorSpaceCatalog()).engine).toBeNull();
   });
 });

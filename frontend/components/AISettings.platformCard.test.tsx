@@ -22,6 +22,7 @@ import {
   withPlatform,
   type PlatformRowSpec,
 } from '../tests/fixtures/platform';
+import type { PlatformEngineState } from '../types/api';
 
 import en from '../public/locales/en.json';
 
@@ -94,7 +95,7 @@ vi.mock('./ApprovalsPanel', () => ({ ApprovalsPanel: () => null }));
 vi.mock('./MemoryPanel', () => ({ MemoryPanel: () => null }));
 vi.mock('./AIHealthBoard', () => ({ AIHealthBoard: () => null }));
 
-function renderSettings(rows: PlatformRowSpec[] = FOUR_TYPES, engine = undefined as undefined | typeof ENGINE_DOWN) {
+function renderSettings(rows: PlatformRowSpec[] = FOUR_TYPES, engine = undefined as undefined | PlatformEngineState) {
   const settings = withPlatform(baseAISettings(), rows, engine ? { engine } : {});
   return render(<AISettings settings={settings} onSave={vi.fn()} />);
 }
@@ -207,6 +208,25 @@ describe('AISettings — Nous (Platform) models card', () => {
 
     await waitFor(() => expect(chip('nous-llm')).not.toBeNull());
     expect(screen.queryByTestId('platform-engine-unreachable')).toBeNull();
+  });
+
+  it('warns the status may be delayed while the engine list is a carried-over snapshot', async () => {
+    renderSettings(FOUR_TYPES, { reachable: true, stale: true, checked_at: '2026-09-25T08:00:00Z' });
+
+    await waitFor(() => expect(chip('nous-llm')).not.toBeNull());
+    const notice = within(platformCard()).getByTestId('platform-engine-stale');
+    expect(notice).toHaveTextContent('Status may be delayed');
+    expect(screen.queryByTestId('platform-engine-unreachable')).toBeNull();
+    expect(screen.getAllByTestId('platform-model-row')).toHaveLength(4);
+  });
+
+  it('is one more card of the provider loop, rendered last like before', async () => {
+    renderSettings();
+
+    await waitFor(() => expect(chip('nous-llm')).not.toBeNull());
+    const cards = Array.from(document.querySelectorAll('[data-testid^="provider-card-"]'));
+    expect(cards.at(-1)).toHaveAttribute('data-testid', 'provider-card-nous');
+    expect(cards.at(-1)).toContainElement(chip('nous-llm'));
   });
 
   it('renders no API key box and no Test Connection on the managed card', async () => {

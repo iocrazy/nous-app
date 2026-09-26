@@ -114,11 +114,15 @@ const withSpaces = (cand: ReturnType<typeof candidate> | null, canManage = true)
   spaces: cand ? [ACTIVE_SPACE, cand] : [ACTIVE_SPACE],
   can_manage: canManage,
 });
-const EMBEDDING_MODELS = [
-  { name: 'nous-doubao-embedding-vision', display_name: 'Doubao Embedding Vision', type: 'embedding' },
-  { name: 'nous-wemm-embedding-2b', display_name: 'WeMM Embedding 2B', type: 'embedding' },
-  { name: 'nous-wemm-embedding-4b', display_name: 'WeMM Embedding 4B', type: 'embedding' },
+// Real wire of GET /search/vectors/catalog: `last_test_status` carries the
+// live status (backend test_platform_embedding_models_*), plus `engine`.
+const ROWS = [
+  { name: 'nous-doubao-embedding-vision', display_name: 'Doubao Embedding Vision', type: 'embedding', last_test_status: 'ok' },
+  { name: 'nous-wemm-embedding-2b', display_name: 'WeMM Embedding 2B', type: 'embedding', last_test_status: 'ok' },
+  { name: 'nous-wemm-embedding-4b', display_name: 'WeMM Embedding 4B', type: 'embedding', last_test_status: 'ok' },
 ];
+const ENGINE_OK = { reachable: true, stale: false, checked_at: '2026-09-25T08:00:00Z' };
+const EMBEDDING_MODELS = { models: ROWS, engine: ENGINE_OK };
 
 describe('VectorsPanel', () => {
   beforeEach(() => {
@@ -542,6 +546,42 @@ describe('VectorsPanel', () => {
       fireEvent.click(within(picker).getByRole('button', { name: /WeMM Embedding 4B/ }));
       await waitFor(() => expect(createSpaceMock).toHaveBeenCalledWith('nous-wemm-embedding-4b'));
       await waitFor(() => expect(getVectorsStatusMock).toHaveBeenCalledTimes(2));
+    });
+
+    it('Add Space marks rows that are not ready and cannot pick a not-loaded one', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(null));
+      getCatalogMock.mockResolvedValue({
+        models: [
+          { ...ROWS[1], last_test_status: 'idle' },
+          { ...ROWS[2], last_test_status: 'not_probed' },
+        ],
+        engine: ENGINE_OK,
+      });
+      render(<VectorsPanel />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add Space' }));
+      const picker = await screen.findByTestId('vector-add-space-picker');
+      const idle = within(picker).getByRole('button', { name: /WeMM Embedding 2B/ });
+      expect(idle).toBeDisabled();
+      expect(idle).toHaveTextContent('Not loaded on nous-engine');
+      const unknown = within(picker).getByRole('button', { name: /WeMM Embedding 4B/ });
+      expect(unknown).toBeEnabled();
+      expect(unknown).toHaveTextContent('Status unknown');
+      expect(within(picker).queryByTestId('vector-catalog-engine-unreachable')).toBeNull();
+    });
+
+    it('Add Space says so when nous-engine is unreachable or its answer is stale', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(null));
+      getCatalogMock.mockResolvedValueOnce({ models: ROWS, engine: { ...ENGINE_OK, reachable: false } });
+      const { unmount } = render(<VectorsPanel />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add Space' }));
+      expect(await screen.findByTestId('vector-catalog-engine-unreachable')).toHaveTextContent(
+        'nous-engine is unreachable right now',
+      );
+      unmount();
+      getCatalogMock.mockResolvedValueOnce({ models: ROWS, engine: { ...ENGINE_OK, stale: true } });
+      render(<VectorsPanel />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add Space' }));
+      expect(await screen.findByTestId('vector-catalog-engine-stale')).toHaveTextContent('Status may be delayed');
     });
 
     it('a 422 dimension_mismatch from Add Space reads both widths', async () => {

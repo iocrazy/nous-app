@@ -3,7 +3,7 @@
  */
 
 import { apiClient } from './apiClient';
-import type { NousModelPublic } from '../types/api';
+import type { NousModelPublic, PlatformEngineState } from '../types/api';
 import type { SearchChipFilters } from './searchChipFilters';
 
 // Types
@@ -386,7 +386,19 @@ export const activateVectorSpace = (spaceId: string): Promise<VectorsStatus> =>
 export const deleteVectorSpace = (spaceId: string): Promise<DeleteVectorSpaceResult> =>
   apiClient.delete<DeleteVectorSpaceResult>(`/api/v1/search/vectors/spaces/${encodeURIComponent(spaceId)}`);
 
-/** Catalog models Add Space may pick: enabled PLATFORM embedding rows only
- *  (no owner-scoped BYOK rows). */
-export const getVectorSpaceCatalog = async (): Promise<NousModelPublic[]> =>
-  (await apiClient.get<{ models: NousModelPublic[] }>('/api/v1/search/vectors/catalog')).models;
+/** What Add Space may pick. `models` are the platform provider view's system
+ *  rows of type embedding (platform-wide only, governance and nous-engine
+ *  state applied, failed rows dropped); each `last_test_status` is the live
+ *  status (ok / idle / not_probed). `engine` is nous-engine reachability
+ *  behind that list, null when no row is served by nous-engine. */
+export interface VectorSpaceCatalog {
+  models: NousModelPublic[];
+  engine: PlatformEngineState | null;
+}
+
+export const getVectorSpaceCatalog = async (): Promise<VectorSpaceCatalog> => {
+  const body = await apiClient.get<{ models: NousModelPublic[]; engine?: PlatformEngineState | null }>(
+    '/api/v1/search/vectors/catalog',
+  );
+  return { models: body.models, engine: body.engine ?? null };
+};
