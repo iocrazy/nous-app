@@ -48,6 +48,28 @@ describe('globalChatStore · collapsed FAB state', () => {
     expect(useGlobalChatStore.getState().fabUnread).toBe(0);
   });
 
+  it('clears unread through every action that opens the window', () => {
+    const s = () => useGlobalChatStore.getState();
+    const openers: Array<() => void> = [
+      () => s().requestChat('analyze'),
+      () => s().sendSelectionToChat({ text: 'quoted' }),
+      () => s().sendResourceToChat({
+        resourceId: '1',
+        name: 'Clip',
+        kind: 'video',
+        mime: 'video/mp4',
+        scope: { type: 'personal', id: '7' },
+      }),
+      () => s().sendAssetToChat({ assetId: '1', loadoutId: null, name: 'Hero', assetType: 'character', coverFileId: null, scopeId: '7' }),
+    ];
+    for (const open of openers) {
+      useGlobalChatStore.setState({ open: false, fabUnread: 3 });
+      open();
+      expect(s().open).toBe(true);
+      expect(s().fabUnread).toBe(0);
+    }
+  });
+
   it('never stores a negative unread count', () => {
     useGlobalChatStore.getState().setFabUnread(-3);
     expect(useGlobalChatStore.getState().fabUnread).toBe(0);

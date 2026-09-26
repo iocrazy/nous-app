@@ -179,6 +179,11 @@ export const CHAT_MIN_W = 340;
 export const CHAT_MAX_W = 760;
 export const CHAT_MIN_H = 420;
 
+/** Patch for any action that opens the window: open, and mark everything read. */
+function opened<P extends Partial<GlobalChatState>>(patch: P): P & { open: true; fabUnread: 0 } {
+  return { ...patch, open: true, fabUnread: 0 };
+}
+
 export const useGlobalChatStore = create<GlobalChatState>()(
   persist(
     (set) => ({
@@ -197,41 +202,28 @@ export const useGlobalChatStore = create<GlobalChatState>()(
       fabActivity: 'idle',
       fabUnread: 0,
 
-      // Opening the window is the act of reading, so it clears the unread
-      // count in the same set — no second render where the badge lingers.
-      setOpen: (open) => set(open ? { open, fabUnread: 0 } : { open }),
-      toggle: () => set((s) => (s.open ? { open: false } : { open: true, fabUnread: 0 })),
+      // Opening the window is the act of reading, so every action that opens
+      // it clears the unread count in the same set (via `opened`) — no second
+      // render where the badge lingers.
+      setOpen: (open) => set(open ? opened({}) : { open }),
+      toggle: () => set((s) => (s.open ? { open: false } : opened({}))),
       setRect: (rect) => set(rect),
       setPageContext: (ctx) => set({ pageContext: ctx }),
       requestChat: (agentSlug, sessionId) =>
-        set((s) => ({
-          open: true,
-          chatRequest: { agentSlug, sessionId, nonce: (s.chatRequest?.nonce ?? 0) + 1 },
-        })),
+        set((s) =>
+          opened({ chatRequest: { agentSlug, sessionId, nonce: (s.chatRequest?.nonce ?? 0) + 1 } }),
+        ),
       consumeChatRequest: () => set({ chatRequest: null }),
       sendSelectionToChat: (quote) =>
-        set((s) => ({
-          open: true,
-          pendingQuote: { ...quote, nonce: (s.pendingQuote?.nonce ?? 0) + 1 },
-        })),
+        set((s) => opened({ pendingQuote: { ...quote, nonce: (s.pendingQuote?.nonce ?? 0) + 1 } })),
       consumePendingQuote: () => set({ pendingQuote: null }),
       sendResourceToChat: (resource) =>
-        set((s) => ({
-          open: true,
-          pendingResource: {
-            ...resource,
-            nonce: (s.pendingResource?.nonce ?? 0) + 1,
-          },
-        })),
+        set((s) =>
+          opened({ pendingResource: { ...resource, nonce: (s.pendingResource?.nonce ?? 0) + 1 } }),
+        ),
       consumePendingResource: () => set({ pendingResource: null }),
       sendAssetToChat: (asset) =>
-        set((s) => ({
-          open: true,
-          pendingAsset: {
-            ...asset,
-            nonce: (s.pendingAsset?.nonce ?? 0) + 1,
-          },
-        })),
+        set((s) => opened({ pendingAsset: { ...asset, nonce: (s.pendingAsset?.nonce ?? 0) + 1 } })),
       consumePendingAsset: () => set({ pendingAsset: null }),
       setFabPosition: ({ side, top }) => set({ fabSide: side, fabTop: top }),
       setFabActivity: (activity) => set({ fabActivity: activity }),
