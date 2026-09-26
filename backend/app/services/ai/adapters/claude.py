@@ -9,7 +9,7 @@ follow-up PR — the fingerprint field is accepted but not yet honored.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from anthropic import AsyncAnthropic
 from loguru import logger
@@ -17,6 +17,48 @@ from loguru import logger
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.adapters._model_routing import resolve_wire_model
 from app.services.ai.provider_contract import normalize_envelope
+
+# Anthropic ``stop_reason`` → OpenAI ``finish_reason``. Everything used to
+# collapse to "stop", so a ``max_tokens`` cut looked like a complete answer and
+# a ``refusal`` looked like an empty one (fh4 T5). ``pause_turn`` (server-tool
+# pause) has no OpenAI twin; it is an unfinished turn, closest to ``length``.
+_STOP_REASON_TO_FINISH: Dict[str, str] = {
+    "end_turn": "stop",
+    "stop_sequence": "stop",
+    "tool_use": "tool_calls",
+    "max_tokens": "length",
+    "pause_turn": "length",
+    "refusal": "content_filter",
+}
+
+
+def _finish_reason(stop_reason: Any, has_tool_calls: bool) -> str:
+    mapped = _STOP_REASON_TO_FINISH.get(str(stop_reason or ""), "stop")
+    if mapped == "stop" and has_tool_calls:
+        return "tool_calls"
+    return mapped
+
+
+def _tokens(usage: Any, name: str) -> int:
+    value = getattr(usage, name, None)
+    return value if isinstance(value, int) else 0
+
+
+def _usage(usage: Any) -> Optional[Dict[str, Any]]:
+    """Anthropic ``usage`` → the OpenAI shape RunRecorder bills from. It used
+    to be dropped, so every Claude turn was recorded as free."""
+    if usage is None:
+        return None
+    prompt = _tokens(usage, "input_tokens")
+    completion = _tokens(usage, "output_tokens")
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": prompt + completion,
+        "prompt_tokens_details": {
+            "cached_tokens": _tokens(usage, "cache_read_input_tokens")
+        },
+    }
 
 
 class ClaudeAdapter:
@@ -132,8 +174,20 @@ class ClaudeAdapter:
         if tool_calls:
             message["tool_calls"] = tool_calls
 
-        finish_reason = "tool_calls" if tool_calls else "stop"
-        return {"choices": [{"message": message, "finish_reason": finish_reason}]}
+        envelope: Dict[str, Any] = {
+            "choices": [
+                {
+                    "message": message,
+                    "finish_reason": _finish_reason(
+                        getattr(resp, "stop_reason", None), bool(tool_calls)
+                    ),
+                }
+            ]
+        }
+        usage = _usage(getattr(resp, "usage", None))
+        if usage is not None:
+            envelope["usage"] = usage
+        return envelope
 
     # ── Public API ────────────────────────────────────────────────────
 

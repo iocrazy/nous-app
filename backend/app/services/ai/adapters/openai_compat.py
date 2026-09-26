@@ -21,7 +21,10 @@ from loguru import logger
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.adapters._model_routing import resolve_wire_model
 from app.services.ai.adapters.base import StreamChunk
-from app.services.ai.provider_contract import normalize_envelope
+from app.services.ai.provider_contract import (
+    normalize_envelope,
+    stream_ended_without_finish,
+)
 from app.services.ai.runner.reasoning import (
     MIN_REASONING_MAX_TOKENS,
     model_uses_reasoning,
@@ -291,3 +294,10 @@ class OpenAICompatibleAdapter:
                         finish_reason=pending_finish.finish_reason,
                         usage=final_usage,
                     )
+                    return
+                # fh4 T5: closed with NO finish_reason and no [DONE] — the
+                # reply was cut off in transit. Ending quietly here made the
+                # runner file the turn CANCELLED (a generator that returns
+                # without a terminal chunk is how a cooperative cancel looks).
+                # It is a transport failure: raise it typed and retryable.
+                raise stream_ended_without_finish(body["model"])
