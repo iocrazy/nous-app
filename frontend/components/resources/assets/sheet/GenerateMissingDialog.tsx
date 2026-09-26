@@ -484,7 +484,7 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
                       but not pickable. A native <option> has no second line,
                       so the reason rides in the text and the title. */}
                   {models.map((m) => {
-                    const notLoaded = platformModelAvailability(m).reason === 'not_loaded';
+                    const notLoaded = platformModelAvailability(m.status).reason === 'not_loaded';
                     return (
                       <option
                         key={m.name}

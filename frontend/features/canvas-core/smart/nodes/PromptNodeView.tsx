@@ -9,7 +9,7 @@ import { ImagePlus, Images, Library, Play, Split, Square, Zap } from 'lucide-rea
 import type { DroppedRef, GeneratedImageRef, PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
-import { useTextModels } from './useTextModels';
+import { useTextPlatformModels } from '../../../../hooks/usePlatformModels';
 import { useAgents } from './useAgents';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -153,9 +153,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const readOnly = useCanvasReadOnly();
   const genKind = gen?.kind ?? 'text';
   const genModels = useGenerationModels(gen ? gen.kind : undefined);
-  // Text-mode model options come from the platform DB catalog (same source as
-  // genModels), never a hardcoded list (P0-1).
-  const textModels = useTextModels();
+  // Text-mode model options are the user's enabled platform llm rows (the AI
+  // settings, same source as genModels), never a hardcoded list (P0-1).
+  const textModels = useTextPlatformModels();
   // Idle nous-engine rows stay listed but disabled (utils/platformModel).
   const notLoadedText = t('platformModel.notLoaded', 'Not loaded on nous-engine');
   // Agent picker (CC3) — writes the pre-plumbed agent_id channel; the run
@@ -920,7 +920,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 <option value="">Catalog default</option>
                 {textModels.map((m) => (
                   <option key={m.name} value={m.name}
-                    {...platformOptionAttrs(m, notLoadedText)}
+                    {...platformOptionAttrs(m.status, notLoadedText)}
                   >
                     {platformModelText(m)}
                   </option>

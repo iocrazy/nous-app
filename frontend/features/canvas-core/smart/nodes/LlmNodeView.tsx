@@ -23,7 +23,7 @@ import { RunStatusBadge } from './RunStatusBadge';
 import { useAgents } from './useAgents';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
-import { useTextModels } from './useTextModels';
+import { useTextPlatformModels } from '../../../../hooks/usePlatformModels';
 import { UiSelect } from '../../../../components/ui';
 import { useTranslation } from 'react-i18next';
 import { platformModelText, platformOptionAttrs } from '../../../../utils/platformModel';
@@ -63,7 +63,7 @@ export function upstreamTextFor(
 export function LlmNodeView({ id, data, selected }: NodeProps) {
   const d = data as unknown as LlmNodeData;
   const patch = useNodeDataPatch(id);
-  const textModels = useTextModels();
+  const textModels = useTextPlatformModels();
   const { t } = useTranslation();
   // Idle nous-engine rows stay listed but disabled (utils/platformModel).
   const notLoadedText = t('platformModel.notLoaded', 'Not loaded on nous-engine');
@@ -132,7 +132,7 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
             <option value="">Catalog default</option>
             {textModels.map((m) => (
               <option key={m.name} value={m.name}
-                {...platformOptionAttrs(m, notLoadedText)}
+                {...platformOptionAttrs(m.status, notLoadedText)}
               >
                 {platformModelText(m)}
               </option>

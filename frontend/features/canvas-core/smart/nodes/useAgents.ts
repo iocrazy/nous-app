@@ -1,7 +1,7 @@
 // features/canvas-core/smart/nodes/useAgents.ts
 //
 // AI Library agent catalog for the prompt node's agent picker (CC3).
-// Mirrors useTextModels: fetched once per session (module cache — agents
+// Fetched once per session (module cache — agents
 // change via the AI Library settings page, not mid-edit), failures degrade
 // to an empty list (picker shows only "No agent") and log for the funnel.
 

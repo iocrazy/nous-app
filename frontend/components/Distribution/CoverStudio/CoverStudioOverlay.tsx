@@ -23,10 +23,7 @@ import { useTranslation } from 'react-i18next';
 import { Sparkles, Upload, User, X } from 'lucide-react';
 
 import { getApiUrl } from '../../../utils/apiConfig';
-import {
-  listGenerationModels,
-  type GenerationModel,
-} from '../../../features/canvas-core/services/canvasGenerationService';
+import { useGenerationModels } from '../../../features/canvas-core/smart/nodes/useGenerationModels';
 import {
   BUILTIN_COVER_STYLE,
   awaitCoverGeneration,
@@ -121,7 +118,9 @@ export function CoverStudioOverlay({
   const [refs, setRefs] = useState<CoverReference[]>([]);
   const [refusal, setRefusal] = useState<'full' | 'duplicate' | null>(null);
   const [allowSmallLabels, setAllowSmallLabels] = useState(false);
-  const [models, setModels] = useState<GenerationModel[]>([]);
+  // Same list as every other generation picker (spec 2026-09-25 §3.7): the
+  // enabled platform image rows from the AI settings, live status on top.
+  const models = useGenerationModels('image');
   const [model, setModel] = useState('');
   const [styles, setStyles] = useState<CoverStyle[]>([]);
   const sourceVideoId = sources[0]?.id ?? null;
@@ -178,15 +177,6 @@ export function CoverStudioOverlay({
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    void listGenerationModels()
-      .then((all) => {
-        if (!alive) return;
-        setModels(all.filter((m) => m.type === 'image'));
-      })
-      .catch((err) => {
-        // Degraded, not broken: '' lets the catalog pick its default.
-        console.error('[CoverStudio] listGenerationModels failed:', err);
-      });
     // Past rounds for this video come back from the server — a round the user
     // paid for must not vanish because the dialog was closed.
     if (sourceVideoId) {
@@ -968,7 +958,7 @@ export function CoverStudioOverlay({
                       <option
                         key={m.name}
                         value={m.name}
-                        {...platformOptionAttrs(m, t('platformModel.notLoaded'))}
+                        {...platformOptionAttrs(m.status, t('platformModel.notLoaded'))}
                       >
                         {platformModelText(m)}
                       </option>
