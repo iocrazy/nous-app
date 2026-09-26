@@ -106,21 +106,25 @@ class TopicScorerService:
         return adapter, governance.model
 
     async def _nous_candidates(self) -> list:
-        """``[(adapter, model), …]`` for EVERY enabled platform Nous ``llm``
-        model (not just the first) — the failover pool. Empty when Nous is
-        disabled for this module or no enabled model resolves."""
+        """``[(adapter, model), …]`` for EVERY platform Nous ``llm`` model the
+        system view offers (not just the first) — the failover pool. Same rows
+        and order as ``resolve_scorer_config`` reports (the platform provider
+        view's system rows ranked by ``default_model_pick``: governance, live
+        engine state, ``fail`` rows gone). Empty when Nous is disabled for
+        this module or no row resolves."""
         cands: list = []
         try:
             if not await is_nous_allowed("topic_scorer"):
                 return cands
-            from app.repositories.nous_model_repository import (
-                get_nous_model_repository,
-            )
+            from app.services.ai.default_model_pick import rank_default_candidates
+            from app.services.ai.platform_provider import platform_rows
 
-            repo = get_nous_model_repository()
-            for m in await repo.list_enabled("llm"):
-                full = await repo.get_by_name(m["name"])
-                if full and full.get("base_url") and full.get("api_key"):
+            rows = await platform_rows(None, type="llm", purpose="system")
+            ranked = rank_default_candidates(
+                [r.dispatch_row() for r in rows], context="topic scorer pool"
+            )
+            for full in ranked:
+                if full.get("base_url") and full.get("api_key"):
                     cands.append(
                         (
                             OpenAICompatibleAdapter(

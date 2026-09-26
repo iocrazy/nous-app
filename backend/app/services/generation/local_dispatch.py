@@ -120,7 +120,7 @@ async def resolve_local_engine(
     try:
         from app.services.media.parsers.video_providers import db_registry
 
-        rows = await db_registry._enabled_rows(media_type)  # noqa: SLF001
+        rows = await db_registry._enabled_rows(media_type, user_id)  # noqa: SLF001
         # Exact name first, then the mediahub-/nous- rename alias.
         row = find_row_by_catalog_name(rows, model_name)
         if row is None:

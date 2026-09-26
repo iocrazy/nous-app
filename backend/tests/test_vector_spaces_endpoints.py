@@ -503,8 +503,8 @@ async def test_catalog_lists_platform_embedding_rows_only(monkeypatch):
     rows = [{"name": "nous-wemm-embedding-2b", "display_name": "WeMM 2B"}]
 
     async def _platform():
-        return rows
+        return {"models": rows, "engine": None}
 
     monkeypatch.setattr(search_router, "platform_embedding_models", _platform)
     out = await search_router.vector_space_catalog(_AUTH)
-    assert out == {"models": rows}
+    assert out == {"models": rows, "engine": None}

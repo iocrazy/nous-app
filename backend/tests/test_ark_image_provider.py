@@ -138,9 +138,18 @@ def test_ctor_requires_key_and_base_url():
 
 
 def _repo_with(rows):
-    repo = MagicMock()
-    repo.list_all = AsyncMock(return_value=rows)
-    return repo
+    # Dispatch reads the platform provider view (P4): the fake honours
+    # list_enabled_private's real filtering; ``_open_view`` opens governance.
+    from tests.platform_catalog_fake import FakeCatalogRepo
+
+    return FakeCatalogRepo(rows)
+
+
+@pytest.fixture(autouse=True)
+def _open_view(monkeypatch):
+    from tests.platform_catalog_fake import open_platform_view
+
+    open_platform_view(monkeypatch)
 
 
 async def test_resolve_picks_enabled_image_row_and_reveals_key():

@@ -288,7 +288,7 @@ async def test_capabilities_for_model_resolves_alias():
     from app.services.generation import model_capabilities as gm
 
     rows = [{"name": "mediahub-seedream", "actual_provider": "doubao"}]
-    with patch.object(gm, "visible_generation_rows", AsyncMock(return_value=rows)):
+    with patch.object(gm, "generation_rows_for", AsyncMock(return_value=rows)):
         caps = await gm.capabilities_for_model("nous-seedream", "u")
     assert caps is not None
 
@@ -298,52 +298,34 @@ async def test_capabilities_for_model_unknown_stays_none():
     from app.services.generation import model_capabilities as gm
 
     rows = [{"name": "mediahub-seedream", "actual_provider": "doubao"}]
-    with patch.object(gm, "visible_generation_rows", AsyncMock(return_value=rows)):
+    with patch.object(gm, "generation_rows_for", AsyncMock(return_value=rows)):
         assert await gm.capabilities_for_model("seedream", "u") is None
 
 
 # ─── platform_model_visibility (user's persisted disabled_models) ──────────
 
 
-@pytest.mark.asyncio
-async def test_disabled_old_name_hides_renamed_row():
+def test_disabled_old_name_hides_renamed_row():
     from app.services.ai import platform_model_visibility as v
 
     rows = [{"name": "nous-moss-asr"}, {"name": "nous-other"}]
-    with patch.object(
-        v,
-        "platform_model_gate",
-        AsyncMock(return_value=(True, frozenset({"mediahub-moss-asr"}))),
-    ):
-        out = await v.filter_platform_models_for_user("u", rows)
-    assert [r["name"] for r in out] == ["nous-other"]
+    hidden = v.blacklisted(rows, {"mediahub-moss-asr"})
+    assert [r["name"] for r in rows if id(r) not in hidden] == ["nous-other"]
 
 
-@pytest.mark.asyncio
-async def test_disabled_new_name_hides_unrenamed_row():
+def test_disabled_new_name_hides_unrenamed_row():
     from app.services.ai import platform_model_visibility as v
 
     rows = [{"name": "mediahub-moss-asr"}]
-    with patch.object(
-        v,
-        "platform_model_gate",
-        AsyncMock(return_value=(True, frozenset({"nous-moss-asr"}))),
-    ):
-        assert await v.filter_platform_models_for_user("u", rows) == []
+    assert v.blacklisted(rows, {"nous-moss-asr"}) == {id(rows[0])}
 
 
-@pytest.mark.asyncio
-async def test_disabled_exact_name_hides_only_that_row_when_both_exist():
+def test_disabled_exact_name_hides_only_that_row_when_both_exist():
     from app.services.ai import platform_model_visibility as v
 
     rows = [{"name": "nous-x"}, {"name": "mediahub-x"}]
-    with patch.object(
-        v,
-        "platform_model_gate",
-        AsyncMock(return_value=(True, frozenset({"mediahub-x"}))),
-    ):
-        out = await v.filter_platform_models_for_user("u", rows)
-    assert [r["name"] for r in out] == ["nous-x"]
+    hidden = v.blacklisted(rows, {"mediahub-x"})
+    assert [r["name"] for r in rows if id(r) not in hidden] == ["nous-x"]
 
 
 # ─── ai.model_capabilities local-vision catalog rows ───────────────────────
@@ -589,22 +571,16 @@ async def test_capabilities_for_model_rename_resolves():
     from app.services.generation import model_capabilities as gm
 
     rows = [{"name": _OLD_Q, "actual_provider": "doubao"}]
-    with patch.object(gm, "visible_generation_rows", AsyncMock(return_value=rows)):
+    with patch.object(gm, "generation_rows_for", AsyncMock(return_value=rows)):
         assert await gm.capabilities_for_model(_NEW_Q, "u") is not None
 
 
-@pytest.mark.asyncio
-async def test_disabled_old_rename_hides_renamed_row():
+def test_disabled_old_rename_hides_renamed_row():
     from app.services.ai import platform_model_visibility as v
 
     rows = [{"name": _NEW_Q}, {"name": "nous-other"}]
-    with patch.object(
-        v,
-        "platform_model_gate",
-        AsyncMock(return_value=(True, frozenset({_OLD_Q}))),
-    ):
-        out = await v.filter_platform_models_for_user("u", rows)
-    assert [r["name"] for r in out] == ["nous-other"]
+    hidden = v.blacklisted(rows, {_OLD_Q})
+    assert [r["name"] for r in rows if id(r) not in hidden] == ["nous-other"]
 
 
 @pytest.mark.asyncio

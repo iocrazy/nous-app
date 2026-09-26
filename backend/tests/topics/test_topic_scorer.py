@@ -139,19 +139,16 @@ def _patch_nous(monkeypatch, *, allowed=False, models=None):
     # Also patch the name imported into topic_scorer's namespace.
     monkeypatch.setattr("app.services.topics.topic_scorer.is_nous_allowed", _allowed)
 
-    class _Repo:
-        async def list_enabled(self, type_filter=None):
-            return models or []
+    # The scorer pool reads the platform provider view's system rows (P4),
+    # so the catalog is installed at the view's seams.
+    from tests.platform_catalog_fake import install_catalog
 
-        async def get_by_name(self, name):
-            for m in models or []:
-                if m["name"] == name:
-                    return m
-            return None
-
-    monkeypatch.setattr(
-        "app.repositories.nous_model_repository.get_nous_model_repository",
-        lambda: _Repo(),
+    install_catalog(
+        monkeypatch,
+        [
+            {"type": "llm", "is_enabled": True, "actual_provider": "ark", **m}
+            for m in models or []
+        ],
     )
 
 

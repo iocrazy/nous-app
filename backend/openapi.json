@@ -9268,8 +9268,18 @@
         "type": "object"
       },
       "AiNousModelsResponse": {
-        "description": "``GET /search/vectors/catalog``: platform embedding rows.",
+        "description": "``GET /search/vectors/catalog``: platform embedding rows from the\nplatform provider view's system computation (governance, engine state,\n``fail`` rows dropped). ``last_test_status`` carries the live status\n(``ok`` / ``idle`` / ``not_probed``), the same value\n``platform_models[name].status`` has on the AI settings.",
         "properties": {
+          "engine": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AiPlatformEngineState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "models": {
             "items": {
               "$ref": "#/components/schemas/AiNousModelPublic"
@@ -123444,7 +123454,7 @@
     },
     "/api/v1/search/vectors/catalog": {
       "get": {
-        "description": "Catalog models Add Space may pick: enabled PLATFORM embedding rows\nonly (public fields) — never the caller's own owner-scoped rows, which\nmust never back a shared space.",
+        "description": "Catalog models Add Space may pick: the platform provider view's\nsystem rows of type ``embedding`` (public fields, live status, engine\nstate) — never the caller's own owner-scoped rows, which must never back\na shared space.",
         "operationId": "vector_space_catalog_api_v1_search_vectors_catalog_get",
         "parameters": [
           {

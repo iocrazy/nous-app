@@ -249,25 +249,25 @@ async def resolve_scorer_config() -> ResolvedAIConfig:
                 origin="governance",
             )
         if await is_nous_allowed("topic_scorer"):
-            from app.repositories.nous_model_repository import (
-                get_nous_model_repository,
-            )
             from app.services.ai.default_model_pick import (
                 rank_default_candidates,
             )
-            from app.services.ai.platform_provider import platform_rows_with_status
+            from app.services.ai.platform_provider import platform_rows
 
-            repo = get_nous_model_repository()
-            # Same implicit-default rule as the canvas Catalog default, over
-            # the live platform status (ok → not_probed → idle; fail rows and
-            # services the engine no longer lists are not candidates).
+            # Same rows and rule as the scorer's own pool
+            # (``TopicScorerService._nous_candidates``): the platform provider
+            # view's system rows (governance, live engine state; fail rows and
+            # services the engine no longer lists are gone), ranked
+            # ok → not_probed → idle.
             candidates = rank_default_candidates(
-                await platform_rows_with_status("llm"),
+                [
+                    r.dispatch_row()
+                    for r in await platform_rows(None, type="llm", purpose="system")
+                ],
                 context="resolve_scorer_config",
             )
-            for m in candidates:
-                full = await repo.get_by_name(m["name"])
-                if full and full.get("base_url") and full.get("api_key"):
+            for full in candidates:
+                if full.get("base_url") and full.get("api_key"):
                     return ResolvedAIConfig(
                         provider_key=_pk(full["actual_model"]),
                         provider_config={

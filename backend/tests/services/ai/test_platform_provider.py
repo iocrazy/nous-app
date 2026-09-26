@@ -295,3 +295,187 @@ async def test_platform_status_reports_local_readiness(env, monkeypatch):
         "chat": {"status": "ok", "local_ready": None, "superseded": False},
     }
     assert out["engine"] is None
+
+
+# ─── platform_rows: the one entry every backend decision reads (P4) ─────────
+
+
+def _stored(monkeypatch, nous: dict) -> None:
+    monkeypatch.setattr(
+        "app.services.ai.platform_model_visibility.stored_nous_settings",
+        AsyncMock(return_value=nous),
+    )
+
+
+def row_names(rows) -> list[str]:
+    return [r.model.name for r in rows]
+
+
+@pytest.mark.asyncio
+async def test_platform_rows_normal_row_is_selected_with_status(env, monkeypatch):
+    _stored(monkeypatch, {})
+    env.rows = [catalog_row("pic", type="image", actual_provider="ark")]
+    rows = await pp.platform_rows(USER, type="image", purpose="dispatch")
+    assert row_names(rows) == ["pic"]
+    assert rows[0].dispatch_row()["api_key"] == "sk-platform"
+    assert rows[0].dispatch_row()["status"] == "ok"
+    env.repo.list_enabled_private.assert_awaited_with(USER)
+
+
+@pytest.mark.asyncio
+async def test_platform_rows_user_blacklist_hides_the_row(env, monkeypatch):
+    _stored(monkeypatch, {"disabled_models": ["pic-a"]})
+    env.rows = [
+        catalog_row("pic-a", type="image"),
+        catalog_row("pic-b", type="image"),
+    ]
+    rows = await pp.platform_rows(USER, type="image", purpose="dispatch")
+    assert row_names(rows) == ["pic-b"]
+
+
+@pytest.mark.asyncio
+async def test_platform_rows_blacklist_follows_the_rename_alias(env, monkeypatch):
+    _stored(monkeypatch, {"disabled_models": ["mediahub-pic"]})
+    env.rows = [catalog_row("nous-pic", type="image")]
+    assert await pp.platform_rows(USER, purpose="picker") == []
+
+
+@pytest.mark.asyncio
+async def test_platform_rows_master_switch_off_is_empty(env, monkeypatch):
+    _stored(monkeypatch, {"enabled": False})
+    env.rows = [catalog_row("pic", type="image")]
+    assert await pp.platform_rows(USER, purpose="dispatch") == []
+
+
+@pytest.mark.asyncio
+async def test_platform_rows_governance_off_is_empty(env, monkeypatch):
+    _stored(monkeypatch, {})
+    env.governance = False
+    env.rows = [catalog_row("pic", type="image")]
+    assert await pp.platform_rows(USER, purpose="dispatch") == []
+    assert await pp.platform_rows(None, purpose="system") == []
+
+
+@pytest.mark.asyncio
+async def test_platform_rows_engine_not_listing_the_service_drops_it(env, monkeypatch):
+    _stored(monkeypatch, {})
+    env.rows = [
+        engine_row("nous-gone", "gone-svc", type="image"),
+        engine_row("nous-here", "here-svc", type="image"),
+    ]
+    env.engine_answers = [listed(("here-svc", True))]
+    rows = await pp.platform_rows(USER, type="image", purpose="dispatch")
+    assert row_names(rows) == ["nous-here"]
+    assert rows[0].model.status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_platform_rows_drops_failed_rows(env, monkeypatch):
+    _stored(monkeypatch, {})
+    env.rows = [
+        catalog_row("bad", last_test_status="fail"),
+        catalog_row("good"),
+    ]
+    assert row_names(await pp.platform_rows(USER, purpose="picker")) == ["good"]
+
+
+@pytest.mark.asyncio
+async def test_platform_rows_picker_leaves_out_upscale_only_rows(env, monkeypatch):
+    _stored(monkeypatch, {})
+    env.rows = [
+        engine_row("nous-upscale", "studio-upscale", type="image"),
+        catalog_row("pic", type="image"),
+    ]
+    env.engine_answers = [listed(("studio-upscale", True))]
+    assert row_names(await pp.platform_rows(USER, purpose="picker")) == ["pic"]
+    dispatch = await pp.platform_rows(USER, purpose="dispatch")
+    assert row_names(dispatch) == ["nous-upscale", "pic"]
+
+
+@pytest.mark.asyncio
+async def test_platform_rows_read_failure_raises_for_dispatch_only(env, monkeypatch):
+    _stored(monkeypatch, {})
+    env.repo.list_enabled_private = AsyncMock(side_effect=RuntimeError("db down"))
+    with pytest.raises(RuntimeError):
+        await pp.platform_rows(USER, purpose="dispatch")
+    assert await pp.platform_rows(USER, purpose="picker") == []
+    assert await pp.platform_rows(None, purpose="system") == []
+
+
+@pytest.mark.asyncio
+async def test_platform_rows_system_takes_no_user(env):
+    with pytest.raises(ValueError):
+        await pp.platform_rows(USER, purpose="system")
+
+
+@pytest.mark.asyncio
+async def test_view_and_platform_rows_agree(env, monkeypatch):
+    """The settings card and every backend decision are one computation."""
+    stored = {"disabled_models": ["b"]}
+    _stored(monkeypatch, stored)
+    env.rows = [catalog_row("a"), catalog_row("b"), catalog_row("c", type="image")]
+    view = await pp.platform_provider_view(USER, stored_nous=stored)
+    rows = await pp.platform_rows(USER, purpose="dispatch")
+    assert list(view.enabled_models) == row_names(rows) == ["a", "c"]
+
+
+# ─── user_may_use: the user gates on one resolved row ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_user_may_use_admits_a_normal_row(monkeypatch):
+    _stored(monkeypatch, {})
+    await pp.user_may_use(USER, {"name": "nous-a", "owner_user_id": None})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "nous, row, reason",
+    [
+        ({}, {"name": "x", "owner_user_id": "someone-else"}, "owner_scope"),
+        ({"enabled": False}, {"name": "x"}, "platform_card_disabled"),
+        ({"disabled_models": ["x"]}, {"name": "x"}, "user_disabled"),
+        ({"disabled_models": ["mediahub-x"]}, {"name": "nous-x"}, "user_disabled"),
+    ],
+)
+async def test_user_may_use_refuses_typed(monkeypatch, nous, row, reason):
+    _stored(monkeypatch, nous)
+    with pytest.raises(pp.PlatformModelNotAvailableError) as info:
+        await pp.user_may_use(USER, row)
+    err = info.value
+    assert isinstance(err, RuntimeError)
+    assert err.status_code == 409
+    assert err.details == {
+        "code": "platform_model_not_available",
+        "model": row["name"],
+        "reason": reason,
+    }
+
+
+# ─── residue (P4 G) ─────────────────────────────────────────────────────────
+
+
+def test_nous_engine_provider_has_one_definition():
+    import app.repositories.nous_engine_sync_repository as sync_repo
+    import app.repositories.nous_model_repository as repo
+    import app.services.ai.nous_model_health as health
+
+    assert (
+        ec.NOUS_ENGINE_PROVIDER
+        is repo.NOUS_ENGINE_PROVIDER
+        is health.NOUS_ENGINE_PROVIDER
+        is sync_repo.NOUS_ENGINE_PROVIDER
+        == "nous"
+    )
+
+
+def test_last_good_snapshots_are_bounded(monkeypatch):
+    ec.reset_engine_cache()
+    snap = ec.EngineSnapshot(services={}, fetched_at=None, reachable=True, error=None)
+    for i in range(ec._CACHE_MAXSIZE + 10):
+        ec._remember(f"k{i}", (float(i), snap))
+    assert len(ec._last_good) == ec._CACHE_MAXSIZE
+    assert "k0" not in ec._last_good and f"k{ec._CACHE_MAXSIZE + 9}" in ec._last_good
+    ec._remember("k20", (99.0, snap))  # re-stored → newest
+    assert list(ec._last_good)[-1] == "k20"
+    ec.reset_engine_cache()

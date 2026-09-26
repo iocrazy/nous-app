@@ -115,12 +115,6 @@ class AiNousModelPublic(BaseModel):
     is_local: bool
 
 
-class AiNousModelsResponse(BaseModel):
-    """``GET /search/vectors/catalog``: platform embedding rows."""
-
-    models: List[AiNousModelPublic]
-
-
 # ─── platform provider view (spec 2026-09-25 §3.1 / §3.3) ─────────────────────
 
 AiPlatformModelStatus = Literal["ok", "idle", "not_probed"]
@@ -162,6 +156,17 @@ class AiPlatformEngineState(BaseModel):
     reachable: bool
     stale: bool
     checked_at: Optional[WireDatetime]
+
+
+class AiNousModelsResponse(BaseModel):
+    """``GET /search/vectors/catalog``: platform embedding rows from the
+    platform provider view's system computation (governance, engine state,
+    ``fail`` rows dropped). ``last_test_status`` carries the live status
+    (``ok`` / ``idle`` / ``not_probed``), the same value
+    ``platform_models[name].status`` has on the AI settings."""
+
+    models: List[AiNousModelPublic]
+    engine: Optional[AiPlatformEngineState] = None
 
 
 class AiPlatformProviderEntry(BaseModel):

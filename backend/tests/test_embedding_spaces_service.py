@@ -194,13 +194,50 @@ def test_space_to_catalog_lookup_skips_private_rows_and_prefers_enabled():
 
 
 @pytest.mark.asyncio
-async def test_platform_embedding_models_lists_without_a_viewer():
-    repo = _Repo(_ROW)
-    with patch.object(mod, "_repo", lambda: repo):
-        out = await mod.platform_embedding_models()
-    # No viewer = platform rows only (list_enabled fails closed on owners).
-    assert repo.listed == ("embedding", None)
-    assert out == [_ROW]
+async def test_platform_embedding_models_reads_the_system_view(monkeypatch):
+    """Add Space reads the platform provider view's system rows (no viewer:
+    platform-wide rows, no personal blacklist), never the table directly."""
+    from tests.services.ai.test_platform_provider import Env, catalog_row
+
+    env = Env(monkeypatch)
+    env.rows = [
+        catalog_row("nous-emb", type="embedding"),
+        catalog_row("nous-chat"),
+    ]
+    out = await mod.platform_embedding_models()
+    env.repo.list_enabled_private.assert_awaited_with(None)
+    assert [m["name"] for m in out["models"]] == ["nous-emb"]
+    assert out["models"][0]["last_test_status"] == "ok"
+    assert not {"api_key", "base_url", "actual_provider"} & set(out["models"][0])
+    assert out["engine"] is None
+
+
+@pytest.mark.asyncio
+async def test_platform_embedding_models_drops_what_the_view_drops(monkeypatch):
+    """Governance off / engine no longer listing the service / failed row →
+    not offered."""
+    from tests.services.ai.test_platform_provider import (
+        Env,
+        catalog_row,
+        engine_row,
+        listed,
+    )
+
+    env = Env(monkeypatch)
+    env.rows = [
+        engine_row("nous-gone", "gone-emb", type="embedding"),
+        engine_row("nous-here", "here-emb", type="embedding"),
+        catalog_row("nous-bad", type="embedding", last_test_status="fail"),
+    ]
+    env.engine_answers = [listed(("here-emb", False))]
+    out = await mod.platform_embedding_models()
+    assert [(m["name"], m["last_test_status"]) for m in out["models"]] == [
+        ("nous-here", "idle")
+    ]
+    assert out["engine"]["reachable"] is True
+
+    env.governance = False
+    assert (await mod.platform_embedding_models())["models"] == []
 
 
 # ---------------------------------------------------- active_actual_model ----

@@ -50,88 +50,124 @@ async def test_scorer_governance_wins():
     assert cfg.agent_slug == "topic-scorer"
 
 
-async def test_scorer_falls_to_first_enabled_platform_llm():
-    live = AsyncMock(
-        return_value=[{"name": "mediahub-deepseek-v4-flash", "status": "not_probed"}]
+@pytest.fixture
+def platform(monkeypatch):
+    """The platform provider view's own seams (catalog full rows, governance,
+    engine) — the scorer reads ``platform_rows``, never the table."""
+    from tests.services.ai.test_platform_provider import Env
+
+    env = Env(monkeypatch)
+    monkeypatch.setattr(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=_gov()),
     )
-    repo = MagicMock()
-    repo.get_by_name = AsyncMock(
-        return_value={
-            "name": "mediahub-deepseek-v4-flash",
-            "actual_model": "deepseek-v4-flash",
-            "base_url": "https://cat/v1",
-            "api_key": "sk-cat",
-            "app_id": "",
-        }
-    )
-    with (
-        patch(
-            "app.services.ai.governance.ai_governance.get_module_governance",
-            AsyncMock(return_value=_gov()),
-        ),
-        patch(
-            "app.services.ai.governance.ai_governance.is_nous_allowed",
-            AsyncMock(return_value=True),
-        ),
-        patch(
-            "app.repositories.nous_model_repository.get_nous_model_repository",
-            return_value=repo,
-        ),
-        patch("app.services.ai.platform_provider.platform_rows_with_status", live),
+    # The per-module nous gate is its own check; pin it open so these tests
+    # prove the platform view's gates, not that one.
+    for target in (
+        "app.services.ai.governance.ai_governance.is_nous_allowed",
+        "app.services.topics.topic_scorer.is_nous_allowed",
     ):
-        cfg = await resolve_scorer_config()
+        monkeypatch.setattr(target, AsyncMock(return_value=True))
+    return env
+
+
+async def test_scorer_falls_to_first_enabled_platform_llm(platform):
+    from tests.services.ai.test_platform_provider import catalog_row
+
+    platform.rows = [
+        catalog_row(
+            "mediahub-deepseek-v4-flash",
+            actual_provider="deepseek",
+            actual_model="deepseek-v4-flash",
+            base_url="https://cat/v1",
+            api_key="sk-cat",
+            last_test_status="not_probed",
+        )
+    ]
+    cfg = await resolve_scorer_config()
     assert cfg.origin == "platform"
     assert cfg.model == "deepseek-v4-flash"
     assert cfg.provider_key == "deepseek"
-    live.assert_awaited_once_with("llm")
+    assert cfg.provider_config["api_key"] == "sk-cat"
+    platform.repo.list_enabled_private.assert_awaited_with(None)
 
 
-async def test_scorer_platform_pick_prefers_ok_over_idle_and_skips_fail():
+async def test_scorer_platform_pick_prefers_ok_over_idle_and_skips_fail(platform):
     """Same default rule as the canvas Catalog default (default_model_pick),
     over the platform view's live status: an idle (not loaded on nous-engine)
     row ranks after an ok one, a failing row is never reported."""
-    rows = [
-        {"name": "nous-qwen3-8-27b", "status": "idle"},
-        {"name": "broken", "status": "fail"},
-        {"name": "mediahub-deepseek-v4-flash", "status": "ok"},
+    from tests.services.ai.test_platform_provider import (
+        catalog_row,
+        engine_row,
+        listed,
+    )
+
+    platform.rows = [
+        engine_row("nous-qwen3-8-27b", "qwen3-8-27b"),
+        catalog_row("broken", actual_model="doubao-pro", last_test_status="fail"),
+        catalog_row(
+            "mediahub-deepseek-v4-flash",
+            actual_provider="deepseek",
+            actual_model="deepseek-v4-flash",
+        ),
     ]
-    full = {
-        name: {
-            "name": name,
-            "actual_model": actual,
-            "base_url": "https://cat/v1",
-            "api_key": "sk-cat",
-            "app_id": "",
-        }
-        for name, actual in [
-            ("nous-qwen3-8-27b", "qwen3-8-27b"),
-            ("broken", "doubao-pro"),
-            ("mediahub-deepseek-v4-flash", "deepseek-v4-flash"),
-        ]
-    }
-    repo = MagicMock()
-    repo.get_by_name = AsyncMock(side_effect=lambda n: full[n])
-    with (
-        patch(
-            "app.services.ai.governance.ai_governance.get_module_governance",
-            AsyncMock(return_value=_gov()),
-        ),
-        patch(
-            "app.services.ai.governance.ai_governance.is_nous_allowed",
-            AsyncMock(return_value=True),
-        ),
-        patch(
-            "app.repositories.nous_model_repository.get_nous_model_repository",
-            return_value=repo,
-        ),
-        patch(
-            "app.services.ai.platform_provider.platform_rows_with_status",
-            AsyncMock(return_value=rows),
-        ),
-    ):
-        cfg = await resolve_scorer_config()
+    platform.engine_answers = [listed(("qwen3-8-27b", False))]
+    cfg = await resolve_scorer_config()
     assert cfg.origin == "platform"
     assert cfg.model == "deepseek-v4-flash"
+
+
+async def test_scorer_skips_a_service_the_engine_no_longer_lists(platform):
+    from tests.services.ai.test_platform_provider import engine_row, listed
+
+    platform.rows = [
+        engine_row("nous-gone", "gone-llm"),
+        engine_row("nous-here", "here-llm"),
+    ]
+    platform.engine_answers = [listed(("here-llm", True))]
+    cfg = await resolve_scorer_config()
+    assert cfg.model == "here-llm"
+
+
+async def test_scorer_governance_off_has_no_platform_pick(platform):
+    from tests.services.ai.test_platform_provider import catalog_row
+
+    platform.governance = False
+    platform.rows = [catalog_row("nous-a")]
+    cfg = await resolve_scorer_config()
+    assert cfg.origin == "env" and cfg.model == ""
+
+
+async def test_scorer_pool_is_the_same_rows_in_the_same_order(platform):
+    """``TopicScorerService._nous_candidates`` (the real failover pool) and
+    the health reporter read one computation: same rows, same rank."""
+    from app.services.topics.topic_scorer import TopicScorerService
+    from tests.services.ai.test_platform_provider import (
+        catalog_row,
+        engine_row,
+        listed,
+    )
+
+    platform.rows = [
+        engine_row("nous-idle", "idle-llm"),
+        engine_row("nous-gone", "gone-llm"),
+        catalog_row("bad", last_test_status="fail"),
+        catalog_row("good", actual_model="good-llm"),
+    ]
+    platform.engine_answers = [listed(("idle-llm", False))]
+    pool = await TopicScorerService()._nous_candidates()
+    assert [model for _, model in pool] == ["good-llm", "idle-llm"]
+    cfg = await resolve_scorer_config()
+    assert cfg.model == pool[0][1]
+
+
+async def test_scorer_pool_is_empty_when_governance_is_off(platform):
+    from app.services.topics.topic_scorer import TopicScorerService
+    from tests.services.ai.test_platform_provider import catalog_row
+
+    platform.governance = False
+    platform.rows = [catalog_row("good")]
+    assert await TopicScorerService()._nous_candidates() == []
 
 
 async def test_scorer_nothing_configured_degrades_not_raises():

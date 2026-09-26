@@ -14251,9 +14251,10 @@ export interface paths {
         };
         /**
          * Vector Space Catalog
-         * @description Catalog models Add Space may pick: enabled PLATFORM embedding rows
-         *     only (public fields) — never the caller's own owner-scoped rows, which
-         *     must never back a shared space.
+         * @description Catalog models Add Space may pick: the platform provider view's
+         *     system rows of type ``embedding`` (public fields, live status, engine
+         *     state) — never the caller's own owner-scoped rows, which must never back
+         *     a shared space.
          */
         get: operations["vector_space_catalog_api_v1_search_vectors_catalog_get"];
         put?: never;
@@ -19542,9 +19543,14 @@ export interface components {
         };
         /**
          * AiNousModelsResponse
-         * @description ``GET /search/vectors/catalog``: platform embedding rows.
+         * @description ``GET /search/vectors/catalog``: platform embedding rows from the
+         *     platform provider view's system computation (governance, engine state,
+         *     ``fail`` rows dropped). ``last_test_status`` carries the live status
+         *     (``ok`` / ``idle`` / ``not_probed``), the same value
+         *     ``platform_models[name].status`` has on the AI settings.
          */
         AiNousModelsResponse: {
+            engine?: components["schemas"]["AiPlatformEngineState"] | null;
             /** Models */
             models: components["schemas"]["AiNousModelPublic"][];
         };

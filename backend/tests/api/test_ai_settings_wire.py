@@ -465,9 +465,7 @@ async def test_view_failure_is_unknown_not_empty(
 ) -> None:
     import app.services.ai.platform_provider as pp
 
-    monkeypatch.setattr(
-        pp, "live_platform_rows", AsyncMock(side_effect=RuntimeError("db down"))
-    )
+    monkeypatch.setattr(pp, "_compute", AsyncMock(side_effect=RuntimeError("db down")))
     body = (await client.get("/api/v1/ai/settings")).json()
     assert body["platform_models"] is None and body["platform_engine"] is None
     assert body["ai_providers"]["nous"]["disabled_models"] == ["nous-doubao"]

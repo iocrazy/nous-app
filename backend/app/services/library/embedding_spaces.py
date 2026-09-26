@@ -16,7 +16,7 @@ a space, deleting the catalog row does (``space_catalog_row_missing``).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
@@ -111,11 +111,24 @@ async def config_for_catalog_model(name: str) -> EmbeddingConfig:
     return platform_embedding_config(provider_cfg, actual_model)
 
 
-async def platform_embedding_models() -> List[Dict[str, Any]]:
-    """Enabled PLATFORM embedding rows (public fields) — what Add Space may
-    pick. No viewer: ``list_enabled`` then fails closed to owner-less rows,
-    so an admin's own BYOK rows are not offered."""
-    return await _repo().list_enabled("embedding")
+async def platform_embedding_models() -> Dict[str, Any]:
+    """What Add Space may pick: ``{"models": [public rows], "engine": …}``.
+
+    The platform provider view's SYSTEM computation (``platform_rows`` with
+    no user): governance, live engine state, ``fail`` rows dropped, and
+    platform-wide rows only — a space is shared, so neither an admin's own
+    owner-scoped rows nor their personal blacklist apply. Each row's
+    ``last_test_status`` is the live status (``ok`` / ``idle`` /
+    ``not_probed``). A failed read degrades to no models (logged)."""
+    from app.services.ai.platform_provider import platform_rows_and_engine
+
+    rows, engine = await platform_rows_and_engine(
+        None, type="embedding", purpose="system"
+    )
+    return {
+        "models": [r.model.public_row() for r in rows],
+        "engine": engine.as_dict() if engine else None,
+    }
 
 
 async def catalog_name_for(actual_model: str) -> Optional[str]:
