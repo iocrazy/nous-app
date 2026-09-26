@@ -90,6 +90,28 @@ issue 触发的轮次（`issue_dispatch` / `issue_dispatch_auto` / `issue_reply`
 
 **全部在缓存边界之后**，对稳定前缀没有影响；逐轮变化只改边界之后那一段。
 
+### 工具 schema：`ResourceFetch`（1:1 聊天）
+
+#### What the model sees
+
+本轮 @-mention 解析出至少一条**资源**引用时（只 @ 了 `prompt` 类资产、没有可取的资源时不挂），`AILibraryChatService` 把下面这份内联 schema 追加到 composer 产出的 `tools` 末尾（在 `GenerateImage` / `GenerateVideo` 之前），并把本轮可访问的资源 id 集合绑进 runner 的 `resource_fetch_handler` 闭包。逐字如下：
+
+```json
+{"type": "function", "function": {"name": "ResourceFetch", "description": "Load content for a resource listed in <available_resources>. Call with the resource id and an optional mode.", "parameters": {"type": "object", "properties": {"resource_id": {"type": "string", "description": "id attribute from <available_resources>."}, "mode": {"type": "string", "description": "How to read the resource. Defaults vary by kind — see system message for details."}, "args": {"type": "object", "description": "Optional extra args (e.g. {page: 2} for PDF)."}}, "required": ["resource_id"]}}}
+```
+
+它与团队频道 @agent 那份同名 schema（`app/services/chat/README.md`）**描述不同**：这份指向系统消息里的 `<available_resources>` 目录（见 `../prompts/README.md`），那份说「available in this conversation」。两份各有各的块，谁也不能替对方过守卫。
+
+执行体是 `services/ai/tools/resource_fetch_tool.resource_fetch`：成功 `{"content": …, "meta": {"name", "mode"}}`，失败 `{"error": "<短句>"}`；只认本轮绑定的 id 集合，模型伪造的 id 拿到的是错误而不是内容。图片结果的两种注记与本轮没挂此工具时的错误文案见 `../runner/README.md`；墙钟上限 200s 的超时结果见 `../prompts/README.md`。
+
+#### Token effect
+
+schema 固定约 140 token（紧凑 JSON 584 字符），只在有资源引用的轮次出现。工具结果的大小由资源决定：文本类按 mode 返回正文或摘要，图片走多段内容（见 runner README 的图片注记），本工具自身不截断，进上下文后受 runner 的单条消息上限约束。同一轮内对同一资源的重复调用由 `request_cache` 命中，不重复读取。
+
+#### KV Cache effect
+
+`tools` 在多数 provider 侧位于系统消息之前的前缀里。这份 schema **按轮出现**：同一会话里有 @-mention 的轮次与没有的轮次 `tools` 不同，所以两类轮次各是一个前缀族，在两类之间切换就换一次前缀；改这份 schema 的任何一个字会让有 @-mention 的前缀族一次性失效。工具结果是 append-only 的工具消息。
+
 ## Known Limitations and Deferred Work
 
 - **200 条窗口滑动**：会话一过 200 条，每轮第 0 条都变，消息列表前缀每轮失效。

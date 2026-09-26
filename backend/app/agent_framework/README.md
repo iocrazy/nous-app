@@ -308,6 +308,28 @@ Rules:
 
 **独立请求**：这是另一个客户端自己的请求，完全在本仓缓存契约之外。本模块的改动只影响外部客户端看到的工具清单。
 
+### 出站 MCP 工具（agent 连接的第三方 server）
+
+#### What the model sees
+
+与上一块方向相反：这里是**我们的模型**调用用户登记的第三方 MCP server。用户在 `user_mcp_servers`（mig 194）里启用的每一行，由 `services/ai/chat/ai_library_chat_wiring.py` 装进 `MCPOutboundRegistry`（`mcp_outbound_registry.py`）；今天只有 1:1 聊天路装配它，用户一行都没启用时 registry 为 `None`，模型什么都看不到。
+
+有 registry 时，`AgentRunner.run_turn` 与 `stream_turn` 每轮调一次 `all_tools()`，经 `_mcp_tools_to_openai_format`（`services/ai/runner/agent_runner.py`）把每个工具追加到 composer 产出的 `tools` **末尾**。每个工具的形状：
+
+```json
+{"type": "function", "function": {"name": "{server}.{tool}", "description": "{server 给的 description，缺省为空串}", "parameters": {"...": "server 给的 inputSchema 原样，缺省 {\"type\": \"object\"}"}}}
+```
+
+`{server}` 是用户给这台 server 起的名字，`{tool}` 是 server 在 `tools/list` 里报的名字。**名字、描述、参数 schema 三样全部来自第三方 server，原样进模型，不转义、不截断。** 调用结果也是 server 返回什么就进工具消息什么；只有传输失败被改写成 `MCP transport failure: …`（`../services/ai/runner/mcp_errors.py`，经 `escape_frame_prose`、截到 500 字符，见 runner README）。某台 server 的 `tools/list` 失败时只丢它自己的工具，本轮照常。
+
+#### Token effect
+
+**没有上限**：条数 = 已启用 server 数 × 每台 server 报的工具数，每条描述与 schema 的长度由对方决定。每个 client 的工具清单缓存 5 分钟（`DEFAULT_TOOLS_CACHE_TTL_SECONDS = 300`），缓存只省网络往返，不省 token——每轮请求都带全部工具。
+
+#### KV Cache effect
+
+追加在 `tools` 末尾，所以不动它前面的内置工具，但 `tools` 在多数 provider 侧位于系统消息之前：server 改了工具清单、用户启用或停用一台 server、或某台 server 本轮 `tools/list` 失败，都会让这位用户的前缀在那一刻失效一次。清单不变时逐轮稳定。工具结果是 append-only 的工具消息。
+
 ## Known Limitations and Deferred Work
 
 - **循环守卫警告的注入位置与工具结果交错**（fh5 T1 留票）。`run_turn` 缓冲路在逐个调用的循环里注入，触发的调用不是最后一个时，警告夹在同一个 assistant 轮的两条工具结果之间：`claude` 协议靠 adapter 的合并与 `tool_result` 提前兜住，OpenAI 兼容 provider 可能拒绝 `tool` 回复之间的非 tool 消息。流式路注入后 `break`，同一轮剩下的调用**没有**工具结果，两种 API 都会拒绝。修法是把缓冲路的注入挪到循环之后、流式路给跳过的调用补结果。
@@ -321,3 +343,4 @@ Rules:
 - **流式路的循环守卫触发后 `break` 跳出本批工具**：同一条 assistant 消息里排在后面的 tool_call 既不执行、也不补合成结果（AskUser 停靠路径会补 `skipped` 结果，这里不会）。流式路今天不是生产路径（生产 adapter 是没有 `stream` 的 `LLMFallbackChain`），但它一旦启用，这些孤立的 tool_call 会让 Anthropic 形状的 provider 回 400。
 - **`multimodal` 的 `alt_text` 是用户设的文件名，未转义**。它不在任何我们拥有的框里，所以 #2472 没有处理，留票。
 - **MCP 的 agent 工具不执行 agent**，只回人设（`mcp_tool_registration.py` docstring 写明推迟）；skill 描述缺失时退到 name / slug。
+- **出站 MCP 的名字、描述、参数 schema 与调用结果原样进模型**（fh5 T4 登记，留票）。它们来自用户登记的第三方 server，没有转义、没有长度或条数上限；一台恶意或出错的 server 可以用工具描述塞入任意指令文本，也可以用上百个工具撑大每轮请求。要收口就在 `_mcp_tools_to_openai_format` 给描述加上限并过 `escape_frame_body`、给条数加上限，结果侧另议是否过 `neutralize_external_text`。

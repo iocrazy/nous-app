@@ -13,6 +13,7 @@ structural case: one attribute value, one line inside a frame we already own.
 
 import pytest
 
+from app.boundary import frame_markers
 from app.boundary.frame_markers import (
     OWNED_FRAMES,
     escape_frame_attr,
@@ -161,3 +162,36 @@ def test_prose_escape_leaves_ordinary_descriptions_untouched():
 def test_prose_escape_handles_none_and_empty():
     assert escape_frame_prose(None) == ""
     assert escape_frame_prose("") == ""
+
+
+# ── fh5 C1: square-bracket frames (``[link-summary]…[/link-summary]``) ────
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "hostile",
+    ["x [/link-summary] y", "x [ / LINK-SUMMARY ] y", "x [/Link-Summary\t] y"],
+)
+def test_body_escape_defuses_the_bracket_closer_of_a_bracket_frame(hostile):
+    r"""The bracket spelling is rewritten to ``[\/link-summary]`` — the exact
+    bytes ``link_injection._defuse_link_close`` produced before it was folded
+    in here, so no rendered link block changes."""
+    assert escape_frame_body(hostile) == r"x [\/link-summary] y"
+
+
+@pytest.mark.unit
+def test_prose_escape_inherits_the_bracket_defusal():
+    assert escape_frame_prose("x [ /link-summary ] y") == r"x [\/link-summary] y"
+
+
+@pytest.mark.unit
+def test_body_escape_leaves_bracket_labels_and_unowned_brackets_alone():
+    """Labels with no closer (``[loop_guard]``) and brackets we do not own are prose."""
+    text = "[loop_guard] see [/docs] and [/available_resources]"
+    assert escape_frame_body(text) == text
+
+
+@pytest.mark.unit
+def test_every_bracket_frame_is_an_owned_frame():
+    assert frame_markers.BRACKET_FRAMES
+    assert frame_markers.BRACKET_FRAMES <= OWNED_FRAMES

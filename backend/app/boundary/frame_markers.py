@@ -55,11 +55,10 @@ OWNED_FRAMES: Final[frozenset[str]] = frozenset(
         "graph_facts",
         # harness p4 §1-③: a claimed inbox item injected at a step boundary
         "inbox_message",
-        # 链接摘要块（services/ai/prompts/link_injection.py）。⚠️ 它是方括号框
-        # ``[link-summary …]…[/link-summary]``，不是尖括号框：本表驱动的
-        # ``_CLOSE_RE`` 只认 ``</name>``，所以方括号闭合由 link_injection 自己
-        # 的 ``_defuse_link_close`` 负责；登记在这里是为了让尖括号拼写
-        # ``</link-summary>`` 同样关不掉它，并让这张表完整列出我们拥有的框。
+        # 链接摘要块（services/ai/prompts/link_injection.py）。它是方括号框
+        # ``[link-summary …]…[/link-summary]``，所以同时登记在下面的
+        # BRACKET_FRAMES：``[/link-summary]`` 与 ``</link-summary>`` 两种拼写
+        # 都由 escape_frame_body 转义。
         "link-summary",
         "pending_followups",
         # script_ai_service 元素批改重试：上一次 dry-run 的 OpError 文本，
@@ -88,10 +87,27 @@ OWNED_FRAMES: Final[frozenset[str]] = frozenset(
     }
 )
 
+# Owned frames rendered with SQUARE brackets: ``[name …]…[/name]``. Their
+# ``[/name]`` closer is defused by ``escape_frame_body`` alongside ``</name>``
+# (the angle spelling stays defused too — a model reads both as the close).
+# `test_every_bracket_frame_is_registered_as_a_bracket_frame` in
+# tests/services/ai/prompts/test_frame_escape_wiring.py discovers bracket
+# frames in app/ and fails if one is rendered but missing here.
+BRACKET_FRAMES: Final[frozenset[str]] = frozenset({"link-summary"})
+assert BRACKET_FRAMES <= OWNED_FRAMES, "every bracket frame must be an owned frame"
+
 # `</ scene_elements >` closes the element in every real parser, and an LLM
 # reads it the same way, so tolerate whitespace inside the tag.
 _CLOSE_RE: Final = re.compile(
     r"</\s*(" + "|".join(re.escape(f) for f in sorted(OWNED_FRAMES)) + r")\s*>",
+    re.IGNORECASE,
+)
+
+# ``[ / link-summary ]`` likewise. Rewritten to the canonical lower-case name
+# (``[\/link-summary]``) — byte-identical to what link_injection's private
+# defuser produced before it moved here, so no rendered block changed.
+_BRACKET_CLOSE_RE: Final = re.compile(
+    r"\[\s*/\s*(" + "|".join(re.escape(f) for f in sorted(BRACKET_FRAMES)) + r")\s*\]",
     re.IGNORECASE,
 )
 
@@ -110,10 +126,14 @@ def escape_frame_body(text: Any) -> str:
     Unowned tags (``</div>``, ``</think>``) are left alone on purpose: a
     screenplay may legitimately quote them, and mangling every angle bracket
     costs readability for no security gain — only OUR frames grant authority.
+
+    Bracket frames (``BRACKET_FRAMES``) also lose their ``[/name]`` closer,
+    rewritten to ``[\\/name]``.
     """
     if not text:
         return ""
-    return _CLOSE_RE.sub(lambda m: f"<\\/{m.group(1)}>", str(text))
+    s = _CLOSE_RE.sub(lambda m: f"<\\/{m.group(1)}>", str(text))
+    return _BRACKET_CLOSE_RE.sub(lambda m: f"[\\/{m.group(1).lower()}]", s)
 
 
 def escape_frame_close(text: Any, frame: str, *, bracket: bool = False) -> str:
