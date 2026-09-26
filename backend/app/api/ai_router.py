@@ -10,7 +10,6 @@ Supports both platform_id-based (legacy) and resource_id-based triggers.
 """
 
 import time
-import uuid
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -46,6 +45,7 @@ from app.schemas.shots import (
 )
 from app.services.billing import transcription_billing
 from app.services.billing.points_service import PointsService
+from app.services.library.shot_dispatch import dispatch_index_shots
 from app.services.library.shot_index import ShotIndexError
 
 router = APIRouter(prefix="/ai", tags=["AI"])
@@ -1925,45 +1925,10 @@ def _shot_index_http_error(e: ShotIndexError) -> HTTPException:
     )
 
 
-async def _dispatch_index_shots(
-    *, user_id: str, resource_id: str, title: str, flow_id: Optional[str]
-) -> str:
-    """Create the ``index_shots`` task row and start its workflow; the row is
-    failed (``DISPATCH_ERROR``) when the start itself fails so nothing sits
-    queued forever. Returns the workflow id (= task id)."""
-    from app.services.infra.dbos_orchestrator import start_workflow_routed
-    from app.services.infra.unified_task_manager import get_task_manager
-    from app.workflows.index_shots import TASK_TYPE as INDEX_SHOTS_TASK_TYPE
-    from app.workflows.index_shots import index_shots_workflow
-
-    manager = get_task_manager()
-    wf_id = str(uuid.uuid4())
-    await manager.create(
-        user_id=user_id,
-        task_type=INDEX_SHOTS_TASK_TYPE,
-        title=f"Index shots · {title}"[:200],
-        subtitle="Queued",
-        resource_id=str(resource_id),
-        dbos_workflow_id=wf_id,
-        flow_id=flow_id,
-        metadata={"shots": {"resource_id": str(resource_id)}},
-    )
-    try:
-        await start_workflow_routed(
-            INDEX_SHOTS_TASK_TYPE,
-            dbos_workflow_callable=index_shots_workflow,
-            dbos_workflow_kwargs={"resource_id": str(resource_id), "user_id": user_id},
-            workflow_id=wf_id,
-        )
-    except Exception as e:
-        try:
-            await manager.fail(
-                wf_id, f"Dispatch failed: {str(e)[:180]}", error_code="DISPATCH_ERROR"
-            )
-        except Exception as fail_err:  # noqa: BLE001
-            logger.error(f"index-shots: could not fail orphan task {wf_id}: {fail_err}")
-        raise
-    return wf_id
+# The dispatch lives in ``services.library.shot_dispatch`` (shared with the
+# download chain and the backfill sweeper); the module-level name stays so
+# the endpoint tests keep patching ``ai_router._dispatch_index_shots``.
+_dispatch_index_shots = dispatch_index_shots
 
 
 @router.post(

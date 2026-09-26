@@ -149,3 +149,28 @@ def test_workflow_autopilot_quota_object() -> None:
     for bad in (20, {"daily_auto_runs": -1}, {"daily_auto_runs": "x"}):
         with pytest.raises(SettingValidationError):
             validate_setting_value("workflow_autopilot", bad)
+
+
+# ----------------------------------------------------- shot-index automation ----
+@pytest.mark.parametrize(
+    "key", ["ai_module.shots.auto_index", "ai_module.shots.backfill"]
+)
+def test_shots_modes_are_whitelisted(key: str) -> None:
+    assert validate_setting_value(key, ' "Always" ') == "always"
+    assert validate_setting_value(key, "local_only") == "local_only"
+    with pytest.raises(SettingValidationError):
+        validate_setting_value(key, "sometimes")
+
+
+def test_shots_batch_and_daily_cap_ranges() -> None:
+    assert validate_setting_value("ai_module.shots.backfill_batch", "10") == 10
+    assert validate_setting_value("ai_module.shots.backfill_daily_cap", 0) == 0
+    for key, bad in [
+        ("ai_module.shots.backfill_batch", 0),
+        ("ai_module.shots.backfill_batch", 51),
+        ("ai_module.shots.backfill_daily_cap", -1),
+        ("ai_module.shots.backfill_daily_cap", 10_001),
+        ("ai_module.shots.backfill_daily_cap", "many"),
+    ]:
+        with pytest.raises(SettingValidationError):
+            validate_setting_value(key, bad)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 from types import SimpleNamespace
 from typing import Any, List
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -242,6 +243,11 @@ def _wire(
     monkeypatch.setattr(search_router, "catalog_name_for", _catalog_name)
     if not real_active:
         monkeypatch.setattr(search_router, "active_actual_model", _active_model)
+
+    async def _policy(visual_space):
+        return None
+
+    monkeypatch.setattr(search_router, "_shots_policy_status", _policy)
     monkeypatch.setattr(search_router, "visual_actual_model", _visual_model)
     monkeypatch.setattr(search_router, "visual_follows_active", _follows)
     monkeypatch.setattr(
@@ -673,3 +679,121 @@ async def test_catalog_lists_platform_embedding_rows_only(monkeypatch):
     monkeypatch.setattr(search_router, "platform_embedding_models", _platform)
     out = await search_router.vector_space_catalog(_AUTH)
     assert out == {"models": rows, "engine": None}
+
+
+# ----------------------------------------------------------- shots policy ----
+@pytest.mark.asyncio
+async def test_set_shots_policy_is_admin_only_and_writes_then_answers_status(
+    monkeypatch,
+):
+    from app.schemas.search import ShotsPolicyUpdate
+
+    route = next(
+        r
+        for r in search_router.router.routes
+        if r.path == "/search/vectors/shots-policy" and "PUT" in r.methods
+    )
+    assert get_admin_auth in [d.call for d in route.dependant.dependencies]
+
+    w = _wire(monkeypatch)
+    written = []
+
+    async def _write(fields, admin_id):
+        written.append((fields, admin_id))
+        return SimpleNamespace(__dict__={"backfill": "always", "batch": 3})
+
+    monkeypatch.setattr(search_router, "write_shots_policy", _write)
+    out = await search_router.set_shots_policy(
+        ShotsPolicyUpdate(backfill="always", batch=3), _AUTH, _REQ
+    )
+    assert written == [({"backfill": "always", "batch": 3}, "admin-1")]
+    assert w.audits[-1]["action"] == "set_shots_policy"
+    assert out.status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_set_shots_policy_422_names_the_field(monkeypatch):
+    from app.schemas.search import ShotsPolicyUpdate
+    from app.services.library.shot_policy import PolicyValueError
+
+    _wire(monkeypatch)
+
+    async def _write(fields, admin_id):
+        raise PolicyValueError("batch", "an integer in [1, 50]")
+
+    monkeypatch.setattr(search_router, "write_shots_policy", _write)
+    with pytest.raises(HTTPException) as exc:
+        await search_router.set_shots_policy(ShotsPolicyUpdate(batch=7), _AUTH, _REQ)
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "policy_invalid"
+    assert exc.value.detail["field"] == "batch"
+
+
+@pytest.mark.asyncio
+async def test_shots_policy_status_reads_policy_state_counts(monkeypatch):
+    from app.services.library.shot_policy import BackfillState, ShotsPolicy
+
+    monkeypatch.setattr(
+        search_router,
+        "read_shots_policy",
+        AsyncMock(return_value=ShotsPolicy("local_only", "always", 5, 200)),
+    )
+    monkeypatch.setattr(
+        search_router,
+        "read_backfill_state",
+        AsyncMock(
+            return_value=BackfillState(
+                "2026-09-26",
+                37,
+                last_tick="t",
+                last_error=None,
+                last_skip="backpressure",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        search_router, "visual_provider_is_local", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        "app.services.infra.unified_task_manager.get_task_manager",
+        lambda: SimpleNamespace(count_active_by_type=AsyncMock(return_value=3)),
+    )
+    pending_calls = []
+
+    async def _pending_all(**kw):
+        pending_calls.append(kw)
+        return [], 1081
+
+    monkeypatch.setattr(
+        search_router,
+        "get_video_shot_embeddings_repository",
+        lambda: SimpleNamespace(pending_all=_pending_all),
+    )
+    out = await search_router._shots_policy_status({"id": 42})
+    assert out.model_dump() == {
+        "auto_index": "local_only",
+        "backfill": "always",
+        "batch": 5,
+        "daily_cap": 200,
+        "provider_local": True,
+        "dispatched_today": 37,
+        "active": 3,
+        "pending_total": 1081,
+        "last_tick": "t",
+        "last_error": None,
+        "last_skip": "backpressure",
+    }
+    assert pending_calls[0]["space_id"] == 42 and pending_calls[0]["limit"] == 0
+    # No visual space: nothing to count pending against.
+    out = await search_router._shots_policy_status(None)
+    assert out.pending_total is None and len(pending_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_shots_policy_status_is_none_only_when_the_policy_is_unreadable(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        search_router, "read_shots_policy", AsyncMock(side_effect=RuntimeError("db"))
+    )
+    assert await search_router._shots_policy_status(None) is None

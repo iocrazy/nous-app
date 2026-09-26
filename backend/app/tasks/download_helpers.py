@@ -768,6 +768,60 @@ async def maybe_chain_ai_pipeline(
         )
 
 
+async def maybe_chain_index_shots(
+    platform_id: str,
+    user_id: str,
+    *,
+    flow_id: str | None = None,
+    video_title: str = "",
+):
+    """Chain shot indexing (the Visual retrieval layer) after download when
+    the admin policy allows — ``ai_module.shots.auto_index``: ``always`` /
+    ``local_only`` (the visual embedder is nous-engine) / ``off`` — or when
+    the resource carries the ``shots`` intent tag (which overrides the
+    policy). Spec 2026-09-26 §3.2. Best-effort like every chain helper: a
+    failure here never fails the download workflow.
+
+    Awaited from ``download.chain_followups_step`` (a workflow body, inside
+    the caller's USER scope) — the dispatch starts a workflow and must not
+    run inside a ``@DBOS.step``."""
+    try:
+        from app.repositories.resources_repository import ResourcesRepository
+        from app.services.library.shot_dispatch import dispatch_index_shots
+        from app.services.library.shot_policy import dispatch_decision
+
+        resource = await ResourcesRepository().get_resource_by_platform_id(platform_id)
+        if not resource:
+            logger.info(f"[Shots/Chain] No resource for platform_id={platform_id}")
+            return
+        mime = (resource.get("mime_type") or "").lower()
+        if not (mime.startswith("video/") or resource.get("file_type") == "video"):
+            logger.debug(f"[Shots/Chain] Not a video ({mime}), skip: {platform_id}")
+            return
+        resource_id = str(resource["id"])
+        forced = "shots" in await read_resource_tag_slugs(resource_id)
+        decision = await dispatch_decision("auto_index", force=forced)
+        if not decision.dispatch:
+            logger.info(
+                f"[Shots/Chain] skip resource={resource_id}: {decision.reason}"
+                + (f" ({decision.detail})" if decision.detail else "")
+            )
+            return
+        title = (video_title or resource.get("filename") or platform_id or "")[:50]
+        wf_id = await dispatch_index_shots(
+            user_id=user_id, resource_id=resource_id, title=title, flow_id=flow_id
+        )
+        logger.info(
+            f"[Shots/Chain] index_shots chained after download: resource={resource_id} "
+            f"task={wf_id} reason={decision.reason}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"[Shots/Chain] Failed to chain index_shots for {platform_id}: "
+            f"{type(e).__name__}: {e!r}"
+        )
+
+
 # ─── URL availability helpers ─────────────────────────────────────────
 
 

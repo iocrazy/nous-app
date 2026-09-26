@@ -61,7 +61,7 @@
 
 ### 3.2 新下载
 
-`download.chain_followups_step` 末尾加 `maybe_chain_index_shots(resource_id, user_id, flow_id)`（`app/tasks/download_helpers.py`，与 `maybe_chain_ai_pipeline` 同形、best-effort、不失败 workflow）：视频（`_is_video`）且策略允许 → 复用 `ai_router._dispatch_index_shots`（搬到 `app/services/library/shot_dispatch.py`，router 与 helper 都调它）；`flow_id` 透传，Task Center 里挂在同一条下载链上。资源带 `shots` 意图标签时无视策略直接派（PR 5b 的钩子，本期只读标签不写）。
+`download.chain_followups_step` 末尾加 `maybe_chain_index_shots(resource_id, user_id, flow_id)`（`app/tasks/download_helpers.py`，与 `maybe_chain_transcode` 同形、best-effort、不失败 workflow）：视频（`video/*` mime 或 `file_type='video'`）且策略允许 → 复用 `ai_router._dispatch_index_shots`（搬到 `app/services/library/shot_dispatch.py`，router 与 helper 都调它）；策略允许但画面空间解析不了 → 不建任务（否则每支下载都留一条类型化失败行）；`flow_id` 透传，Task Center 里挂在同一条下载链上。资源带 `shots` 意图标签时无视策略直接派（PR 5b 的钩子，本期只读标签不写）。
 
 ### 3.3 存量回填（scheduled）
 
@@ -71,13 +71,14 @@
 2. 背压：`task_tracking` 里 `index_shots` 活跃（queued/in_progress）≥ batch → 返回。
 3. 网络 provider 且当天已派 ≥ daily_cap → 返回。
 4. 候选 = `pending_for_user` 的跨用户版 `pending_all(space_id, kind, algo_version, limit=batch)`（同一条 SQL 去掉 creator 过滤，按 resource id 升序，missing 优先），逐支 `_dispatch_index_shots(flow_id=None)`；派发本身在 workflow 体里，不在 step 里（DBOS 约束，同 sweeper）。
-5. 计数进 `system_settings` 的 `ai_module.shots.backfill_state`（json：`{day, dispatched_today, last_tick, last_error}`），面板读它。
+5. 计数进 `system_settings` 的 `ai_module.shots.backfill_state`（json：`{day, dispatched_today, last_tick, last_error, last_skip}`——`last_skip` 是上一 tick 没派的原因，如 `backpressure` / `daily_cap` / `nothing_pending`，与 `last_error` 分开：正常的「没活干」不是错误），面板读它。
+6. 背压按空位补：活跃 `a < batch` 时本 tick 最多派 `batch − a` 支（不是「一有活跃就整批不派」，也不是「不管活跃派整批」）；网络 provider 再与 `daily_cap − dispatched_today` 取小。
 
 路线 C 不变：每支仍是一行 `index_shots`，失败 raise。
 
 ### 3.4 状态
 
-`GET /search/vectors/status` 加 `shots_policy: {auto_index, backfill, batch, daily_cap, provider_local: bool, dispatched_today, active, pending_total, last_tick, last_error}`（非 admin 也可读，只有写要 admin）。`PUT /search/vectors/shots-policy`（admin）写四个键，白名单校验取值。
+`GET /search/vectors/status` 加 `shots_policy: {auto_index, backfill, batch, daily_cap, provider_local: bool|null, dispatched_today, active, pending_total, last_tick, last_error, last_skip}`（非 admin 也可读，只有写要 admin；`provider_local` null = 判定不了，按非本地处理）。`PUT /search/vectors/shots-policy`（admin）写四个键，白名单校验取值。
 
 ### 3.5 UI（Vectors 面板新增 Indexing Policy 段）
 

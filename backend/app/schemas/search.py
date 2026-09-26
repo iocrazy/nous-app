@@ -277,6 +277,39 @@ VisualStatus = Literal[
 ]
 
 
+class ShotsPolicyStatus(BaseModel):
+    """``GET /search/vectors/status``.``shots_policy`` — the shot-index
+    automation (spec 2026-09-26 §3) and the sweeper's progress.
+
+    ``provider_local``: the visual layer's embedder is nous-engine (free);
+    null when it cannot be told. Under ``local_only`` a non-local provider
+    means nothing runs — the UI says so. ``active`` = ``index_shots`` tasks
+    queued / running (every user); ``pending_total`` = videos still without
+    a frame vector in the visual space (every user)."""
+
+    auto_index: Literal["off", "local_only", "always"]
+    backfill: Literal["off", "local_only", "always"]
+    batch: int
+    daily_cap: int
+    provider_local: Optional[bool] = None
+    dispatched_today: int = 0
+    active: int = 0
+    pending_total: Optional[int] = None
+    last_tick: Optional[str] = None
+    last_error: Optional[str] = None
+    last_skip: Optional[str] = None
+
+
+class ShotsPolicyUpdate(BaseModel):
+    """``PUT /search/vectors/shots-policy``: only the fields sent are
+    written. ``batch`` 1–50, ``daily_cap`` 0–10000 (0 = no cap)."""
+
+    auto_index: Optional[Literal["off", "local_only", "always"]] = None
+    backfill: Optional[Literal["off", "local_only", "always"]] = None
+    batch: Optional[int] = Field(default=None, ge=1, le=50)
+    daily_cap: Optional[int] = Field(default=None, ge=0, le=10_000)
+
+
 class VectorsStatusResponse(BaseModel):
     """``GET /search/vectors/status``.
 
@@ -302,6 +335,8 @@ class VectorsStatusResponse(BaseModel):
     can_manage: bool = False
     visual_space: Optional[VisualSpaceInfo] = None
     visual_status: VisualStatus = "embedder_unconfigured"
+    #: Null only when the policy could not be read at all.
+    shots_policy: Optional[ShotsPolicyStatus] = None
 
 
 class SetVisualSpaceRequest(BaseModel):

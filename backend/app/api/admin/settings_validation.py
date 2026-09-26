@@ -198,6 +198,34 @@ def _card_labels(raw: Any) -> dict[str, str]:
 
 _MODULE_BOOL_WHY = "ai_governance reads it with isinstance(bool); strings are ignored"
 
+
+def _shots_mode(raw: Any) -> str:
+    from app.services.library.shot_policy import PolicyValueError, check_mode
+
+    try:
+        return check_mode(raw)
+    except PolicyValueError as e:
+        raise _Invalid(e.reason) from e
+
+
+def _shots_bounded(lo: int, hi: int) -> Callable[[Any], int]:
+    def check(raw: Any) -> int:
+        from app.services.library.shot_policy import (
+            PolicyValueError,
+            check_bounded_int,
+        )
+
+        try:
+            return check_bounded_int(raw, lo, hi)
+        except PolicyValueError as e:
+            raise _Invalid(e.reason) from e
+
+    return check
+
+
+_shots_batch = _shots_bounded(1, 50)
+_shots_daily_cap = _shots_bounded(0, 10_000)
+
 SETTING_VALIDATORS: dict[str, SettingRule] = {
     "agent_cost_anomaly.min_hour_cost_cents": SettingRule(
         _non_negative_number,
@@ -252,6 +280,20 @@ SETTING_VALIDATORS: dict[str, SettingRule] = {
     AI_PROVIDER_CARD_LABELS_KEY: SettingRule(
         _card_labels,
         "admin AI Models page reads {card_key: name}; blank names are dropped",
+    ),
+    # Shot-index automation (spec 2026-09-26 §3.1); readers in
+    # services.library.shot_policy fall back to defaults on anything else.
+    "ai_module.shots.auto_index": SettingRule(
+        _shots_mode, "shot_policy.parse_mode: off / local_only / always"
+    ),
+    "ai_module.shots.backfill": SettingRule(
+        _shots_mode, "shot_policy.parse_mode: off / local_only / always"
+    ),
+    "ai_module.shots.backfill_batch": SettingRule(
+        _shots_batch, "shot_policy: int in [1, 50], videos per sweeper tick"
+    ),
+    "ai_module.shots.backfill_daily_cap": SettingRule(
+        _shots_daily_cap, "shot_policy: int in [0, 10000], 0 = no cap"
     ),
     **{
         f"ai_module.{module}.{flag}": SettingRule(_json_bool, _MODULE_BOOL_WHY)

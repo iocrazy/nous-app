@@ -35,6 +35,8 @@ from app.schemas.search import (
     SearchResultItem,
     SemanticSearchRequest,
     SetVisualSpaceRequest,
+    ShotsPolicyStatus,
+    ShotsPolicyUpdate,
     SpaceInfo,
     SpaceStatus,
     TextSearchRequest,
@@ -74,6 +76,13 @@ from app.services.library.search_service import (
     SearchService,
 )
 from app.services.library.shot_cut import ALGO_VERSION as SHOT_ALGO_VERSION
+from app.services.library.shot_policy import (
+    PolicyValueError,
+    read_backfill_state,
+    read_shots_policy,
+    visual_provider_is_local,
+    write_shots_policy,
+)
 from app.services.search.service import ALL_SEARCH_KINDS, unified_search
 from app.utils.admin_helpers import create_audit_log
 
@@ -600,6 +609,54 @@ async def _visual_info(
     )
 
 
+async def _shots_policy_status(
+    visual_space: Optional[Dict[str, Any]],
+) -> Optional[ShotsPolicyStatus]:
+    """The automation policy and the sweeper's progress; None only when the
+    policy itself cannot be read (each count degrades on its own)."""
+    from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.index_shots import TASK_TYPE as INDEX_SHOTS_TASK_TYPE
+
+    try:
+        policy = await read_shots_policy()
+        state = await read_backfill_state()
+        provider_local = await visual_provider_is_local()
+    except Exception as e:  # noqa: BLE001 — a status row, not the answer
+        logger.error(f"Vector status: shots policy unreadable: {e}")
+        return None
+    active = 0
+    try:
+        active = await get_task_manager().count_active_by_type(INDEX_SHOTS_TASK_TYPE)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Vector status: index_shots active count: {e}")
+    pending_total: Optional[int] = None
+    if visual_space is not None:
+        try:
+            _, pending_total = await get_video_shot_embeddings_repository().pending_all(
+                space_id=int(visual_space["id"]),
+                kind=FRAME_KIND,
+                algo_version=SHOT_ALGO_VERSION,
+                limit=0,
+            )
+        except EmbeddingStoreMissing:
+            pending_total = None
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Vector status: shots pending count: {e}")
+    return ShotsPolicyStatus(
+        auto_index=policy.auto_index,
+        backfill=policy.backfill,
+        batch=policy.batch,
+        daily_cap=policy.daily_cap,
+        provider_local=provider_local,
+        dispatched_today=state.dispatched_today,
+        active=active,
+        pending_total=pending_total,
+        last_tick=state.last_tick,
+        last_error=state.last_error,
+        last_skip=state.last_skip,
+    )
+
+
 @router.get("/vectors/status", response_model=VectorsStatusResponse)
 async def vectors_status(auth: AuthDep):
     """How much of the caller's library has a vector, per retrieval layer —
@@ -644,6 +701,7 @@ async def vectors_status(auth: AuthDep):
             can_manage=can_manage,
             visual_space=await _visual_info(visual_space, follows),
             visual_status=visual_status,
+            shots_policy=await _shots_policy_status(visual_space),
         )
     try:
         space = await get_embedding_space_repository().get_or_create(spec)
@@ -672,6 +730,7 @@ async def vectors_status(auth: AuthDep):
         can_manage=can_manage,
         visual_space=await _visual_info(visual_space, follows),
         visual_status=visual_status,
+        shots_policy=await _shots_policy_status(visual_space),
     )
 
 
@@ -959,6 +1018,34 @@ async def clear_visual_space(auth: AdminAuthDep, request: Request):
         target_type="embedding_space",
         target_id="follows_active",
         details={},
+        ip_address=_client_ip(request),
+    )
+    return await vectors_status(auth)
+
+
+@router.put("/vectors/shots-policy", response_model=VectorsStatusResponse)
+async def set_shots_policy(
+    body: ShotsPolicyUpdate, auth: AdminAuthDep, request: Request
+):
+    """Write the shot-index automation policy (spec 2026-09-26 §3.1): the
+    fields sent, whitelist-checked (``off`` / ``local_only`` / ``always``;
+    ``batch`` 1–50; ``daily_cap`` 0–10000). Takes effect on the sweeper's
+    next tick and the next download. Answers with the new status."""
+    fields = body.model_dump(exclude_unset=True)
+    try:
+        policy = await write_shots_policy(fields, auth.user_id)
+    except PolicyValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "policy_invalid", "field": e.field, "message": e.reason},
+        )
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="set_shots_policy",
+        target_type="shots_policy",
+        target_id="ai_module.shots",
+        details={k: v for k, v in fields.items() if v is not None}
+        | {"effective": policy.__dict__},
         ip_address=_client_ip(request),
     )
     return await vectors_status(auth)
