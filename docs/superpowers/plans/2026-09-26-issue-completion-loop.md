@@ -3338,7 +3338,7 @@ git commit -m "feat(issues): CriteriaBlock (editable acceptance criteria) and Ve
 
 - 8 个 Task 的 commit 都在同一分支（或按 PR-A 后端 Task 1–7 / PR-B 前端 Task 8 拆两个 PR，PR-B 基于 PR-A）；`git rebase origin/master` 后 `ahead=N behind=0`。
 - CI 全部 check 显式 pass（fail-closed 门禁脚本）；`schema-drift.yml` 跑过 `tests/db/test_migration_509_acceptance_criteria.py`。
-- 部署顺序不保证迁移先行：代码先到 → `Issues` ORM 多两列会让 `SELECT` 报 42703。**所以合并顺序必须是：先合只含迁移 509 的 PR（迁移链 `run-migration.yml` 跑完、`information_schema` 核到两列），再合代码 PR。**（把 Task 1 的迁移文件单独拆成 PR-0。）
+- 部署顺序不保证迁移先行：代码先到 → `Issues` ORM 多两列会让 `SELECT` 报 42703。schema-drift 门禁两向零容忍，迁移与 ORM 拆不开，所以 **PR-0 = Task 1 的 Step 1–3（迁移 509 + ORM 两列/两 CHECK + transcript 字面量 + `LATEST_MIGRATION`）**，挑 self-hosted runner 空闲时合并（`run-migration.yml` 几秒跑完、`deploy-gpu.yml` 要构建几分钟，迁移通常先落地）；合并后核 `information_schema` 有两列、`application_logs` 无 42703，再合 PR-1（Task 1 其余 + Task 2–7）与 PR-2（Task 8）。
 
 - [ ] **Step 2: 真栈验收（debug 账号，真实 `script_ai` issue）**
 
