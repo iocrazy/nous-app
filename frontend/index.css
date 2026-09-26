@@ -2048,7 +2048,8 @@ body {
   border-radius: 999px;
   opacity: 0;
   transition: opacity 0.3s;
-  background: conic-gradient(from 0deg, #8fb0ff, #c08cff, #ff9bdc, #ffbb7a, #8fb0ff);
+  /* agent-running indicator: semantic --agent only (light/dark each define it) */
+  background: conic-gradient(from 0deg, var(--agent), color-mix(in srgb, var(--agent) 25%, transparent) 70%, var(--agent));
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
 }
