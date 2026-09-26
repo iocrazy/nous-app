@@ -53302,6 +53302,175 @@
         "title": "ShotUpdate",
         "type": "object"
       },
+      "ShotsPolicyStatus": {
+        "description": "``GET /search/vectors/status``.``shots_policy`` — the shot-index\nautomation (spec 2026-09-26 §3) and the sweeper's progress.\n\n``provider_local``: the visual layer's embedder is nous-engine (free);\nnull when it cannot be told. Under ``local_only`` a non-local provider\nmeans nothing runs — the UI says so. ``active`` = ``index_shots`` tasks\nqueued / running (every user); ``pending_total`` = videos still without\na frame vector in the visual space (every user).",
+        "properties": {
+          "active": {
+            "default": 0,
+            "title": "Active",
+            "type": "integer"
+          },
+          "auto_index": {
+            "enum": [
+              "off",
+              "local_only",
+              "always"
+            ],
+            "title": "Auto Index",
+            "type": "string"
+          },
+          "backfill": {
+            "enum": [
+              "off",
+              "local_only",
+              "always"
+            ],
+            "title": "Backfill",
+            "type": "string"
+          },
+          "batch": {
+            "title": "Batch",
+            "type": "integer"
+          },
+          "daily_cap": {
+            "title": "Daily Cap",
+            "type": "integer"
+          },
+          "dispatched_today": {
+            "default": 0,
+            "title": "Dispatched Today",
+            "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_skip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Skip"
+          },
+          "last_tick": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Tick"
+          },
+          "pending_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Total"
+          },
+          "provider_local": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Local"
+          }
+        },
+        "required": [
+          "auto_index",
+          "backfill",
+          "batch",
+          "daily_cap"
+        ],
+        "title": "ShotsPolicyStatus",
+        "type": "object"
+      },
+      "ShotsPolicyUpdate": {
+        "description": "``PUT /search/vectors/shots-policy``: only the fields sent are\nwritten. ``batch`` 1–50, ``daily_cap`` 0–10000 (0 = no cap).",
+        "properties": {
+          "auto_index": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "local_only",
+                  "always"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Index"
+          },
+          "backfill": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "local_only",
+                  "always"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backfill"
+          },
+          "batch": {
+            "anyOf": [
+              {
+                "maximum": 50.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch"
+          },
+          "daily_cap": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Cap"
+          }
+        },
+        "title": "ShotsPolicyUpdate",
+        "type": "object"
+      },
       "ShotsResponse": {
         "description": "``GET /resources/{id}/shots``. ``indexed=false`` with an empty list is\nthe normal answer for a video nobody has indexed — not a 404.",
         "properties": {
@@ -60210,6 +60379,16 @@
             },
             "title": "Layers",
             "type": "array"
+          },
+          "shots_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShotsPolicyStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "space": {
             "anyOf": [
@@ -123640,6 +123819,83 @@
           }
         },
         "summary": "Vector Space Catalog",
+        "tags": [
+          "Search",
+          "Search"
+        ]
+      }
+    },
+    "/api/v1/search/vectors/shots-policy": {
+      "put": {
+        "description": "Write the shot-index automation policy (spec 2026-09-26 §3.1): the\nfields sent, whitelist-checked (``off`` / ``local_only`` / ``always``;\n``batch`` 1–50; ``daily_cap`` 0–10000). Takes effect on the sweeper's\nnext tick and the next download. Answers with the new status.",
+        "operationId": "set_shots_policy_api_v1_search_vectors_shots_policy_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShotsPolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorsStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Shots Policy",
         "tags": [
           "Search",
           "Search"

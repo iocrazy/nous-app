@@ -14265,6 +14265,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search/vectors/shots-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Shots Policy
+         * @description Write the shot-index automation policy (spec 2026-09-26 §3.1): the
+         *     fields sent, whitelist-checked (``off`` / ``local_only`` / ``always``;
+         *     ``batch`` 1–50; ``daily_cap`` 0–10000). Takes effect on the sweeper's
+         *     next tick and the next download. Answers with the new status.
+         */
+        put: operations["set_shots_policy_api_v1_search_vectors_shots_policy_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search/vectors/spaces": {
         parameters: {
             query?: never;
@@ -36551,6 +36574,68 @@ export interface components {
             shot_type?: string | null;
         };
         /**
+         * ShotsPolicyStatus
+         * @description ``GET /search/vectors/status``.``shots_policy`` — the shot-index
+         *     automation (spec 2026-09-26 §3) and the sweeper's progress.
+         *
+         *     ``provider_local``: the visual layer's embedder is nous-engine (free);
+         *     null when it cannot be told. Under ``local_only`` a non-local provider
+         *     means nothing runs — the UI says so. ``active`` = ``index_shots`` tasks
+         *     queued / running (every user); ``pending_total`` = videos still without
+         *     a frame vector in the visual space (every user).
+         */
+        ShotsPolicyStatus: {
+            /**
+             * Active
+             * @default 0
+             */
+            active: number;
+            /**
+             * Auto Index
+             * @enum {string}
+             */
+            auto_index: "off" | "local_only" | "always";
+            /**
+             * Backfill
+             * @enum {string}
+             */
+            backfill: "off" | "local_only" | "always";
+            /** Batch */
+            batch: number;
+            /** Daily Cap */
+            daily_cap: number;
+            /**
+             * Dispatched Today
+             * @default 0
+             */
+            dispatched_today: number;
+            /** Last Error */
+            last_error?: string | null;
+            /** Last Skip */
+            last_skip?: string | null;
+            /** Last Tick */
+            last_tick?: string | null;
+            /** Pending Total */
+            pending_total?: number | null;
+            /** Provider Local */
+            provider_local?: boolean | null;
+        };
+        /**
+         * ShotsPolicyUpdate
+         * @description ``PUT /search/vectors/shots-policy``: only the fields sent are
+         *     written. ``batch`` 1–50, ``daily_cap`` 0–10000 (0 = no cap).
+         */
+        ShotsPolicyUpdate: {
+            /** Auto Index */
+            auto_index?: ("off" | "local_only" | "always") | null;
+            /** Backfill */
+            backfill?: ("off" | "local_only" | "always") | null;
+            /** Batch */
+            batch?: number | null;
+            /** Daily Cap */
+            daily_cap?: number | null;
+        };
+        /**
          * ShotsResponse
          * @description ``GET /resources/{id}/shots``. ``indexed=false`` with an empty list is
          *     the normal answer for a video nobody has indexed — not a 404.
@@ -39416,6 +39501,7 @@ export interface components {
             can_manage: boolean;
             /** Layers */
             layers: components["schemas"]["LayerStatus"][];
+            shots_policy?: components["schemas"]["ShotsPolicyStatus"] | null;
             space?: components["schemas"]["SpaceInfo"] | null;
             /** Spaces */
             spaces?: components["schemas"]["SpaceStatus"][];
@@ -66930,6 +67016,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiNousModelsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_shots_policy_api_v1_search_vectors_shots_policy_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotsPolicyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VectorsStatusResponse"];
                 };
             };
             /** @description Validation Error */

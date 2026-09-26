@@ -394,6 +394,18 @@ async def test_search_coverage_stale_and_pending_agree(pg, fx, orm_dsn):
             and rows[0].resource_id == fx["v2"]
             and rows[0].reason == "stale_algo"
         )
+        # The sweeper's cross-user view agrees, carries the owner, and
+        # ``limit=0`` only counts.
+        all_rows, all_total = await vecs.pending_all(
+            space_id=fx["s1"], kind="frame", algo_version="hist_v1", limit=10
+        )
+        assert all_total >= 1
+        mine = [r for r in all_rows if r.resource_id == fx["v2"]]
+        assert mine and mine[0].user_id == user and mine[0].reason == "stale_algo"
+        none, count_only = await vecs.pending_all(
+            space_id=fx["s1"], kind="frame", algo_version="hist_v1", limit=0
+        )
+        assert none == [] and count_only == all_total
         # In the other space nothing is covered and both are missing again.
         assert await vecs.coverage(user_id=user, space_id=fx["s2"], kind="frame") == (
             0,

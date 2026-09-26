@@ -349,7 +349,7 @@ async def chain_followups_step(
     video_title: str = "",
     media_type: int = 0,
 ) -> None:
-    """Dispatch thumbnail + extract_audio + transcode + AI pipeline.
+    """Dispatch thumbnail + extract_audio + transcode + AI pipeline + shots.
     Best-effort — failures here never fail the workflow.
 
     Every dispatched workflow pre-creates its own task_tracking row
@@ -464,6 +464,7 @@ async def chain_followups_step(
         from app.db.scope import Scope, request_scope
         from app.tasks.download_helpers import (
             maybe_chain_ai_pipeline,
+            maybe_chain_index_shots,
             maybe_chain_transcode,
         )
 
@@ -479,6 +480,11 @@ async def chain_followups_step(
                 platform_id, user_id, flow_id=flow_id, video_title=video_title
             )
             await maybe_chain_ai_pipeline(
+                platform_id, user_id, flow_id=flow_id, video_title=video_title
+            )
+            # Visual layer (spec 2026-09-26 §3.2): policy- or tag-gated shot
+            # indexing, on the same flow as thumbnail / extract_audio.
+            await maybe_chain_index_shots(
                 platform_id, user_id, flow_id=flow_id, video_title=video_title
             )
     except Exception as e:

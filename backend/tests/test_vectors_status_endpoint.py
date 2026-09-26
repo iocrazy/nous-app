@@ -156,6 +156,11 @@ def _wire(
 
     monkeypatch.setattr(search_router, "is_admin_user", _is_admin)
     monkeypatch.setattr(search_router, "catalog_name_for", _catalog_name)
+
+    async def _policy(visual_space):
+        return None
+
+    monkeypatch.setattr(search_router, "_shots_policy_status", _policy)
     monkeypatch.setattr(search_router, "visual_follows_active", _follows)
     monkeypatch.setattr(
         search_router, "resolve_visual_space_and_embedder", _resolve_visual
@@ -277,6 +282,7 @@ async def test_store_missing(monkeypatch, where):
         "can_manage": False,
         "visual_space": None,
         "visual_status": "store_missing",
+        "shots_policy": None,
     }
 
 

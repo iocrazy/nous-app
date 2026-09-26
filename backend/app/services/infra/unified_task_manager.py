@@ -1133,6 +1133,25 @@ class UnifiedTaskManager:
                 by_type[t] = by_type.get(t, 0) + 1
         return {"total": sum(by_type.values()), "by_type": by_type}
 
+    async def count_active_by_type(self, task_type: str) -> int:
+        """Active (pending/processing) tasks of ``task_type`` across EVERY
+        user — the backpressure signal of the shots backfill sweeper (spec
+        2026-09-26 §3.3: no new dispatch while ``batch`` are still running).
+        Same status predicate as :meth:`get_active_counts`."""
+        from sqlalchemy import func, select
+
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            count = await session.scalar(
+                select(func.count())
+                .select_from(TaskTracking)
+                .where(TaskTracking.task_type == task_type)
+                .where(TaskTracking.status.in_(["pending", "processing"]))
+            )
+        return int(count or 0)
+
     async def get_recent_terminal_runs(
         self,
         user_id: str,

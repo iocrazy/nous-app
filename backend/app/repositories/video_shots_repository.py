@@ -73,6 +73,17 @@ class ShotBackfillRow:
     reason: ShotPendingReason = "missing"
 
 
+@dataclass(frozen=True)
+class ShotSweepRow:
+    """A video the backfill sweeper would index — any user's, so it carries
+    the owner the task row is created for."""
+
+    resource_id: int
+    user_id: str
+    title: str
+    reason: ShotPendingReason = "missing"
+
+
 def _store_missing(what: str) -> EmbeddingStoreMissing:
     return EmbeddingStoreMissing(
         f"{what} does not exist in this database (migration 507 not applied)"
@@ -111,6 +122,28 @@ def _search_rows_out(rows: Iterator[Any]) -> list[dict]:
         d["created_at"] = _iso(d.get("created_at"))
         output.append(d)
     return output
+
+
+def _video_resources_all():
+    """Every user's videos the Visual layer could hold: non-trashed web
+    downloads with a parsed_media row that are videos (``file_type='video'``
+    or a ``video/*`` mime) — the same test ``cover_frames._is_video`` applies
+    before touching ffmpeg. Orphans (no creator) are excluded: nobody could
+    own the task row."""
+    return (
+        select(Resources.id)
+        .join(ParsedMedia, ParsedMedia.id == Resources.media_id)
+        .where(Resources.creator_id.isnot(None))
+        .where(Resources.source_type == "web")
+        .where(Resources.is_trashed.is_(False))
+        .where(Resources.media_id.isnot(None))
+        .where(
+            or_(
+                Resources.file_type == "video",
+                func.lower(func.coalesce(Resources.mime_type, "")).like("video/%"),
+            )
+        )
+    )
 
 
 def _video_resources_of(user_id: str):
@@ -449,6 +482,52 @@ class VideoShotEmbeddingsRepository:
                 title=r[2] or "",
                 duration=r[3],
                 reason=r[4],
+            )
+            for r in rows
+        ]
+        return out, total
+
+    async def pending_all(
+        self, *, space_id: int, kind: str, algo_version: str, limit: int
+    ) -> tuple[list[ShotSweepRow], int]:
+        """:meth:`pending_for_user` across every user, for the backfill
+        sweeper: missing first, then OLDEST resource first (a stable order
+        the sweeper walks over successive ticks). ``limit=0`` counts only.
+        Returns ``(first limit rows, total pending)``."""
+        has_vector = self._has_vector(space_id, kind)
+        stale = and_(
+            exists().where(
+                VideoShotIndexes.resource_id == Resources.id,
+                VideoShotIndexes.algo_version != algo_version,
+            ),
+            has_vector,
+        )
+        reason = case((stale, "stale_algo"), else_="missing")
+        base = (
+            _video_resources_all()
+            .add_columns(
+                Resources.creator_id,
+                ParsedMedia.title,
+                reason.label("reason"),
+            )
+            .where(or_(~has_vector, stale))
+        )
+        total_stmt = select(func.count()).select_from(base.subquery())
+        page_stmt = base.order_by(reason.asc(), Resources.id.asc()).limit(limit)
+        try:
+            async with read_scope() as session:
+                total = int((await session.execute(total_stmt)).scalar_one() or 0)
+                rows = (await session.execute(page_stmt)).all() if limit > 0 else []
+        except ProgrammingError as exc:
+            if is_store_missing(exc):
+                raise _store_missing("video_shot_embeddings") from exc
+            raise
+        out = [
+            ShotSweepRow(
+                resource_id=int(r[0]),
+                user_id=str(r[1]),
+                title=r[2] or "",
+                reason=r[3],
             )
             for r in rows
         ]
