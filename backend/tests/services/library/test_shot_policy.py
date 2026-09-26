@@ -256,5 +256,8 @@ async def test_backfill_state_round_trips_through_the_setting(monkeypatch):
     )
     assert s.writes[0][0] == mod.BACKFILL_STATE_SETTING
     assert s.writes[0][1]["dispatched_today"] == 3
+    # updated_by is a uuid column; the sweeper is not a user (2026-09-26: a
+    # string here made every production tick fail before it stamped anything).
+    assert s.writes[0][2] is None
     got = await mod.read_backfill_state()
     assert got.dispatched_today == 3 and got.last_skip == "backpressure"

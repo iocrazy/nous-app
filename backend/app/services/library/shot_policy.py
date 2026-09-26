@@ -324,9 +324,16 @@ async def read_backfill_state() -> BackfillState:
     return parse_backfill_state(raw)
 
 
+#: ``system_settings.updated_by`` is a nullable ``uuid`` (the admin who last
+#: wrote the row). The sweeper is not a user: it writes NULL. A string there
+#: is an asyncpg DataError on every tick — which is exactly how the first
+#: production tick failed (2026-09-26).
+SYSTEM_WRITER = None
+
+
 async def write_backfill_state(state: BackfillState) -> None:
     await get_system_settings_repository().upsert_setting(
-        BACKFILL_STATE_SETTING, state.as_dict(), "shots_backfill_sweep"
+        BACKFILL_STATE_SETTING, state.as_dict(), SYSTEM_WRITER
     )
 
 
