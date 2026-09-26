@@ -262,17 +262,23 @@ def test_turn_end_exception_carries_the_catalog_code():
 def test_every_finish_word_is_known_to_turn_end():
     """Every word of the closed vocabulary either has a non-COMPLETED
     turn_end reason or is explicitly a normal end."""
+    from app.services.ai.provider_contract import parse_finish_reason
+
     normal = {"stop", "tool_calls", "empty", "unknown"}
     vocab = {f.value for f in FinishReason}
-    assert vocab == normal | set(te.FINISH_REASON_MARKERS), vocab ^ (
-        normal | set(te.FINISH_REASON_MARKERS)
-    )
+    known = normal | set(te.FINISH_REASON_MARKERS)
+    assert vocab <= known, vocab - known
+    # the extra raw synonyms turn_end knows must mean what the contract says
+    for word in set(te.FINISH_REASON_MARKERS) - vocab:
+        assert parse_finish_reason(word).value in te.FINISH_REASON_MARKERS, word
 
 
 @pytest.mark.parametrize(
     "finish, reason, code",
     [
         ("content_filter", "error", "PROVIDER_CONTENT_FILTER"),
+        ("sensitive", "error", "PROVIDER_CONTENT_FILTER"),
+        ("refusal", "error", "PROVIDER_CONTENT_FILTER"),
         ("error", "error", "PROVIDER_BAD_RESPONSE"),
         ("length", "provider_length", None),
     ],

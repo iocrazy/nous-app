@@ -300,7 +300,14 @@ class LLMFallbackChain:
                 # calls skip this model until cooldown expires. Use 429
                 # as the proxy status for "exhausted retries" — same
                 # cooldown duration as a single 429.
-                if self.health_registry is not None:
+                #
+                # fh4 T5 review H1: NOT for a content filter. That verdict is
+                # about THIS request, not the model's health — cooling the
+                # model would take it offline for every other turn in the
+                # worker for 60 s (a single-model chain: everything fails).
+                if self.health_registry is not None and not _request_scoped(
+                    attempts[-1].get("error_code")
+                ):
                     self.health_registry.report_status(model, 429)
                 if idx < len(models) - 1:
                     self._switch_log.append(
@@ -370,6 +377,15 @@ class LLMFallbackChain:
 
     def _build_adapter(self, model: str) -> Any:
         return self.adapter_factory(model)
+
+
+# Codes whose failure belongs to the request, not the model: exhausting them
+# must not put the model in cooldown for everyone else.
+_REQUEST_SCOPED_CODES = frozenset({"PROVIDER_CONTENT_FILTER"})
+
+
+def _request_scoped(code: Optional[str]) -> bool:
+    return code in _REQUEST_SCOPED_CODES
 
 
 def _last_error_code(attempts: list[dict]) -> Optional[str]:

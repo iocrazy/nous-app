@@ -178,3 +178,57 @@ async def test_probe_allows_60s(row: dict) -> None:
         await probe_nous_model(row)
 
     assert _RaisingClient.kwargs.get("timeout") == 60.0
+
+
+# ── fh4 T5 review L: the probe reads its reply through the provider contract
+
+
+def _patch_reply(body: dict):
+    real = httpx.AsyncClient
+
+    def _client(*a, **kw):
+        kw["transport"] = httpx.MockTransport(
+            lambda req: httpx.Response(200, json=body)
+        )
+        return real(*a, **kw)
+
+    return patch("app.services.ai.nous_model_health.httpx.AsyncClient", _client)
+
+
+def _reply(content, finish, ctoks):
+    return {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": finish,
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 3,
+            "completion_tokens": ctoks,
+            "total_tokens": 3 + ctoks,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "body, ok, code",
+    [
+        (_reply("pong", "stop", 1), True, None),
+        # reasoning ate the 8-token budget: billed but empty is still a live model
+        (_reply("", "length", 8), True, None),
+        (_reply("", "content_filter", 0), False, "PROVIDER_CONTENT_FILTER"),
+        (_reply("", "stop", 0), False, "PROVIDER_EMPTY_RESPONSE"),
+        (
+            {"error": {"code": "InternalServiceError", "message": "x"}},
+            False,
+            "PROVIDER_BAD_RESPONSE",
+        ),
+    ],
+)
+async def test_chat_probe_reads_the_reply_through_the_contract(body, ok, code) -> None:
+    with _patch_reply(body):
+        out = await probe_nous_model(_LLM_ROW)
+    assert out["ok"] is ok
+    if code:
+        assert out["error"].startswith(code), out["error"]

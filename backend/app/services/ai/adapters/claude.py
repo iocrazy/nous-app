@@ -49,15 +49,22 @@ def _usage(usage: Any) -> Optional[Dict[str, Any]]:
     to be dropped, so every Claude turn was recorded as free."""
     if usage is None:
         return None
-    prompt = _tokens(usage, "input_tokens")
+    # Anthropic's ``input_tokens`` EXCLUDES cache reads and cache writes;
+    # the OpenAI shape (and ``usage_cached``) treats cached tokens as a SUBSET
+    # of ``prompt_tokens``. So prompt = uncached + cache read + cache write,
+    # and ``cached_tokens`` = the read part (fh4 T5 review M1).
+    cached = _tokens(usage, "cache_read_input_tokens")
+    prompt = (
+        _tokens(usage, "input_tokens")
+        + cached
+        + _tokens(usage, "cache_creation_input_tokens")
+    )
     completion = _tokens(usage, "output_tokens")
     return {
         "prompt_tokens": prompt,
         "completion_tokens": completion,
         "total_tokens": prompt + completion,
-        "prompt_tokens_details": {
-            "cached_tokens": _tokens(usage, "cache_read_input_tokens")
-        },
+        "prompt_tokens_details": {"cached_tokens": cached},
     }
 
 

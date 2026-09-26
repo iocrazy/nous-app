@@ -80,12 +80,37 @@ async def test_claude_max_tokens_maps_to_length_and_keeps_usage():
         )
     )
     assert out["choices"][0]["finish_reason"] == "length"
+    # input_tokens excludes cache reads: prompt = 120 uncached + 100 read
     assert out["usage"] == {
-        "prompt_tokens": 120,
+        "prompt_tokens": 220,
         "completion_tokens": 64,
-        "total_tokens": 184,
+        "total_tokens": 284,
         "prompt_tokens_details": {"cached_tokens": 100},
     }
+
+
+async def test_claude_prompt_tokens_include_cache_reads_and_writes():
+    """Review M1: cached tokens are a SUBSET of prompt_tokens everywhere else
+    (usage_cached), so a cache-heavy Claude turn must not bill as tiny."""
+    from app.services.ai.runner.usage_cached import extract_cached_input_tokens
+
+    out = await _claude_call(
+        _anthropic(
+            "end_turn",
+            [_text("ok")],
+            {
+                "input_tokens": 12,
+                "output_tokens": 5,
+                "cache_read_input_tokens": 4000,
+                "cache_creation_input_tokens": 300,
+            },
+        )
+    )
+    usage = out["usage"]
+    assert usage["prompt_tokens"] == 4312
+    assert usage["total_tokens"] == 4317
+    assert extract_cached_input_tokens(usage) == 4000
+    assert extract_cached_input_tokens(usage) <= usage["prompt_tokens"]
 
 
 async def test_claude_refusal_raises_content_filter():

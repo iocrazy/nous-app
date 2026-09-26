@@ -362,3 +362,65 @@ async def test_issue_executor_sees_the_raise_not_an_empty_output(monkeypatch, _w
 
     assert classify_ai_error(ei.value) == "PROVIDER_CONTENT_FILTER"
     forced.assert_not_awaited()
+
+
+# ── review H1: a content filter must not cool the model down ─────────────
+
+
+def _chain_with_registry(wire: dict, primary, fallback, registry) -> LLMFallbackChain:
+    chain = _chain(wire, primary, fallback)
+    chain.health_registry = registry
+    return chain
+
+
+@pytest.mark.parametrize(
+    "name, cooled",
+    [
+        ("content_filter", False),
+        ("http_429_quota_cap", True),
+        ("body_200_error", True),
+    ],
+)
+async def test_only_model_scoped_failures_cool_the_model(name, cooled, _wire):
+    """A content filter is about THIS request. Reporting it to the
+    per-process registry as a 429 took the model offline for every other
+    turn in the worker for 60 s — on a single-model chain, all of them."""
+    from app.agent_framework.model_health import ModelHealthRegistry
+
+    registry = ModelHealthRegistry()
+    await _drive(_chain_with_registry(_wire, SHAPES[name][0], _HEALTHY, registry))
+    assert registry.is_available(PRIMARY) is (not cooled)
+    assert registry.is_available(FALLBACK)
+
+
+async def test_rate_limit_still_cools_the_model(_wire):
+    from app.agent_framework.model_health import ModelHealthRegistry
+
+    registry = ModelHealthRegistry()
+    burst = _json(429, {"error": {"code": "RateLimitExceeded", "message": "rpm"}})
+    await _drive(_chain_with_registry(_wire, burst, _HEALTHY, registry))
+    assert not registry.is_available(PRIMARY)
+
+
+async def test_a_filtered_turn_leaves_the_single_model_chain_usable(_wire):
+    """Single-model chain: after a filtered turn, the next turn on the same
+    worker still reaches the model."""
+    from app.agent_framework.model_health import ModelHealthRegistry
+
+    registry = ModelHealthRegistry()
+    chain = LLMFallbackChain(
+        primary_model=PRIMARY,
+        fallback_models=[],
+        adapter_factory=_chain(
+            _wire, SHAPES["content_filter"][0], _HEALTHY
+        ).adapter_factory,
+        max_retries_per_model=2,
+        base_delay_s=0.0,
+        max_delay_s=0.0,
+        health_registry=registry,
+    )
+    _t, _c, escaped = await _drive(chain)
+    assert escaped is not None
+    _wire["behaviours"][PRIMARY] = _HEALTHY
+    _t, chunks, escaped = await _drive(chain)
+    assert escaped is None and chunks[-1].delta_text == "fine"

@@ -570,11 +570,17 @@ async def probe_nous_model(
                 "dims": None,
                 "code": classify_probe_failure(status_code=r.status_code),
             }
-        ok = bool((r.json() or {}).get("choices"))
+        # Same contract every adapter call passes through (fh4 T5): a 200
+        # carrying an error body, a filtered or an unbilled empty reply is
+        # not a healthy model.
+        from app.services.ai.provider_contract import ProviderOutcome
+
+        outcome = ProviderOutcome.from_envelope(r.json())
+        ok = outcome.kind == "ok"
         return {
             "ok": ok,
             "detail": "chat ok" if ok else "",
-            "error": None if ok else "no choices in response",
+            "error": None if ok else f"{outcome.error_code}: {outcome.detail}"[:200],
             "dims": None,
             "code": (
                 None

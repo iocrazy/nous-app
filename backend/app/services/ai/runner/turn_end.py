@@ -97,8 +97,11 @@ WARNING_MARKERS: dict[str, TurnEndReason] = {
 FINISH_REASON_MARKERS: dict[str, TurnEndReason] = {
     "length": TurnEndReason.PROVIDER_LENGTH,
     "content_filter": TurnEndReason.ERROR,
+    "sensitive": TurnEndReason.ERROR,  # raw provider synonyms of content_filter
+    "refusal": TurnEndReason.ERROR,
     "error": TurnEndReason.ERROR,
 }
+_FILTER_WORDS = frozenset({"content_filter", "sensitive", "refusal"})
 
 
 def result_was_cancelled(result: Optional[dict[str, Any]]) -> bool:
@@ -195,7 +198,7 @@ def _by_finish(
 
         code = (
             PROVIDER_CONTENT_FILTER
-            if finish == "content_filter"
+            if finish in _FILTER_WORDS
             else PROVIDER_BAD_RESPONSE
         )
         return reason, {**extra, "error_code": code}
