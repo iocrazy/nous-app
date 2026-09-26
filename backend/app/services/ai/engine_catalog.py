@@ -45,6 +45,7 @@ import httpx
 from loguru import logger
 
 from app.core.cache import TTLCache
+from app.core.exceptions import AppError
 
 ENGINE_TTL_S = 30.0
 KEEP_LAST_GOOD_S = 600.0
@@ -55,6 +56,30 @@ EMPTY_LIST_ERROR = "engine listed no services (empty list not trusted)"
 
 # ``nous_models.actual_provider`` of rows served by nous-engine.
 NOUS_ENGINE_PROVIDER = "nous"
+
+
+ENGINE_SERVICE_UNAVAILABLE = "engine_service_unavailable"
+
+
+class EngineServiceUnavailableError(AppError, RuntimeError):
+    """nous-engine answered and does not list this row's service for its key
+    (grant revoked or service removed). Raised at dispatch, before a request
+    is sent (spec 2026-09-25 §3.6).
+
+    An :class:`AppError` so an uncaught one reaches the client as a typed
+    503 (``details.code``); a ``RuntimeError`` so every caller that already
+    handles "platform model is no longer available" handles this the same way.
+    """
+
+    status_code = 503
+    code = ENGINE_SERVICE_UNAVAILABLE
+
+    def __init__(self, model_name: str) -> None:
+        super().__init__(
+            f"Platform model '{model_name}' is not currently served by nous-engine.",
+            details={"code": ENGINE_SERVICE_UNAVAILABLE, "model": model_name},
+        )
+        self.model = model_name
 
 
 @dataclass(frozen=True)
@@ -244,6 +269,21 @@ def engine_credential(row: Mapping[str, Any]) -> tuple[str, str]:
     return normalize_base_url(row.get("base_url")), (row.get("api_key") or "").strip()
 
 
+async def ensure_engine_serves(model_name: str, row: Mapping[str, Any]) -> None:
+    """Dispatch guard for one ``actual_provider='nous'`` row.
+
+    Raises :class:`EngineServiceUnavailableError` only when a FRESH list was
+    read and it does not contain the row's service. Unreachable, refused or
+    stale → let the call through: the real request gives a typed error of its
+    own, and guessing here would turn "could not check" into "revoked".
+    """
+    snapshot = await engine_snapshot(*engine_credential(row))
+    if not snapshot.reachable or snapshot.stale:
+        return
+    if snapshot.lists(str(row.get("actual_model") or "")) is False:
+        raise EngineServiceUnavailableError(model_name)
+
+
 async def snapshots_for(
     credentials: Mapping[str, tuple[str, str]],
 ) -> dict[str, EngineSnapshot]:
@@ -259,11 +299,14 @@ async def snapshots_for(
 
 
 __all__ = [
+    "ENGINE_SERVICE_UNAVAILABLE",
     "EngineService",
+    "EngineServiceUnavailableError",
     "EngineSnapshot",
     "NOUS_ENGINE_PROVIDER",
     "engine_credential",
     "engine_snapshot",
+    "ensure_engine_serves",
     "normalize_base_url",
     "reset_engine_cache",
     "snapshots_for",

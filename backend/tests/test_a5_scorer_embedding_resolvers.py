@@ -51,8 +51,10 @@ async def test_scorer_governance_wins():
 
 
 async def test_scorer_falls_to_first_enabled_platform_llm():
+    live = AsyncMock(
+        return_value=[{"name": "mediahub-deepseek-v4-flash", "status": "not_probed"}]
+    )
     repo = MagicMock()
-    repo.list_enabled = AsyncMock(return_value=[{"name": "mediahub-deepseek-v4-flash"}])
     repo.get_by_name = AsyncMock(
         return_value={
             "name": "mediahub-deepseek-v4-flash",
@@ -75,22 +77,23 @@ async def test_scorer_falls_to_first_enabled_platform_llm():
             "app.repositories.nous_model_repository.get_nous_model_repository",
             return_value=repo,
         ),
+        patch("app.services.ai.platform_provider.platform_rows_with_status", live),
     ):
         cfg = await resolve_scorer_config()
     assert cfg.origin == "platform"
     assert cfg.model == "deepseek-v4-flash"
     assert cfg.provider_key == "deepseek"
-    repo.list_enabled.assert_awaited_once_with("llm")
+    live.assert_awaited_once_with("llm")
 
 
-async def test_scorer_platform_pick_skips_idle_and_fail_rows():
-    """Same default rule as the canvas Catalog default (default_model_pick):
-    an idle (not loaded on nous-engine) or failing row is not reported as the
-    scorer's model while an ok / unprobed row exists."""
+async def test_scorer_platform_pick_prefers_ok_over_idle_and_skips_fail():
+    """Same default rule as the canvas Catalog default (default_model_pick),
+    over the platform view's live status: an idle (not loaded on nous-engine)
+    row ranks after an ok one, a failing row is never reported."""
     rows = [
-        {"name": "nous-qwen3-8-27b", "last_test_status": "idle"},
-        {"name": "broken", "last_test_status": "fail"},
-        {"name": "mediahub-deepseek-v4-flash", "last_test_status": "ok"},
+        {"name": "nous-qwen3-8-27b", "status": "idle"},
+        {"name": "broken", "status": "fail"},
+        {"name": "mediahub-deepseek-v4-flash", "status": "ok"},
     ]
     full = {
         name: {
@@ -107,7 +110,6 @@ async def test_scorer_platform_pick_skips_idle_and_fail_rows():
         ]
     }
     repo = MagicMock()
-    repo.list_enabled = AsyncMock(return_value=rows)
     repo.get_by_name = AsyncMock(side_effect=lambda n: full[n])
     with (
         patch(
@@ -121,6 +123,10 @@ async def test_scorer_platform_pick_skips_idle_and_fail_rows():
         patch(
             "app.repositories.nous_model_repository.get_nous_model_repository",
             return_value=repo,
+        ),
+        patch(
+            "app.services.ai.platform_provider.platform_rows_with_status",
+            AsyncMock(return_value=rows),
         ),
     ):
         cfg = await resolve_scorer_config()

@@ -25,6 +25,7 @@ def _enabled_llm_row() -> dict:
     """One enabled llm row shaped like a real ``nous_models`` catalog
     entry (doubao-backed, platform credentials present)."""
     return {
+        "id": 7300000000000000123,
         "name": "mediahub-doubao-llm",
         "display_name": "Doubao LLM",
         "type": "llm",
@@ -48,6 +49,8 @@ def _repo(*, name_hit: dict | None, enabled_llm: list[dict]) -> MagicMock:
     repo.get_by_name = AsyncMock(return_value=name_hit)
     repo.get_by_actual_model = AsyncMock(return_value=None)
     repo.list_enabled = AsyncMock(return_value=enabled_llm)
+    # The canvas default reads the platform view (full rows, live status).
+    repo.list_enabled_private = AsyncMock(return_value=enabled_llm)
     return repo
 
 
@@ -79,7 +82,8 @@ async def test_default_text_model_is_first_enabled_llm_from_catalog():
     ):
         model = await svc._default_text_model()
     assert model == "mediahub-doubao-llm"
-    repo.list_enabled.assert_awaited_with("llm")
+    # Platform-wide rows only (no viewer): a default is never someone's BYOK row.
+    repo.list_enabled_private.assert_awaited_with(None)
 
 
 @pytest.mark.asyncio

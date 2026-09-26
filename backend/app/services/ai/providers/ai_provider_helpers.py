@@ -25,6 +25,11 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 from loguru import logger
 
+from app.services.ai.engine_catalog import (
+    NOUS_ENGINE_PROVIDER,
+    ensure_engine_serves,
+)
+
 
 @dataclass(frozen=True)
 class ResolvedAIConfig:
@@ -120,6 +125,9 @@ async def resolve_nous_model(
         — the platform config, ready for the existing adapter factory.
       - found + (disabled OR nous gated off) → **fail-closed** (RuntimeError);
         never silently fall back to a guessed BYOK provider.
+      - found + served by nous-engine + a fresh engine list without its
+        service → ``EngineServiceUnavailableError`` (a typed 503 that is
+        also a RuntimeError); an unreachable engine lets the call through.
       - not found → ``None`` (an ordinary BYOK model name like ``gpt-4o``).
     """
     from app.repositories.nous_model_repository import get_nous_model_repository
@@ -140,6 +148,10 @@ async def resolve_nous_model(
         )
     if not row.get("is_enabled"):
         raise RuntimeError(f"Platform model '{model_name}' is no longer available.")
+    if row.get("actual_provider") == NOUS_ENGINE_PROVIDER:
+        # The engine's own list is the authority on "is this service still
+        # granted" (spec 2026-09-25 §3.6). Typed refusal, never a guess.
+        await ensure_engine_serves(model_name, row)
 
     provider_config: Dict[str, Any] = {
         "api_key": row.get("api_key", ""),
@@ -199,8 +211,8 @@ async def resolve_scorer_config() -> ResolvedAIConfig:
       1. admin per-module governance (``ai_module.topic_scorer.*`` with model
          AND key) → ``origin="governance"``
       2. first enabled platform ``llm`` catalog model with base_url+key
-         (nous gate honored), ranked by ``default_model_pick`` (ok →
-         unprobed; idle / fail only as a last resort) → ``origin="platform"``.
+         (nous gate honored), ranked by ``default_model_pick`` over the live
+         platform status (ok → not_probed → idle) → ``origin="platform"``.
          The scorer's own failover pool still walks every row — it tries
          them in turn, so a cold row there costs a retry, not the run.
       3. nothing configured → empty config, ``origin="env"`` (the shared
@@ -243,12 +255,15 @@ async def resolve_scorer_config() -> ResolvedAIConfig:
             from app.services.ai.default_model_pick import (
                 rank_default_candidates,
             )
+            from app.services.ai.platform_provider import platform_rows_with_status
 
             repo = get_nous_model_repository()
-            # Same implicit-default rule as the canvas Catalog default:
-            # ok → unprobed; idle (not loaded) / fail skipped unless nothing else.
+            # Same implicit-default rule as the canvas Catalog default, over
+            # the live platform status (ok → not_probed → idle; fail rows and
+            # services the engine no longer lists are not candidates).
             candidates = rank_default_candidates(
-                await repo.list_enabled("llm"), context="resolve_scorer_config"
+                await platform_rows_with_status("llm"),
+                context="resolve_scorer_config",
             )
             for m in candidates:
                 full = await repo.get_by_name(m["name"])
