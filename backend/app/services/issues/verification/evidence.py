@@ -150,15 +150,19 @@ async def _load_scene_scope(scene_ids: list[int]) -> tuple[SceneFacts, ...]:
         )
         if not script_ids:
             return ()
+        # Columns only: the scene body (content / content_json) can be large
+        # and the checks never read it.
         scenes = (
-            (
-                await session.execute(
-                    select(ScriptScenes).where(ScriptScenes.script_id.in_(script_ids))
-                )
+            await session.execute(
+                select(
+                    ScriptScenes.id,
+                    ScriptScenes.script_id,
+                    ScriptScenes.scene_number,
+                    ScriptScenes.content_version,
+                    ScriptScenes.omitted_at,
+                ).where(ScriptScenes.script_id.in_(script_ids))
             )
-            .scalars()
-            .all()
-        )
+        ).all()
         if not scenes:
             return ()
         counts = dict(

@@ -87,19 +87,23 @@ async def _judge(**over):
     return await j.judge(**{**kw, **over})
 
 
-async def test_pass_verdict_and_child_run(wired):
+async def test_pass_verdict_and_its_own_root_run(wired):
+    """The verifier is a ROOT run (review fix): the issue's root run has
+    already settled when the judge starts, so a child would never be
+    charged. Lineage lives in metadata.issue_run_id."""
     out = await _judge()
     assert (
         out.verdict == "pass" and out.confidence == 0.9 and out.run_id == "verify-run-1"
     )
     rec = _Recorder.instances[0]
-    assert rec.kw["parent_run_id"] == "r1"
+    assert "parent_run_id" not in rec.kw
+    assert rec.kw["issue_id"] is not None
     assert rec.kw["trigger"] == "issue_dispatch_verify"
     assert (
         rec.kw["attribution"] == "direct_human"
         and rec.kw["credential_origin"] == "platform"
     )
-    assert rec.kw["metadata"] == {"verifier": True}
+    assert rec.kw["metadata"] == {"verifier": True, "issue_run_id": "r1"}
     assert rec.usage == (10, 5)
 
 
@@ -140,6 +144,23 @@ async def test_code_fenced_json_is_accepted(wired):
         '```json\n{"verdict":"pass","unmet":[],"confidence":1}\n```'
     )
     assert (await _judge()).verdict == "pass"
+
+
+async def test_pass_with_unmet_is_contradictory_bad_output(wired):
+    """A pass that lists unmet criteria is not a pass: retried once, then
+    typed bad output (→ unverified upstream), never trusted."""
+    wired.call.return_value = _resp(
+        '{"verdict":"pass","unmet":[{"criterion":"c","why":"w"}],"confidence":0.9}'
+    )
+    with pytest.raises(j.JudgeBadOutput):
+        await _judge()
+    assert wired.call.await_count == 2
+
+
+def test_parse_rejects_pass_with_unmet():
+    with pytest.raises(j.JudgeBadOutput, match="pass with unmet"):
+        j.parse_judge_output('{"verdict":"pass","unmet":[{"criterion":"c"}]}')
+    assert j.parse_judge_output('{"verdict":"pass","unmet":[]}')[0] == "pass"
 
 
 async def test_bad_output_retries_once_then_typed(wired):

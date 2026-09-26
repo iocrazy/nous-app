@@ -123,6 +123,15 @@ async def test_scene_scope_counts_only_the_touched_scripts_scenes(monkeypatch):
     assert scope == (ev.SceneFacts(1, "1", 2, False, 3),)
     assert "script_scenes.id IN" in compiled[0]
     assert "script_scenes.script_id IN" in compiled[1]
+    # columns only: the scene body (content / content_json) is never loaded
+    select_list = compiled[1].split("FROM")[0]
+    assert "script_scenes.content_json" not in select_list
+    assert (
+        "script_scenes.content," not in select_list
+        and "script_scenes.content " not in select_list
+    )
+    for col in ("id", "script_id", "scene_number", "content_version", "omitted_at"):
+        assert f"script_scenes.{col}" in select_list
     # the shot count is bounded to those scenes, not a table-wide GROUP BY
     assert (
         "script_shots.scene_id IN" in compiled[2]

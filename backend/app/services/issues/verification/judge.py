@@ -3,8 +3,11 @@
 One bounded request on the issue session's own model and credentials
 (``_resolve_agent_and_adapter`` — deviation 3: no separate verifier model).
 It sees ONLY the criteria, predicate facts and the assistant text (all
-model / user text neutralized). Billing: a child run under the issue run
-(``parent_run_id``), ``trigger=<trigger>_verify`` — the tree charges once.
+model / user text neutralized). Billing: its OWN root run (same shape as
+the forced declaration), ``trigger=<trigger>_verify``, the issue's
+``issue_id`` and ``attribution``. Not a child of the issue run: that root has
+already settled when the judge starts, so a child would find it charged and
+never be billed. Lineage is ``metadata.issue_run_id``.
 """
 
 from __future__ import annotations
@@ -128,6 +131,9 @@ def parse_judge_output(content: str) -> tuple[str, tuple[dict[str, str], ...], f
         for u in (data.get("unmet") or [])
         if isinstance(u, dict)
     )
+    if verdict == "pass" and unmet:
+        # Contradictory: a pass that lists unmet criteria is not a pass.
+        raise JudgeBadOutput("pass with unmet")
     try:
         confidence = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
     except (TypeError, ValueError):
@@ -190,8 +196,11 @@ async def judge(
         input_summary=criteria[:500],
         attribution=attribution,
         credential_origin=credential_origin,
-        parent_run_id=str(parent_run_id) if parent_run_id else None,
-        metadata={"verifier": True},
+        # A root run on purpose (see module docstring): lineage, not billing.
+        metadata={
+            "verifier": True,
+            "issue_run_id": str(parent_run_id) if parent_run_id else None,
+        },
     ) as recorder:
         last_error: Optional[JudgeBadOutput] = None
         for _attempt in range(2):

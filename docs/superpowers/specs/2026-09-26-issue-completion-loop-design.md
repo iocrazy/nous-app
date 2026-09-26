@@ -1,7 +1,7 @@
 # issue「做完」闭环设计（完成标准 · 证据核验 · 受闸的自动关单）
 
 - 日期：2026-09-26
-- 状态：已评审通过（2026-09-26）；实施计划 `docs/superpowers/plans/2026-09-26-issue-completion-loop.md`。写计划时核对代码发现四处偏离，已就地修订并标 **[修订]**。
+- 状态：已评审通过（2026-09-26）；实施计划 `docs/superpowers/plans/2026-09-26-issue-completion-loop.md`。写计划时核对代码发现四处偏离，PR-1 评审又加一处（verifier 自开 root run，§5.3 / §8），均已就地修订并标 **[修订]**。
 - 侦察：`.superpowers/sdd/2026-09-26-done-loop-recon.md`（锚点基于 origin/master d6737c8c3）、`.superpowers/sdd/2026-09-23-nous-issue-agent-recon.md`
 - 第一个场景：剧本链（`script_ai` agent：大纲 / 扩写 / 分镜 / 出图）。生产 108 个 issue 里 36 个指派给 `script_ai`，其余全是验收探针，这是唯一的真实业务。
 
@@ -100,7 +100,7 @@ execute_issue (workflow body — 不动)
 - **输入只有**：标准、谓词事实、`final_text` / `prior_texts`（已 neutralize）。**不给**：agent 的系统提示、推理、工具轨迹、FinishIssue 的 reason、对话历史。reason 只作为「agent 声称」显示给人，不进判定。
 - 系统提示词是固定字面量（进 prompts README 三问；独立请求、无共享前缀）。要求输出严格 JSON：`{"verdict":"pass"|"fail","unmet":[{"criterion":"…","why":"…"}],"confidence":0..1}`；解析失败一次重试；仍失败 → `unverified(verifier_bad_output)`。
 - 超时 30 s（`VERIFIER_TIMEOUT_S`），`max_tokens` 400，temperature 0。
-- 计费：`RunRecorder(parent_run_id=<当前 issue run>, trigger=f"{trigger}_verify")`，继承 `attribution` 与 `credential_origin`；花费进当前 run 的树（一树一扣、BYOK 免扣自然成立）。这是与 forced declare 的刻意区别（它自开 root，见 recon §7.1；本设计不动它）。
+- 计费：**[修订]** verifier 自开 root run（与 forced declare 同形）：issue 根 run 在 verifier 起跑前已结账，子 run 挂树永远拿到 already 而不扣费；血缘用 metadata.issue_run_id。`RunRecorder(trigger=f"{trigger}_verify", issue_id=…, metadata={"verifier": True, "issue_run_id": <当前 issue run>})`，继承 `attribution` 与 `credential_origin`；BYOK 免扣照常成立。~~原稿：`parent_run_id=<当前 issue run>`，花费进当前 run 的树~~
 
 ### 5.4 结局路由（全部在 step 内）
 
@@ -174,7 +174,7 @@ Fix these and call FinishIssue again.
 
 ## 8. 计费与配额
 
-- verifier 子 run 挂当前 run 树：`own_cost_cents` 计入 `root` 的 `cost_cents`；不新开 root，不单独扣分；BYOK 来源继承。
+- **[修订]** verifier 自开 root run（与 forced declare 同形）：issue 根 run 在 verifier 起跑前已结账，子 run 挂树永远拿到 already 而不扣费；血缘用 metadata.issue_run_id。它是自己的 root，按 root 单独结账扣分；BYOK 来源继承（BYOK 免扣）。~~原稿：verifier 子 run 挂当前 run 树，不新开 root，不单独扣分~~
 - 每次 completed 声明最多一次 LLM 判定；`VERIFY_MAX_ATTEMPTS=2` → 每 issue 最多 3 次判定、2 次续跑（续跑本身受 `ISSUE_MAX_CONTINUATIONS=2` 上限，verifier 驳回消耗的是同一个上限）。
 - 预算 hook（80% 警告 / 100% 停机）对 verifier 子 run 同样生效；预算停机的 completed（`budget_wrap_up`）不送审，直接按今天路由。
 
