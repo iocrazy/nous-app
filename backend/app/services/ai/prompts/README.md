@@ -501,9 +501,9 @@ content: {content}
 [/link-summary]
 ```
 
-`{content}` 是 `neutralize_external_text` 包裹后的正文摘录（随机 id 包裹，形状见 `../../../boundary/README.md`），抓不到正文时是 `(no body extracted)`；没有标题写 `(no title)`，没有描述写 `(none)`。`{title}` / `{description}` 取自页面的 `<title>` 与 meta，只压了空白，**在包裹之外**。
+`{content}` 是 `neutralize_external_text` 包裹后的正文摘录（随机 id 包裹，形状见 `../../../boundary/README.md`），抓不到正文时是 `(no body extracted)`；没有标题写 `(no title)`，没有描述写 `(none)`。`{title}` / `{description}` 取自页面的 `<title>` 与 meta，**在包裹之外**。#2472 起它们各自先截断（`LINK_TITLE_MAX = 200` / `LINK_DESC_MAX = 500` 字符，超出补 `…`），再经 `escape_frame_prose` 压成一行并实体转义，最后把伪造的 `[/link-summary]`（容许括号内空白）改写成 `[\/link-summary]`。同样的方括号闭合改写也作用于 `{content}`。
 
-失败时（`render_failure_block`，`{reason}` 是 `异常类名: 消息` 的第一行、截到 200 字符）：
+失败时（`render_failure_block`，`{reason}` 是 `异常类名: 消息` 的第一行、截到 200 字符，再经 `escape_frame_prose` 与方括号闭合改写）：
 
 ```text
 [link-summary url={url} error=true]
@@ -514,7 +514,7 @@ The agent should not invent its contents.
 
 #### Token effect
 
-每轮最多 3 个 URL；单个抓取超时 15 秒、整体 30 秒；抓取上限 2 MiB（`DEFAULT_FETCH_CAP_BYTES`）；正文摘录 8 KiB 字符（`DEFAULT_BODY_EXCERPT_CHARS`，约 2k token）。**标题与描述没有长度上限**。块只在本轮存在、不持久化，下一轮就没有了。
+每轮最多 3 个 URL；单个抓取超时 15 秒、整体 30 秒；抓取上限 2 MiB（`DEFAULT_FETCH_CAP_BYTES`）；正文摘录 8 KiB 字符（`DEFAULT_BODY_EXCERPT_CHARS`，约 2k token）；标题 200、描述 500 字符。块只在本轮存在、不持久化，下一轮就没有了。
 
 #### KV Cache effect
 
@@ -716,7 +716,7 @@ schema 约 200 token（不含 `options` 子 schema），指令约 110 token，�
 - **legacy 路径（issue 没有 assignee agent）根本不转发附件**，所以那条路上的引用既不被校验也不到达任何人。这对所有附件 kind 都成立，不是 `output_ref` 引进的；在那里加校验只会给出「引用有效」的假保证，因为它随后照样被丢掉。
 - **`script_chapter` 今天没有生产者**，所以引用它必然是 `output_ref_unresolvable`。没有特判——登记表说没有就是没有。
 - **`link_injection` 失败会落显式占位块**，不是静默跳过——但占位块的文案目前只有英文，与 UI 的 i18n 口径不一致。
-- **`[link-summary]` 的标题与描述没有转义、没有长度上限，而且在包裹之外**。它们取自第三方页面，落在系统消息里：一个页面标题就能伪造带系统权威的文字，2 MiB 的标题就是 2 MiB 的 token。本批 PR-F (2026-09-26) 修复（转义 + `LINK_TITLE_MAX` / `LINK_DESC_MAX` 上限，`link-summary` 登记为框）。非 HTML 页面只有响应头信息。
+- **`[link-summary]` 是方括号框**。`OWNED_FRAMES` 里登记了 `link-summary`，但 `escape_frame_body` 只认 `</name>`，方括号闭合 `[/link-summary]` 由 `link_injection._defuse_link_close` 自己负责；新增往块里写外部文本的地方必须同样过它。#2472 之前标题与描述未转义、无上限，记录在此供对照。非 HTML 页面只有响应头信息。
 - **强制声明的 `tool_choice` 从不穿过 `LLMFallbackChain`**（链的 `call` 不收这个参数），所以生产上那次强制请求实际是「不强制」。已记票（fh4 计划留票 E）。
 - **`{assistant_text}` 进强制声明请求时没有上限**。
 - **`Delegate` 的工具 schema 没有自己的三问块**。它由 `PromptComposer._build_tools` 追加，本 README 只在系统消息块里提到 `<available_workers>`；fh4 守卫按模块登记，`prompt_composer.py` 已被其他块覆盖，所以守卫不会指出这一处。留票。

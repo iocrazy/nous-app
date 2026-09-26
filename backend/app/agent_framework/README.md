@@ -292,5 +292,5 @@ Rules:
 - **一轮之内的增长不受压缩约束**，只受 `MAX_TOOL_ITERATIONS = 10` 约束。
 - **`summarizer.py` 模块 docstring 仍写默认 `claude-haiku-4-5`**，`context_compactor.py` 里「Phase 2 will swap this for an LLM summarizer」也是过时注释；真实顺序见上文。
 - **流式路的循环守卫触发后 `break` 跳出本批工具**：同一条 assistant 消息里排在后面的 tool_call 既不执行、也不补合成结果（AskUser 停靠路径会补 `skipped` 结果，这里不会）。流式路今天不是生产路径（生产 adapter 是没有 `stream` 的 `LLMFallbackChain`），但它一旦启用，这些孤立的 tool_call 会让 Anthropic 形状的 provider 回 400。
-- **`multimodal` 的 `alt_text` 是用户设的文件名，未转义**。它不在任何我们拥有的框里，所以本批 PR-F 不处理，留票。
+- **`multimodal` 的 `alt_text` 是用户设的文件名，未转义**。它不在任何我们拥有的框里，所以 #2472 没有处理，留票。
 - **MCP 的 agent 工具不执行 agent**，只回人设（`mcp_tool_registration.py` docstring 写明推迟）；skill 描述缺失时退到 name / slug。

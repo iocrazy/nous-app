@@ -78,13 +78,13 @@ The user's message refers to this selection. Use these ids directly (ReadScene t
 The user's message refers to this scene. Use this scene_id directly (ReadScene the scene) instead of re-locating it by content.
 ```
 
-`scene` / `element_type` / `spans multiple scenes` 三行各自可缺省。`scene_label` 与 `element_type` 经 `escape_frame_body`。
+`scene` / `element_type` / `spans multiple scenes` 三行各自可缺省。`scene_label` 与 `element_type` 经 `escape_frame_body`；`scene_id` 与每个 `element_ids` 项经 `escape_frame_attr`（#2472，正常 id 原样不变）。请求模型 `ScriptContextRequest` 限长：id 各 64、`element_ids` 最多 100 项、`element_type` 64、`scene_label` 500 字符。
 
 issue 触发的轮次（`issue_dispatch` / `issue_dispatch_auto` / `issue_reply`）另在**整条系统消息末尾**（`# Runtime` 行之后）追加 `FinishIssue` 指令，并在 tools 里挂上 `FinishIssue`；见 `../prompts/README.md`。能力授予时 tools 里还会挂 `GenerateImage` / `GenerateVideo`，同见该 README。
 
 #### Token effect
 
-默认指令约 110 token，计划提示词约 250 token。`<pending_followups>` 最多列 5 条；`<user_selection>` 与请求体里的选区一样大。链接块每个 URL 最多约 2k token 正文加标题与描述，最多 3 个 URL。这些都只在本轮存在，不持久化，所以不随会话增长。
+默认指令约 110 token，计划提示词约 250 token。`<pending_followups>` 最多列 5 条；`<user_selection>` 受请求模型限长约束，最多约 100 个 id。链接块每个 URL 最多约 2k token 正文加标题与描述，最多 3 个 URL。这些都只在本轮存在，不持久化，所以不随会话增长。
 
 #### KV Cache effect
 
@@ -97,6 +97,6 @@ issue 触发的轮次（`issue_dispatch` / `issue_dispatch_auto` / `issue_reply`
 - **压缩摘要不写回历史**，越过 orange 的会话每轮重新摘要头部；推迟项与裁定见 `app/agent_framework/README.md`。
 - **工具调用不跨轮**：上一轮模型读过的工具结果，下一轮只剩 assistant 的最终文本。需要再看就得再调。
 - **`<pending_followups>` 的条数与列表可能不一致**：待兑现超过 5 条时，开头说的是全部条数，列表只列 5 条，也只把这 5 条标成已兑现。标记失败时静默跳过（`except Exception: pass`），那条会在下个会话再出现。
-- **`<user_selection>` 的 `scene_id` 与 `element_ids` 原样进框**。`ScriptContextRequest` 是自由字符串，客户端可以用它提前关掉 `<user_selection>`。这是用户对自己的注入，但违反「用户可控文本进框必须转义」；本批 PR-F (2026-09-26) 修复（`escape_frame_attr` + 请求模型长度上限）。
+- **`<user_selection>` 的 id 在 #2472 之前原样进框**，客户端可以借它提前关掉框。#2472 起经 `escape_frame_attr` 并在请求模型上限长；记录在此供对照。
 - **单条上限用的是默认 tokenizer**（`model=""`），对非默认 tokenizer 的模型只是近似。
 - **计划模式整段替换默认指令**。`ai_library_chat_service.py` 里有一处 docstring 说它是「前置」，以代码为准。

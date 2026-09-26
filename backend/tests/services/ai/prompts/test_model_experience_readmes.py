@@ -155,12 +155,20 @@ MODEL_SURFACES: tuple[Surface, ...] = (
         _RUNNER,
         "### runner 合成的工具结果与注记",
     ),
+    Surface(
+        "services/ai/runner/mcp_errors.py", _RUNNER, "### runner 合成的工具结果与注记"
+    ),
     Surface("services/ai/runner/subagent_task_service.py", _RUNNER, _H_RUNNER_SUB),
     Surface("services/ai/runner/replay.py", _RUNNER, _H_RUNNER_SUB),
     Surface("services/workforce/agent_worker.py", _RUNNER, _H_RUNNER_SUB),
     # ── fh4 T4: new screenplay-copilot README ─────────────────────────
     Surface(
         "services/storyboard/script/script_ai_service.py",
+        _SCRIPT,
+        "### 剧本助手的七个单次请求",
+    ),
+    Surface(
+        "services/storyboard/script/script_prompt_frames.py",
         _SCRIPT,
         "### 剧本助手的七个单次请求",
     ),

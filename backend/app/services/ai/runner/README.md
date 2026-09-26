@@ -5,6 +5,7 @@
 - `agent_runner.py` — 工具分派、合成的工具结果、图片提升
 - `subagent_task_service.py` — `Skill(skill="task")`：同步 / 并行 / 后台 / 续跑子 agent
 - `replay.py` — 从 transcript 重建模型可见历史（续跑与分叉用）
+- `mcp_errors.py` — MCP 传输失败的模型可见文本（截断 + 转义，#2472）
 - `../../workforce/agent_worker.py` — workforce 派发的 agent 的请求指令
 
 ## Model Experience
@@ -36,7 +37,7 @@
 | LibrarySearch 抛异常 | `"error": "LibrarySearch failed: {Cls}"` |
 | 出图未配置 | `"error": "GenerateImage not configured"` |
 | 出视频未配置 | `"error": "GenerateVideo not configured"` |
-| MCP 工具传输失败 | `"error": "MCP transport failure: {exc}"`（`{exc}` 是异常的完整字符串） |
+| MCP 工具传输失败 | `"error": "MCP transport failure: {exc}"`（`runner/mcp_errors.mcp_transport_error_text`：`{exc}` 是异常字符串截到 `MCP_ERROR_TEXT_MAX = 500` 字符、超出补 `…`，再经 `escape_frame_prose` 压成一行并实体转义 `&<>`） |
 | Delegate 未配置（流式路） | `"error": "Delegate tool not configured"` |
 | Delegate 未配置（`run_turn` 路） | `"error": "Delegate tool not configured for this run. Cross-agent dispatch requires a DelegateToolService — wiring this run didn't supply one."` |
 | FinishIssue 处理器抛异常 | `"error": "FinishIssue failed: {Cls}"` |
@@ -116,7 +117,7 @@ You are running as a workforce-dispatched agent. A peer agent has handed you a t
 ## Known Limitations and Deferred Work
 
 - **同步 `summary` 无上限**：子 agent 的完整输出原样进入父 run 的上下文，10 路并行就是 10 份。transcript 里的副本有 500 字符上限，模型看到的那份没有。
-- **`MCP transport failure: {exc}` 把原始异常字符串交给模型**。异常文本可能来自外部 MCP 服务，未转义、无长度上限。本批 PR-F (2026-09-26) 修复（`escape_frame_prose` + 500 字符上限）。
+- **MCP 传输失败的异常文本仍是外部文本**，只是 #2472 起被截到 500 字符并转义；它在工具消息里，不在我们拥有的框里，所以没有「关框」风险，模型看到的仍是对方服务器写的那一行话。
 - **两条路径的 Delegate 未配置文案不一致**（流式路短、`run_turn` 路长）。
 - **工具结果跨轮丢失**：下一轮模型看不到上一轮的工具结果，只看到 assistant 的最终文本。
 - **`[awaiting approval: …]` 混进答复文本**。它是给用户看的标记，被持久化后会作为 assistant 历史出现在下一轮。
