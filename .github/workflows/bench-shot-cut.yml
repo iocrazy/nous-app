@@ -65,7 +65,10 @@ jobs:
 
       - name: Stage this ref's backend code in the container
         run: |
-          docker exec nous-backend sh -c 'rm -rf /tmp/bench_src && mkdir -p /tmp/bench_src'
+          # docker cp keeps the runner's uid on the files, which the image's
+          # non-root user cannot delete: remove as root (a /tmp path only).
+          docker exec -u 0 nous-backend rm -rf /tmp/bench_src
+          docker exec nous-backend mkdir -p /tmp/bench_src
           docker cp backend/app nous-backend:/tmp/bench_src/app
           docker cp backend/scripts nous-backend:/tmp/bench_src/scripts
           docker cp backend/config.yml nous-backend:/tmp/bench_src/config.yml
@@ -140,4 +143,4 @@ jobs:
 
       - name: Clean the container's temp files
         if: always()
-        run: docker exec nous-backend sh -c 'rm -rf /tmp/sd /tmp/bench_src /tmp/bench_shot_cut.json' || true
+        run: docker exec -u 0 nous-backend rm -rf /tmp/sd /tmp/bench_src /tmp/bench_shot_cut.json || true
