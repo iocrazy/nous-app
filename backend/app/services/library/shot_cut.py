@@ -31,11 +31,14 @@ from PIL import Image
 
 #: Names THIS cutter + THESE defaults. Bump when the output for the same
 #: frames would change.
-#: ``hist_v2`` (2026-09-25): 3 fps sampling + ratio 2.5. ``hist_v1`` sampled
-#: at 1 fps with ratio 3.0 and lost most cuts on grainy / fast-cut footage
-#: (recall 0.25 on a 20-cut archival reel; 0.75 at 3 fps — see the bench in
-#: PR "shots-cutter-v2"). Indexes cut by an older version read as ``stale``.
-ALGO_VERSION = "hist_v2"
+#: ``hist_v3`` (2026-09-26): min shot 800 ms, ratio 2.0, min_abs 0.12 — the
+#: best cell of a parameter grid on 30 production videos (bench-shot-cut.yml,
+#: seed 7): F1 0.635 → 0.688, recall 0.59 → 0.71, precision 0.75 → 0.71.
+#: ``hist_v2`` (2026-09-25) added 3 fps sampling (1 fps lost most cuts on
+#: grainy / fast-cut footage). Indexes cut by an older version read as
+#: ``stale``. The histogram method tops out around 0.69 on this content mix;
+#: the next step is a frame-level detector, not more tuning.
+ALGO_VERSION = "hist_v3"
 
 _THUMB = 32
 _H_BINS, _S_BINS, _V_BINS = 16, 8, 8
@@ -63,19 +66,22 @@ class Shot:
 
 @dataclass(frozen=True)
 class CutParams:
-    #: d[i] / rolling-mean(d around i) must reach this. 2.5 at 3 fps: the
-    #: within-shot distance between frames 333 ms apart is small enough that
-    #: a real cut clears it; 3.0 was the 1 fps setting.
-    ratio: float = 2.5
+    #: d[i] / rolling-mean(d around i) must reach this. 2.0 at 3 fps (hist_v3;
+    #: 2.5 in v2, 3.0 at 1 fps in v1): the within-shot distance between frames
+    #: 333 ms apart is small enough that a real cut clears it.
+    ratio: float = 2.0
     #: ... and d[i] itself must reach this (kills ratio spikes on static video
-    #: where the baseline is ~0).
-    min_abs: float = 0.15
+    #: where the baseline is ~0). 0.12 catches low-contrast cuts (0.15 lost
+    #: them); the false-positive cost showed up as -4 points of precision.
+    min_abs: float = 0.12
     #: Half-width of the rolling window, in frames.
     window: int = 2
     #: A cut followed by a frame that returns to the pre-cut picture within
     #: this distance is a flash, not two cuts.
     flash_threshold: float = 0.10
-    min_shot_ms: int = 1500
+    #: 800 ms (1500 in v1/v2): talking-head videos cut in fast b-roll shorter
+    #: than 1.5 s, and merging those away was the largest single recall loss.
+    min_shot_ms: int = 800
     max_shot_ms: int = 30_000
     max_shots: int = 600
     #: Adjacent shots whose representative frames are closer than this merge.
