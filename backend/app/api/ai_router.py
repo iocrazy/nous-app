@@ -2086,6 +2086,9 @@ async def backfill_shots(
     return {
         **base,
         "dry_run": False,
+        # A str: create_flow() normalises the uuid scalar at its boundary
+        # (2026-09-26: the raw UUID failed response validation AFTER every
+        # task was dispatched — the batch ran, the caller saw a 500).
         "parent_task_id": flow_id,
         "dispatched": dispatched,
         "skipped": skipped,

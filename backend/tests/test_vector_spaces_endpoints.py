@@ -797,3 +797,10 @@ async def test_shots_policy_status_is_none_only_when_the_policy_is_unreadable(
         search_router, "read_shots_policy", AsyncMock(side_effect=RuntimeError("db"))
     )
     assert await search_router._shots_policy_status(None) is None
+
+
+def test_shots_pending_total_is_counted_under_system_scope():
+    import inspect
+
+    src = inspect.getsource(search_router._shots_policy_status)
+    assert src.index("system_request_scope(") < src.index("pending_all(")

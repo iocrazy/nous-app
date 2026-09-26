@@ -107,6 +107,26 @@ class TestCreateFlow:
         assert "metadata" not in row  # not passed → not present
 
     @pytest.mark.asyncio
+    async def test_returns_str_for_the_real_uuid_scalar(self, monkeypatch) -> None:
+        """``task_flows.id`` is a uuid column: the RETURNING scalar is a
+        ``uuid.UUID``. The signature promises ``str`` — and a UUID object
+        leaking into a JSON response body is a 500 (backfill-shots,
+        2026-09-26). The string fixture above never exercised this."""
+        import uuid
+
+        mgr = UnifiedTaskManager()
+        real_id = uuid.UUID("3f1d2a4e-9b7c-4c1e-8a2f-5d6e7f8a9b0c")
+        _, scope = _patch_scopes([real_id])
+        import app.db.session as dbs
+
+        monkeypatch.setattr(dbs, "write_scope", scope)
+
+        result = await mgr.create_flow(user_id="user-1", name="Index shots")
+
+        assert result == str(real_id)
+        assert isinstance(result, str)
+
+    @pytest.mark.asyncio
     async def test_truncates_long_name(self, monkeypatch) -> None:
         mgr = UnifiedTaskManager()
         session, scope = _patch_scopes(["f"])
