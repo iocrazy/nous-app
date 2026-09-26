@@ -1,7 +1,10 @@
 #!/usr/bin/env python
 """Shot-cut benchmark on PRODUCTION data (spec §8.1, T7): sample N of one
-user's video downloads, materialize each, run our cutter (``hist_v2``)
+user's video downloads, materialize each, run our cutter (``ALGO_VERSION``)
 against PySceneDetect's ``ContentDetector`` and print per-video P / R / F1.
+
+The reference IS ContentDetector, so F1 here is agreement with it, not with
+human-labelled cuts — scoring ContentDetector itself would read 1.0.
 
 Read-only: nothing is written to the database or the object store. sb://
 rows are streamed to a temp file that ``materialize`` deletes per video;
@@ -22,10 +25,12 @@ Options
   --min-seconds / --max-seconds   skip shorts and hour-long streams
   --seed        sample is deterministic per seed (default 7)
   --tolerance-ms  matching window (default 500, as in spec §8.1)
-  --variants    extra CutParams sets scored on the SAME sampled frames, e.g.
-                "min_shot_ms=800;min_shot_ms=800,ratio=2.0" — one decode per
-                video, one cut per variant; the per-video table is the
-                default's, the variants table compares means
+  --variants    extra CutParams sets scored on the SAME decode, e.g.
+                "detector=hist;scene_threshold=0.2;scene_threshold=0.4" —
+                one ffmpeg pass per video (frames + scene scores), one cut
+                per variant; ``detector=hist`` alone is exactly hist_v3.
+                The per-video table is the default's, the variants table
+                compares means
   --json        write per-video rows here
 Exit 0 when mean F1 >= 0.8 (default params), 1 otherwise, 2 when nothing
 could be scored.
@@ -46,7 +51,12 @@ from typing import Any, Sequence
 
 from sqlalchemy import func, or_, select
 
-from app.services.library.shot_cut import DEFAULT_PARAMS, CutParams, cut_video
+from app.services.library.shot_cut import (
+    DEFAULT_PARAMS,
+    HIST_V3_PARAMS,
+    CutParams,
+    cut_video,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_shot_cut import _f1  # noqa: E402 — sibling script, same matching rule
@@ -55,6 +65,17 @@ F1_TARGET = 0.8
 DEFAULT_LABEL = "default"
 
 _INT_FIELDS = {"window", "min_shot_ms", "max_shot_ms", "max_shots"}
+_STR_FIELDS = {"detector"}
+_DETECTORS = {"scene", "hist"}
+
+
+def _typed(key: str, raw: str) -> Any:
+    if key in _STR_FIELDS:
+        value = raw.strip()
+        if key == "detector" and value not in _DETECTORS:
+            raise ValueError(f"unknown detector in variant: {value!r}")
+        return value
+    return int(raw) if key in _INT_FIELDS else float(raw)
 
 
 def parse_variants(spec: str | None) -> list[tuple[str, CutParams]]:
@@ -71,8 +92,11 @@ def parse_variants(spec: str | None) -> list[tuple[str, CutParams]]:
             key, sep, raw = pair.strip().partition("=")
             if not sep or not hasattr(DEFAULT_PARAMS, key):
                 raise ValueError(f"unknown CutParams field in variant: {pair!r}")
-            overrides[key] = int(raw) if key in _INT_FIELDS else float(raw)
-        out.append((chunk, replace(DEFAULT_PARAMS, **overrides)))
+            overrides[key] = _typed(key, raw)
+        # ``detector=hist`` starts from hist_v3's own params (its min shot
+        # length differs from scene_v1's), so it alone IS the old cutter.
+        base = HIST_V3_PARAMS if overrides.get("detector") == "hist" else DEFAULT_PARAMS
+        out.append((chunk, replace(base, **overrides)))
     return out
 
 
@@ -191,7 +215,7 @@ async def _score_one(
     from app.repositories.resources_repository import ResourcesRepository
     from app.services.distribution.cover_frames import load_source_video
     from app.services.library.media_storage import materialize
-    from app.services.library.shot_frames import cut_video_file, signatures
+    from app.services.library.shot_frames import cut_video_file
 
     async with request_scope(Scope(user_id=user_id)):
         source = await load_source_video(ResourcesRepository(), str(resource_id))
@@ -201,11 +225,10 @@ async def _score_one(
         async with cut_video_file(str(local)) as result:
             duration_ms = result.duration_ms
             per_variant[DEFAULT_LABEL] = _cuts_of(result.shots)
-            if len(variants) > 1:
-                # Same frames, other params: one decode, N cuts.
-                sigs = await signatures(result.frames)
-                for label, params in variants[1:]:
-                    per_variant[label] = _cuts_of(cut_video(sigs, duration_ms, params))
+            # Same decode, other params: one ffmpeg pass, N cuts.
+            for label, params in variants[1:]:
+                shots = cut_video(result.sigs, duration_ms, params, result.scene)
+                per_variant[label] = _cuts_of(shots)
         # OpenCV decode is blocking CPU work; keep the loop free.
         ref = await asyncio.to_thread(_reference_cuts_ms, str(local))
     scored = {}

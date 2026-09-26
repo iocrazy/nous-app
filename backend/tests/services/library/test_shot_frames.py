@@ -14,12 +14,14 @@ from pathlib import Path
 import pytest
 
 from app.services.library import shot_frames
+from app.services.library.shot_cut import HIST_V3_PARAMS, SceneScore, cut_video
 from app.services.library.shot_frames import (
     BASE_FPS,
     MAX_FRAMES,
     ShotFramesError,
     choose_fps,
     cut_video_file,
+    parse_scene_scores,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -59,6 +61,25 @@ def _make_clip(path: Path, *, red_s: int = 4, blue_s: int = 6) -> None:
     )
 
 
+def test_parse_scene_scores_shifts_to_zero_and_skips_noise():
+    text = (
+        "frame:0    pts:1536    pts_time:1.5\n"
+        "lavfi.scene_score=0.000000\n"
+        "garbage line\n"
+        "frame:1    pts:2560    pts_time:1.54\n"
+        "lavfi.scene_score=0.412000\n"
+        "lavfi.scene_score=0.9\n"  # no pts before it: skipped
+        "frame:2    pts:3584    pts_time:1.58\n"
+        "lavfi.scene_score=0.01\n"
+    )
+    assert parse_scene_scores(text) == [
+        SceneScore(0, 0.0),
+        SceneScore(40, 0.412),
+        SceneScore(80, 0.01),
+    ]
+    assert parse_scene_scores("") == []
+
+
 def test_choose_fps_caps_the_frame_count():
     assert choose_fps(600) == BASE_FPS == 3.0
     assert choose_fps(MAX_FRAMES / BASE_FPS) == BASE_FPS
@@ -80,6 +101,13 @@ async def test_two_scene_clip_cuts_at_the_scene_change(tmp_path):
         assert len(spans) == 2, spans
         assert spans[0][0] == 0 and spans[-1][1] == result.duration_ms
         assert spans[0][1] == 4000
+        # scene_v1 read the cut off the native-rate (10 fps) score track ...
+        assert len(result.scene) in (99, 100, 101)
+        assert max(result.scene, key=lambda x: x.score).t_ms == 4000
+        assert len(result.sigs) == len(result.frames)
+        # ... and the same decode re-cuts with hist_v3 without ffmpeg.
+        hist = cut_video(result.sigs, result.duration_ms, HIST_V3_PARAMS)
+        assert [s.start_ms for s in hist] == [0, 4000]
         rep = result.frame_at(result.shots[1].rep_frame_ms)
         assert rep is not None and rep.path.is_file()
         scratch_dir = rep.path.parent

@@ -1,4 +1,4 @@
-"""Shot boundary detection from sampled frames — local, free, pure Python.
+"""Shot boundary detection — local, free, pure Python over ffmpeg's signals.
 
 Spec: docs/superpowers/specs/2026-09-25-pr3-shots-index-design.md §4.
 
@@ -8,7 +8,19 @@ per second of video on a network provider. A 32×32 HSV histogram per frame
 gives the same *shape* of signal (a spike where the picture changes) for
 nothing, so only the representative frame of each shot is ever embedded.
 
-Skeleton after PySceneDetect's ``AdaptiveDetector``: the frame-to-frame
+Two detectors share the shaping below (``CutParams.detector``):
+
+* ``scene`` (default, ``scene_v1``): ffmpeg's per-frame scene score
+  (``select='gte(scene,0)'``, see ``shot_frames``) at the video's NATIVE
+  frame rate. A cut is a frame whose score reaches ``scene_threshold``. The
+  score is ``min(mafd, |mafd - prev_mafd|)`` of consecutive frames, so a
+  steady trickle of change (a cursor, a gesturing picture-in-picture, a
+  scrolling screen recording) keeps ``|Δmafd|`` near 0 and never cuts —
+  exactly where the 3 fps histogram ratio below over-cut.
+* ``hist`` (``hist_v3``, kept for the benchmark): the colour-histogram
+  cutter over the 3 fps sampled frames.
+
+Histogram skeleton after PySceneDetect's ``AdaptiveDetector``: the frame-to-frame
 distance is divided by the rolling mean of its neighbours, a cut is where the
 ratio AND the absolute distance both clear a threshold; a one-frame flash
 (cut, then straight back) is dropped. Then shots are shaped: shorter than
@@ -31,6 +43,16 @@ from PIL import Image
 
 #: Names THIS cutter + THESE defaults. Bump when the output for the same
 #: frames would change.
+#: ``scene_v1`` (2026-09-26): ffmpeg scene score at native frame rate
+#: (``detector="scene"``) replaces the histogram ratio; the index step also
+#: folds adjacent shots whose frame vectors are near-identical
+#: (``shot_merge``). bench-shot-cut.yml, 30 production videos (seed 7, 29
+#: scored), against ContentDetector: mean F1 0.676 (hist_v3) → 0.780,
+#: precision 0.65 → 0.79, recall 0.75 → 0.79; 0.825 on the 25 videos where
+#: the reference found any cut (two where it found none cap the mean at
+#: 27/29). Threshold 0.18–0.19 is a plateau; 0.15 / 0.3 fall to 0.71 / 0.72.
+ALGO_VERSION = "scene_v1"
+#: The histogram cutter's version, still selectable with ``detector="hist"``.
 #: ``hist_v3`` (2026-09-26): min shot 800 ms, ratio 2.0, min_abs 0.12 — the
 #: best cell of a parameter grid on 30 production videos (bench-shot-cut.yml,
 #: seed 7): F1 0.635 → 0.688, recall 0.59 → 0.71, precision 0.75 → 0.71.
@@ -38,7 +60,11 @@ from PIL import Image
 #: grainy / fast-cut footage). Indexes cut by an older version read as
 #: ``stale``. The histogram method tops out around 0.69 on this content mix;
 #: the next step is a frame-level detector, not more tuning.
-ALGO_VERSION = "hist_v3"
+HIST_ALGO_VERSION = "hist_v3"
+
+#: ``CutParams.detector`` values.
+DETECTOR_SCENE = "scene"
+DETECTOR_HIST = "hist"
 
 _THUMB = 32
 _H_BINS, _S_BINS, _V_BINS = 16, 8, 8
@@ -55,6 +81,14 @@ class FrameSig:
 
 
 @dataclass(frozen=True)
+class SceneScore:
+    """ffmpeg's scene score of one decoded frame against the previous one."""
+
+    t_ms: int
+    score: float
+
+
+@dataclass(frozen=True)
 class Shot:
     start_ms: int
     end_ms: int
@@ -66,6 +100,13 @@ class Shot:
 
 @dataclass(frozen=True)
 class CutParams:
+    #: ``"scene"`` (ffmpeg scene score, native fps) or ``"hist"`` (hist_v3).
+    detector: str = DETECTOR_SCENE
+    #: scene: a frame whose ffmpeg scene score reaches this opens a shot.
+    #: The score is in [0, 1]; a hard cut between unrelated pictures scores
+    #: 0.3–0.6, a cut between two angles of one room lower. 0.18 is the best
+    #: of 0.12–0.4 on bench-shot-cut.yml (see ALGO_VERSION).
+    scene_threshold: float = 0.18
     #: d[i] / rolling-mean(d around i) must reach this. 2.0 at 3 fps (hist_v3;
     #: 2.5 in v2, 3.0 at 1 fps in v1): the within-shot distance between frames
     #: 333 ms apart is small enough that a real cut clears it.
@@ -79,9 +120,11 @@ class CutParams:
     #: A cut followed by a frame that returns to the pre-cut picture within
     #: this distance is a flash, not two cuts.
     flash_threshold: float = 0.10
-    #: 800 ms (1500 in v1/v2): talking-head videos cut in fast b-roll shorter
-    #: than 1.5 s, and merging those away was the largest single recall loss.
-    min_shot_ms: int = 800
+    #: 500 ms in scene_v1 (the bench's best with 0.18; 400 / 650 lose 0.3 /
+    #: 0.4 points). 800 in hist_v3, 1500 in v1/v2: talking-head videos cut in
+    #: fast b-roll shorter than 1.5 s, and merging those away was the largest
+    #: single recall loss.
+    min_shot_ms: int = 500
     max_shot_ms: int = 30_000
     max_shots: int = 600
     #: Adjacent shots whose representative frames are closer than this merge.
@@ -89,6 +132,13 @@ class CutParams:
 
 
 DEFAULT_PARAMS = CutParams()
+#: Exactly the production cutter before scene_v1 (the benchmark's baseline).
+HIST_V3_PARAMS = CutParams(detector=DETECTOR_HIST, min_shot_ms=800)
+
+
+def algo_version(params: CutParams) -> str:
+    """The ``video_shot_indexes.algo_version`` a cut with ``params`` gets."""
+    return HIST_ALGO_VERSION if params.detector == DETECTOR_HIST else ALGO_VERSION
 
 
 # ── signatures ───────────────────────────────────────────────────────────────
@@ -173,6 +223,61 @@ def detect_cuts(
     return kept
 
 
+def _sig_before(sigs: Sequence[FrameSig], t_ms: int) -> FrameSig | None:
+    """The last sampled frame strictly before ``t_ms``."""
+    best: FrameSig | None = None
+    for s in sigs:
+        if s.t_ms >= t_ms:
+            break
+        best = s
+    return best
+
+
+def _sig_from(sigs: Sequence[FrameSig], t_ms: int) -> FrameSig | None:
+    """The first sampled frame at or after ``t_ms``."""
+    for s in sigs:
+        if s.t_ms >= t_ms:
+            return s
+    return None
+
+
+def detect_scene_cuts(
+    scores: Sequence[SceneScore],
+    sigs: Sequence[FrameSig],
+    params: CutParams = DEFAULT_PARAMS,
+) -> list[tuple[int, float]]:
+    """``(t_ms, score)`` of each frame whose scene score reaches the
+    threshold: a boundary lies AT ``t_ms``. Sorted by time.
+
+    Flash suppression, as in :func:`detect_cuts`: two cuts closer than
+    ``min_shot_ms`` where the sampled picture before the first matches the
+    one after the second are one flash, not two boundaries — both go.
+    Consecutive-frame spikes of one cut (a dissolve) are left to the
+    min-length shaping, which keeps the stronger."""
+    cands = sorted(
+        (int(s.t_ms), float(s.score))
+        for s in scores
+        if s.t_ms > 0 and s.score >= params.scene_threshold
+    )
+    kept: list[tuple[int, float]] = []
+    k = 0
+    while k < len(cands):
+        if k + 1 < len(cands):
+            (t1, _), (t2, _) = cands[k], cands[k + 1]
+            if t2 - t1 < params.min_shot_ms:
+                before, after = _sig_before(sigs, t1), _sig_from(sigs, t2)
+                if (
+                    before is not None
+                    and after is not None
+                    and distance(before, after) < params.flash_threshold
+                ):
+                    k += 2
+                    continue
+        kept.append(cands[k])
+        k += 1
+    return kept
+
+
 # ── shot shaping ─────────────────────────────────────────────────────────────
 
 
@@ -198,17 +303,30 @@ def build_shots(
     duration_ms: int,
     params: CutParams = DEFAULT_PARAMS,
 ) -> list[Shot]:
-    """Turn cut indices into shots over ``[0, duration_ms)`` and shape them
+    """Cut frame INDICES (:func:`detect_cuts`) → shaped shots; see
+    :func:`build_shots_at`."""
+    if not sigs:
+        return []
+    at = [(sigs[i].t_ms, score) for i, score in cuts]
+    return build_shots_at(sigs, at, duration_ms, params)
+
+
+def build_shots_at(
+    sigs: Sequence[FrameSig],
+    cuts_ms: Sequence[tuple[int, float]],
+    duration_ms: int,
+    params: CutParams = DEFAULT_PARAMS,
+) -> list[Shot]:
+    """Turn cut times into shots over ``[0, duration_ms)`` and shape them
     (min / max length, cap, look-alike merge). Empty when the video has no
     positive duration."""
     if duration_ms <= 0 or not sigs:
         return []
     # boundaries: (t_ms, score); the first boundary is the start of the video
     bounds: list[tuple[int, float]] = [(0, 0.0)]
-    for i, score in cuts:
-        t = sigs[i].t_ms
+    for t, score in cuts_ms:
         if 0 < t < duration_ms:
-            bounds.append((t, score))
+            bounds.append((int(t), float(score)))
     bounds.sort()
 
     # 1. Too-short shots: drop the weaker of the two cuts around the shot.
@@ -290,7 +408,14 @@ def cut_video(
     sigs: Sequence[FrameSig],
     duration_ms: int,
     params: CutParams = DEFAULT_PARAMS,
+    scene: Sequence[SceneScore] = (),
 ) -> list[Shot]:
-    """Signatures in time order → shaped shot list. The one entry point the
-    workflow uses."""
-    return build_shots(sigs, detect_cuts(sigs, params), duration_ms, params)
+    """Signatures (and, for the scene detector, ffmpeg's per-frame scene
+    scores) in time order → shaped shot list. The one entry point the
+    workflow uses. Unknown ``detector`` is a ValueError."""
+    if params.detector == DETECTOR_HIST:
+        return build_shots(sigs, detect_cuts(sigs, params), duration_ms, params)
+    if params.detector == DETECTOR_SCENE:
+        cuts = detect_scene_cuts(scene, sigs, params)
+        return build_shots_at(sigs, cuts, duration_ms, params)
+    raise ValueError(f"unknown shot detector: {params.detector!r}")

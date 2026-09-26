@@ -9,6 +9,13 @@ name: Bench shot cut (production sample)
 # Read-only: the script only reads resources / parsed_media and streams each
 # video to a temp file it deletes. scenedetect goes into /tmp inside the
 # container (--target), never into the image's venv.
+#
+# The CUTTER UNDER TEST is the dispatched ref's, not the deployed image's:
+# backend/app + scripts + config.yml of this checkout are copied to
+# /tmp/bench_src in the container and put first on PYTHONPATH, so a branch
+# can be scored before it merges (`gh workflow run bench-shot-cut.yml --ref
+# <branch>`). The image's venv, env and ffmpeg are what run it. Still
+# dispatch-only: no pull_request trigger, so no fork code reaches this box.
 
 on:
   workflow_dispatch:
@@ -34,7 +41,7 @@ on:
         default: '900'
         required: true
       variants:
-        description: 'Extra CutParams sets scored on the same frames, e.g. "min_shot_ms=800;min_shot_ms=800,ratio=2.0"'
+        description: 'Extra CutParams sets scored on the same decode, e.g. "detector=hist;scene_threshold=0.2"'
         default: ''
         required: false
 
@@ -47,12 +54,32 @@ concurrency:
 
 jobs:
   bench:
-    name: hist_v2 vs PySceneDetect on a production sample
+    name: our cutter vs PySceneDetect on a production sample
     runs-on: [self-hosted, gpu]
     timeout-minutes: 45
     steps:
       - name: Backend container is up
         run: docker exec nous-backend /app/.venv/bin/python -c "import app; print('ok')"
+
+      - uses: actions/checkout@v4
+
+      - name: Stage this ref's backend code in the container
+        run: |
+          # docker cp keeps the runner's uid on the files, which the image's
+          # non-root user cannot delete: remove as root (a /tmp path only).
+          docker exec -u 0 nous-backend rm -rf /tmp/bench_src
+          docker exec nous-backend mkdir -p /tmp/bench_src
+          docker cp backend/app nous-backend:/tmp/bench_src/app
+          docker cp backend/scripts nous-backend:/tmp/bench_src/scripts
+          docker cp backend/config.yml nous-backend:/tmp/bench_src/config.yml
+          # -w /tmp: `python -c` puts the cwd first on sys.path, and the
+          # image's WORKDIR /app would shadow the staged copy. The script
+          # run below is a file path, whose sys.path[0] is its own dir.
+          docker exec -w /tmp nous-backend sh -c '
+            PYTHONPATH=/tmp/bench_src /app/.venv/bin/python -c "
+          import app.services.library.shot_cut as m
+          assert m.__file__.startswith(\"/tmp/bench_src/\"), m.__file__
+          print(m.__file__, m.ALGO_VERSION)"'
 
       # opencv-headless is ~50 MB; gpupc pulls foreign indexes slowly, so use
       # the Aliyun PyPI mirror (same reason the Dockerfile has APT_MIRROR).
@@ -79,7 +106,7 @@ jobs:
           # 1: below, 2: nothing scored); keep it, but always show the table.
           set +e
           docker exec -i -w /app nous-backend sh -c "
-            PYTHONPATH=/tmp/sd /app/.venv/bin/python scripts/bench_shot_cut_prod.py \
+            PYTHONPATH=/tmp/bench_src:/tmp/sd /app/.venv/bin/python /tmp/bench_src/scripts/bench_shot_cut_prod.py \
               --limit $LIMIT --seed $SEED --min-seconds $MIN_S --max-seconds $MAX_S $user_flag \
               --variants '$VARIANTS' --json /tmp/bench_shot_cut.json" 2>&1 | tee bench.txt
           rc=${PIPESTATUS[0]}
@@ -116,4 +143,4 @@ jobs:
 
       - name: Clean the container's temp files
         if: always()
-        run: docker exec nous-backend sh -c 'rm -rf /tmp/sd /tmp/bench_shot_cut.json' || true
+        run: docker exec -u 0 nous-backend rm -rf /tmp/sd /tmp/bench_src /tmp/bench_shot_cut.json || true

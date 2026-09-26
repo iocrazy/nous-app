@@ -99,8 +99,11 @@ def stack(monkeypatch, tmp_path):
     return SimpleNamespace(shots_repo=shots_repo, vec_repo=vec_repo, frames=frames)
 
 
+X, Y, Z = [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]
+
+
 async def test_one_call_per_shot_and_versioned_hash(stack):
-    embedder = _Embedder([([1.0], None)] * 3)
+    embedder = _Embedder([(X, None), (Y, None), (Z, None)])
     said = []
 
     async def progress(pct, subtitle):
@@ -122,12 +125,43 @@ async def test_one_call_per_shot_and_versioned_hash(stack):
     space_id, kind, vec_rows = stack.vec_repo.rows
     assert space_id == SPACE["id"] and kind == "frame"
     expected = f"{ALGO_VERSION}:{hashlib.sha1(b'jpeg-bytes-1').hexdigest()}"
-    assert vec_rows[1] == (1001, [1.0], expected)
+    assert vec_rows[1] == (1001, Y, expected)
+    assert ALGO_VERSION == "scene_v1"
     subtitles = [s for _, s in said]
     assert "Extracting frames 100% → 3 cuts" in subtitles
     assert "Embedding 3 / 3" in subtitles and subtitles[-1] == "Writing"
     meta = result.as_metadata()
     assert meta["resource_id"] == "42" and meta["space_id"] == str(SPACE["id"])
+    assert meta["merged"] == 0
+
+
+async def test_lookalike_vectors_fold_before_writing(stack):
+    # Shots 1 and 2 embed to the same picture: one shot 4000–15000 is
+    # written, renumbered, with shot 2's frame (the stronger cut, 0.6).
+    embedder = _Embedder([(X, None), (Y, None), ([0.0, 0.999, 0.01], None)])
+    result = await index_resource_shots(
+        resource_id=42, file_path="v.mp4", space=SPACE, embedder=embedder
+    )
+    assert embedder.calls == 3  # the fold costs no extra call
+    assert (result.shots, result.embedded, result.skipped, result.merged) == (
+        2,
+        2,
+        0,
+        1,
+    )
+    _, rows, _, _ = stack.shots_repo.replaced
+    assert [(r.shot_index, r.start_ms, r.end_ms, r.rep_frame_ms) for r in rows] == [
+        (0, 0, 4000, 2000),
+        (1, 4000, 15_000, 12_000),
+    ]
+    assert rows[1].cut_score == 0.4
+    _, _, vec_rows = stack.vec_repo.rows
+    expected = f"{ALGO_VERSION}:{hashlib.sha1(b'jpeg-bytes-2').hexdigest()}"
+    assert vec_rows == [
+        (1000, X, f"{ALGO_VERSION}:{hashlib.sha1(b'jpeg-bytes-0').hexdigest()}"),
+        (1001, [0.0, 0.999, 0.01], expected),
+    ]
+    assert result.as_metadata()["merged"] == 1
 
 
 async def test_one_flaky_frame_is_skipped_not_fatal(stack):
