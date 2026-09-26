@@ -284,6 +284,19 @@ async def ensure_engine_serves(model_name: str, row: Mapping[str, Any]) -> None:
         raise EngineServiceUnavailableError(model_name)
 
 
+def engine_presence(
+    snapshot: EngineSnapshot, service_id: str
+) -> tuple[str, Optional[bool]]:
+    """``(engine_status, engine_ready)`` for the admin catalog (§3.5)."""
+    listed = snapshot.lists(service_id)
+    if listed is None:
+        return "unreachable", None
+    if listed is False:
+        return "missing", None
+    service = snapshot.service(service_id)
+    return "listed", bool(service and service.ready)
+
+
 async def snapshots_for(
     credentials: Mapping[str, tuple[str, str]],
 ) -> dict[str, EngineSnapshot]:
@@ -305,6 +318,7 @@ __all__ = [
     "EngineSnapshot",
     "NOUS_ENGINE_PROVIDER",
     "engine_credential",
+    "engine_presence",
     "engine_snapshot",
     "ensure_engine_serves",
     "normalize_base_url",

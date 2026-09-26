@@ -111,6 +111,18 @@ class NousModelResponse(BaseModel):
     # Independent of the probe status: reachable and unpriced both happen.
     # Only the list endpoint fills it; single-row responses leave None.
     price_coverage: Optional[str] = None
+    # nous-engine rows only (actual_provider='nous'), list endpoint only; None
+    # for every other row. Read live from the engine's own list with the row's
+    # credential (spec 2026-09-25 §3.5) — the status dot reads these instead of
+    # last_test_status for such rows:
+    #   listed       the engine lists the service for this key
+    #   missing      the engine answered and does not list it (grant revoked
+    #                or service removed) — the admin decides; nothing is
+    #                disabled automatically
+    #   unreachable  no usable list (down, timeout, key refused)
+    engine_status: Optional[Literal["listed", "missing", "unreachable"]] = None
+    # listed rows only: is the service loaded right now. None otherwise.
+    engine_ready: Optional[bool] = None
 
 
 class NousModelPublic(BaseModel):

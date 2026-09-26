@@ -39,6 +39,12 @@ from app.schemas.nous_model import (
     ProviderProtocolItem,
     ProviderProtocolListResponse,
 )
+from app.services.ai.engine_catalog import (
+    NOUS_ENGINE_PROVIDER,
+    engine_credential,
+    engine_presence,
+    snapshots_for,
+)
 from app.services.ai.model_pricing_coverage import (
     load_priced_models,
     price_coverage_for,
@@ -68,7 +74,12 @@ def _mask_key(key: str) -> str:
     return f"{'*' * (len(key) - 4)}{key[-4:]}"
 
 
-def _to_response(row: dict, *, price_coverage: str | None = None) -> NousModelResponse:
+def _to_response(
+    row: dict,
+    *,
+    price_coverage: str | None = None,
+    engine: tuple[str, bool | None] | None = None,
+) -> NousModelResponse:
     """Convert DB row to admin response with masked API key.
 
     ``price_coverage`` is computed by the list endpoint (one price-table read
@@ -102,7 +113,26 @@ def _to_response(row: dict, *, price_coverage: str | None = None) -> NousModelRe
         ),
         context_window_tokens=row.get("context_window_tokens"),
         price_coverage=price_coverage,
+        engine_status=engine[0] if engine else None,
+        engine_ready=engine[1] if engine else None,
     )
+
+
+async def _engine_overlay(rows: list[dict]) -> dict[str, tuple[str, bool | None]]:
+    """``name → (engine_status, engine_ready)`` for every nous-engine row, read
+    with each row's own credential (one read per distinct credential). Rows of
+    other providers are absent. Never raises."""
+    credentials = {
+        r["name"]: engine_credential(r)
+        for r in rows
+        if r.get("actual_provider") == NOUS_ENGINE_PROVIDER
+    }
+    snapshots = await snapshots_for(credentials)
+    by_name = {r["name"]: r for r in rows}
+    return {
+        name: engine_presence(snap, str(by_name[name].get("actual_model") or ""))
+        for name, snap in snapshots.items()
+    }
 
 
 @router.get("", response_model=List[NousModelResponse])
@@ -111,7 +141,15 @@ async def list_nous_models(auth: AdminAuthDep):
     repo = get_nous_model_repository()
     rows = await repo.list_all()
     priced = await load_priced_models()
-    return [_to_response(r, price_coverage=price_coverage_for(r, priced)) for r in rows]
+    engine = await _engine_overlay(rows)
+    return [
+        _to_response(
+            r,
+            price_coverage=price_coverage_for(r, priced),
+            engine=engine.get(r["name"]),
+        )
+        for r in rows
+    ]
 
 
 @router.get("/protocols", response_model=ProviderProtocolListResponse)
