@@ -40,7 +40,7 @@ ENGINE_BODY = {
         {
             "id": "studio-upscale",
             "object": "model",
-            "type": "comfy_template",
+            "type": "image",
             "ready": True,
             "context_window": None,
             "capabilities": None,

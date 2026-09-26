@@ -103,6 +103,12 @@ const PROVIDER_META: Record<
     // Provider console / API-key page, rendered as an external link in
     // the card header so users can jump straight to where keys live.
     website?: string;
+    // i18n key for the card title, when the name is not a brand name.
+    nameKey?: string;
+    // Platform-managed card (the `nous` entry): no key box and no Test
+    // Connection — the admin owns the credentials and probes the rows. The
+    // wire flag `providers.nous.managed` says the same; either one hides them.
+    managed?: boolean;
   }
 > = {
   openai: {
@@ -234,6 +240,21 @@ const PROVIDER_META: Record<
     website: 'https://lmstudio.ai',
     models: [],
   },
+  // The platform card — one more entry in the same card loop (spec
+  // 2026-09-25 P4 "全部统一"). Its model list is the server-computed
+  // `providers.nous` (+ `platform_models` mapping); the user toggles the
+  // card and each row, nothing else. Rendered only while the admin master
+  // switch (`governance.nous_enabled`) is on.
+  nous: {
+    name: 'Nous (Platform)',
+    nameKey: 'aiSettings.nousPlatform',
+    description: 'aiSettings.nousDesc',
+    icon: <Sparkles size={18} />,
+    color: 'accent',
+    badge: 'aiSettings.platformManaged',
+    managed: true,
+    models: [],
+  },
 };
 
 const LANGUAGE_OPTIONS = [
@@ -295,6 +316,12 @@ const COLOR_MAP: Record<string, { bg: string; text: string; border: string; badg
     text: 'text-rose-400',
     border: 'border-rose-500/30',
     badge: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+  },
+  accent: {
+    bg: 'bg-[var(--accent-soft)]',
+    text: 'text-[var(--accent-text)]',
+    border: 'border-[var(--accent-border)]',
+    badge: 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]',
   },
 };
 
@@ -791,10 +818,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
   // or enabled !== false).
   const nousUserEnabled = localSettings.providers.nous?.enabled !== false;
 
-  // The set of platform models the user has hidden from the pickers.
-  const localDisabled = localSettings.providers.nous?.disabled_models;
-  const nousDisabledModels = useMemo(() => localDisabled ?? [], [localDisabled]);
-
 
   // BYOK model guard (2026-08-16 incident). A user pruned doubao's enabled
   // models down to `doubao-embedding-vision-251215`; summarization takes that
@@ -850,25 +873,20 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     [localSettings, platformStatus],
   );
 
-  // Which listed rows are on. The base is the server's `enabled_models`; the
-  // only local adjustment is this session's unsaved chip edits, read as the
-  // difference between the stored blacklist and the edited one.
-  const storedNousDisabled = settings.providers.nous?.disabled_models;
-  const nousEnabledNames = useMemo(() => {
-    const base = new Set(localSettings.providers.nous?.enabled_models ?? []);
-    const stored = new Set(storedNousDisabled ?? []);
-    const edited = new Set(nousDisabledModels);
-    for (const name of edited) if (!stored.has(name)) base.delete(name);
-    for (const name of stored) if (!edited.has(name)) base.add(name);
-    return base;
-  }, [localSettings.providers.nous?.enabled_models, storedNousDisabled, nousDisabledModels]);
-
-  // What the task pickers offer: the card on, the row enabled. Per-module
-  // governance (nous_modules) is applied on top at each picker; the admin
-  // master switch is already applied server-side (models = []).
-  const visibleNousModels = useMemo(
-    () => (nousUserEnabled ? listedNousModels.filter((m) => nousEnabledNames.has(m.name)) : []),
-    [listedNousModels, nousEnabledNames, nousUserEnabled],
+  // What the task pickers offer — the ONE derivation every picker uses
+  // (utils/platformModel.platformModelRows over `providers.nous.enabled_models`,
+  // the card's master switch included), live status overlaid. This session's
+  // unsaved chip edits are already in `enabled_models` (setNousModelEnabled
+  // edits it the way a BYOK card edits its own). Per-module governance
+  // (nous_modules) is applied on top at each picker; the admin master switch
+  // is applied server-side (models = []).
+  const enabledNousModels = useMemo<PlatformModelRow[]>(
+    () =>
+      platformModelRows(localSettings).map((m) => ({
+        ...m,
+        status: platformStatus.statusOf(m.name) ?? m.status,
+      })),
+    [localSettings, platformStatus],
   );
 
   // Idle on nous-engine (authorized, not loaded): the row is listed but the
@@ -948,7 +966,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
         : disabled.includes(modelName)
           ? disabled
           : [...disabled, modelName];
-      providers.nous = { ...current, disabled_models: next };
+      // Same edit on `enabled_models` (catalog order), so the card and every
+      // picker read one list, exactly like a BYOK card. Only `disabled_models`
+      // is sent on save (aiService strips the computed fields).
+      const on = new Set(current.enabled_models ?? []);
+      if (enabled) on.add(modelName);
+      else on.delete(modelName);
+      const enabledModels = (current.models ?? []).filter((n) => on.has(n));
+      providers.nous = { ...current, disabled_models: next, enabled_models: enabledModels };
       return { ...prev, providers };
     });
   };
@@ -1162,12 +1187,12 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
       }
     }
 
-    // Append Nous platform ASR models. visibleNousModels already folds in the
+    // Append Nous platform ASR models. enabledNousModels already folds in the
     // admin master switch + the user's platform-card master toggle + per-model
     // blacklist; here we only add the per-module governance gate.
     const nousAllowed = governance.nous_modules?.transcription ?? true;
     const matchingNousModels = nousAllowed
-      ? visibleNousModels.filter((m) => m.type === 'asr')
+      ? enabledNousModels.filter((m) => m.type === 'asr')
       : [];
     for (const model of matchingNousModels) {
       const pricingLabel =
@@ -1274,12 +1299,12 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     const systemOptions = options.filter((o) => o.group === 'system');
     const mineOptions = options.filter((o) => o.group === 'mine');
     // Platform (Nous) LLM models are directly selectable per task — same as
-    // the ASR picker. visibleNousModels already folds in the admin master switch
+    // the ASR picker. enabledNousModels already folds in the admin master switch
     // + the user's platform-card master toggle + per-model blacklist; here we
     // only add the per-module governance gate.
     const nousAllowed = governance.nous_modules?.[taskKey] ?? true;
     const nousLlmOptions = nousAllowed
-      ? visibleNousModels
+      ? enabledNousModels
           .filter((m) => m.type === 'llm')
           .map((m) => ({
             value: `nous:${m.name}`,
@@ -1674,16 +1699,28 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
         <div className="p-6 pt-2 space-y-4">
           {Object.entries(PROVIDER_META).map(([providerKey, meta]) => {
             const config = getProviderConfig(providerKey);
+            // Platform-managed card: no key box, no Test Connection. The wire
+            // flag (`providers.nous.managed`) or the meta entry says so — the
+            // meta keeps it managed when the server could not compute the view.
+            const managed = config.managed === true || meta.managed === true;
+            // The admin master switch hides the platform card entirely.
+            if (managed && !governance.nous_enabled) return null;
+            // A managed card is ON unless the user switched it off (absent =
+            // on); a BYOK card is off until the user switches it on.
+            const cardEnabled = managed ? nousUserEnabled : !!config.enabled;
+            const onToggle = managed ? toggleNousMaster : () => toggleProvider(providerKey);
+            const title = meta.nameKey ? t(meta.nameKey) : meta.name;
             const colors = COLOR_MAP[meta.color] || COLOR_MAP.blue;
             const isLocal = meta.isLocal || false;
             const connStatus = connectionStatus[providerKey] || 'idle';
+            const engineState = managed ? platformStatus.engine : null;
 
             return (
               <div
                 key={providerKey}
                 data-testid={`provider-card-${providerKey}`}
                 className={`bg-ink-950 border rounded-xl overflow-hidden transition-all ${
-                  config.enabled ? colors.border : 'border-ink-800'
+                  cardEnabled ? colors.border : 'border-ink-800'
                 }`}
               >
                 {/* Provider Header */}
@@ -1693,7 +1730,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <h4 className="font-semibold text-ink-200">{meta.name}</h4>
+                      <h4 className="font-semibold text-ink-200">{title}</h4>
                       {meta.website && (
                         <a
                           href={meta.website}
@@ -1727,14 +1764,35 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                     </div>
                     <p className="text-xs text-ink-500 mt-0.5">{t(meta.description)}</p>
                   </div>
-                  {renderToggle(config.enabled, () => toggleProvider(providerKey))}
+                  {renderToggle(cardEnabled, onToggle)}
                 </div>
 
                 {/* Provider Config (expanded when enabled) */}
-                {config.enabled && (
+                {cardEnabled && (
                   <div className="px-6 pb-5 pt-2 border-t border-ink-800/50 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                    {engineState?.reachable === false && (
+                      <p
+                        data-testid="platform-engine-unreachable"
+                        role="status"
+                        className="flex items-center gap-1.5 text-[11px] text-warn"
+                      >
+                        <AlertTriangle size={12} className="shrink-0" aria-hidden />
+                        <span>{t('aiSettings.platformEngineUnreachable')}</span>
+                      </p>
+                    )}
+                    {engineState?.reachable !== false && engineState?.stale && (
+                      <p
+                        data-testid="platform-engine-stale"
+                        role="status"
+                        className="flex items-center gap-1.5 text-[11px] text-ink-400"
+                      >
+                        <AlertTriangle size={12} className="shrink-0" aria-hidden />
+                        <span>{t('aiSettings.platformEngineStale')}</span>
+                      </p>
+                    )}
+
                     {/* API Key (for cloud providers) */}
-                    {!isLocal && !meta.noApiKey && (
+                    {!isLocal && !meta.noApiKey && !managed && (
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
                           <Key size={12} />
@@ -1813,7 +1871,29 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                         provider, OpenAI included (its bespoke selectors
                         retired 2026-08-25). Chips = ``enabled_models``;
                         Test Connection populates ``config.models``. */}
-                    {(
+                    {managed ? (
+                      // Same chips + "Add Model" picker as every BYOK card.
+                      // The catalog is every row the server listed (type
+                      // order, live status); removing a chip puts the row on
+                      // `disabled_models`, adding it back takes it off.
+                      listedNousModels.length === 0 ? (
+                        <p className="text-xs text-ink-500">{t('aiSettings.noPlatformModels')}</p>
+                      ) : (
+                        <EnabledModelsField
+                          providerKey={providerKey}
+                          enabledModels={listedNousModels
+                            .map((m) => m.name)
+                            .filter((name) => (config.enabled_models ?? []).includes(name))}
+                          catalog={listedNousModels.map((m) => m.name)}
+                          onAdd={(name) => setNousModelEnabled(name, true)}
+                          onRemove={(name) => setNousModelEnabled(name, false)}
+                          labelOf={nousLabelOf}
+                          tagOf={nousTagOf}
+                          chipTestId="platform-model-row"
+                          allowCustom={false}
+                        />
+                      )
+                    ) : (
                       <EnabledModelsField
                         providerKey={providerKey}
                         enabledModels={config.enabled_models ?? (config.selected_model ? [config.selected_model] : [])}
@@ -1842,7 +1922,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                         request means "use what the server already holds",
                         so a saved provider is always testable — the old
                         re-type-to-test dead-end is gone. */}
-                    {(isLocal || meta.noApiKey || config.api_key || config.api_key_set) && (
+                    {!managed && (isLocal || meta.noApiKey || config.api_key || config.api_key_set) && (
                       <div className="pt-1">
                         <button
                           data-testid={`test-connection-${providerKey}`}
@@ -1907,71 +1987,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
               </div>
             );
           })}
-          {governance.nous_enabled && (
-            <div
-              className={`bg-ink-950 border rounded-xl overflow-hidden transition-all ${
-                nousUserEnabled ? 'border-[var(--accent-border)]' : 'border-ink-800'
-              }`}
-            >
-              {/* Header — master toggle mirrors the Ollama / LM Studio cards. */}
-              <div className="px-6 py-4 flex items-center gap-4">
-                <div className="p-2 rounded-lg bg-[var(--accent-soft)] text-[var(--accent-text)]">
-                  <Sparkles size={18} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-ink-100">{t('aiSettings.nousPlatform')}</span>
-                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-text)]">
-                      {t('aiSettings.platformManaged')}
-                    </span>
-                  </div>
-                  <p className="text-xs text-ink-400 mt-0.5">
-                    {t('aiSettings.nousDesc')}
-                  </p>
-                </div>
-                {renderToggle(nousUserEnabled, toggleNousMaster)}
-              </div>
-
-              {/* Body — collapses to header-only when the master toggle is off.
-                  Same "Enabled Models" chips + "Add Model" picker as every BYOK
-                  card above (2026-09-25 user request: one style for every
-                  provider). No API key and no Test Connection: the platform
-                  rows are the admin's to probe. Semantics stay a blacklist —
-                  removing a chip adds the row name to `nous.disabled_models`,
-                  adding it back removes it — so nothing changes on the wire. */}
-              {nousUserEnabled && (
-                <div className="px-6 pb-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                  {platformStatus.engine?.reachable === false && (
-                    <p
-                      data-testid="platform-engine-unreachable"
-                      role="status"
-                      className="flex items-center gap-1.5 text-[11px] text-warn"
-                    >
-                      <AlertTriangle size={12} className="shrink-0" aria-hidden />
-                      <span>{t('aiSettings.platformEngineUnreachable')}</span>
-                    </p>
-                  )}
-                  {listedNousModels.length === 0 ? (
-                    <p className="text-xs text-ink-500">{t('aiSettings.noPlatformModels')}</p>
-                  ) : (
-                    <EnabledModelsField
-                      providerKey="nous"
-                      enabledModels={listedNousModels
-                        .filter((m) => nousEnabledNames.has(m.name))
-                        .map((m) => m.name)}
-                      catalog={listedNousModels.map((m) => m.name)}
-                      onAdd={(name) => setNousModelEnabled(name, true)}
-                      onRemove={(name) => setNousModelEnabled(name, false)}
-                      labelOf={nousLabelOf}
-                      tagOf={nousTagOf}
-                      chipTestId="platform-model-row"
-                      allowCustom={false}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </section>
       )}

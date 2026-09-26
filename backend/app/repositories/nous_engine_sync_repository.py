@@ -22,8 +22,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
 from app.models import AiModelPrices, NousModels
-
-NOUS_ENGINE_PROVIDER = "nous"
+from app.repositories.nous_model_repository import NOUS_ENGINE_PROVIDER
 
 # Columns a sync reads from engine rows: identity, the credential/endpoint set
 # a new row copies (enabled rows are preferred as the source), and the window

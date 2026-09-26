@@ -7,7 +7,8 @@
 
 import { useState, type ReactNode } from 'react';
 
-import type { BackfillResult, NousModelPublic } from '../../types/api';
+import type { BackfillResult, NousModelPublic, PlatformEngineState } from '../../types/api';
+import { platformModelAvailability } from '../../utils/platformModel';
 import type { VectorSpaceStatus } from '../../services/searchService';
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string;
@@ -171,6 +172,8 @@ interface AddSpacePickerProps {
   t: TFn;
   /** null while the catalog list loads. */
   models: NousModelPublic[] | null;
+  /** nous-engine reachability behind the list (null = not applicable). */
+  engine?: PlatformEngineState | null;
   /** Catalog names that already have a space (active or candidate). */
   taken: ReadonlySet<string>;
   /** Catalog name being probed, if any. */
@@ -179,7 +182,7 @@ interface AddSpacePickerProps {
   onClose: () => void;
 }
 
-export function AddSpacePicker({ t, models, taken, probing, onPick, onClose }: AddSpacePickerProps) {
+export function AddSpacePicker({ t, models, engine = null, taken, probing, onPick, onClose }: AddSpacePickerProps) {
   const available = (models ?? []).filter((m) => !taken.has(m.name));
   return (
     <div
@@ -193,24 +196,55 @@ export function AddSpacePicker({ t, models, taken, probing, onPick, onClose }: A
         </button>
       </div>
       {models === null && <p className="text-xs text-ink-500">{t('settings.vectors.addSpaceLoading')}</p>}
+      {models !== null && engine?.reachable === false && (
+        <p data-testid="vector-catalog-engine-unreachable" role="status" className="text-xs text-warn">
+          {t('aiSettings.platformEngineUnreachable')}
+        </p>
+      )}
+      {models !== null && engine?.reachable !== false && engine?.stale && (
+        <p data-testid="vector-catalog-engine-stale" role="status" className="text-xs text-ink-400">
+          {t('aiSettings.platformEngineStale')}
+        </p>
+      )}
       {models !== null && available.length === 0 && (
         <p className="text-xs text-ink-500">{t('settings.vectors.addSpaceNone')}</p>
       )}
       {available.length > 0 && (
         <ul className="space-y-1">
-          {available.map((m) => (
-            <li key={m.name}>
-              <button
-                type="button"
-                disabled={probing !== null}
-                onClick={() => onPick(m)}
-                className="flex w-full items-baseline justify-between gap-3 rounded-md px-2 py-1 text-left text-sm text-ink-200 hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <span>{m.display_name}</span>
-                <span className="text-xs text-ink-500">{m.name}</span>
-              </button>
-            </li>
-          ))}
+          {available.map((m) => {
+            // Same rule as every platform picker (utils/platformModel): an
+            // `idle` row (nous-engine: authorized, not loaded) is listed but
+            // not pickable — the space's probe would get "not loaded" back.
+            const { selectable } = platformModelAvailability(
+              m.last_test_status === 'fail' ? null : m.last_test_status,
+            );
+            const statusLabel = !selectable
+              ? t('platformModel.notLoaded')
+              : m.last_test_status === 'not_probed'
+                ? t('settings.vectors.modelStatusUnknown')
+                : null;
+            return (
+              <li key={m.name}>
+                <button
+                  type="button"
+                  disabled={probing !== null || !selectable}
+                  onClick={() => onPick(m)}
+                  data-model-name={m.name}
+                  className="flex w-full items-baseline justify-between gap-3 rounded-md px-2 py-1 text-left text-sm text-ink-200 hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span>{m.display_name}</span>
+                  <span className="flex items-baseline gap-2">
+                    {statusLabel && (
+                      <span data-testid="vector-catalog-model-status" className="text-[11px] text-warn">
+                        {statusLabel}
+                      </span>
+                    )}
+                    <span className="text-xs text-ink-500">{m.name}</span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
       {probing && (

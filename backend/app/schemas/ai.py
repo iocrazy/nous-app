@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas.ai_settings_responses import (
     AiPlatformEngineState,
+    AiPlatformGovernance,
     AiPlatformModelEntry,
 )
 
@@ -112,6 +113,14 @@ class AISettingsResponse(BaseModel):
         description=(
             "nous-engine reachability behind the platform list; null when "
             "no listed row is served by nous-engine or the view is unknown."
+        ),
+    )
+    platform_governance: Optional[AiPlatformGovernance] = Field(
+        default=None,
+        description=(
+            "Admin governance nous.user_enabled as the platform view read it: "
+            "on / off (off = empty list) / unknown (the read failed; the list "
+            "is computed as if on). null = the view is unknown."
         ),
     )
 

@@ -31,18 +31,12 @@ def _row(**over):
     return base
 
 
-class _FakeRepo:
-    def __init__(self, rows):
-        self._rows = rows
-
-    async def list_all(self):
-        return self._rows
-
-
 def _patch_repo(monkeypatch, rows):
-    import app.repositories.nous_model_repository as repo_mod
+    # Dispatch reads the platform provider view (P4), so the catalog is
+    # installed at the view's seams, not as a bare ``list_all``.
+    from tests.platform_catalog_fake import install_catalog
 
-    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: _FakeRepo(rows))
+    install_catalog(monkeypatch, rows)
 
 
 # --------------------------------------------------------------- image dispatch

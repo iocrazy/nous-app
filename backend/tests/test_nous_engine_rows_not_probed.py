@@ -143,7 +143,10 @@ def test_probe_result_status_maps_idle() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduled_step_records_nous_rows_as_not_probed() -> None:
+async def test_scheduled_step_skips_nous_rows_without_writing() -> None:
+    """The hourly step neither calls nous-engine nor writes the row: the
+    stored columns belong to the admin's Test button, and an hourly
+    ``not_probed`` write used to overwrite what that Test found (P4)."""
     from app.workflows.scheduled_health import probe_nous_models_step
 
     repo = AsyncMock()
@@ -161,14 +164,36 @@ async def test_scheduled_step_records_nous_rows_as_not_probed() -> None:
         summary = await probe_nous_models_step()
     assert _Client.gets == [] and _Client.posts == []
     assert summary == {
-        "total": 1,
+        "total": 0,
         "ok": 0,
         "failed": 0,
         "idle": 0,
-        "not_probed": 1,
+        "not_probed": 0,
+        "engine_live": 1,
     }
     repo.list_all.assert_awaited_once()
-    args = repo.record_test_result.await_args.args
-    assert args[1] == "not_probed"
-    assert args[2] == NOUS_ENGINE_LIVE_DETAIL
-    assert args[3] is None
+    repo.record_test_result.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_scheduled_step_still_probes_and_writes_other_rows() -> None:
+    from app.workflows.scheduled_health import probe_nous_models_step
+
+    repo = AsyncMock()
+    repo.list_all.return_value = [
+        dict(_row(), id=1, is_enabled=True),
+        dict(_row(model="deepseek-v4", provider="deepseek"), id=2, is_enabled=True),
+    ]
+    probe = AsyncMock(return_value={"success": True, "detail": "pong"})
+    with (
+        patch(
+            "app.repositories.nous_model_repository.get_nous_model_repository",
+            return_value=repo,
+        ),
+        patch("app.services.ai.nous_model_health.probe_nous_model", probe),
+    ):
+        summary = await probe_nous_models_step()
+    assert summary["total"] == 1 and summary["engine_live"] == 1
+    probe.assert_awaited_once()
+    assert repo.record_test_result.await_count == 1
+    assert repo.record_test_result.await_args.args[0] == "2"

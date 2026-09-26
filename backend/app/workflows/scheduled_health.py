@@ -214,11 +214,11 @@ async def probe_nous_models_step() -> dict[str, Any]:
     logic, no new table, no new scheduler. Each probe is a tiny ping
     (max_tokens=8 for chat); a failure is recorded, never raised.
 
-    nous-engine rows (``actual_provider='nous'``) are skipped and recorded as
-    ``not_probed`` (detail ``live: status comes from nous-engine``): the
-    platform view reads their status from the engine's own list on every
-    request (spec 2026-09-25 §3.4), so a stored hourly answer would only be a
-    second, staler source.
+    nous-engine rows (``actual_provider='nous'``) are skipped and NOTHING is
+    written for them: the platform view reads their status from the engine's
+    own list on every request (spec 2026-09-25 §3.4), and the stored columns
+    belong to the admin's Test button alone — an hourly ``not_probed`` write
+    used to overwrite whatever the admin's last Test found (P4).
 
     Three buckets here: ``ok`` / ``fail`` / ``not_probed``. A type this poll
     may not dial is ``not_probed`` too; it is not a failure. Counting
@@ -228,6 +228,7 @@ async def probe_nous_models_step() -> dict[str, Any]:
     but this poll no longer produces it.
     """
     from app.repositories.nous_model_repository import get_nous_model_repository
+    from app.services.ai.engine_catalog import NOUS_ENGINE_PROVIDER
     from app.services.ai.nous_model_health import (
         probe_nous_model,
         probe_result_status,
@@ -236,9 +237,10 @@ async def probe_nous_models_step() -> dict[str, Any]:
     repo = get_nous_model_repository()
     rows = await repo.list_all()
     enabled = [r for r in rows if r.get("is_enabled")]
+    probed = [r for r in enabled if r.get("actual_provider") != NOUS_ENGINE_PROVIDER]
 
     counts = {"ok": 0, "fail": 0, "idle": 0, "not_probed": 0}
-    for row in enabled:
+    for row in probed:
         # Deliberately WITHOUT ``allow_costly``: this loop runs hourly over every
         # enabled model, and the image probe spends a real generation per call.
         # Image rows stay ``not_probed`` here; the admin Test button is where a
@@ -266,17 +268,20 @@ async def probe_nous_models_step() -> dict[str, Any]:
             )
 
     return {
-        "total": len(enabled),
+        "total": len(probed),
         "ok": counts["ok"],
         "failed": counts["fail"],
         "idle": counts["idle"],
         "not_probed": counts["not_probed"],
+        # Read live from nous-engine by the platform view; not probed here.
+        "engine_live": len(enabled) - len(probed),
     }
 
 
-# hourly: the status is now user-visible (the model picker warns on a red
-# light), so a stale reading is a wrong reading. Cost is one max_tokens=8 ping
-# per enabled model per hour.
+# hourly: for every row that is NOT served by nous-engine, the stored status is
+# what the platform view hands users (a ``fail`` row leaves their list), so a
+# stale reading is a wrong reading. Cost is one max_tokens=8 ping per such row
+# per hour. nous-engine rows are read live and skipped.
 @DBOS.scheduled("0 * * * *")
 @DBOS.workflow()
 async def nous_model_health_workflow(
@@ -288,13 +293,15 @@ async def nous_model_health_workflow(
     # nothing was wrong, and silently dropping the count would hide the fact
     # that some enabled models are going unchecked.
     skipped = summary.get("not_probed", 0)
+    live = summary.get("engine_live", 0)
     if summary["failed"]:
         logger.warning(
             f"[nous_model_health] {summary['failed']}/{summary['total']} "
-            f"platform models unreachable (not_probed={skipped})"
+            f"platform models unreachable (not_probed={skipped}, "
+            f"engine_live={live})"
         )
     else:
         logger.info(
             f"[nous_model_health] all {summary['ok']} probeable platform "
-            f"models reachable (not_probed={skipped})"
+            f"models reachable (not_probed={skipped}, engine_live={live})"
         )

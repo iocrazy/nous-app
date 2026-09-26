@@ -6,9 +6,12 @@ nous-engine row that is ``idle`` (authorized, not loaded: on 2026-09-24 a real
 chat to one got 503 "not loaded") while a loaded one sits further down.
 
 Input rows carry ``status`` as the platform provider view computes it
-(``services/ai/platform_provider.platform_rows_with_status``: live engine
-state for nous-engine rows, the stored probe for the rest; ``fail`` rows and
-services the engine no longer lists are already gone). One rule, shared:
+(``services/ai/platform_provider.platform_rows``: the user's view when there
+is a user — their switch and blacklist applied — else the system view; live
+engine state for nous-engine rows, the stored probe for the rest; ``fail``
+rows and services the engine no longer lists are already gone). Callers:
+the canvas Catalog default, the scorer health resolver and the scorer's own
+failover pool. One rule, shared:
 ``ok`` first, then ``not_probed``, then ``idle`` (catalog order within a
 rank); anything else (``fail``) is skipped. If nothing qualifies, the rows
 come back unchanged — callers keep their old first-row behaviour, a guess

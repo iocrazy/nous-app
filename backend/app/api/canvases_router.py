@@ -902,6 +902,7 @@ async def run_canvas_prompt(
         body=payload.body,
         provider_slug=payload.provider_slug,
         agent_id=payload.agent_id,
+        user_id=str(auth.user_id),
     )
     body = CanvasPromptRunResponse(ok=result.ok, text=result.text, error=result.error)
     return {"success": True, "data": body.model_dump(mode="json")}

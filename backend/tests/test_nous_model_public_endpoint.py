@@ -22,8 +22,8 @@ def _patched_view(repo):
     )
     stack.enter_context(
         patch(
-            "app.services.ai.governance.ai_governance.is_nous_globally_enabled",
-            new=AsyncMock(return_value=True),
+            "app.services.ai.governance.ai_governance.nous_global_state",
+            new=AsyncMock(return_value="on"),
         )
     )
     stack.enter_context(

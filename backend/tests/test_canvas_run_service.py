@@ -124,7 +124,7 @@ class TestRunPrompt:
         svc = make_service(adapter)
         svc._get_adapter = AsyncMock(return_value=adapter)  # type: ignore[assignment]
         await svc.run_prompt(body="hi", provider_slug="anthropic/claude-sonnet-4-6")
-        svc._get_adapter.assert_called_once_with("claude-sonnet-4-6")
+        svc._get_adapter.assert_called_once_with("claude-sonnet-4-6", None)
 
     @pytest.mark.asyncio
     async def test_no_provider_slug_uses_db_default_text_model(self):
@@ -138,7 +138,7 @@ class TestRunPrompt:
         )
         await svc.run_prompt(body="hi")
         svc._default_text_model.assert_awaited_once()
-        svc._get_adapter.assert_called_once_with("mediahub-doubao-llm")
+        svc._get_adapter.assert_called_once_with("mediahub-doubao-llm", None)
 
     @pytest.mark.asyncio
     async def test_agent_id_is_appended_to_system_message(self):

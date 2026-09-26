@@ -42,7 +42,7 @@ def _row(name: str, provider: str, model: str = "m", **extra) -> dict:
 
 
 def _patch_rows(monkeypatch, rows: list[dict]) -> None:
-    async def _enabled(media_type: str) -> list[dict]:
+    async def _enabled(media_type: str, user_id=None) -> list[dict]:
         assert media_type == "video"
         return list(rows)
 

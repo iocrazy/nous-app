@@ -369,7 +369,7 @@ async def test_override_is_applied_before_the_platform_catalog_lookup() -> None:
     repo = _repo(_agent("summarize"), override_row={"model": USER_MODEL})
     seen: list[str] = []
 
-    async def _catalog(model_name: str, module: str):
+    async def _catalog(model_name: str, module: str, user_id=None):
         seen.append(model_name)
         return None
 

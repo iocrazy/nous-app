@@ -347,3 +347,50 @@ async def test_probe_overlay_ok_probe_stays_green(monkeypatch):
     ]
     await ai_health._overlay_probe_health(rows, {})
     assert rows[0]["status"] == "ok"
+
+
+# ─── nous-engine rows read the platform view, not the stored probe (P4 H) ──
+
+
+def _engine_board_row(model: str) -> dict:
+    return {
+        "capability": "x",
+        "status": "ok",
+        "origin": "platform",
+        "model": model,
+        "provider": "nous",
+        "hint": "",
+    }
+
+
+async def _engine_overlay(monkeypatch, listed_services, stored_status="fail"):
+    from tests.services.ai.test_platform_provider import Env, engine_row, listed
+
+    env = Env(monkeypatch)
+    env.rows = [
+        engine_row("nous-a", "a-svc", last_test_status=stored_status),
+        engine_row("nous-b", "b-svc", last_test_status=stored_status),
+    ]
+    by_name = {r["name"]: r for r in env.rows}
+    env.repo.get_by_name = AsyncMock(side_effect=lambda n: by_name.get(n))
+    env.repo.get_by_actual_model = AsyncMock(return_value=None)
+    env.engine_answers = [listed(*listed_services)]
+    rows = [_engine_board_row("nous-a"), _engine_board_row("nous-b")]
+    await ai_health._overlay_probe_health(rows, {})
+    return rows
+
+
+async def test_engine_row_the_engine_lists_stays_green_despite_stale_fail(
+    monkeypatch,
+):
+    """The stored probe value is the admin's last Test, not the engine's
+    answer now: a listed (even idle) engine row stays green."""
+    rows = await _engine_overlay(monkeypatch, [("a-svc", True), ("b-svc", False)])
+    assert [r["status"] for r in rows] == ["ok", "ok"]
+
+
+async def test_engine_row_the_engine_no_longer_lists_is_failing(monkeypatch):
+    rows = await _engine_overlay(monkeypatch, [("a-svc", True)], stored_status="ok")
+    assert rows[0]["status"] == "ok"
+    assert rows[1]["status"] == "probe_failing"
+    assert "no longer lists" in rows[1]["hint"]

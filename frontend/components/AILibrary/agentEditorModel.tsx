@@ -11,7 +11,6 @@ import React from 'react';
 import { suspectedNonChatKind } from '../../utils/nonChatModel';
 import {
   platformModelAvailability,
-  platformModelRows,
   platformModelText,
 } from '../../utils/platformModel';
 import type { AISettings as AISettingsType } from '../../types';
@@ -78,32 +77,32 @@ export function getAvailableModels(
   settings: AISettingsType | null | undefined,
 ): ProviderModelGroup[] {
   if (!settings?.providers) return [];
+  const mapping = settings.platform_models;
   return Object.entries(settings.providers)
     .filter(([, config]) => config?.enabled)
     .map(([key, config]) => {
-      // The platform card is the same shape as a BYOK card — the server
-      // computed its `enabled_models` (spec 2026-09-25 §3.1) — but it lists
-      // every platform type, so the chat picker keeps only `llm` rows and
-      // labels each one the way the admin page does (row name stays the VALUE).
-      if (key === 'nous') {
-        const rows = platformModelRows(settings, { types: ['llm'] });
-        return {
-          providerKey: key,
-          providerName: PROVIDER_DISPLAY_NAMES[key] ?? key,
-          models: rows.map((m) => m.name),
-          labels: Object.fromEntries(rows.map((m) => [m.name, platformModelText(m)])),
-        };
-      }
+      // ONE path for every card, the platform (`nous`) card included: its
+      // `enabled_models` is the same shape as a BYOK card's (the server
+      // computed it, spec 2026-09-25 §3.1). What differs is only the mapping
+      // step — a platform name maps through `platform_models[name]` for its
+      // type (the chat picker keeps `llm` rows) and its admin label; a name
+      // with no mapping (`platform_models` null = view unknown) is skipped
+      // rather than shown as a bare id.
       const whitelist = config?.enabled_models;
       const fallback = config?.selected_model ? [config.selected_model] : [];
-      const models = Array.from(new Set(whitelist ?? fallback)).filter(Boolean);
-      // The Codex card's ids carry a ``codex:`` routing prefix (backend
-      // services/codex/provider_card.py); the group already says Codex, so
-      // the label drops it.
-      const labels =
-        key === 'codex-local'
-          ? Object.fromEntries(models.map((m) => [m, m.replace(/^codex:/i, '')]))
-          : undefined;
+      let models = Array.from(new Set(whitelist ?? fallback)).filter(Boolean);
+      let labels: Record<string, string> | undefined;
+      if (key === 'nous') {
+        models = models.filter((name) => mapping?.[name]?.type === 'llm');
+        labels = Object.fromEntries(
+          models.map((name) => [name, platformModelText({ name, ...mapping![name] })]),
+        );
+      } else if (key === 'codex-local') {
+        // The Codex card's ids carry a ``codex:`` routing prefix (backend
+        // services/codex/provider_card.py); the group already says Codex, so
+        // the label drops it.
+        labels = Object.fromEntries(models.map((m) => [m, m.replace(/^codex:/i, '')]));
+      }
       return {
         providerKey: key,
         providerName: PROVIDER_DISPLAY_NAMES[key] ?? key,

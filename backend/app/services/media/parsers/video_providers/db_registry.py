@@ -11,7 +11,10 @@ here, dispatching on the row's ``actual_provider``:
     lower-priority fallback).
   - ``doubao`` / ``ark`` → the OpenAI-compatible Ark image endpoint.
 
-Row SELECTION lives here (``_enabled_rows`` / ``_pick_row``); CONSTRUCTION of
+Row SELECTION lives here (``_enabled_rows`` / ``_pick_row``); the candidate
+rows come from the platform provider view (``platform_provider.platform_rows``,
+the same computation as the Settings card), never from the table directly.
+CONSTRUCTION of
 the actual provider/adapter is delegated to the matching provider protocol
 (``resolve_generation_protocol(actual_provider).build_image_provider(row)`` /
 ``.build_video_provider(row)`` — see ``app.services.ai.provider_protocols``).
@@ -102,16 +105,50 @@ def _pick_row(rows: list[dict], name: Optional[str], jimeng_first: bool = True) 
     return rows[0]
 
 
-async def _enabled_rows(media_type: str) -> list[dict]:
-    from app.repositories.nous_model_repository import (
-        get_nous_model_repository,
+async def _enabled_rows(media_type: str, user_id: Optional[str] = None) -> list[dict]:
+    """The platform rows of ``media_type`` that ``user_id`` may dispatch to.
+
+    Read from the platform provider view (``platform_provider.platform_rows``,
+    purpose ``dispatch``) — the SAME computation as the Settings card and the
+    generation pickers: admin governance, owner scope, the user's platform
+    card switch and blacklist, live nous-engine state, ``fail`` rows dropped.
+    Full rows (api_key revealed) in catalog ``sort_order``, each carrying the
+    computed ``status``. No user → platform-wide rows only. Raises when the
+    catalog cannot be read ("could not read" is not "no model").
+    """
+    from app.services.ai.platform_provider import platform_rows
+
+    rows = await platform_rows(user_id, type=media_type, purpose="dispatch")
+    return [r.dispatch_row() for r in rows]
+
+
+async def _refuse_withheld(name: str, media_type: str, user_id: Optional[str]) -> None:
+    """Raise when ``name`` is a catalog row of ``media_type`` that the view
+    withheld from this caller — an explicitly requested model must be refused
+    by name, never silently replaced by the default pick.
+
+    Returns quietly when ``name`` is no catalog row of this type (a BYOK card
+    key or free text keeps its old fall-through).
+    """
+    from app.repositories.nous_model_repository import get_nous_model_repository
+    from app.services.ai.platform_provider import (
+        PlatformModelNotAvailableError,
+        user_may_use,
     )
 
     repo = get_nous_model_repository()
-    # list_all reveals api_key on every full row and is ordered by sort_order;
-    # list_enabled returns public columns only (no api_key/base_url).
-    rows = await repo.list_all()
-    return [r for r in rows if r.get("type") == media_type and r.get("is_enabled")]
+    row = await repo.get_by_name(name) or await repo.get_by_actual_model(name)
+    if not row or row.get("type") != media_type:
+        return
+    if not row.get("is_enabled"):
+        raise RuntimeError(f"{media_type} model {name!r} is no longer available")
+    if user_id:
+        await user_may_use(user_id, row)
+    elif row.get("owner_user_id"):
+        raise PlatformModelNotAvailableError(name, "owner_scope")
+    # Visible to this caller by owner and settings, yet not in the view:
+    # governance off, the engine no longer lists it, or its probe failed.
+    raise PlatformModelNotAvailableError(name, "not_served")
 
 
 def _visible_to(row: dict, user_id: Optional[str]) -> bool:
@@ -225,10 +262,12 @@ async def resolve_image_provider(
     from app.services.ai.provider_protocols import resolve_generation_protocol
     from app.services.generation.model_capabilities import generates_from_prompt
 
-    catalog = await _enabled_rows("image")
+    catalog = await _enabled_rows("image", user_id)
     byok = await byok_image_rows(user_id)
     visible = _visible_rows([*catalog, *byok], name, user_id, "image")
     explicit = _explicit_match(visible, name) if name else None
+    if name and explicit is None:
+        await _refuse_withheld(name, "image", user_id)
     # Upscale-only rows (``text_to_image = False``) never win a DEFAULT pick —
     # they need an input image a prompt request does not have. Named
     # explicitly they stay in, so the refusal below names the row instead of
@@ -300,7 +339,7 @@ async def resolve_upscale_provider(*, user_id: Optional[str]) -> Tuple[Any, str,
     """
     from app.services.ai.provider_protocols import resolve_generation_protocol
 
-    catalog = await _enabled_rows("image")
+    catalog = await _enabled_rows("image", user_id)
     byok = await byok_image_rows(user_id)
     candidates: list[tuple[int, int, dict, Any]] = []
     for index, row in enumerate(
@@ -346,7 +385,11 @@ async def _pick_video_row(name: Optional[str], user_id: Optional[str]) -> dict:
     ``resolve_video_route`` (either machine) so the two can never disagree on
     which row a request lands on.
     """
-    video_rows = _visible_rows(await _enabled_rows("video"), name, user_id, "video")
+    video_rows = _visible_rows(
+        await _enabled_rows("video", user_id), name, user_id, "video"
+    )
+    if name and _explicit_match(video_rows, name) is None:
+        await _refuse_withheld(name, "video", user_id)
     if not video_rows:
         raise RuntimeError("no video model configured in nous_models catalog")
     return _pick_row(video_rows, name)
@@ -371,7 +414,7 @@ def _build_server_video_provider(row: dict) -> Tuple[JimengCliProvider, str]:
             f"{actual_provider!r} (catalog row name={row.get('name')!r})"
         )
     provider, actual_model = protocol.build_video_provider(row)
-    # 视频侧今天只有平台目录（``_enabled_rows("video")``，没有 BYOK 层），所以
+    # 视频侧今天只有平台目录（``_enabled_rows("video", …)``，没有 BYOK 层），所以
     # 这里恒是 "catalog"。仍然显式传行上的值：BYOK 视频行一旦出现，这条链就已经
     # 说得出层，而不是等着谁想起来补一个默认值。
     _stamp_provider_key(

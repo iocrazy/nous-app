@@ -160,6 +160,7 @@ async def test_governance(client, monkeypatch) -> None:
 
     monkeypatch.setattr(gov, "get_module_governance", _module)
     monkeypatch.setattr(gov, "is_nous_globally_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(gov, "nous_global_state", AsyncMock(return_value="on"))
     monkeypatch.setattr(
         gov, "is_nous_allowed", AsyncMock(side_effect=lambda m: m != "chat")
     )
@@ -288,6 +289,7 @@ def platform(monkeypatch):
     real_client = httpx.AsyncClient
     monkeypatch.setattr(repo_mod, "read_scope", _scope)
     monkeypatch.setattr(gov, "is_nous_globally_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(gov, "nous_global_state", AsyncMock(return_value="on"))
     monkeypatch.setattr(
         ec.httpx,
         "AsyncClient",
@@ -349,6 +351,7 @@ async def test_settings_carry_the_platform_view(
         "enabled_models": ["nous-qwen3-8b", "nous-wemm-2b", "nous-codex-image"],
         "disabled_models": ["nous-doubao"],
     }
+    assert body["platform_governance"] == "on"
     models = body["platform_models"]
     assert set(models) == set(body["ai_providers"]["nous"]["models"])
     assert models["nous-qwen3-8b"] == {
@@ -465,9 +468,7 @@ async def test_view_failure_is_unknown_not_empty(
 ) -> None:
     import app.services.ai.platform_provider as pp
 
-    monkeypatch.setattr(
-        pp, "live_platform_rows", AsyncMock(side_effect=RuntimeError("db down"))
-    )
+    monkeypatch.setattr(pp, "_compute", AsyncMock(side_effect=RuntimeError("db down")))
     body = (await client.get("/api/v1/ai/settings")).json()
     assert body["platform_models"] is None and body["platform_engine"] is None
     assert body["ai_providers"]["nous"]["disabled_models"] == ["nous-doubao"]
@@ -561,6 +562,39 @@ async def test_platform_status(client, platform, settings_repo, monkeypatch) -> 
     }
     assert body["models"]["nous-codex-image"]["local_ready"] is True
     assert body["engine"]["reachable"] is True
+
+
+@pytest.mark.asyncio
+async def test_platform_status_degrades_instead_of_500(
+    client, platform, settings_repo, monkeypatch
+) -> None:
+    """Same fallback as ``GET /ai/settings``: a view that cannot be computed
+    is "unknown" (empty models, no engine), never a 500."""
+    import app.services.ai.platform_provider as pp
+
+    monkeypatch.setattr(pp, "_compute", AsyncMock(side_effect=RuntimeError("db down")))
+    response = await client.get("/api/v1/ai/platform-status")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"models": {}, "engine": None, "governance": None}
+
+
+@pytest.mark.asyncio
+async def test_put_echoes_the_stored_provider_health(
+    client, platform, settings_repo
+) -> None:
+    """PUT answers in GET's shape: the stored provider health comes back
+    unchanged (a PUT never writes it), so the client never blanks it."""
+    health = {
+        "deepseek": {"status": "ok", "detail": "", "tested_at": "2026-09-25T00:00:00Z"}
+    }
+    stored = _stored_settings({"enabled": True, "disabled_models": []})
+    stored["settings_json"]["ai_provider_health"] = health
+    settings_repo.get_by_user_id = AsyncMock(return_value=stored)
+    payload = {"ai_providers": {"nous": {"disabled_models": []}}}
+    put = await client.put("/api/v1/ai/settings", json=payload)
+    assert put.status_code == 200, put.text
+    get = await client.get("/api/v1/ai/settings")
+    assert put.json()["provider_health"] == health == get.json()["provider_health"]
 
 
 @pytest.mark.asyncio

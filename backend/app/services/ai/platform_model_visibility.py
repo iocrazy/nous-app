@@ -1,31 +1,20 @@
-"""用户在 Settings「平台模型」卡上的开关，套到任何面向用户的目录列表上。
+"""The user's stored platform-card choices (``ai_providers.nous``) and the
+blacklist matcher.
 
-Settings 页（`AISettings.tsx::visibleNousModels`）有三层；这里**只套用户自己的两层**：
-1. 用户平台卡总开关 `ai_providers.nous.enabled === false` → 一个不给；
-2. 用户逐模型黑名单 `ai_providers.nous.disabled_models` → 去掉这些。
-
-⚠️ 故意不套管理员治理总开关 `nous.user_enabled`：那个开关**默认关、库读不到也判关**
-（`is_nous_globally_enabled` 为控成本 fail-closed）。把它接进模型下拉，一次 DB 抖动
-就会让画布 / 封面工作室的下拉整个变空，而真正的成本闸门在派发那一层早就有了。
-下拉的职责是"显示用户在 Settings 里留下的选择"，不是再当一次闸门。
-
-这层原来只在前端 Settings 页里生效，画布 / 封面工作室拿 `/canvases/generation-models`
-时看到的是没过滤的目录 —— 用户在 Settings 里关掉的模型照样出现在下拉里
-（2026-08-27 用户指出）。这里把同一口径搬到服务端，让所有"给用户选模型"的列表
-走同一个函数，而不是各自抄一份必然漂移的过滤。
-
-只做过滤、不做兜底：用户把所有图片模型都关了，列表就是空的 —— 那是他在 Settings
-里明确表达的意思，不该被"目录默认"悄悄绕过。
+Two stored values, both user-owned: the card's master switch
+``enabled`` and the per-model blacklist ``disabled_models``. They are applied
+in exactly one place — ``services/ai/platform_provider`` (the platform
+provider view and ``platform_rows``) — together with admin governance, owner
+scope and live engine state, so the Settings card, every picker and every
+dispatch decision read one computation. This module only reads the stored
+values and resolves blacklisted names to rows.
 """
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Iterable
 
 from app.core.catalog_names import find_row_by_catalog_name
-
-logger = logging.getLogger(__name__)
 
 _AI_SETTINGS_KEY = "ai_settings"
 
@@ -49,18 +38,6 @@ def disabled_names(nous: dict[str, Any]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(str(n) for n in raw if n))
 
 
-async def platform_model_gate(user_id: str) -> tuple[bool, frozenset[str]]:
-    """``(any_allowed, disabled_names)`` for this user.
-
-    ``any_allowed=False`` means the user turned the platform card's master
-    switch off; ``disabled_names`` is the per-model blacklist otherwise.
-    """
-    nous = await stored_nous_settings(user_id)
-    if nous.get("enabled") is False:
-        return False, frozenset()
-    return True, frozenset(disabled_names(nous))
-
-
 def blacklisted(rows: list[dict[str, Any]], disabled: Iterable[str]) -> set[int]:
     """``id()`` of each row the blacklist hides. Pure.
 
@@ -74,28 +51,3 @@ def blacklisted(rows: list[dict[str, Any]], disabled: Iterable[str]) -> set[int]
         for name in disabled
         if (hit := find_row_by_catalog_name(rows, name)) is not None
     }
-
-
-async def filter_platform_models_for_user(
-    user_id: str, rows: Iterable[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """Apply the user's Settings platform-card switches to catalog rows.
-
-    Degrades OPEN on a failed settings read: this is a preference, not an
-    authorisation (owner-private rows are already excluded by
-    ``list_enabled(viewer_user_id=…)``), and hiding every model because the
-    settings row could not be read would turn a blip into "the picker is
-    empty". Logged, never silent.
-    """
-    rows = list(rows)
-    try:
-        allowed, disabled = await platform_model_gate(user_id)
-    except Exception as e:  # noqa: BLE001 — degraded, logged, not swallowed
-        logger.error("platform model gate failed for user %s: %s", user_id, e)
-        return rows
-    if not allowed:
-        return []
-    if not disabled:
-        return rows
-    hidden = blacklisted(rows, disabled)
-    return [r for r in rows if id(r) not in hidden]

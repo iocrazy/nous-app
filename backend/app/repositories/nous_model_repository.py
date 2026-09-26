@@ -110,6 +110,11 @@ _PUBLIC_COLS = (
 # bit of ``actual_provider`` a public projection may carry is "is it one of these".
 LOCAL_ENGINE_PROVIDERS = ("codex-local", "jimeng-local")
 
+# ``nous_models.actual_provider`` of rows served by nous-engine. The ONE copy:
+# ``engine_catalog``, ``nous_model_health`` and the engine-sync repository all
+# import it from here.
+NOUS_ENGINE_PROVIDER = "nous"
+
 
 def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
     """Strategy-C value-type parity IN PLACE on a SELECT *-shaped dict:

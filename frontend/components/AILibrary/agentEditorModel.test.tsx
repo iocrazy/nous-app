@@ -115,6 +115,19 @@ describe('getAvailableModels — the platform card', () => {
     expect(groups.find((g) => g.providerKey === 'nous')).toBeUndefined();
   });
 
+  it('reads the card the same way as a BYOK card: enabled_models is the source, in its order', async () => {
+    const { getAvailableModels } = await import('./agentEditorModel');
+    const settings = withPlatform(baseAISettings(), [
+      { name: 'nous-a', actual_model: 'a-up', type: 'llm' },
+      { name: 'nous-b', actual_model: 'b-up', type: 'llm' },
+    ]);
+    // A computed card whose enabled_models differs from models: the picker
+    // follows enabled_models (the BYOK rule), not a second derivation.
+    const nousCard = { ...settings.providers.nous!, enabled_models: ['nous-b', 'nous-a'] };
+    const groups = getAvailableModels({ ...settings, providers: { ...settings.providers, nous: nousCard } });
+    expect(groups.find((g) => g.providerKey === 'nous')?.models).toEqual(['nous-b', 'nous-a']);
+  });
+
   it('offers nothing when the platform view is unknown (platform_models: null)', async () => {
     const { getAvailableModels } = await import('./agentEditorModel');
     const settings = { ...withPlatform(baseAISettings(), ROWS), platform_models: null };

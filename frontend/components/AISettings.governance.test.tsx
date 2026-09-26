@@ -324,3 +324,27 @@ describe('AISettings governance — AI Providers section', () => {
     expect(screen.queryByText(MANAGED_TEXT)).toBeNull();
   });
 });
+
+describe('AISettings governance — platform card', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('leaves the platform card out of the provider loop while the admin master switch is off', async () => {
+    // Default mock: nous_enabled=false.
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByText('AI Providers')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('provider-card-openai')).toBeInTheDocument();
+    expect(screen.queryByTestId('provider-card-nous')).toBeNull();
+  });
+
+  it('renders the platform card once the admin master switch is on', async () => {
+    await setGovernanceMock({ nous_enabled: true });
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByTestId('provider-card-nous')).toBeInTheDocument();
+    });
+  });
+});

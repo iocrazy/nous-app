@@ -30,7 +30,9 @@ from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
 LOCAL_ONLY_CHAT_KEY = "codex-local"
 
 
-async def resolve_nous_model(model_name: str, module: str):
+async def resolve_nous_model(
+    model_name: str, module: str, *, user_id: Optional[str] = None
+):
     """Deferred re-export of :func:`ai_provider_helpers.resolve_nous_model`.
 
     Re-imports the source function on every call instead of binding it once
@@ -51,6 +53,8 @@ async def resolve_nous_model(model_name: str, module: str):
         resolve_nous_model as _impl,
     )
 
+    if user_id:
+        return await _impl(model_name, module, user_id=user_id)
     return await _impl(model_name, module)
 
 
@@ -78,6 +82,7 @@ async def build_fallback_llm(
     provider_key: Optional[str] = None,
     module: str = "chat",
     user_id: Optional[str] = None,
+    gate_user_id: Optional[str] = None,
 ) -> LLMFallbackChain:
     """Build the fallback-wrapped adapter chain (DB-only credentials).
 
@@ -120,6 +125,13 @@ async def build_fallback_llm(
     not participate in resolution — batch callers that have no user may leave
     it unset, and ``codex-local`` then refuses to build rather than dial an
     arbitrary daemon.
+
+    ``gate_user_id`` applies that user's platform card (switch, blacklist,
+    owner scope — ``resolve_nous_model``'s ``user_id``) to the catalog hits:
+    pass it only when the models are the user's own (their agent's model and
+    its fallback pool). A primary the user may not use raises the typed
+    ``PlatformModelNotAvailableError``; a fallback they may not use is left
+    out of the pool (logged), never dialed on the platform's key.
     """
     # Pre-resolve every model the fallback chain may dial against the platform
     # ``nous_models`` catalog (async — the factory below must stay sync for
@@ -129,10 +141,25 @@ async def build_fallback_llm(
     # Credentials are DB-only (铁律 2026-07-07): a miss on both the catalog and
     # the BYOK/platform-provider dict raises ProviderNotConfiguredError at dial
     # time — there is no env fallback anymore.
+    from app.services.ai.platform_provider import PlatformModelNotAvailableError
+
     _platform_adapters: dict = {}
     _primary_is_local = False
+    _withheld: set[str] = set()
     for _m in dict.fromkeys([primary_model, *fallback_models]):
-        _hit = await resolve_nous_model(_m, module)
+        if gate_user_id:
+            try:
+                _hit = await resolve_nous_model(_m, module, user_id=gate_user_id)
+            except PlatformModelNotAvailableError as exc:
+                if _m == primary_model:
+                    raise
+                logger.info(
+                    "[fallback] dropping fallback {}: {}", _m, exc.details or exc
+                )
+                _withheld.add(_m)
+                continue
+        else:
+            _hit = await resolve_nous_model(_m, module)
         if _hit:
             _prov, _pcfg, _actual = _hit
             _creds = {"api_key": _pcfg["api_key"], "base_url": _pcfg["base_url"]}
@@ -146,6 +173,9 @@ async def build_fallback_llm(
             _platform_adapters[_m] = get_adapter_for_key(
                 _key, _actual, {_key: _creds}, user_id=user_id
             )
+
+    if _withheld:
+        fallback_models = [m for m in fallback_models if m not in _withheld]
 
     # Picking a local model is a statement about WHERE the work runs and WHO
     # pays: the user's own machine, on their own codex subscription. Silently

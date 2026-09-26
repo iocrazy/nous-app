@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,26 @@ class AIModuleGovernance:
         object.__setattr__(self, "api_key_present", bool(self.api_key.strip()))
 
 
+async def _read_raw_strict(key: str) -> Optional[object]:
+    """:func:`_read_raw` without the catch: None when the key is absent or no
+    database is configured, RAISES when the read itself fails. For callers
+    that must tell "could not read" apart from "absent" (:func:`nous_global_state`)."""
+    from sqlalchemy import select
+
+    from app.core.secure_settings import reveal
+    from app.db import engine as db_engine
+    from app.db.session import read_scope
+    from app.models import SystemSettings
+
+    if not db_engine.is_configured():
+        return None
+    async with read_scope() as session:
+        value = await session.scalar(
+            select(SystemSettings.value).where(SystemSettings.key == key)
+        )
+    return reveal(value) if value is not None else None
+
+
 async def _read_raw(key: str) -> Optional[object]:
     """Read one ``system_settings`` JSONB value via the SQLAlchemy engine
     (service-role, bypasses RLS).  Returns the native Python value
@@ -104,20 +124,7 @@ async def _read_raw(key: str) -> Optional[object]:
     ``reveal`` and resolves to ``""`` rather than raising here.
     """
     try:
-        from sqlalchemy import select
-
-        from app.core.secure_settings import reveal
-        from app.db import engine as db_engine
-        from app.db.session import read_scope
-        from app.models import SystemSettings
-
-        if not db_engine.is_configured():
-            return None
-        async with read_scope() as session:
-            value = await session.scalar(
-                select(SystemSettings.value).where(SystemSettings.key == key)
-            )
-        return reveal(value) if value is not None else None
+        return await _read_raw_strict(key)
     except Exception:  # noqa: BLE001
         logger.warning("[governance] system_settings read failed for key: %s", key)
         return None
@@ -222,6 +229,32 @@ async def is_nous_globally_enabled() -> bool:
     DB unreachable (``_read_raw`` returns None) ⇒ False (fail-closed for cost).
     """
     return (await _read_raw(NOUS_GLOBAL_KEY)) is True
+
+
+NousGlobalState = Literal["on", "off", "unknown"]
+
+
+async def nous_global_state() -> NousGlobalState:
+    """``nous.user_enabled`` as three states, for the platform provider view.
+
+    ``"on"`` only for a stored ``True``; ``"off"`` for anything else READ
+    (absent, false, no database configured) — the switch stays default-off;
+    ``"unknown"`` when the read itself FAILED. The view treats ``"unknown"``
+    as enabled and says so (``platform_governance``): a failed read is not a
+    negative answer, and turning it into "no models" would empty every
+    picker and dispatch on a DB blip. Only a read that answered off closes.
+    """
+    try:
+        raw = await _read_raw_strict(NOUS_GLOBAL_KEY)
+    except Exception as exc:  # noqa: BLE001 — reported as a state, not swallowed
+        logger.warning(
+            "[governance] %s read failed — platform view treats it as unknown "
+            "(listed): %r",
+            NOUS_GLOBAL_KEY,
+            exc,
+        )
+        return "unknown"
+    return "on" if raw is True else "off"
 
 
 async def is_nous_allowed(module: str) -> bool:

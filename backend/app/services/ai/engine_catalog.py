@@ -46,6 +46,7 @@ from loguru import logger
 
 from app.core.cache import TTLCache
 from app.core.exceptions import AppError
+from app.repositories.nous_model_repository import NOUS_ENGINE_PROVIDER
 
 ENGINE_TTL_S = 30.0
 KEEP_LAST_GOOD_S = 600.0
@@ -55,9 +56,6 @@ LIST_TIMEOUT_S = 5.0
 _ERROR_TEXT_MAX = 200
 UNAUTHORIZED_ERROR = "HTTP 401: platform key rejected by nous-engine"
 EMPTY_LIST_ERROR = "engine listed no services (empty list not trusted)"
-
-# ``nous_models.actual_provider`` of rows served by nous-engine.
-NOUS_ENGINE_PROVIDER = "nous"
 
 
 ENGINE_SERVICE_UNAVAILABLE = "engine_service_unavailable"
@@ -194,9 +192,22 @@ async def _http_list(base_url: str, api_key: str) -> _Read:
 _fetch: Callable[[str, str], Awaitable[_Read]] = _http_list
 _clock: Callable[[], float] = time.monotonic
 
-_cache: TTLCache[EngineSnapshot] = TTLCache(ttl_seconds=ENGINE_TTL_S, maxsize=64)
-# cache key → (monotonic time of the read, snapshot)
+_CACHE_MAXSIZE = 64
+_cache: TTLCache[EngineSnapshot] = TTLCache(
+    ttl_seconds=ENGINE_TTL_S, maxsize=_CACHE_MAXSIZE
+)
+# cache key → (monotonic time of the read, snapshot). Bounded like ``_cache``:
+# keys are credential fingerprints, so a stream of rotated keys must not grow
+# it forever; the least recently stored entry goes first (:func:`_remember`).
 _last_good: dict[str, tuple[float, EngineSnapshot]] = {}
+
+
+def _remember(key: str, entry: tuple[float, EngineSnapshot]) -> None:
+    """Store a last-good snapshot, evicting the oldest past the cap."""
+    _last_good.pop(key, None)
+    _last_good[key] = entry
+    while len(_last_good) > _CACHE_MAXSIZE:
+        _last_good.pop(next(iter(_last_good)))
 
 
 def reset_engine_cache() -> None:
@@ -216,7 +227,7 @@ async def _load(key: str, base_url: str, api_key: str) -> EngineSnapshot:
             error=None if read.services else EMPTY_LIST_ERROR,
         )
         if read.services:
-            _last_good[key] = (now, snap)
+            _remember(key, (now, snap))
         else:
             logger.warning(f"[engine_catalog] {base_url}: {EMPTY_LIST_ERROR}")
         return snap

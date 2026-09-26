@@ -58,7 +58,7 @@ def _ark(name="ark-t2i") -> dict:
 
 
 def _catalog(monkeypatch, rows, byok=()):
-    async def _enabled(media_type):
+    async def _enabled(media_type, user_id=None):
         return [r for r in rows if r["type"] == media_type]
 
     async def _byok(user_id):
@@ -173,48 +173,36 @@ async def test_only_an_upscaler_means_no_image_model(monkeypatch):
         await db_registry.resolve_image_provider(None, user_id=USER)
 
 
-def _stub_list_enabled(monkeypatch, rows):
-    """Honour list_enabled's real projection: actual_provider is popped unless
-    the caller opts in (the 2026-08-14 leak tripwire)."""
-    from app.repositories import nous_model_repository as repo_mod
-    from app.services.ai import platform_model_visibility as vis
-
-    class _Repo:
-        async def list_enabled(
-            self, type_filter=None, viewer_user_id=None, include_actual_provider=False
-        ):
-            out = []
-            for r in rows:
-                row = {k: v for k, v in r.items() if k not in ("api_key", "base_url")}
-                provider = row.pop("actual_provider", None)
-                if include_actual_provider:
-                    row["actual_provider"] = provider
-                out.append(row)
-            return out
-
-    async def _passthrough(user_id, rows):
-        return rows
-
-    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: _Repo())
-    monkeypatch.setattr(vis, "filter_platform_models_for_user", _passthrough)
-
-
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_picker_rows_exclude_the_upscaler_and_keep_the_projection(
-    monkeypatch,
-):
-    from app.services.generation.model_capabilities import visible_generation_rows
+async def test_picker_rows_exclude_the_upscaler(monkeypatch):
+    """The generation rows a picker (and the asset bundle) offers come from
+    the platform provider view with purpose ``picker``: the upscale-only
+    nous-engine row is left out, the provider string stays server side."""
+    from unittest.mock import AsyncMock
 
-    _stub_list_enabled(monkeypatch, [_nous(), _ark(), _jimeng()])
+    from app.services.generation.model_capabilities import generation_rows_for
+    from tests.services.ai.test_platform_provider import (
+        Env,
+        catalog_row,
+        engine_row,
+        listed,
+    )
 
-    rows = await visible_generation_rows(USER)
+    env = Env(monkeypatch)
+    monkeypatch.setattr(
+        "app.services.ai.platform_model_visibility.stored_nous_settings",
+        AsyncMock(return_value={}),
+    )
+    env.rows = [
+        engine_row("nous-studio-upscale", "studio-upscale", type="image"),
+        catalog_row("ark-t2i", type="image", actual_provider="ark"),
+        catalog_row("jimeng-cli-image", type="image", actual_provider="jimeng-cli"),
+    ]
+    env.engine_answers = [listed(("studio-upscale", True))]
+    rows = await generation_rows_for(USER)
     assert [r["name"] for r in rows] == ["ark-t2i", "jimeng-cli-image"]
-    # Default projection unchanged: the provider string never leaves.
-    assert all("actual_provider" not in r for r in rows)
-
-    with_provider = await visible_generation_rows(USER, include_actual_provider=True)
-    assert [r["actual_provider"] for r in with_provider] == ["ark", "jimeng-cli"]
+    assert [r["actual_provider"] for r in rows] == ["ark", "jimeng-cli"]
 
 
 @pytest.mark.parametrize(

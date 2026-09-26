@@ -14251,9 +14251,10 @@ export interface paths {
         };
         /**
          * Vector Space Catalog
-         * @description Catalog models Add Space may pick: enabled PLATFORM embedding rows
-         *     only (public fields) — never the caller's own owner-scoped rows, which
-         *     must never back a shared space.
+         * @description Catalog models Add Space may pick: the platform provider view's
+         *     system rows of type ``embedding`` (public fields, live status, engine
+         *     state) — never the caller's own owner-scoped rows, which must never back
+         *     a shared space.
          */
         get: operations["vector_space_catalog_api_v1_search_vectors_catalog_get"];
         put?: never;
@@ -16278,6 +16279,11 @@ export interface components {
             default_summary_model: string;
             /** @description nous-engine reachability behind the platform list; null when no listed row is served by nous-engine or the view is unknown. */
             platform_engine?: components["schemas"]["AiPlatformEngineState"] | null;
+            /**
+             * Platform Governance
+             * @description Admin governance nous.user_enabled as the platform view read it: on / off (off = empty list) / unknown (the read failed; the list is computed as if on). null = the view is unknown.
+             */
+            platform_governance?: ("on" | "off" | "unknown") | null;
             /**
              * Platform Models
              * @description Platform catalog name → mapping for every name in ai_providers.nous.models (spec 2026-09-25 §3.1). null = the platform view could not be computed (unknown, not empty).
@@ -19542,9 +19548,16 @@ export interface components {
         };
         /**
          * AiNousModelsResponse
-         * @description ``GET /search/vectors/catalog``: platform embedding rows.
+         * @description ``GET /search/vectors/catalog``: platform embedding rows from the
+         *     platform provider view's system computation (governance, engine state,
+         *     ``fail`` rows dropped). ``last_test_status`` carries the live status
+         *     (``ok`` / ``idle`` / ``not_probed``), the same value
+         *     ``platform_models[name].status`` has on the AI settings.
          */
         AiNousModelsResponse: {
+            engine?: components["schemas"]["AiPlatformEngineState"] | null;
+            /** Governance */
+            governance?: ("on" | "off" | "unknown") | null;
             /** Models */
             models: components["schemas"]["AiNousModelPublic"][];
         };
@@ -19628,6 +19641,8 @@ export interface components {
          */
         AiPlatformStatusResponse: {
             engine: components["schemas"]["AiPlatformEngineState"] | null;
+            /** Governance */
+            governance?: ("on" | "off" | "unknown") | null;
             /** Models */
             models: {
                 [key: string]: components["schemas"]["AiPlatformModelRuntime"];

@@ -405,6 +405,21 @@ describe('platform models ride on the settings (spec 2026-09-25)', () => {
     expect(saved.platform_models).toEqual(wire.platform_models);
   });
 
+  it('saveAISettings keeps the provider_health the PUT echo carries (same shape as GET)', async () => {
+    // Real wire: PUT /ai/settings echoes the stored ai_provider_health
+    // (backend test_put_echoes_provider_health); a save must not blank the
+    // Test Connection results the page shows.
+    const health = { deepseek: { status: 'ok', detail: 'Connected', tested_at: '2026-09-25T08:00:00Z' } };
+    stubJson({ ai_enabled: true, ...platformSettingsWire(ROWS), provider_health: health });
+    const saved = await saveAISettings({
+      ai_enabled: true,
+      preferred_language: 'auto',
+      providers: {},
+      task_assignment: { transcription: '', summarization: '', visual_analysis: '' },
+    });
+    expect(saved.provider_health).toEqual(health);
+  });
+
   it('getPlatformStatus GETs /ai/platform-status and returns the body', async () => {
     const body = platformStatusWire({ 'nous-qwen3-8b': {}, 'codex-local-image': { local_ready: true } });
     const spy = stubJson(body);

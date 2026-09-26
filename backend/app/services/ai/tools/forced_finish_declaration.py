@@ -150,7 +150,7 @@ async def _resolve_agent_and_adapter(
     # 拿到的是一个无从追问来路的对象，于是这条路的 BYOK run 在账上与平台 run 无
     # 从区分 —— 而它带着 session 的 team_id，是真的会扣分的。
     credential_origin: Optional[str]
-    hit = await resolve_nous_model(model, "chat")
+    hit = await resolve_nous_model(model, "chat", user_id=str(uid))
     if hit:
         actual_provider, cfg, actual_model = hit
         creds = {"api_key": cfg["api_key"], "base_url": cfg["base_url"]}
