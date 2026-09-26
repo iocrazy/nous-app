@@ -240,14 +240,41 @@ class SpaceStatus(SpaceInfo):
     """One embedding space and the caller's coverage in it.
 
     ``active`` = the admin governance embedder writes and searches here;
-    every other space is a candidate. ``catalog_name`` is the ``nous_models``
+    every other space is a candidate. ``visual`` = the VISUAL layer (shot
+    frames) writes and searches here — the same space as the active one
+    unless an admin pointed the visual layer elsewhere (``PUT
+    /search/vectors/visual-space``). ``catalog_name`` is the ``nous_models``
     row serving ``actual_model`` (null when it was removed from the catalog:
     such a space can neither be filled nor switched to).
     """
 
     active: bool
+    visual: bool = False
     catalog_name: Optional[str] = None
     layers: List[LayerStatus]
+
+
+class VisualSpaceInfo(BaseModel):
+    """The space the VISUAL layer embeds into and searches: the visual
+    governance key (``ai_module.embedding.visual_model``) when set, else the
+    active space (``follows_active``). ``id`` is a Snowflake as a string."""
+
+    id: str
+    actual_model: str
+    catalog_name: Optional[str] = None
+    follows_active: bool
+
+
+#: Why ``visual_space`` is null: no embedder at all / the visual key names a
+#: catalog row that is gone or disabled / the embedder takes no images /
+#: the store is not there yet. Same codes as the shot index's refusals.
+VisualStatus = Literal[
+    "ok",
+    "embedder_unconfigured",
+    "visual_space_unavailable",
+    "provider_no_image",
+    "store_missing",
+]
 
 
 class VectorsStatusResponse(BaseModel):
@@ -259,10 +286,13 @@ class VectorsStatusResponse(BaseModel):
     empty). A layer is "not_built" until it holds at least one vector;
     ``transcript`` is always "not_built" until that layer ships.
 
-    ``space`` / ``layers`` describe the ACTIVE space (kept for old readers);
-    ``spaces`` lists every space, active and candidates, each with the
-    caller's coverage. ``can_manage`` = the caller may add / switch / delete
-    spaces (admin).
+    ``space`` describes the ACTIVE space; ``layers`` is the caller's coverage
+    per layer where each layer actually lives — ``semantic`` in the active
+    space, ``visual`` in ``visual_space`` (the two coincide unless the visual
+    layer was pointed elsewhere). ``spaces`` lists every space, active and
+    candidates, each with the caller's coverage IN THAT SPACE. ``can_manage``
+    = the caller may add / switch / delete spaces (admin). ``visual_status``
+    says why ``visual_space`` is null.
     """
 
     space: Optional[SpaceInfo] = None
@@ -270,6 +300,15 @@ class VectorsStatusResponse(BaseModel):
     layers: List[LayerStatus]
     spaces: List[SpaceStatus] = Field(default_factory=list)
     can_manage: bool = False
+    visual_space: Optional[VisualSpaceInfo] = None
+    visual_status: VisualStatus = "embedder_unconfigured"
+
+
+class SetVisualSpaceRequest(BaseModel):
+    """``PUT /search/vectors/visual-space``: the space (a Snowflake id as a
+    string) the visual layer should embed into and search from now on."""
+
+    space_id: str = Field(..., min_length=1, max_length=32)
 
 
 class CreateSpaceRequest(BaseModel):

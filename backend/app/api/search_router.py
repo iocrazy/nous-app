@@ -34,12 +34,15 @@ from app.schemas.search import (
     SearchResponse,
     SearchResultItem,
     SemanticSearchRequest,
+    SetVisualSpaceRequest,
     SpaceInfo,
     SpaceStatus,
     TextSearchRequest,
     VectorsStatusResponse,
+    VisualSpaceInfo,
 )
 from app.schemas.unified_search import UnifiedSearchResponse
+from app.services.ai.providers.embedding_capabilities import capabilities_for
 from app.services.ai.providers.embedding_service import (
     EmbeddingService,
     classify_embed_reason,
@@ -48,14 +51,19 @@ from app.services.library.embedding_document import DOC_VERSION
 from app.services.library.embedding_spaces import (
     EMBEDDING_MODEL_SETTING,
     PROBE_TEXT,
+    VISUAL_MODEL_SETTING,
     ActiveSpaceUnknown,
     SpaceCatalogError,
+    VisualSpaceError,
     active_actual_model,
     catalog_name_for,
     catalog_row_for_space,
     config_for_catalog_model,
     forget_space_id,
     platform_embedding_models,
+    resolve_visual_space_and_embedder,
+    visual_actual_model,
+    visual_follows_active,
 )
 from app.services.library.like_escape import escape_like
 from app.services.library.resource_lookup import (
@@ -502,17 +510,20 @@ def _layers(
 
 
 async def _space_statuses(
-    user_id: str, active_space: Optional[Dict[str, Any]]
+    user_id: str,
+    active_space: Optional[Dict[str, Any]],
+    visual_space: Optional[Dict[str, Any]] = None,
 ) -> List[SpaceStatus]:
-    """Every space with the caller's coverage. ``active_space`` is always in
-    the answer, even when the listing raced its creation."""
+    """Every space with the caller's coverage IN THAT SPACE. ``active_space``
+    and ``visual_space`` are always in the answer, even when the listing
+    raced their creation."""
     spaces = await get_embedding_space_repository().list_all()
-    if active_space is not None and all(
-        int(s["id"]) != int(active_space["id"]) for s in spaces
-    ):
-        spaces = [*spaces, active_space]
+    for must in (active_space, visual_space):
+        if must is not None and all(int(s["id"]) != int(must["id"]) for s in spaces):
+            spaces = [*spaces, must]
     repo = get_resource_embeddings_repository()
     active_id = int(active_space["id"]) if active_space is not None else None
+    visual_id = int(visual_space["id"]) if visual_space is not None else None
     out: List[SpaceStatus] = []
     for space in spaces:
         covered, total = await repo.coverage(
@@ -529,6 +540,7 @@ async def _space_statuses(
             SpaceStatus(
                 **SpaceInfo.from_row(space).model_dump(),
                 active=int(space["id"]) == active_id,
+                visual=int(space["id"]) == visual_id,
                 catalog_name=await catalog_name_for(space["actual_model"]),
                 layers=_layers(covered, total, stale, visual),
             )
@@ -536,55 +548,130 @@ async def _space_statuses(
     return out
 
 
+async def _resolve_visual() -> tuple[Optional[Dict[str, Any]], str, bool]:
+    """``(visual space row | None, visual_status, follows_active)`` — never
+    raises: the visual layer's trouble is reported next to the semantic
+    layer's numbers, not instead of them."""
+    try:
+        follows = await visual_follows_active()
+    except ActiveSpaceUnknown as e:
+        logger.warning(f"Vector status: visual key unreadable: {e}")
+        return None, "embedder_unconfigured", True
+    try:
+        space, _ = await resolve_visual_space_and_embedder()
+    except VisualSpaceError as e:
+        logger.warning(f"Vector status: visual space: {e}")
+        return None, e.code, follows
+    return space, "ok", follows
+
+
+def _with_visual_row(
+    layers: List[LayerStatus], visual: VisualCoverage
+) -> List[LayerStatus]:
+    """``layers`` with the visual row replaced by ``visual``'s numbers (the
+    visual layer lives in its own space, not necessarily the active one)."""
+    v_covered, v_total, v_stale = visual if visual is not None else (0, 0, 0)
+    return [
+        (
+            LayerStatus(
+                layer="visual",
+                status="ok" if v_covered else "not_built",
+                covered=v_covered,
+                total=v_total,
+                stale=v_stale,
+            )
+            if row.layer == "visual"
+            else row
+        )
+        for row in layers
+    ]
+
+
+async def _visual_info(
+    visual_space: Optional[Dict[str, Any]], follows: bool
+) -> Optional[VisualSpaceInfo]:
+    if visual_space is None:
+        return None
+    return VisualSpaceInfo(
+        id=str(visual_space["id"]),
+        actual_model=visual_space["actual_model"],
+        catalog_name=await catalog_name_for(visual_space["actual_model"]),
+        follows_active=follows,
+    )
+
+
 @router.get("/vectors/status", response_model=VectorsStatusResponse)
 async def vectors_status(auth: AuthDep):
-    """How much of the caller's library has a vector, per retrieval layer, in
-    the CURRENT embedding space (the admin-configured embedder), plus every
-    candidate space (``spaces``) and whether the caller may manage them.
+    """How much of the caller's library has a vector, per retrieval layer —
+    the semantic layer in the CURRENT embedding space (the admin-configured
+    embedder), the visual layer in ITS space (``visual_space``: the visual
+    governance key, else the current space) — plus every candidate space
+    (``spaces``) and whether the caller may manage them.
 
     ``status`` is "ok", "unconfigured" (no embedder: ``space`` null, coverage
     0 of the caller's total) or "store_missing" (migration 499 not applied:
-    ``space`` null, ``layers`` / ``spaces`` empty). A typed answer in every
-    case, never a 500 — the UI shows it next to the search box.
+    ``space`` null, ``layers`` / ``spaces`` empty). ``visual_status`` is the
+    visual layer's own answer. A typed answer in every case, never a 500 —
+    the UI shows it next to the search box.
     """
     can_manage = await is_admin_user(auth.user_id)
     embedder = EmbeddingService()
     spec = await embedder.space_spec()
     repo = get_resource_embeddings_repository()
+    visual_space, visual_status, follows = await _resolve_visual()
+    visual_id = int(visual_space["id"]) if visual_space is not None else NO_SPACE_ID
     if spec is None:
         try:
             _, total = await repo.coverage(
                 user_id=auth.user_id, space_id=NO_SPACE_ID, layer=SEMANTIC_LAYER
             )
-            spaces = await _space_statuses(auth.user_id, None)
+            spaces = await _space_statuses(auth.user_id, None, visual_space)
         except EmbeddingStoreMissing:
             return VectorsStatusResponse(
-                space=None, status="unconfigured", layers=[], can_manage=can_manage
+                space=None,
+                status="unconfigured",
+                layers=[],
+                can_manage=can_manage,
+                visual_status="store_missing",
             )
         return VectorsStatusResponse(
             space=None,
             status="unconfigured",
             layers=_layers(
-                0, total, visual=await _visual_coverage(auth.user_id, NO_SPACE_ID)
+                0, total, visual=await _visual_coverage(auth.user_id, visual_id)
             ),
             spaces=spaces,
             can_manage=can_manage,
+            visual_space=await _visual_info(visual_space, follows),
+            visual_status=visual_status,
         )
     try:
         space = await get_embedding_space_repository().get_or_create(spec)
-        spaces = await _space_statuses(auth.user_id, space)
+        spaces = await _space_statuses(auth.user_id, space, visual_space)
     except EmbeddingStoreMissing as e:
         logger.error(f"Vector status: store missing (migration 499): {e}")
         return VectorsStatusResponse(
-            space=None, status="store_missing", layers=[], can_manage=can_manage
+            space=None,
+            status="store_missing",
+            layers=[],
+            can_manage=can_manage,
+            visual_status="store_missing",
         )
     active = next(s for s in spaces if s.active)
+    if visual_id == int(space["id"]):
+        layers = active.layers  # the visual row of the active space IS the answer
+    else:
+        layers = _with_visual_row(
+            active.layers, await _visual_coverage(auth.user_id, visual_id)
+        )
     return VectorsStatusResponse(
         space=SpaceInfo.from_row(space),
         status="ok",
-        layers=active.layers,
+        layers=layers,
         spaces=spaces,
         can_manage=can_manage,
+        visual_space=await _visual_info(visual_space, follows),
+        visual_status=visual_status,
     )
 
 
@@ -771,6 +858,30 @@ async def delete_vector_space(space_id: str, auth: AdminAuthDep, request: Reques
                 "another one before deleting it.",
             },
         )
+    # The visual layer may live in another space than the active one; its
+    # frame vectors are just as gone after a cascade.
+    try:
+        visual_model = await visual_actual_model()
+    except ActiveSpaceUnknown as e:
+        logger.error(f"Delete space {space_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "active_space_unknown",
+                "message": "Could not determine the visual layer's embedding "
+                "space; nothing was deleted. Try again shortly.",
+            },
+        )
+    if visual_model is not None and visual_model == space["actual_model"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "space_in_use_visual",
+                "message": "This space serves the visual layer; point the "
+                "visual layer at another space (or back to the current "
+                "space) before deleting it.",
+            },
+        )
     try:
         deleted_vectors = await get_resource_embeddings_repository().count_in_space(
             space["id"]
@@ -793,6 +904,64 @@ async def delete_vector_space(space_id: str, auth: AdminAuthDep, request: Reques
     return DeleteSpaceResponse(
         deleted=True, space_id=str(space["id"]), deleted_vectors=deleted_vectors
     )
+
+
+@router.put("/vectors/visual-space", response_model=VectorsStatusResponse)
+async def set_visual_space(
+    body: SetVisualSpaceRequest, auth: AdminAuthDep, request: Request
+):
+    """Point the VISUAL layer (shot frames) at ``space_id`` by writing its
+    catalog row name to ``ai_module.embedding.visual_model``. The row must
+    be usable (same refusals as switching) and its embedder must take images
+    (422 ``provider_no_image``). The semantic layer and the active space are
+    untouched. Answers with the new status."""
+    space = await _load_space(body.space_id)
+    try:
+        row = await catalog_row_for_space(space)
+        cfg = await config_for_catalog_model(row["name"])
+    except SpaceCatalogError as e:
+        raise _catalog_http_error(e)
+    caps = capabilities_for(cfg)
+    if "image" not in caps.modalities:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "provider_no_image",
+                "message": f"{cfg.model} takes no image input "
+                f"(declares {sorted(caps.modalities)}); the visual layer "
+                "needs an image-capable embedder.",
+            },
+        )
+    await get_system_settings_repository().upsert_setting(
+        VISUAL_MODEL_SETTING, row["name"], auth.user_id
+    )
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="set_visual_embedding_space",
+        target_type="embedding_space",
+        target_id=str(space["id"]),
+        details={"model_name": row["name"], "actual_model": space["actual_model"]},
+        ip_address=_client_ip(request),
+    )
+    return await vectors_status(auth)
+
+
+@router.delete("/vectors/visual-space", response_model=VectorsStatusResponse)
+async def clear_visual_space(auth: AdminAuthDep, request: Request):
+    """Make the visual layer follow the active space again (blank key).
+    Answers with the new status."""
+    await get_system_settings_repository().upsert_setting(
+        VISUAL_MODEL_SETTING, "", auth.user_id
+    )
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="clear_visual_embedding_space",
+        target_type="embedding_space",
+        target_id="follows_active",
+        details={},
+        ip_address=_client_ip(request),
+    )
+    return await vectors_status(auth)
 
 
 @router.get("/similar/{media_id}", response_model=SearchResponse)

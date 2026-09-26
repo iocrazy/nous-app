@@ -152,12 +152,31 @@ def build_openai_multimodal_payload(
     }
 
 
-def build_openai_chat_payload(model: str, text: str) -> dict[str, Any]:
-    """Chat-messages ``/v1/embeddings`` body: ``text`` as one user message.
-    No ``input`` key — its presence makes the gateway skip the template."""
+def build_openai_chat_payload(
+    model: str, items: Sequence[ContentItem]
+) -> dict[str, Any]:
+    """Chat-messages ``/v1/embeddings`` body: one user message whose content
+    is every text item fused into ONE text part (blank-line joined, the
+    shape WeMM's template expects) followed by one ``image_url`` part per
+    image item. No ``input`` key — its presence makes the gateway skip the
+    template. Frame lists and video URLs have no part in this shape: the
+    capability table keeps ``video`` out of the chat modalities, so
+    :meth:`EmbeddingService._embed_items_checked` refuses them first."""
+    texts = [item.text for item in items if isinstance(item, TextItem)]
+    parts: list[dict[str, Any]] = []
+    if texts:
+        parts.append(_text_part("\n\n".join(texts)))
+    for item in items:
+        if isinstance(item, ImageUrlItem):
+            parts.append(_image_part(item.url))
+        elif not isinstance(item, TextItem):
+            raise TypeError(
+                f"{type(item).__name__} has no chat-messages part; "
+                "the capability table must keep it out of this protocol"
+            )
     return {
         "model": model,
-        "messages": [{"role": "user", "content": [_text_part(text)]}],
+        "messages": [{"role": "user", "content": parts}],
         "encoding_format": "float",
     }
 

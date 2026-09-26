@@ -703,6 +703,52 @@ async def test_wemm_text_is_posted_as_chat_messages_not_input(model) -> None:
 
 
 @pytest.mark.asyncio
+async def test_wemm_image_is_posted_as_an_image_url_part_in_messages() -> None:
+    """2026-09-23: through the engine gateway an ``image_url`` part inside
+    ``messages`` is cross-modal; this is the visual layer's wire shape on
+    WeMM. Video items stay refused at the modality gate (no chat part)."""
+    from app.services.ai.providers.embedding_items import (
+        ImageUrlItem,
+        VideoFramesItem,
+    )
+
+    cfg = EmbeddingConfig(
+        base_url="http://nous-engine:8000/v1",
+        api_key="sk-engine",
+        model="wemm-embedding-2b",
+        dimensions=0,
+    )
+    posted: dict = {}
+    client = _recording_client(
+        posted, {"data": [{"index": 0, "embedding": [0.2] * EMBEDDING_DIM}]}
+    )
+    with (
+        _patch_cfg(cfg),
+        patch("app.services.ai.providers.embedding_service.httpx.AsyncClient", client),
+    ):
+        svc = EmbeddingService()
+        vec, reason = await svc.try_embed_items(
+            [ImageUrlItem("data:image/jpeg;base64,AAA")]
+        )
+        refused, why = await svc.try_embed_items([VideoFramesItem(("data:1",))])
+
+    assert (vec, reason) == ([0.2] * EMBEDDING_DIM, None)
+    assert posted["json"]["messages"] == [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/jpeg;base64,AAA"},
+                }
+            ],
+        }
+    ]
+    assert "input" not in posted["json"]
+    assert refused is None and why == "modality_unsupported: video"
+
+
+@pytest.mark.asyncio
 async def test_cfg_constructor_skips_resolution_and_uses_the_given_config() -> None:
     """A candidate space embeds with ITS catalog row, not the active one."""
     cfg = EmbeddingConfig(

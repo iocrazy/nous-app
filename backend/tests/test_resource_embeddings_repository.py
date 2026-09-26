@@ -506,9 +506,16 @@ async def test_get_or_create_space_is_idempotent_on_model_dims():
 
     insert_sql = _sql(session.calls[0][0])
     assert "INSERT INTO public.embedding_spaces" in insert_sql
-    assert "ON CONFLICT ON CONSTRAINT embedding_spaces_model_dims_key DO NOTHING" in (
+    # Identity = the unique key; the descriptive columns follow the
+    # capability table, the instruction version never moves here.
+    assert "ON CONFLICT ON CONSTRAINT embedding_spaces_model_dims_key DO UPDATE" in (
         insert_sql
     )
+    assert "SET protocol = excluded.protocol, modalities = excluded.modalities" in (
+        insert_sql
+    )
+    assert "IS DISTINCT FROM" in insert_sql
+    assert "instruction_version = excluded" not in insert_sql
     assert got == {
         "id": 99,
         "actual_model": "doubao-embedding-vision-251215",

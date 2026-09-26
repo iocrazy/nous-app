@@ -291,14 +291,14 @@ class EmbeddingService:
             )
             body = await self._post_json(url, payload)
             return parse_openai_embeddings_response(body, expected=1)[0]
-        text = "\n\n".join(item.text for item in items if isinstance(item, TextItem))
         if protocol == PROTOCOL_OPENAI_CHAT:
-            # Text only (the modality check guarantees it); fused like below.
+            # Text and image parts (the modality check keeps video out).
             url = cfg.base_url.rstrip("/") + "/embeddings"
             body = await self._post_json(
-                url, build_openai_chat_payload(cfg.model, text)
+                url, build_openai_chat_payload(cfg.model, items)
             )
             return parse_openai_embeddings_response(body, expected=1)[0]
+        text = "\n\n".join(item.text for item in items if isinstance(item, TextItem))
         # Plain OpenAI /v1/embeddings: text only (the modality check above
         # guarantees it). Several text items fuse into one input string.
         response = await self.client.embeddings.create(

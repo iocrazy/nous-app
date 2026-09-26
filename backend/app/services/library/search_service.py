@@ -30,6 +30,10 @@ from app.services.ai.providers.embedding_service import (
     EmbeddingService,
     classify_embed_reason,
 )
+from app.services.library.embedding_spaces import (
+    VisualSpaceError,
+    resolve_visual_space_and_embedder,
+)
 from app.services.library.like_escape import escape_like
 from app.services.library.semantic_store import SemanticStore
 
@@ -243,7 +247,12 @@ class SearchService:
         shot_embeddings_repo: Any = None,
     ):
         self.embedding_service = EmbeddingService()
-        # Visual leg (mig 507): frame vectors of shots, same space as above.
+        # Visual leg (mig 507): frame vectors of shots in the VISUAL layer's
+        # own space (spec 2026-09-26 §2.2: the visual governance key, else
+        # the active space). Resolved on first use by _visual_target; tests
+        # and callers may set both up front.
+        self.visual_embedding_service: Optional[EmbeddingService] = None
+        self.visual_space_id: Optional[int] = None
         self.shot_embeddings_repo = (
             shot_embeddings_repo or get_video_shot_embeddings_repository()
         )
@@ -508,16 +517,36 @@ class SearchService:
         hits = [_row_to_result(r) for r in rows if r.get("media_id") is not None]
         return hits, "ok"
 
+    async def _visual_target(self) -> tuple[EmbeddingService, int]:
+        """The visual layer's embedder and space id, resolved once per
+        service (one per request). Raises :class:`VisualSpaceError`."""
+        if self.visual_embedding_service is None or self.visual_space_id is None:
+            space, embedder = await resolve_visual_space_and_embedder()
+            self.visual_embedding_service = embedder
+            self.visual_space_id = int(space["id"])
+        return self.visual_embedding_service, self.visual_space_id
+
     async def _visual_hits(
         self, query: str, user_id: str, limit: int, threshold: float
     ) -> tuple[List[SearchResult], str]:
         """Best shot per video whose frame looks like ``query``, for the
         hybrid merge. Same best-effort contract and outcome codes as
-        :meth:`_vector_hits`; the query is embedded once more under the
-        visual instruction (spec §4.4: instruction per layer)."""
+        :meth:`_vector_hits`; the query is embedded by the VISUAL layer's
+        embedder (which may be another space than the semantic leg's) under
+        the visual instruction (spec §4.4: instruction per layer). A visual
+        space that cannot be resolved is ``unconfigured`` (``store_missing``
+        when the store is the reason); the semantic leg is untouched."""
+        try:
+            embedder, space_id = await self._visual_target()
+        except VisualSpaceError as e:
+            logger.warning(f"[hybrid] visual leg has no space: {e}")
+            return [], "store_missing" if e.code == "store_missing" else "unconfigured"
+        except Exception as e:  # noqa: BLE001 — the other legs still answer
+            logger.error(f"[hybrid] visual space resolution failed: {e}")
+            return [], "error"
         try:
             vec, reason = await asyncio.wait_for(
-                self.embedding_service.try_embed(visual_query_text(query)),
+                embedder.try_embed(visual_query_text(query)),
                 timeout=HYBRID_EMBED_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -536,9 +565,6 @@ class SearchService:
                 return [], "dimension_mismatch"
             return [], "embed_failed"
         try:
-            space_id = await self._store().current_space_id()
-            if space_id is None:
-                return [], "unconfigured"
             rows = await self.shot_embeddings_repo.search(
                 embedding=vec,
                 space_id=space_id,

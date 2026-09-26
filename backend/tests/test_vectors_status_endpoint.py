@@ -13,6 +13,7 @@ import pytest
 
 from app.core.embedding_space import SEMANTIC_LAYER, SpaceSpec
 from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
+from app.services.library.embedding_spaces import VisualSpaceError
 
 # app.api rebinds ``search_router`` to the APIRouter; take the module.
 search_router = importlib.import_module("app.api.search_router")
@@ -140,8 +141,25 @@ def _wire(
     async def _catalog_name(actual_model):
         return names.get(actual_model)
 
+    async def _follows():
+        return True
+
+    async def _resolve_visual():
+        # Follows the active space: same row the status resolves, or the
+        # same typed refusal when there is nothing to resolve.
+        if spec is None:
+            raise VisualSpaceError("embedder_unconfigured")
+        try:
+            return await (space_repo or _SpaceRepo()).get_or_create(spec), None
+        except EmbeddingStoreMissing as e:
+            raise VisualSpaceError("store_missing", str(e)) from e
+
     monkeypatch.setattr(search_router, "is_admin_user", _is_admin)
     monkeypatch.setattr(search_router, "catalog_name_for", _catalog_name)
+    monkeypatch.setattr(search_router, "visual_follows_active", _follows)
+    monkeypatch.setattr(
+        search_router, "resolve_visual_space_and_embedder", _resolve_visual
+    )
     monkeypatch.setattr(search_router, "EmbeddingService", lambda: _Embedder(spec))
     monkeypatch.setattr(
         search_router,
@@ -257,6 +275,8 @@ async def test_store_missing(monkeypatch, where):
         "layers": [],
         "spaces": [],
         "can_manage": False,
+        "visual_space": None,
+        "visual_status": "store_missing",
     }
 
 
@@ -377,3 +397,35 @@ async def test_missing_shot_store_leaves_the_semantic_row_alone(monkeypatch):
         "total": 0,
         "stale": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_visual_space_follows_the_active_space_by_default(monkeypatch):
+    _wire(monkeypatch, emb_repo=_EmbRepo(1, 1))
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    assert body["visual_status"] == "ok"
+    assert body["visual_space"] == {
+        "id": "3",
+        "actual_model": "doubao-embedding-vision-251215",
+        "catalog_name": "nous-doubao-embedding-vision",
+        "follows_active": True,
+    }
+    assert body["spaces"][0]["active"] is True and body["spaces"][0]["visual"] is True
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_reports_the_visual_layer_as_unconfigured_too(monkeypatch):
+    _wire(monkeypatch, spec=None, emb_repo=_EmbRepo(0, 7))
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    assert body["status"] == "unconfigured"
+    assert body["visual_space"] is None
+    assert body["visual_status"] == "embedder_unconfigured"
+
+
+@pytest.mark.asyncio
+async def test_store_missing_reports_the_visual_layer_as_store_missing(monkeypatch):
+    _wire(monkeypatch, space_repo=_SpaceRepo(fail=EmbeddingStoreMissing("no 499")))
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    assert (
+        body["status"] == "store_missing" and body["visual_status"] == "store_missing"
+    )

@@ -46,13 +46,14 @@ def test_doubao_vision_is_ark_multimodal_text_image_video() -> None:
         ("wemm-embedding", 2048),
     ],
 )
-def test_wemm_is_text_only_over_the_chat_messages_shape(model, native) -> None:
+def test_wemm_is_text_and_image_over_the_chat_messages_shape(model, native) -> None:
     # 2026-09-15: the engine gateway does not apply WeMM's chat template to a
     # bare ``input`` (keyword recall 0.22 -> 0.06); only ``messages`` gets it.
-    # Multimodal stays off until the engine's grouped endpoint ships.
+    # 2026-09-23: image_url parts in that shape are cross-modal through the
+    # gateway. Video (frame lists) stays off until the grouped endpoint ships.
     caps = capabilities_for(_cfg(model, base_url="http://nous-engine:8000/v1"))
     assert caps.protocol == "openai-embeddings-chat"
-    assert caps.modalities == frozenset({"text"})
+    assert caps.modalities == frozenset({"text", "image"})
     assert caps.max_video_frames == 0 and caps.matryoshka_dims == ()
     assert caps.native_dims == native
 

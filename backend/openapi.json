@@ -52184,6 +52184,22 @@
         "title": "SetReviewStatusRequest",
         "type": "object"
       },
+      "SetVisualSpaceRequest": {
+        "description": "``PUT /search/vectors/visual-space``: the space (a Snowflake id as a\nstring) the visual layer should embed into and search from now on.",
+        "properties": {
+          "space_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Space Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id"
+        ],
+        "title": "SetVisualSpaceRequest",
+        "type": "object"
+      },
       "SettingsPlatformHeaders": {
         "description": "``GET /settings/headers/{platform}``.\n\n``headers_text`` is ``\"\"`` when the caller has no row for the platform and\n``null`` when the row exists (a saved cookie) but headers were never set.",
         "properties": {
@@ -54626,7 +54642,7 @@
         "type": "object"
       },
       "SpaceStatus": {
-        "description": "One embedding space and the caller's coverage in it.\n\n``active`` = the admin governance embedder writes and searches here;\nevery other space is a candidate. ``catalog_name`` is the ``nous_models``\nrow serving ``actual_model`` (null when it was removed from the catalog:\nsuch a space can neither be filled nor switched to).",
+        "description": "One embedding space and the caller's coverage in it.\n\n``active`` = the admin governance embedder writes and searches here;\nevery other space is a candidate. ``visual`` = the VISUAL layer (shot\nframes) writes and searches here — the same space as the active one\nunless an admin pointed the visual layer elsewhere (``PUT\n/search/vectors/visual-space``). ``catalog_name`` is the ``nous_models``\nrow serving ``actual_model`` (null when it was removed from the catalog:\nsuch a space can neither be filled nor switched to).",
         "properties": {
           "active": {
             "title": "Active",
@@ -54676,6 +54692,11 @@
           "protocol": {
             "title": "Protocol",
             "type": "string"
+          },
+          "visual": {
+            "default": false,
+            "title": "Visual",
+            "type": "boolean"
           }
         },
         "required": [
@@ -60176,7 +60197,7 @@
         "type": "object"
       },
       "VectorsStatusResponse": {
-        "description": "``GET /search/vectors/status``.\n\n``status``: \"ok\" (space resolved, coverage counted) | \"unconfigured\" (no\nembedding model; ``space`` null, coverage 0 of the caller's total) |\n\"store_missing\" (migration 499 not applied; ``space`` null, ``layers``\nempty). A layer is \"not_built\" until it holds at least one vector;\n``transcript`` is always \"not_built\" until that layer ships.\n\n``space`` / ``layers`` describe the ACTIVE space (kept for old readers);\n``spaces`` lists every space, active and candidates, each with the\ncaller's coverage. ``can_manage`` = the caller may add / switch / delete\nspaces (admin).",
+        "description": "``GET /search/vectors/status``.\n\n``status``: \"ok\" (space resolved, coverage counted) | \"unconfigured\" (no\nembedding model; ``space`` null, coverage 0 of the caller's total) |\n\"store_missing\" (migration 499 not applied; ``space`` null, ``layers``\nempty). A layer is \"not_built\" until it holds at least one vector;\n``transcript`` is always \"not_built\" until that layer ships.\n\n``space`` describes the ACTIVE space; ``layers`` is the caller's coverage\nper layer where each layer actually lives — ``semantic`` in the active\nspace, ``visual`` in ``visual_space`` (the two coincide unless the visual\nlayer was pointed elsewhere). ``spaces`` lists every space, active and\ncandidates, each with the caller's coverage IN THAT SPACE. ``can_manage``\n= the caller may add / switch / delete spaces (admin). ``visual_status``\nsays why ``visual_space`` is null.",
         "properties": {
           "can_manage": {
             "default": false,
@@ -60214,6 +60235,28 @@
               "store_missing"
             ],
             "title": "Status",
+            "type": "string"
+          },
+          "visual_space": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VisualSpaceInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "visual_status": {
+            "default": "embedder_unconfigured",
+            "enum": [
+              "ok",
+              "embedder_unconfigured",
+              "visual_space_unavailable",
+              "provider_no_image",
+              "store_missing"
+            ],
+            "title": "Visual Status",
             "type": "string"
           }
         },
@@ -60399,6 +60442,41 @@
           "media_id"
         ],
         "title": "VisualAnalysisResponse",
+        "type": "object"
+      },
+      "VisualSpaceInfo": {
+        "description": "The space the VISUAL layer embeds into and searches: the visual\ngovernance key (``ai_module.embedding.visual_model``) when set, else the\nactive space (``follows_active``). ``id`` is a Snowflake as a string.",
+        "properties": {
+          "actual_model": {
+            "title": "Actual Model",
+            "type": "string"
+          },
+          "catalog_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Name"
+          },
+          "follows_active": {
+            "title": "Follows Active",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "actual_model",
+          "follows_active"
+        ],
+        "title": "VisualSpaceInfo",
         "type": "object"
       },
       "WorkflowNodeDeleted": {
@@ -123799,7 +123877,7 @@
     },
     "/api/v1/search/vectors/status": {
       "get": {
-        "description": "How much of the caller's library has a vector, per retrieval layer, in\nthe CURRENT embedding space (the admin-configured embedder), plus every\ncandidate space (``spaces``) and whether the caller may manage them.\n\n``status`` is \"ok\", \"unconfigured\" (no embedder: ``space`` null, coverage\n0 of the caller's total) or \"store_missing\" (migration 499 not applied:\n``space`` null, ``layers`` / ``spaces`` empty). A typed answer in every\ncase, never a 500 — the UI shows it next to the search box.",
+        "description": "How much of the caller's library has a vector, per retrieval layer —\nthe semantic layer in the CURRENT embedding space (the admin-configured\nembedder), the visual layer in ITS space (``visual_space``: the visual\ngovernance key, else the current space) — plus every candidate space\n(``spaces``) and whether the caller may manage them.\n\n``status`` is \"ok\", \"unconfigured\" (no embedder: ``space`` null, coverage\n0 of the caller's total) or \"store_missing\" (migration 499 not applied:\n``space`` null, ``layers`` / ``spaces`` empty). ``visual_status`` is the\nvisual layer's own answer. A typed answer in every case, never a 500 —\nthe UI shows it next to the search box.",
         "operationId": "vectors_status_api_v1_search_vectors_status_get",
         "parameters": [
           {
@@ -123858,6 +123936,148 @@
           }
         },
         "summary": "Vectors Status",
+        "tags": [
+          "Search",
+          "Search"
+        ]
+      }
+    },
+    "/api/v1/search/vectors/visual-space": {
+      "delete": {
+        "description": "Make the visual layer follow the active space again (blank key).\nAnswers with the new status.",
+        "operationId": "clear_visual_space_api_v1_search_vectors_visual_space_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorsStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Visual Space",
+        "tags": [
+          "Search",
+          "Search"
+        ]
+      },
+      "put": {
+        "description": "Point the VISUAL layer (shot frames) at ``space_id`` by writing its\ncatalog row name to ``ai_module.embedding.visual_model``. The row must\nbe usable (same refusals as switching) and its embedder must take images\n(422 ``provider_no_image``). The semantic layer and the active space are\nuntouched. Answers with the new status.",
+        "operationId": "set_visual_space_api_v1_search_vectors_visual_space_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVisualSpaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorsStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Visual Space",
         "tags": [
           "Search",
           "Search"

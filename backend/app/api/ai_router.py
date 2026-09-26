@@ -1912,8 +1912,12 @@ def _shot_index_http_error(e: ShotIndexError) -> HTTPException:
         )
     messages = {
         "embedder_unconfigured": _EMBEDDER_UNCONFIGURED["message"],
-        "provider_no_image": "The current embedding model cannot take images; "
-        "pick an image-capable model (Settings → AI → Vectors) to index shots.",
+        "provider_no_image": "The visual layer's embedding model cannot take "
+        "images; point the visual layer at an image-capable space (Settings → "
+        "AI → Vectors) to index shots.",
+        "visual_space_unavailable": "The visual layer's embedding model is no "
+        "longer available; point the visual layer at another space (Settings → "
+        "AI → Vectors) to index shots.",
     }
     return HTTPException(
         status_code=409,

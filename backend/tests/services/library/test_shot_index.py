@@ -189,22 +189,51 @@ async def test_cutter_failure_is_mapped(monkeypatch):
 
 
 async def test_resolve_refuses_unconfigured_and_text_only(monkeypatch):
+    """The wrapper keeps the reason codes of the visual resolver
+    (``embedding_spaces.resolve_visual_space_and_embedder``)."""
     from unittest.mock import AsyncMock
 
+    from app.services.library import embedding_spaces as spaces
+
+    monkeypatch.setattr(spaces, "visual_follows_active", AsyncMock(return_value=True))
     monkeypatch.setattr(
-        shot_index, "resolve_embedding_config", AsyncMock(return_value=None)
+        "app.services.ai.providers.embedding_config.resolve_embedding_config",
+        AsyncMock(return_value=None),
     )
     with pytest.raises(ShotIndexError) as exc:
         await resolve_space_and_embedder()
     assert exc.value.reason == "embedder_unconfigured"
 
-    cfg = SimpleNamespace(model="wemm-embedding-2b", multimodal=False, dimensions=2048)
+    cfg = SimpleNamespace(
+        model="qwen3-vl-embedding-2b", multimodal=False, dimensions=2048
+    )
     monkeypatch.setattr(
-        shot_index, "resolve_embedding_config", AsyncMock(return_value=cfg)
+        "app.services.ai.providers.embedding_config.resolve_embedding_config",
+        AsyncMock(return_value=cfg),
     )
     with pytest.raises(ShotIndexError) as exc:
         await resolve_space_and_embedder()
     assert exc.value.reason == "provider_no_image"
+
+
+async def test_resolve_wraps_an_unavailable_visual_space(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.services.library import embedding_spaces as spaces
+
+    monkeypatch.setattr(
+        spaces,
+        "resolve_visual_space_and_embedder",
+        AsyncMock(
+            side_effect=spaces.VisualSpaceError(
+                "visual_space_unavailable", "catalog_model_disabled: x"
+            )
+        ),
+    )
+    with pytest.raises(ShotIndexError) as exc:
+        await resolve_space_and_embedder()
+    assert exc.value.reason == "visual_space_unavailable"
+    assert "catalog_model_disabled" in exc.value.detail
 
 
 def test_estimate_shots_mirrors_the_frontend():

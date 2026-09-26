@@ -108,7 +108,7 @@ def test_parse_openai_response_rejects_missing_embedding() -> None:
 def test_openai_chat_payload_wraps_the_text_in_one_user_message() -> None:
     from app.services.ai.providers.embedding_items import build_openai_chat_payload
 
-    assert build_openai_chat_payload("wemm-embedding-2b", "a red car") == {
+    assert build_openai_chat_payload("wemm-embedding-2b", [TextItem("a red car")]) == {
         "model": "wemm-embedding-2b",
         "messages": [
             {"role": "user", "content": [{"type": "text", "text": "a red car"}]}
@@ -117,7 +117,44 @@ def test_openai_chat_payload_wraps_the_text_in_one_user_message() -> None:
     }
 
 
+def test_openai_chat_payload_fuses_texts_and_appends_image_parts() -> None:
+    from app.services.ai.providers.embedding_items import build_openai_chat_payload
+
+    payload = build_openai_chat_payload(
+        "wemm-embedding-2b",
+        [TextItem("a"), ImageUrlItem("data:image/jpeg;base64,AAA"), TextItem("b")],
+    )
+    assert payload["messages"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "a\n\nb"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/jpeg;base64,AAA"},
+                },
+            ],
+        }
+    ]
+
+
+def test_openai_chat_payload_alone_image_has_no_text_part() -> None:
+    from app.services.ai.providers.embedding_items import build_openai_chat_payload
+
+    payload = build_openai_chat_payload("m", [ImageUrlItem("data:image/jpeg;base64,A")])
+    assert payload["messages"][0]["content"] == [
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,A"}}
+    ]
+
+
+def test_openai_chat_payload_refuses_video_items() -> None:
+    from app.services.ai.providers.embedding_items import build_openai_chat_payload
+
+    with pytest.raises(TypeError):
+        build_openai_chat_payload("m", [VideoFramesItem(["data:image/jpeg;base64,A"])])
+
+
 def test_openai_chat_payload_has_no_input_key() -> None:
     from app.services.ai.providers.embedding_items import build_openai_chat_payload
 
-    assert "input" not in build_openai_chat_payload("m", "t")
+    assert "input" not in build_openai_chat_payload("m", [TextItem("t")])

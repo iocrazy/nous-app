@@ -18,10 +18,14 @@ from fastapi import HTTPException
 from app.core.admin_deps import get_admin_auth
 from app.core.embedding_space import EmbeddingDimensionMismatch, SpaceSpec
 from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
-from app.schemas.search import CreateSpaceRequest
+from app.schemas.search import CreateSpaceRequest, SetVisualSpaceRequest
 from app.services.ai.providers.embedding_config import EmbeddingConfig
 from app.services.library import embedding_spaces as spaces_mod
-from app.services.library.embedding_spaces import ActiveSpaceUnknown, SpaceCatalogError
+from app.services.library.embedding_spaces import (
+    ActiveSpaceUnknown,
+    SpaceCatalogError,
+    VisualSpaceError,
+)
 
 search_router = importlib.import_module("app.api.search_router")
 
@@ -100,6 +104,10 @@ class _SpaceRepo:
         if self.fail is not None:
             raise self.fail
         self.created.append(spec)
+        # Spec-aware like production: the row whose actual_model matches.
+        for row in self.spaces.values():
+            if row["actual_model"] == spec.actual_model:
+                return row
         return _CANDIDATE
 
     async def list_all(self):
@@ -118,8 +126,10 @@ class _ShotRepo:
 
     def __init__(self, covered: int = 0, total: int = 0, stale: int = 0):
         self.covered, self.total, self.stale = covered, total, stale
+        self.calls: List[dict] = []
 
     async def coverage(self, **kwargs):
+        self.calls.append(kwargs)
         return self.covered, self.total
 
     async def stale_count(self, **kwargs):
@@ -163,6 +173,8 @@ def _wire(
     space_repo=None,
     emb_repo=None,
     shot_repo=None,
+    visual_model: Any = None,
+    cfg=None,
 ) -> SimpleNamespace:
     space_repo = space_repo or _SpaceRepo()
     emb_repo = emb_repo or _EmbRepo()
@@ -180,7 +192,27 @@ def _wire(
     async def _config_for(name):
         if cfg_error is not None:
             raise cfg_error
-        return _CFG
+        return cfg or _CFG
+
+    async def _visual_model():
+        if isinstance(visual_model, Exception):
+            raise visual_model
+        return visual_model
+
+    async def _follows():
+        return visual_model is None
+
+    async def _resolve_visual():
+        # The visual layer follows the active space unless ``visual_model``
+        # names another; the row comes from the space repo like production.
+        if visual_model is not None:
+            for row in space_repo.spaces.values():
+                if row["actual_model"] == visual_model:
+                    return row, None
+            raise VisualSpaceError("visual_space_unavailable", str(visual_model))
+        if active_spec is None:
+            raise VisualSpaceError("embedder_unconfigured")
+        return await space_repo.get_or_create(active_spec), None
 
     async def _row_for(space):
         if isinstance(catalog_row, SpaceCatalogError):
@@ -210,6 +242,11 @@ def _wire(
     monkeypatch.setattr(search_router, "catalog_name_for", _catalog_name)
     if not real_active:
         monkeypatch.setattr(search_router, "active_actual_model", _active_model)
+    monkeypatch.setattr(search_router, "visual_actual_model", _visual_model)
+    monkeypatch.setattr(search_router, "visual_follows_active", _follows)
+    monkeypatch.setattr(
+        search_router, "resolve_visual_space_and_embedder", _resolve_visual
+    )
     monkeypatch.setattr(
         search_router, "get_embedding_space_repository", lambda: space_repo
     )
@@ -243,6 +280,8 @@ def _body(name="nous-wemm-embedding-2b"):
         ("POST", "/search/vectors/spaces"),
         ("POST", "/search/vectors/spaces/{space_id}/activate"),
         ("DELETE", "/search/vectors/spaces/{space_id}"),
+        ("PUT", "/search/vectors/visual-space"),
+        ("DELETE", "/search/vectors/visual-space"),
     ],
 )
 def test_space_mutations_are_admin_only(method, path):
@@ -391,6 +430,132 @@ async def test_delete_refuses_the_active_space(monkeypatch):
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "space_active"
     assert w.space_repo.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_delete_refuses_the_visual_layers_space(monkeypatch):
+    """The visual layer points at the candidate: its frame vectors would go
+    with the cascade. 409 space_in_use_visual, nothing deleted."""
+    w = _wire(monkeypatch, emb_repo=_EmbRepo(count=5), visual_model="wemm-embedding-2b")
+    with pytest.raises(HTTPException) as exc:
+        await search_router.delete_vector_space(str(_CANDIDATE["id"]), _AUTH, _REQ)
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "space_in_use_visual"
+    assert w.space_repo.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_delete_refuses_when_the_visual_space_cannot_be_determined(monkeypatch):
+    w = _wire(monkeypatch, visual_model=ActiveSpaceUnknown("settings down"))
+    with pytest.raises(HTTPException) as exc:
+        await search_router.delete_vector_space(str(_CANDIDATE["id"]), _AUTH, _REQ)
+    assert exc.value.status_code == 503
+    assert exc.value.detail["code"] == "active_space_unknown"
+    assert w.space_repo.deleted == []
+
+
+# ---------------------------------------------------------- visual space ----
+def _visual_body(space_id=None):
+    return SetVisualSpaceRequest(space_id=space_id or str(_CANDIDATE["id"]))
+
+
+@pytest.mark.asyncio
+async def test_set_visual_space_writes_the_visual_key_with_the_catalog_name(
+    monkeypatch,
+):
+    w = _wire(monkeypatch)
+    out = await search_router.set_visual_space(_visual_body(), _AUTH, _REQ)
+    assert w.settings.writes == [
+        ("ai_module.embedding.visual_model", "nous-wemm-embedding-2b", "admin-1")
+    ]
+    assert w.audits[-1]["action"] == "set_visual_embedding_space"
+    assert w.audits[-1]["target_id"] == str(_CANDIDATE["id"])
+    # The active space is untouched: the answer is the (stubbed) status.
+    assert out.space.actual_model == "doubao-embedding-vision-251215"
+
+
+@pytest.mark.asyncio
+async def test_set_visual_space_refuses_a_text_only_embedder(monkeypatch):
+    text_only = EmbeddingConfig(
+        base_url="http://nous-engine:8000/v1",
+        api_key="k",
+        model="qwen3-vl-embedding-2b",
+        dimensions=0,
+        source="platform",
+    )
+    w = _wire(monkeypatch, cfg=text_only)
+    with pytest.raises(HTTPException) as exc:
+        await search_router.set_visual_space(_visual_body(), _AUTH, _REQ)
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "provider_no_image"
+    assert w.settings.writes == []
+
+
+@pytest.mark.asyncio
+async def test_set_visual_space_refuses_a_space_without_a_usable_catalog_row(
+    monkeypatch,
+):
+    w = _wire(
+        monkeypatch,
+        catalog_row=SpaceCatalogError("space_catalog_row_missing", "gone"),
+    )
+    with pytest.raises(HTTPException) as exc:
+        await search_router.set_visual_space(_visual_body(), _AUTH, _REQ)
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "space_catalog_row_missing"
+    assert w.settings.writes == []
+
+
+@pytest.mark.asyncio
+async def test_set_visual_space_unknown_space_is_404(monkeypatch):
+    _wire(monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        await search_router.set_visual_space(_visual_body("42"), _AUTH, _REQ)
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_clear_visual_space_blanks_the_key(monkeypatch):
+    w = _wire(monkeypatch, visual_model="wemm-embedding-2b")
+    out = await search_router.clear_visual_space(_AUTH, _REQ)
+    assert w.settings.writes == [("ai_module.embedding.visual_model", "", "admin-1")]
+    assert w.audits[-1]["action"] == "clear_visual_embedding_space"
+    assert out.status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_status_marks_the_visual_space_and_counts_frames_there(monkeypatch):
+    """Visual layer on the candidate: ``visual_space`` names it, the
+    candidate card carries ``visual``, and the top-level visual row counts
+    the caller's frames in THAT space while the semantic row stays in the
+    active one."""
+    shot_repo = _ShotRepo()
+    _wire(monkeypatch, visual_model="wemm-embedding-2b", shot_repo=shot_repo)
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    assert body["visual_status"] == "ok"
+    assert body["visual_space"] == {
+        "id": str(_CANDIDATE["id"]),
+        "actual_model": "wemm-embedding-2b",
+        "catalog_name": None,
+        "follows_active": False,
+    }
+    by_model = {s["actual_model"]: s for s in body["spaces"]}
+    assert by_model["wemm-embedding-2b"]["visual"] is True
+    assert by_model["wemm-embedding-2b"]["active"] is False
+    assert by_model["doubao-embedding-vision-251215"]["visual"] is False
+    assert body["space"]["actual_model"] == "doubao-embedding-vision-251215"
+    # The top-level visual row was counted against the candidate space.
+    assert shot_repo.calls[-1]["space_id"] == _CANDIDATE["id"]
+
+
+@pytest.mark.asyncio
+async def test_status_reports_an_unavailable_visual_space(monkeypatch):
+    _wire(monkeypatch, visual_model="gone-model")
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    assert body["status"] == "ok"
+    assert body["visual_space"] is None
+    assert body["visual_status"] == "visual_space_unavailable"
+    assert body["layers"][1]["covered"] == 0
 
 
 @pytest.mark.asyncio
