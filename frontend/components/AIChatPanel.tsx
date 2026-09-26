@@ -71,6 +71,7 @@ import { useComposerPaste } from '../hooks/useComposerPaste';
 import { useResourceSearch } from '../hooks/useResourceSearch';
 import { useGlobalChatStore } from '../stores/globalChatStore';
 import { useFabActivityPublisher } from './chatFab/useFabActivityPublisher';
+import { endsWithAssistantReply } from './chatFab/fabActivity';
 import { useComposerResourceAttach } from '../hooks/useComposerResourceAttach';
 import { useComposerAssetAttach } from '../hooks/useComposerAssetAttach';
 import { useMentionAssetsTab } from './chat/useMentionAssetsTab';
@@ -96,6 +97,14 @@ export interface AIChatPanelProps {
    *  Callers that omit it (ChatPage) keep the inline list, unaffected. */
   sessionsOverlayOpen?: boolean;
   onSessionsOverlayClose?: () => void;
+  /** Who hosts the panel. Only the floating window ('floating') writes the
+   *  mascot's unread count — a reply read on the Chat page is not unread
+   *  just because the (unmounted) floating window is closed. */
+  host?: 'floating' | 'page';
+  /** The floating window is minimized: the panel stays mounted (hidden) so
+   *  an in-flight turn keeps streaming. Skips scrolling while hidden and
+   *  refreshes the agent/session lists when the window is revealed again. */
+  collapsed?: boolean;
 }
 
 function formatTimestamp(isoString?: string | null): string {
@@ -256,6 +265,8 @@ export function AIChatPanel({
   agentSlug,
   sessionsOverlayOpen,
   onSessionsOverlayClose,
+  host = 'page',
+  collapsed = false,
 }: AIChatPanelProps): React.ReactElement {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -646,20 +657,23 @@ export function AIChatPanel({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // While the floating window is minimized the panel is display:none, so
+  // there is nothing to scroll; `collapsed` in the deps re-runs this on
+  // reveal, which brings replies that landed while hidden into view.
   useEffect(() => {
+    if (collapsed) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, sending]);
+  }, [messages, sending, collapsed]);
 
   const numericProjectId = useMemo(() => parseProjectId(projectId), [projectId]);
 
   // Load the agent list for the selector. Sessions are loaded lazily per
   // agent selection so switching agents doesn't drag in noise from others.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
+  const loadAgents = useCallback(
+    async (isCancelled: () => boolean = () => false) => {
       try {
         const list = await aiLibraryService.listAgents();
-        if (cancelled) return;
+        if (isCancelled()) return;
         // Only enabled agents are selectable; the sidebar already surfaces
         // disabled ones visually, but chat requires an executable agent.
         const enabled = list.filter((a) => a.enabled);
@@ -672,13 +686,43 @@ export function AIChatPanel({
       } catch (err) {
         console.error('[AIChatPanel] listAgents failed:', err);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!isCancelled()) setLoading(false);
       }
-    })();
+    },
+    [lockedAgent],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    void loadAgents(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+    // `loadAgents` only changes with the locked agent; later refreshes of
+    // the same panel go through the reveal effect below.
+  }, [loadAgents]);
+
+  // Re-read the session list for the current agent WITHOUT switching the
+  // active session (post-send reordering, reveal refresh).
+  const refreshSessions = useCallback(() => {
+    if (!effectiveAgentSlug) return;
+    void aiLibraryService
+      .listChatSessions(effectiveAgentSlug, lockedAgent ? undefined : numericProjectId)
+      .then(setSessions)
+      .catch((err) => console.error('[AIChatPanel] refresh sessions failed:', err));
+  }, [effectiveAgentSlug, lockedAgent, numericProjectId]);
+
+  // The floating panel stays mounted while minimized, so the lists fetched
+  // at mount go stale (an agent enabled in Settings, a session started
+  // elsewhere). Refresh both on the collapsed → revealed edge only; the
+  // first mount already loaded them.
+  const wasCollapsedRef = useRef(collapsed);
+  useEffect(() => {
+    const revealed = wasCollapsedRef.current && !collapsed;
+    wasCollapsedRef.current = collapsed;
+    if (!revealed) return;
+    void loadAgents();
+    refreshSessions();
+  }, [collapsed, loadAgents, refreshSessions]);
 
   // When the effective agent changes, (re)load that agent's sessions. In
   // locked-agent mode the project filter is omitted so the user sees all their
@@ -1041,9 +1085,23 @@ export function AIChatPanel({
           // Unknown event types are no-ops (forward-compat per the
           // backend contract).
         }
+        // Unread is judged the moment the stream ends: was the floating
+        // window closed when the reply landed? Not at send time (users
+        // collapse AFTER sending) and not after the reload (a collapse
+        // during the reload happened after the user saw the reply).
+        const endedCollapsed = !useGlobalChatStore.getState().open;
         // Refetch full history so IDs + timestamps + tokens are
         // server-authoritative (also swaps out both temp bubbles).
-        await loadSessionMessages(activeSessionId);
+        const settled = await loadSessionMessages(activeSessionId);
+        // The streamed text is the primary evidence of a reply; the reload
+        // is only the fallback for a turn that sent no deltas, so a failed
+        // reload does not lose a reply that already arrived. Failed turns
+        // never reach here.
+        const replied = streamed !== '' || endsWithAssistantReply(settled);
+        if (host === 'floating' && endedCollapsed && replied) {
+          const store = useGlobalChatStore.getState();
+          store.setFabUnread(store.fabUnread + 1);
+        }
       } catch (err) {
         console.error('[AIChatPanel] chat stream failed:', err);
         const msg = err instanceof Error ? err.message : String(err);
@@ -1088,19 +1146,14 @@ export function AIChatPanel({
       }
 
       // Update the session list ordering so this session bubbles to top.
-      if (effectiveAgentSlug) {
-        void aiLibraryService
-          .listChatSessions(effectiveAgentSlug, lockedAgent ? undefined : numericProjectId)
-          .then(setSessions)
-          .catch((err) => console.error('[AIChatPanel] refresh sessions failed:', err));
-      }
+      refreshSessions();
     },
     // C3 fix: include planMode + stagedAttachments so the closure
     // doesn't capture stale values when the user changes mode or
     // adds/removes attachments between renders.
-    [activeSessionId, sending, effectiveAgentSlug, lockedAgent, numericProjectId,
+    [activeSessionId, sending,
      addToast, planMode, stagedAttachments, stagedResources, stagedAssets,
-     contextCapsule, t],
+     contextCapsule, t, host, refreshSessions],
   );
 
   // Phase 2a chat answer surface: the newest assistant message is the only

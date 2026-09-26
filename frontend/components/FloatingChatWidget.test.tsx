@@ -11,12 +11,31 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-vi.mock('./AIChatPanel', () => ({
-  AIChatPanel: () => <div data-testid="chat-panel" />,
+// The mock panel counts its mounts and, like the real one, mirrors a live
+// turn onto the mascot — so a remount (or an unmount on collapse) shows up
+// both as a second mount and as `running` dropping to `idle`.
+const panel = vi.hoisted(() => ({
+  mounts: 0,
+  sending: false,
+  lastProps: null as Record<string, unknown> | null,
 }));
+vi.mock('./AIChatPanel', async () => {
+  const { useEffect } = await import('react');
+  const { useFabActivityPublisher } = await import('./chatFab/useFabActivityPublisher');
+  return {
+    AIChatPanel: (props: Record<string, unknown>) => {
+      panel.lastProps = props;
+      useEffect(() => {
+        panel.mounts += 1;
+      }, []);
+      useFabActivityPublisher(panel.sending, false);
+      return <div data-testid="chat-panel" />;
+    },
+  };
+});
 
 import { FloatingChatWidget } from './FloatingChatWidget';
 import { useGlobalChatStore } from '../stores/globalChatStore';
@@ -81,11 +100,95 @@ describe('FloatingChatWidget drag handle', () => {
     expect(useGlobalChatStore.getState().bottom).toBe(16);
   });
 
-  it('collapses to the FAB when closed', () => {
+  it('collapses to the FAB alone when the window was never opened', () => {
     useGlobalChatStore.setState({ open: false });
     renderWidget();
     expect(screen.getByTestId('sb-toggle-chat')).toBeVisible();
-    expect(screen.queryByTestId('chat-drag-handle')).toBeNull();
+    // Lazy persistence: a tab that never opened the chat pays nothing for it
+    // — no panel, no agent/session fetches, no editor bundle.
+    expect(screen.queryByTestId('sb-panel-chat')).toBeNull();
+    expect(screen.queryByTestId('chat-panel')).toBeNull();
+  });
+});
+
+describe('FloatingChatWidget keeps the panel mounted across collapse', () => {
+  beforeEach(() => {
+    panel.mounts = 0;
+    panel.sending = false;
+    panel.lastProps = null;
+    useGlobalChatStore.setState({
+      open: true,
+      right: 16,
+      bottom: 16,
+      width: 400,
+      height: 620,
+      pageContext: null,
+      fabActivity: 'idle',
+      fabUnread: 0,
+    });
+  });
+
+  it('mounts lazily on first open, then only hides on collapse', () => {
+    useGlobalChatStore.setState({ open: false });
+    renderWidget();
+    expect(screen.queryByTestId('sb-panel-chat')).toBeNull();
+
+    act(() => useGlobalChatStore.getState().setOpen(true));
+    const node = screen.getByTestId('chat-panel');
+    expect(panel.lastProps?.host).toBe('floating');
+
+    act(() => useGlobalChatStore.getState().setOpen(false));
+    const win = screen.getByTestId('sb-panel-chat');
+    expect(win).toBeInTheDocument();
+    expect(win).not.toBeVisible();
+    expect(panel.lastProps?.collapsed).toBe(true);
+
+    act(() => useGlobalChatStore.getState().setOpen(true));
+    expect(screen.getByTestId('chat-panel')).toBe(node);
+    expect(panel.mounts).toBe(1);
+  });
+
+  it('collapse then expand reuses the same panel instance', () => {
+    renderWidget();
+    const node = screen.getByTestId('chat-panel');
+    expect(panel.lastProps?.collapsed).toBe(false);
+
+    act(() => useGlobalChatStore.getState().setOpen(false));
+    expect(screen.getByTestId('chat-panel')).toBe(node);
+    expect(screen.getByTestId('sb-toggle-chat')).toBeVisible();
+
+    act(() => useGlobalChatStore.getState().setOpen(true));
+    expect(screen.getByTestId('chat-panel')).toBe(node);
+    expect(screen.getByTestId('sb-panel-chat')).toBeVisible();
+    expect(screen.queryByTestId('sb-toggle-chat')).toBeNull();
+    expect(panel.mounts).toBe(1);
+  });
+
+  it('keeps the mascot running when the window is collapsed mid-turn', () => {
+    panel.sending = true;
+    renderWidget();
+    expect(useGlobalChatStore.getState().fabActivity).toBe('running');
+
+    act(() => useGlobalChatStore.getState().setOpen(false));
+    expect(useGlobalChatStore.getState().fabActivity).toBe('running');
+  });
+
+  it('ESC does nothing while collapsed', () => {
+    renderWidget();
+    act(() => useGlobalChatStore.getState().setOpen(false));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(useGlobalChatStore.getState().open).toBe(false);
+  });
+
+  it('still unmounts the panel on the Chat page', () => {
+    panel.sending = true;
+    render(
+      <MemoryRouter initialEntries={['/team/1/chat']}>
+        <FloatingChatWidget />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('chat-panel')).toBeNull();
+    expect(screen.queryByTestId('sb-toggle-chat')).toBeNull();
   });
 });
 

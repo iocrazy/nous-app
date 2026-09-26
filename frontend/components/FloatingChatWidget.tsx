@@ -1,7 +1,9 @@
 /**
  * FloatingChatWidget — the global AI chat shell (replaces AIChatDrawer).
  *
- * Collapsed: a bottom-right FAB on every page. Expanded: a floating window
+ * Collapsed: the mascot FAB on every page; once the window has been opened
+ * in this tab it stays mounted but hidden (see the render below). Expanded:
+ * a floating window
  * that can be dragged by its title bar and resized from every edge and
  * corner (anchored bottom-right: east/south drags adjust width/height AND
  * right/bottom together so the grabbed edge tracks the pointer). Rect +
@@ -58,6 +60,14 @@ export function FloatingChatWidget(): React.ReactElement | null {
   const setOpen = useGlobalChatStore((s) => s.setOpen);
   const toggle = useGlobalChatStore((s) => s.toggle);
   const setRect = useGlobalChatStore((s) => s.setRect);
+
+  // Lazy persistence: the panel mounts on the first open in this tab and
+  // stays mounted from then on. A tab that never opens the chat (and every
+  // phone — AppLayout hides the widget below md) keeps paying nothing for
+  // it: no agent/session fetches, no auto-created session. In memory only;
+  // a reload starts lazy again.
+  const [everOpened, setEverOpened] = useState(open);
+  if (open && !everOpened) setEverOpened(true);
 
   const minimize = useCallback(() => setOpen(false), [setOpen]);
   // Laper-style Chat History: the title-bar history button slides the session
@@ -240,107 +250,122 @@ export function FloatingChatWidget(): React.ReactElement | null {
   // Collapsed: the draggable 無我 mascot (components/chatFab). It keeps
   // data-testid="sb-toggle-chat" and the ⌘I toggle above; position lives in
   // the same store as the window rect.
-  if (!open) {
-    return <ChatFab />;
-  }
+  //
+  // Collapsing HIDES the window instead of unmounting it. AIChatPanel is the
+  // consumer of an in-flight turn's stream: unmounting it detaches that
+  // consumer (the request itself keeps running — there is no abort — but
+  // its updates land on an unmounted component), drops the mascot back to
+  // idle mid-turn, and leaves nothing to notice the reply arriving. The
+  // `hidden` attribute is display:none !important in Tailwind's preflight,
+  // so the `flex` class below cannot override it, and it already takes the
+  // subtree out of the accessibility tree. The Chat page still unmounts
+  // everything (the `return null` above) — a real route change, not a
+  // minimize.
+  if (!open && !everOpened) return <ChatFab />;
 
   return (
-    <div
-      role="dialog"
-      aria-label="AI Chat"
-      data-testid="sb-panel-chat"
-      style={{ right, bottom, width, height }}
-      className="fixed z-40 flex flex-col overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-2xl"
-    >
-      {/* Title bar — drag handle + module chip + minimize */}
+    <>
+      {!open && <ChatFab />}
       <div
-        onPointerDown={onDragStart}
-        className="flex h-10 flex-shrink-0 cursor-grab select-none items-center gap-2 border-b border-ink-800 bg-ink-900/95 px-2 active:cursor-grabbing"
+        role="dialog"
+        aria-label="AI Chat"
+        data-testid="sb-panel-chat"
+        hidden={!open}
+        style={{ right, bottom, width, height }}
+        className="fixed z-40 flex flex-col overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-2xl"
       >
-        {/* Grab affordance. A <span>, not a <button> — onDragStart skips
-            anything inside a button, so a button here would never drag. */}
-        <span
-          data-testid="chat-drag-handle"
-          aria-hidden="true"
-          className="flex cursor-grab items-center text-ink-500 active:cursor-grabbing"
+        {/* Title bar — drag handle + module chip + minimize */}
+        <div
+          onPointerDown={onDragStart}
+          className="flex h-10 flex-shrink-0 cursor-grab select-none items-center gap-2 border-b border-ink-800 bg-ink-900/95 px-2 active:cursor-grabbing"
         >
-          <GripVertical size={14} />
-        </span>
-        <button
-          type="button"
-          onClick={() => setSessionsOpen((v) => !v)}
-          title="Chat History"
-          aria-label="Toggle session history"
-          className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
-        >
-          <History size={14} />
-        </button>
-        {pageContext?.moduleLabel && (
-          <span className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--accent-text)]">
-            {pageContext.moduleLabel}
+          {/* Grab affordance. A <span>, not a <button> — onDragStart skips
+              anything inside a button, so a button here would never drag. */}
+          <span
+            data-testid="chat-drag-handle"
+            aria-hidden="true"
+            className="flex cursor-grab items-center text-ink-500 active:cursor-grabbing"
+          >
+            <GripVertical size={14} />
           </span>
-        )}
-        <div className="flex-1" />
-        <button
-          type="button"
-          onClick={minimize}
-          title="Minimize (Esc)"
-          aria-label="Minimize AI Chat"
-          className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
-        >
-          <Minus size={14} />
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => setSessionsOpen((v) => !v)}
+            title="Chat History"
+            aria-label="Toggle session history"
+            className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
+          >
+            <History size={14} />
+          </button>
+          {pageContext?.moduleLabel && (
+            <span className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--accent-text)]">
+              {pageContext.moduleLabel}
+            </span>
+          )}
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={minimize}
+            title="Minimize (Esc)"
+            aria-label="Minimize AI Chat"
+            className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
+          >
+            <Minus size={14} />
+          </button>
+        </div>
 
-      {/* Chat core — the shared AIChatPanel, with the live page context.
-          New sessions stamp the current module; ongoing sessions are
-          never interrupted by navigation (B-mode). */}
-      <div className="min-h-0 flex-1">
-        <AIChatPanel
-          projectId={pageContext?.projectId}
-          contextType={pageContext?.contextType}
-          contextId={pageContext?.contextId}
-          onApplyContent={pageContext?.onApplyContent}
-          onClose={minimize}
-          sessionsOverlayOpen={sessionsOpen}
-          onSessionsOverlayClose={() => setSessionsOpen(false)}
+        {/* Chat core — the shared AIChatPanel, with the live page context.
+            New sessions stamp the current module; ongoing sessions are
+            never interrupted by navigation (B-mode). */}
+        <div className="min-h-0 flex-1">
+          <AIChatPanel
+            projectId={pageContext?.projectId}
+            contextType={pageContext?.contextType}
+            contextId={pageContext?.contextId}
+            onApplyContent={pageContext?.onApplyContent}
+            onClose={minimize}
+            host="floating"
+            collapsed={!open}
+            sessionsOverlayOpen={sessionsOpen}
+            onSessionsOverlayClose={() => setSessionsOpen(false)}
+          />
+        </div>
+
+        {/* Resize handles — all four edges + four corners */}
+        <div
+          onPointerDown={onResizeStart('n')}
+          className="absolute left-3 right-3 top-0 h-1.5 cursor-ns-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('s')}
+          className="absolute bottom-0 left-3 right-3 h-1.5 cursor-ns-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('w')}
+          className="absolute bottom-3 left-0 top-3 w-1.5 cursor-ew-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('e')}
+          className="absolute bottom-3 right-0 top-3 w-1.5 cursor-ew-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('nw')}
+          className="absolute left-0 top-0 h-3 w-3 cursor-nwse-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('ne')}
+          className="absolute right-0 top-0 h-3 w-3 cursor-nesw-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('sw')}
+          className="absolute bottom-0 left-0 h-3 w-3 cursor-nesw-resize"
+        />
+        <div
+          onPointerDown={onResizeStart('se')}
+          className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
         />
       </div>
-
-      {/* Resize handles — all four edges + four corners */}
-      <div
-        onPointerDown={onResizeStart('n')}
-        className="absolute left-3 right-3 top-0 h-1.5 cursor-ns-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('s')}
-        className="absolute bottom-0 left-3 right-3 h-1.5 cursor-ns-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('w')}
-        className="absolute bottom-3 left-0 top-3 w-1.5 cursor-ew-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('e')}
-        className="absolute bottom-3 right-0 top-3 w-1.5 cursor-ew-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('nw')}
-        className="absolute left-0 top-0 h-3 w-3 cursor-nwse-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('ne')}
-        className="absolute right-0 top-0 h-3 w-3 cursor-nesw-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('sw')}
-        className="absolute bottom-0 left-0 h-3 w-3 cursor-nesw-resize"
-      />
-      <div
-        onPointerDown={onResizeStart('se')}
-        className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize"
-      />
-    </div>
+    </>
   );
 }
 
