@@ -1276,6 +1276,13 @@ class AgentRunner:
         ``run.cost`` folds from these — the only place per-call cost is born."""
         import time as _time
 
+        # fh5 T5: the LLM answered, so the inbox items this step injected are
+        # consumed — a later failure of the run must not give them back.
+        # ``isinstance``: stub recorders (AsyncMock) would hand back an
+        # un-awaited coroutine for any attribute.
+        if isinstance(recorder, RunRecorder):
+            recorder.note_step_answered()
+
         usage = usage or {}
         prompt = int(usage.get("prompt_tokens") or 0)
         completion = int(usage.get("completion_tokens") or 0)

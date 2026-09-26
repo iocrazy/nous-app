@@ -247,9 +247,11 @@ Attached to this message (listed for reference; the files are not loaded into th
 
 每行只带白名单字段、按固定顺序、缺的不写：`kind` / `name` / `title` / `resource_id` / `asset_id` / `loadout_id` / `ref_kind` / `ref_id` / `version`。只列 `str` / `int` 值（嵌套 dict、列表、bool 跳过——免费形状的收件箱 API 能塞任意值，`str()` 出来只是 Python repr 噪声）；一个白名单字段都不剩的附件整条不列，编号在过滤之后再数，所以不会出现空的 `[attachment N]`，全被过滤时标题也不加。值全部走 `escape_frame_attr`（文件名是用户写的，引号与 `<>&` 都会被转义，闭合标记伪造不了）；正文经 `escape_frame_prose` 压成一行，所以用户文本伪造不出**独立的**清单行（它能照抄措辞，但只会待在正文那一行里）。`url`（文件系统路径）与 `data_url`（字节）**刻意不进框**。只是文本清单：像素没有注入，**清单里的 id 本轮也取不到**——`ResourceFetch` 的白名单是本轮请求开始时由请求自带的引用算定的，所以标题刻意不许诺「可以打开」（见 Known Limitations）。
 
+**重投递（2026-09-26 fh5 T5）**：一条领到的行被注入了一次没有回答的 LLM 调用（调用抛出、进程死掉、worker 停机）时，它会回到队列，下一次领取时**逐字节相同**地再注入一次（`at` 仍是入队时间；计数器 `content.redelivered` 是簿记，JSON 兜底正文里也会被剔掉）。所以模型可能在后一个回合里第一次真正读到一条更早的 steer。只有两种情况不重投：run 被取消（取消即「别再做」）和 issue 已 done / cancelled / 隐藏。同一条行最多重投 2 次，第 3 次改为过期并记 ERROR —— 见 `app/repositories/agent_run_inbox_redelivery.py`。
+
 #### Token effect
 
-每条一个框，长度就是那条消息的正文长度，外加每个附件一行（几十 token，不含文件内容）。`subagent_result` 只放 summary（加 fh4 的两个短属性，约 10 token），所以一次后台子 agent 的回执通常是几十到几百 token，而不是整个信封的 JSON。领取本身有条数上限（见 `agent_run_inbox_repository.claim`），所以单个步骤边界注入的量是有界的。
+每条一个框，长度就是那条消息的正文长度，外加每个附件一行（几十 token，不含文件内容）。`subagent_result` 只放 summary（加 fh4 的两个短属性，约 10 token），所以一次后台子 agent 的回执通常是几十到几百 token，而不是整个信封的 JSON。领取本身有条数上限（见 `agent_run_inbox_repository.claim`），所以单个步骤边界注入的量是有界的。重投递让同一条行最多被注入 3 次（首投 + 2 次重投），但每次都是在前一次调用没有回答之后。例外：崩溃类收口按「该步没有 `step_end` 事件」判断没回答，而 `step_end` 的写入是 best-effort —— 它恰好没写进库时，模型会把一条已回答过的消息再读一遍（受同一个上限约束）。
 
 #### KV Cache effect
 

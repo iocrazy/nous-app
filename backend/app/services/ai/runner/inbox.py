@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Optional, Sequence
 
 from app.boundary.frame_markers import escape_frame_attr, escape_frame_prose
+from app.repositories.agent_run_inbox_redelivery import REDELIVERED_KEY
 from app.repositories.agent_run_inbox_repository import (
     Target,
     get_agent_run_inbox_repository,
@@ -99,7 +100,10 @@ class InboxItem:
         if self.kind == "answer" and "value" in c:
             v = c["value"]
             return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
-        return json.dumps(c, ensure_ascii=False, default=str)
+        # fh5 T5: the give-back counter is bookkeeping — a re-delivered item
+        # must read exactly like its first delivery.
+        shown = {k: v for k, v in c.items() if k != REDELIVERED_KEY}
+        return json.dumps(shown, ensure_ascii=False, default=str)
 
 
 def clip_claimed_text(text: Any, limit: int = CLAIMED_TEXT_MAX) -> str:

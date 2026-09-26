@@ -46,7 +46,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional, Sequence
 from uuid import UUID
 
 from loguru import logger
@@ -200,6 +200,12 @@ class RunRecorder:
     # healthy run stuck in one long LLM/tool call. Started on a successful
     # insert, cancelled on __aexit__.
     _heartbeat_task: Optional["asyncio.Task[Any]"] = field(default=None, init=False)
+    # fh5 T5: inbox ids claimed by the step in flight — injected into an LLM
+    # call that has not answered yet. ``note_step_answered`` empties it; what is
+    # still here when a run we closed ends ``failed`` goes back to the queue.
+    # A tuple (rebound, never mutated) so the default is a class attribute and
+    # the ``RunRecorder.__new__`` stubs still read ``()``.
+    _inbox_claimed_ids: tuple[int, ...] = field(default=(), init=False)
 
     HEARTBEAT_RATE_LIMIT_S: float = 15.0  # local, DB-write throttle
     EVENT_VALUE_MAX_CHARS: int = 4000  # per-field payload truncation
@@ -214,9 +220,17 @@ class RunRecorder:
         prior_run_id = await self._link_recovered_step()
         await self._insert_row()
         if prior_run_id is not None and self.run_id is not None:
+            from app.repositories import agent_run_inbox_redelivery
             from app.services.ai.runner import step_recovery
 
             await step_recovery.stamp_superseded(prior_run_id, self.run_id)
+            # fh5 T5: the superseded attempt's claim step is nested in the
+            # turn step, so DBOS does not replay its result — this run's claim
+            # would find nothing while the dead run holds the items. Give them
+            # back first; this run's InboxClaimHook then takes them as usual.
+            await agent_run_inbox_redelivery.release_orphaned_claims(
+                [prior_run_id], reason="recovered"
+            )
 
     async def _link_recovered_step(self) -> Optional[int]:
         """Stamp the step key into the row-to-be and, when an earlier row has
@@ -462,6 +476,21 @@ class RunRecorder:
     def completion_tokens(self) -> int:
         """Accumulated completion tokens seen on this run so far."""
         return self._completion_tokens
+
+    def note_inbox_claimed(self, item_ids: Sequence[int]) -> None:
+        """The step in flight claimed these inbox items (``InboxClaimHook``)."""
+        self._inbox_claimed_ids = (
+            *self._inbox_claimed_ids,
+            *(int(i) for i in item_ids),
+        )
+
+    def note_step_answered(self) -> None:
+        """The LLM call of the step in flight returned: its claims are consumed."""
+        self._inbox_claimed_ids = ()
+
+    @property
+    def inbox_claims_in_flight(self) -> tuple[int, ...]:
+        return self._inbox_claimed_ids
 
     def record_skill(self, slug: str) -> None:
         """Track which skills got invoked during this run."""
@@ -1125,6 +1154,17 @@ class RunRecorder:
                     "output_summary": self._output_summary,
                 }
             )
+
+        # fh5 T5: a run WE closed as failed gives back what its unanswered
+        # step claimed. Not cancelled (a stop must not restart the work), not
+        # completed (consumed), not a lost race (the closer released it).
+        if closed_by_us and status == "failed" and self._inbox_claimed_ids:
+            from app.repositories import agent_run_inbox_redelivery
+
+            await agent_run_inbox_redelivery.release_claims_for_run(
+                int(self.run_id), self._inbox_claimed_ids, reason=status
+            )
+            self._inbox_claimed_ids = ()
 
         # W3c: accumulate this turn into the ai_usage_hourly rollup the Usage
         # panel reads. Fire-and-forget (record_usage swallows internally).

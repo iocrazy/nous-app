@@ -105,6 +105,14 @@ async def reconcile_stranded_runs() -> dict[str, int]:
             await project_run_id_best_effort(int(row.id))
         await record_crash_terminal_runs(rows)
 
+        # fh5 T5: give back what these runs claimed at a step that never
+        # answered (logged, never raised).
+        from app.repositories import agent_run_inbox_redelivery
+
+        await agent_run_inbox_redelivery.release_orphaned_claims(
+            [int(row.id) for row in rows], reason="stranded_on_restart"
+        )
+
         # 这条 run 永远不会走到 ``RunRecorder._finish``，所以树收口也只能由这里
         # 跟上 —— 漏掉这一处，含一条崩溃 run 的树永远收不了口，整棵树一分不扣
         # （见 ``tree_charge`` 模块 docstring 的 Stated Limitations）。

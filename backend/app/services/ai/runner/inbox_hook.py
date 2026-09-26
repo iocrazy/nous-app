@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Callable, Optional, Sequence
 from app.repositories.agent_run_inbox_repository import Target
 from app.services.ai.runner import inbox as inbox_mod
 from app.services.ai.runner.events import emit
+from app.services.ai.runner.run_recorder import RunRecorder
 from app.services.ai.runner.step_hooks import StepContext, StepDecision
 
 Claim = Callable[
@@ -49,7 +50,15 @@ class InboxClaimHook:
         targets = await self._targets(int(run_id), recorder)
         if not targets:
             return StepDecision.CONTINUE
-        for item in await self._claim(targets, int(run_id), ctx.turn, ctx.step):
+        items = await self._claim(targets, int(run_id), ctx.turn, ctx.step)
+        # fh5 T5: tell the recorder before anything else can raise — these
+        # items are now injected into a call that has not answered yet, and a
+        # run that fails before it does gives them back (``_finish``).
+        # ``isinstance``: stub recorders (AsyncMock) would return an un-awaited
+        # coroutine for the call.
+        if items and isinstance(recorder, RunRecorder):
+            recorder.note_inbox_claimed([int(item.id) for item in items])
+        for item in items:
             ctx.inject(
                 {"role": "user", "content": inbox_mod.render_inbox_message(item)}
             )
